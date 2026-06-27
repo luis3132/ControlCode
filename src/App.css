@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@source "../node_modules/neogestify-ui-components/src";
+
+@theme {
+  /* Configuración de dark mode para Tailwind v4 */
+}
+
+@variant dark (&:where(.dark, .dark *)) {
+  /* Variante dark mode */
+}
+
+:root {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: #0d1117;
+  color: #e6edf3;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* xterm overrides */
+.xterm-viewport {
+  overflow-y: auto !important;
+}
+
+.xterm {
+  height: 100%;
+}
