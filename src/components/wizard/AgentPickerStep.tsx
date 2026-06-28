@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { AgentInfo } from "../../store/tabs";
 
 interface AgentPickerStepProps {
@@ -21,12 +22,13 @@ const AGENT_SELECTED: Record<string, string> = {
 };
 
 export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepProps) {
+  const { t } = useTranslation();
   const available = agents.filter((a) => a.available);
 
   if (available.length === 0) {
     return (
       <p className="text-xs text-white/30 italic">
-        Detectando agentes…
+        {t("wizard.step2.detecting")}
       </p>
     );
   }
@@ -50,7 +52,7 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
               <span className="text-sm font-medium text-white/90">{agent.label}</span>
               {agent.isCustom && (
                 <span className="text-xs text-violet-400/70 bg-violet-500/10 px-1 rounded">
-                  custom
+                  {t("wizard.step2.customBadge")}
                 </span>
               )}
             </div>

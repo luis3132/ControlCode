@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button, Input } from "neogestify-ui-components";
 import { FolderIcon, HomeIcon, ArrowRightIcon } from "neogestify-ui-components";
+import { useTranslation } from "react-i18next";
 import { useTabsStore, AgentInfo } from "../store/tabs";
 import { useSettingsStore } from "../store/settings";
 
@@ -15,6 +16,7 @@ const AGENT_ICONS: Record<string, string> = {
 };
 
 export function HomePage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { addTab, detectedAgents } = useTabsStore();
   const { customAgents } = useSettingsStore();
@@ -42,7 +44,7 @@ export function HomePage() {
   };
 
   const handleExplorer = async () => {
-    const selected = await open({ directory: true, multiple: false, title: "Seleccionar proyecto" });
+    const selected = await open({ directory: true, multiple: false, title: t("home.dialogTitle") });
     if (typeof selected === "string" && selected) {
       setSelectedCwd(selected);
       setPathError("");
@@ -50,7 +52,7 @@ export function HomePage() {
   };
 
   const handleOpen = () => {
-    if (!selectedCwd.trim()) { setPathError("Selecciona una carpeta"); return; }
+    if (!selectedCwd.trim()) { setPathError(t("home.error.noFolder")); return; }
     if (!selectedAgent) return;
     addTab({ cwd: selectedCwd.trim(), agent: selectedAgent });
     navigate("/workspace");
@@ -63,10 +65,10 @@ export function HomePage() {
       {/* Logo */}
       <div className="flex flex-col items-center gap-1 text-center select-none">
         <h1 className="text-4xl font-bold bg-linear-to-r from-blue-500 to-violet-500 bg-clip-text text-transparent">
-          Control Code
+          {t("app.title")}
         </h1>
         <p className="text-sm text-gray-500 dark:text-white/40">
-          Command center para AI coding agents
+          {t("app.subtitle")}
         </p>
       </div>
 
@@ -79,15 +81,15 @@ export function HomePage() {
         <div className="p-5 flex flex-col gap-3">
           <p className="text-xs font-semibold uppercase tracking-wider
             text-gray-400 dark:text-white/40">
-            1 · Carpeta del proyecto
+            {t("home.step1")}
           </p>
 
           <div className="flex gap-2">
             <Button variant="outline" leftIcon={<HomeIcon />} onClick={handleHome}>
-              Home
+              {t("btn.home")}
             </Button>
             <Button variant="outline" leftIcon={<FolderIcon />} onClick={handleExplorer}>
-              Explorar
+              {t("btn.browse")}
             </Button>
           </div>
 
@@ -95,7 +97,7 @@ export function HomePage() {
             value={selectedCwd}
             onChange={(e) => { setSelectedCwd(e.target.value); setPathError(""); }}
             onKeyDown={(e) => e.key === "Enter" && handleOpen()}
-            placeholder="/ruta/al/proyecto"
+            placeholder={t("home.pathPlaceholder")}
             variant="outline"
             error={pathError}
           />
@@ -107,12 +109,12 @@ export function HomePage() {
         <div className="p-5 flex flex-col gap-3">
           <p className="text-xs font-semibold uppercase tracking-wider
             text-gray-400 dark:text-white/40">
-            2 · Agente / TUI
+            {t("home.step2")}
           </p>
 
           {allAgents.filter(a => a.available).length === 0 ? (
             <p className="text-xs text-gray-400 dark:text-white/30 italic">
-              Detectando agentes instalados…
+              {t("home.detecting")}
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-2">
@@ -157,7 +159,7 @@ export function HomePage() {
             onClick={handleOpen}
             disabled={!canOpen}
           >
-            Abrir proyecto
+            {t("home.openProject")}
           </Button>
         </div>
       </div>

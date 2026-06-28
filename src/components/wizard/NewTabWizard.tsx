@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Modal, Button } from "neogestify-ui-components";
+import { useTranslation } from "react-i18next";
 import { FolderPickerStep } from "./FolderPickerStep";
 import { AgentPickerStep } from "./AgentPickerStep";
 import { AgentInfo, useTabsStore } from "../../store/tabs";
@@ -14,6 +15,7 @@ interface NewTabWizardProps {
 }
 
 export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) {
+  const { t } = useTranslation();
   const { detectedAgents } = useTabsStore();
   const { customAgents } = useSettingsStore();
   const [step, setStep] = useState<Step>("folder");
@@ -54,18 +56,18 @@ export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) 
   const footer =
     step === "folder" ? (
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" onClick={handleClose}>Cancelar</Button>
+        <Button variant="ghost" onClick={handleClose}>{t("btn.cancel")}</Button>
         <Button variant="primary" onClick={() => setStep("agent")} disabled={!selectedCwd}>
-          Siguiente →
+          {t("btn.next")}
         </Button>
       </div>
     ) : (
       <div className="flex justify-between gap-2">
-        <Button variant="ghost" onClick={() => setStep("folder")}>← Atrás</Button>
+        <Button variant="ghost" onClick={() => setStep("folder")}>{t("btn.back")}</Button>
         <div className="flex gap-2">
-          <Button variant="ghost" onClick={handleClose}>Cancelar</Button>
+          <Button variant="ghost" onClick={handleClose}>{t("btn.cancel")}</Button>
           <Button variant="primary" onClick={handleConfirm} disabled={!selectedAgent}>
-            Abrir
+            {t("btn.open")}
           </Button>
         </div>
       </div>
@@ -74,7 +76,7 @@ export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) 
   return (
     <Modal
       onClose={handleClose}
-      title={step === "folder" ? "Seleccionar carpeta" : "Seleccionar agente"}
+      title={step === "folder" ? t("wizard.step1.title") : t("wizard.step2.title")}
       size="md"
       footer={footer}
       closeOnBackdrop={false}

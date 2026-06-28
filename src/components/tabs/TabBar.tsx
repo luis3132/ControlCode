@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AddIcon } from "neogestify-ui-components";
+import { useTranslation } from "react-i18next";
 import { useTabsStore } from "../../store/tabs";
 import { TabItem } from "./TabItem";
 import { NewTabWizard } from "../wizard/NewTabWizard";
 
 export function TabBar() {
+  const { t } = useTranslation();
   const { tabs, activeTabId, activateTab, closeTab, renameTab, reorderTabs, addTab } =
     useTabsStore();
   const navigate = useNavigate();
@@ -49,7 +51,7 @@ export function TabBar() {
 
         <button
           onClick={() => setWizardOpen(true)}
-          title="Nueva terminal"
+          title={t("tabs.new")}
           className="flex items-center justify-center w-9 h-9 shrink-0
             text-gray-400 dark:text-white/40
             hover:text-gray-700 dark:hover:text-white/80

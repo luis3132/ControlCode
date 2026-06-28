@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 import "xterm/css/xterm.css";
 
 interface TerminalProps {
@@ -21,9 +22,8 @@ export function Terminal({
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const ptyIdRef = useRef<number | null>(null);
-  const [status, setStatus] = useState<"connecting" | "running" | "exited">(
-    "connecting"
-  );
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<"connecting" | "running" | "exited">("connecting");
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -68,7 +68,6 @@ export function Terminal({
     term.loadAddon(webLinksAddon);
     term.open(containerRef.current);
 
-    // FIX: esperar un frame para que el DOM tenga dimensiones reales antes de fit()
     requestAnimationFrame(() => {
       fitAddon.fit();
     });
@@ -79,8 +78,6 @@ export function Terminal({
 
     const initPty = async () => {
       try {
-        // FIX: obtener el home dir desde Rust para evitar process.env.HOME
-        // que no existe en el contexto browser de Tauri
         const resolvedCwd: string = cwd ?? await invoke<string>("get_home_dir");
 
         const ptyId = await invoke<number>("pty_create", {
@@ -105,13 +102,13 @@ export function Terminal({
           (event) => {
             setStatus("exited");
             term.write(
-              `\r\n\x1b[90m[Proceso terminado con código ${event.payload.code}]\x1b[0m\r\n`
+              `\r\n\x1b[90m${t("terminal.exitCode", { code: event.payload.code })}\x1b[0m\r\n`
             );
             onExit?.(event.payload.code);
           }
         );
       } catch (err) {
-        term.write(`\r\n\x1b[31m[Error al iniciar PTY: ${err}]\x1b[0m\r\n`);
+        term.write(`\r\n\x1b[31m${t("terminal.ptyError", { error: err })}\x1b[0m\r\n`);
         setStatus("exited");
       }
     };
@@ -127,7 +124,6 @@ export function Terminal({
 
     // ── 6. Resize automático ─────────────────────────────────
     const resizeObserver = new ResizeObserver(() => {
-      // FIX: usar requestAnimationFrame para evitar resize en medio de un layout
       requestAnimationFrame(() => {
         try {
           fitAddon.fit();
@@ -162,30 +158,33 @@ export function Terminal({
     <div className="relative flex flex-col h-full w-full">
       {/* Status badge */}
       <div className="absolute top-2 right-2 z-10 flex items-center gap-2 bg-slate-900 border border-slate-700 px-2 py-1 rounded-lg text-xs font-mono">
-        <span className="w-1.5 h-1.5"
+        <span
+          className="w-1.5 h-1.5"
           style={{
             borderRadius: "50%",
             background:
               status === "running"
                 ? "#34d399"
                 : status === "connecting"
-                  ? "#fbbf24"
-                  : "#f87171",
+                ? "#fbbf24"
+                : "#f87171",
           }}
         />
         <span className="text-white/80">
-          {status === "running" ? command : status}
+          {status === "running"
+            ? command
+            : t(`terminal.status.${status}` as "terminal.status.connecting" | "terminal.status.exited")}
         </span>
       </div>
 
-      {/* xterm container — necesita dimensiones explícitas */}
+      {/* xterm container */}
       <div
         ref={containerRef}
         style={{
           flex: 1,
           width: "100%",
           height: "100%",
-          minHeight: 0,          // FIX: permite que flex-1 funcione en Chrome/WebKit
+          minHeight: 0,
           overflow: "hidden",
           padding: "8px",
           boxSizing: "border-box",

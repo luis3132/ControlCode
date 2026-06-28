@@ -1,4 +1,5 @@
 import { useNavigate, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   HomeIcon,
   ClockIcon,
@@ -9,18 +10,19 @@ import {
 } from "neogestify-ui-components";
 import { useTabsStore } from "../../store/tabs";
 
-const ITEMS = [
-  { id: "home",        Icon: HomeIcon,  label: "Home",        path: "/"         },
-  { id: "sessions",   Icon: ClockIcon, label: "Sessions",    path: null         },
-  { id: "skills",     Icon: StackIcon, label: "Skills",      path: null         },
-  { id: "marketplace",Icon: CloudIcon, label: "Marketplace", path: null         },
-  { id: "settings",   Icon: GearIcon,  label: "Settings",    path: "/settings"  },
-] as const;
-
 export function Sidebar() {
+  const { t } = useTranslation();
   const { sidebarCollapsed, toggleSidebar } = useTabsStore();
   const navigate = useNavigate();
   const location = useLocation();
+
+  const ITEMS = [
+    { id: "home",         Icon: HomeIcon,  labelKey: "sidebar.home",         path: "/"         },
+    { id: "sessions",     Icon: ClockIcon, labelKey: "sidebar.sessions",     path: null         },
+    { id: "skills",       Icon: StackIcon, labelKey: "sidebar.skills",       path: null         },
+    { id: "marketplace",  Icon: CloudIcon, labelKey: "sidebar.marketplace",  path: null         },
+    { id: "settings",     Icon: GearIcon,  labelKey: "sidebar.settings",     path: "/settings"  },
+  ] as const;
 
   return (
     <aside
@@ -32,10 +34,9 @@ export function Sidebar() {
         ${sidebarCollapsed ? "w-12" : "w-44"}
       `}
     >
-      {/* Toggle */}
       <button
         onClick={toggleSidebar}
-        title={sidebarCollapsed ? "Expandir" : "Colapsar"}
+        title={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
         className="flex items-center justify-center h-10 w-full shrink-0
           text-gray-400 dark:text-white/40
           hover:text-gray-700 dark:hover:text-white/80
@@ -48,9 +49,10 @@ export function Sidebar() {
       <div className="w-full h-px bg-gray-200 dark:bg-white/10 shrink-0" />
 
       <nav className="flex flex-col flex-1 py-2 gap-0.5">
-        {ITEMS.map(({ id, Icon, label, path }) => {
+        {ITEMS.map(({ id, Icon, labelKey, path }) => {
           const isActive = path !== null && location.pathname === path;
           const isDisabled = path === null;
+          const label = t(labelKey);
           return (
             <button
               key={id}

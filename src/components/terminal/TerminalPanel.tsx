@@ -1,7 +1,9 @@
+import { useTranslation } from "react-i18next";
 import { Terminal } from "../Terminal";
 import { useTabsStore } from "../../store/tabs";
 
 export function TerminalPanel() {
+  const { t } = useTranslation();
   const { tabs, activeTabId, setPtyId } = useTabsStore();
 
   return (
@@ -30,7 +32,7 @@ export function TerminalPanel() {
       {tabs.length === 0 && (
         <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-400 dark:text-white/20">
           <span className="text-5xl select-none">⌥</span>
-          <p className="text-sm">Abre un proyecto desde Home para empezar</p>
+          <p className="text-sm">{t("terminal.empty")}</p>
         </div>
       )}
     </div>
