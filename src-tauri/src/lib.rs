@@ -1,3 +1,4 @@
+mod agents;
 mod database;
 mod session;
 mod terminal;
@@ -9,6 +10,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
             // Terminal embebida (PTY)
@@ -28,6 +30,8 @@ pub fn run() {
             window::open_new_window,
             window::broadcast_event,
             window::get_home_dir,
+            // Detección de agentes
+            agents::detect_agents,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

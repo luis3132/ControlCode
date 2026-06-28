@@ -2,13 +2,7 @@
 
 @source "../node_modules/neogestify-ui-components/src";
 
-@theme {
-  /* Configuración de dark mode para Tailwind v4 */
-}
-
-@variant dark (&:where(.dark, .dark *)) {
-  /* Variante dark mode */
-}
+@variant dark (&:where(.dark, .dark *)) {}
 
 :root {
   font-family: "Inter", system-ui, -apple-system, sans-serif;
@@ -32,6 +26,14 @@ body,
   height: 100%;
   width: 100%;
   overflow: hidden;
+  /* Light mode */
+  background: #f3f4f6;
+  color: #111827;
+}
+
+html.dark,
+html.dark body,
+html.dark #root {
   background: #0d1117;
   color: #e6edf3;
 }
@@ -47,11 +49,19 @@ body,
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.15);
   border-radius: 3px;
 }
 
+html.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
 }
 
