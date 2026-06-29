@@ -10,9 +10,9 @@ import { useSettingsStore } from "../store/settings";
 
 const AGENT_ICONS: Record<string, string> = {
   "claude-code": "🤖",
-  "gemini-cli":  "✨",
-  "codex":       "⚡",
-  "bash":        "🖥",
+  "gemini-cli": "✨",
+  "codex": "⚡",
+  "bash": "🖥",
 };
 
 export function HomePage() {
@@ -128,7 +128,7 @@ export function HomePage() {
                       flex items-center gap-2.5 p-3 rounded-xl border text-left transition-all
                       ${isSelected
                         ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 ring-1 ring-blue-500"
-                        : "border-gray-200 dark:border-white/10 hover:border-gray-300 dark:hover:border-white/25 bg-gray-50 dark:bg-white/[0.02] hover:bg-gray-100 dark:hover:bg-white/5"}
+                        : "border-gray-200 dark:border-white/10 hover:border-gray-300 dark:hover:border-white/25 bg-gray-50 dark:bg-white/2 hover:bg-gray-100 dark:hover:bg-white/5"}
                     `}
                   >
                     <span className="text-xl shrink-0">{AGENT_ICONS[agent.id] ?? "🔧"}</span>
