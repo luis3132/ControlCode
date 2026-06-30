@@ -8,13 +8,6 @@ import { useTranslation } from "react-i18next";
 import { useTabsStore, AgentInfo } from "../store/tabs";
 import { useSettingsStore } from "../store/settings";
 
-const AGENT_ICONS: Record<string, string> = {
-  "claude-code": "🤖",
-  "gemini-cli": "✨",
-  "codex": "⚡",
-  "bash": "🖥",
-};
-
 export function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -27,13 +20,10 @@ export function HomePage() {
   const allAgents: AgentInfo[] = [
     ...detectedAgents,
     ...customAgents.map((ca) => ({
-      id: ca.id,
-      label: ca.label,
-      command: ca.command,
-      available: true,
-      isCustom: true,
+      id: ca.id, label: ca.label, command: ca.command,
+      available: true, isCustom: true,
     })),
-  ];
+  ].filter((a) => a.available);
 
   const canOpen = selectedCwd.trim() !== "" && selectedAgent !== null;
 
@@ -59,36 +49,39 @@ export function HomePage() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center h-full px-6 gap-8
-      bg-gray-50 dark:bg-[#0d1117]">
+    <div className="flex flex-col items-center justify-center h-full px-8
+      bg-gray-50 dark:bg-gray-950">
 
-      {/* Logo */}
-      <div className="flex flex-col items-center gap-1 text-center select-none">
-        <h1 className="text-4xl font-bold bg-linear-to-r from-blue-500 to-violet-500 bg-clip-text text-transparent">
-          {t("app.title")}
-        </h1>
-        <p className="text-sm text-gray-500 dark:text-white/40">
-          {t("app.subtitle")}
-        </p>
-      </div>
+      <div className="w-full max-w-md flex flex-col gap-10">
 
-      {/* Card */}
-      <div className="w-full max-w-lg rounded-2xl border shadow-lg overflow-hidden
-        bg-white dark:bg-[#161b22]
-        border-gray-200 dark:border-white/10">
-
-        {/* Sección: Carpeta */}
-        <div className="p-5 flex flex-col gap-3">
-          <p className="text-xs font-semibold uppercase tracking-wider
-            text-gray-400 dark:text-white/40">
-            {t("home.step1")}
+        {/* Header */}
+        <div className="flex flex-col gap-1 w-full items-center">
+          <h1 className="text-3xl font-bold bg-clip-text text-transparent
+            bg-linear-to-r from-blue-600 to-violet-600
+            dark:from-blue-400 dark:to-violet-400">
+            {t("app.title")}
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {t("app.subtitle")}
           </p>
+        </div>
+
+        {/* Folder */}
+        <div className="flex flex-col gap-3">
+          <span className="text-[11px] font-semibold uppercase tracking-widest
+            text-gray-400 dark:text-gray-500">
+            {t("home.step1")}
+          </span>
 
           <div className="flex gap-2">
-            <Button variant="outline" leftIcon={<HomeIcon />} onClick={handleHome}>
+            <Button variant="outline" onClick={handleHome}
+              className="flex items-center gap-1.5 text-xs! h-8! px-3!">
+              <HomeIcon className="w-3.5 h-3.5" />
               {t("btn.home")}
             </Button>
-            <Button variant="outline" leftIcon={<FolderIcon />} onClick={handleExplorer}>
+            <Button variant="outline" onClick={handleExplorer}
+              className="flex items-center gap-1.5 text-xs! h-8! px-3!">
+              <FolderIcon className="w-3.5 h-3.5" />
               {t("btn.browse")}
             </Button>
           </div>
@@ -103,44 +96,50 @@ export function HomePage() {
           />
         </div>
 
-        <div className="h-px bg-gray-100 dark:bg-white/10" />
-
-        {/* Sección: Agente */}
-        <div className="p-5 flex flex-col gap-3">
-          <p className="text-xs font-semibold uppercase tracking-wider
-            text-gray-400 dark:text-white/40">
+        {/* Agent picker */}
+        <div className="flex flex-col gap-3">
+          <span className="text-[11px] font-semibold uppercase tracking-widest
+            text-gray-400 dark:text-gray-500">
             {t("home.step2")}
-          </p>
+          </span>
 
-          {allAgents.filter(a => a.available).length === 0 ? (
-            <p className="text-xs text-gray-400 dark:text-white/30 italic">
+          {allAgents.length === 0 ? (
+            <p className="text-sm text-gray-400 dark:text-gray-500 italic">
               {t("home.detecting")}
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-2">
-              {allAgents.filter(a => a.available).map((agent) => {
+              {allAgents.map((agent) => {
                 const isSelected = agent.id === selectedAgent?.id;
                 return (
                   <button
                     key={agent.id}
                     onClick={() => setSelectedAgent(agent)}
                     className={`
-                      flex items-center gap-2.5 p-3 rounded-xl border text-left transition-all
+                      group flex flex-col gap-1 px-4 py-3 rounded-sm border text-left
+                      transition-all duration-200
                       ${isSelected
-                        ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 ring-1 ring-blue-500"
-                        : "border-gray-200 dark:border-white/10 hover:border-gray-300 dark:hover:border-white/25 bg-gray-50 dark:bg-white/2 hover:bg-gray-100 dark:hover:bg-white/5"}
+                        ? "border-blue-500 bg-linear-to-br from-blue-50 to-violet-50 dark:from-blue-500/10 dark:to-violet-500/10 shadow-sm"
+                        : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm"}
                     `}
                   >
-                    <span className="text-xl shrink-0">{AGENT_ICONS[agent.id] ?? "🔧"}</span>
-                    <div className="flex flex-col gap-0.5 min-w-0">
-                      <span className={`text-sm font-medium truncate
-                        ${isSelected ? "text-blue-600 dark:text-blue-400" : "text-gray-800 dark:text-white/90"}`}>
-                        {agent.label}
+                    <span className={`text-sm font-semibold transition-colors
+                      ${isSelected
+                        ? "text-blue-700 dark:text-blue-300"
+                        : "text-gray-800 dark:text-gray-100 group-hover:text-gray-900 dark:group-hover:text-white"}`}>
+                      {agent.label}
+                    </span>
+                    <span className={`text-xs font-mono transition-colors
+                      ${isSelected
+                        ? "text-blue-500/70 dark:text-blue-400/70"
+                        : "text-gray-400 dark:text-gray-500"}`}>
+                      {agent.command}
+                    </span>
+                    {agent.isCustom && (
+                      <span className="text-[10px] font-medium text-violet-500 dark:text-violet-400">
+                        custom
                       </span>
-                      <span className="text-xs font-mono text-gray-400 dark:text-white/40 truncate">
-                        {agent.command}
-                      </span>
-                    </div>
+                    )}
                   </button>
                 );
               })}
@@ -148,20 +147,18 @@ export function HomePage() {
           )}
         </div>
 
-        <div className="h-px bg-gray-100 dark:bg-white/10" />
+        {/* Submit */}
+        <Button
+          variant="primary"
+          fullWidth
+          onClick={handleOpen}
+          disabled={!canOpen}
+          className="flex items-center justify-center gap-2 h-10! text-sm! font-semibold!"
+        >
+          {t("home.openProject")}
+          <ArrowRightIcon className="w-4 h-4" />
+        </Button>
 
-        {/* Botón abrir */}
-        <div className="p-5">
-          <Button
-            variant="primary"
-            fullWidth
-            rightIcon={<ArrowRightIcon />}
-            onClick={handleOpen}
-            disabled={!canOpen}
-          >
-            {t("home.openProject")}
-          </Button>
-        </div>
       </div>
     </div>
   );

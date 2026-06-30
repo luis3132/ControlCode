@@ -26,16 +26,15 @@ body,
   height: 100%;
   width: 100%;
   overflow: hidden;
-  /* Light mode */
-  background: #f3f4f6;
+  background: #f9fafb;
   color: #111827;
 }
 
 html.dark,
 html.dark body,
 html.dark #root {
-  background: #0d1117;
-  color: #e6edf3;
+  background: #030712;
+  color: #f9fafb;
 }
 
 /* Scrollbar styling */
