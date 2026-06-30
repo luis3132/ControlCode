@@ -21,11 +21,12 @@ fn now_ts() -> i64 {
 }
 
 
-/// Detecta si el schema de `windows`/`tabs` es el de una versión anterior a esta fase
-/// (sin la columna `label` en windows, o sin `scrollback` en tabs).
-fn needs_schema_v2(conn: &Connection) -> bool {
-    conn.prepare("SELECT label FROM windows LIMIT 1").is_err()
-        || conn.prepare("SELECT scrollback FROM tabs LIMIT 1").is_err()
+/// Detecta si el schema de `workspaces`/`windows`/`tabs` es el de una versión anterior
+/// a esta fase: workspaces todavía indexado por `root_path` (modelo viejo de "carpeta raíz")
+/// en vez de `name` (modelo de "layout guardado de ventanas/tabs").
+fn needs_schema_v3(conn: &Connection) -> bool {
+    conn.prepare("SELECT root_path FROM workspaces LIMIT 1").is_ok()
+        || conn.prepare("SELECT workspace_id FROM tabs LIMIT 1").is_ok()
 }
 
 pub fn init_db() -> SqlResult<DbConnection> {
@@ -33,15 +34,16 @@ pub fn init_db() -> SqlResult<DbConnection> {
 
     // Pre-MVP: no hay datos reales que preservar, así que en vez de migrar
     // incrementalmente se recrean las tablas si el schema está desactualizado.
-    if needs_schema_v2(&conn) {
-        conn.execute_batch("DROP TABLE IF EXISTS tabs; DROP TABLE IF EXISTS windows;")?;
+    if needs_schema_v3(&conn) {
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS tabs; DROP TABLE IF EXISTS windows; DROP TABLE IF EXISTS workspaces;",
+        )?;
     }
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS workspaces (
              id          TEXT PRIMARY KEY,
-             name        TEXT NOT NULL,
-             root_path   TEXT NOT NULL UNIQUE,
+             name        TEXT NOT NULL UNIQUE,
              created_at  INTEGER NOT NULL,
              last_active INTEGER NOT NULL
          );
@@ -49,7 +51,7 @@ pub fn init_db() -> SqlResult<DbConnection> {
          CREATE TABLE IF NOT EXISTS windows (
              id           TEXT PRIMARY KEY,
              label        TEXT NOT NULL UNIQUE,
-             workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+             workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
              pos_x        INTEGER,
              pos_y        INTEGER,
              width        INTEGER,
@@ -62,7 +64,6 @@ pub fn init_db() -> SqlResult<DbConnection> {
          CREATE TABLE IF NOT EXISTS tabs (
              id              TEXT PRIMARY KEY,
              window_id       TEXT NOT NULL REFERENCES windows(id) ON DELETE CASCADE,
-             workspace_id    TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
              title           TEXT,
              title_is_custom INTEGER NOT NULL DEFAULT 0,
              agent_id        TEXT NOT NULL,
@@ -93,8 +94,27 @@ pub fn init_db() -> SqlResult<DbConnection> {
          );",
     )?;
 
+    ensure_default_workspace(&conn)?;
+
     Ok(Arc::new(Mutex::new(conn)))
 }
+
+/// Toda ventana debe pertenecer a un workspace. Si la app arranca sin ningún
+/// workspace guardado todavía, se crea uno por defecto ("Sin guardar") al que
+/// pertenecen las ventanas hasta que el usuario las guarde con un nombre propio.
+fn ensure_default_workspace(conn: &Connection) -> SqlResult<()> {
+    let has_any: i64 = conn.query_row("SELECT COUNT(*) FROM workspaces", [], |r| r.get(0))?;
+    if has_any == 0 {
+        let now = now_ts();
+        conn.execute(
+            "INSERT INTO workspaces (id, name, created_at, last_active) VALUES (?1, ?2, ?3, ?3)",
+            rusqlite::params![DEFAULT_WORKSPACE_ID, "Sin guardar", now],
+        )?;
+    }
+    Ok(())
+}
+
+pub const DEFAULT_WORKSPACE_ID: &str = "default";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -103,9 +123,20 @@ pub fn init_db() -> SqlResult<DbConnection> {
 pub struct Workspace {
     pub id: String,
     pub name: String,
-    pub root_path: String,
     pub created_at: i64,
     pub last_active: i64,
+}
+
+/// Workspace + conteo de ventanas/tabs, para la lista de Home
+/// (ej. "cliente — 2 ventanas (4+3 tabs)").
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSummary {
+    pub id: String,
+    pub name: String,
+    pub last_active: i64,
+    pub window_count: i64,
+    pub tab_count: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -113,7 +144,7 @@ pub struct Workspace {
 pub struct WindowRow {
     pub id: String,
     pub label: String,
-    pub workspace_id: Option<String>,
+    pub workspace_id: String,
     pub pos_x: Option<i32>,
     pub pos_y: Option<i32>,
     pub width: Option<i32>,
@@ -128,7 +159,6 @@ pub struct WindowRow {
 pub struct TabRow {
     pub id: String,
     pub window_id: String,
-    pub workspace_id: Option<String>,
     pub title: Option<String>,
     pub title_is_custom: bool,
     pub agent_id: String,
@@ -146,7 +176,6 @@ pub struct TabRow {
 #[serde(rename_all = "camelCase")]
 pub struct TabStatePayload {
     pub id: String,
-    pub workspace_id: Option<String>,
     pub title: String,
     pub title_is_custom: bool,
     pub agent_id: String,
@@ -162,7 +191,7 @@ pub struct TabStatePayload {
 #[serde(rename_all = "camelCase")]
 pub struct WindowStatePayload {
     pub label: String,
-    pub workspace_id: Option<String>,
+    pub workspace_id: String,
     pub pos_x: Option<i32>,
     pub pos_y: Option<i32>,
     pub width: Option<i32>,
@@ -177,42 +206,67 @@ pub struct RestoredWindowState {
     pub tabs: Vec<TabRow>,
 }
 
+fn row_to_window(row: &rusqlite::Row) -> rusqlite::Result<WindowRow> {
+    Ok(WindowRow {
+        id: row.get(0)?,
+        label: row.get(1)?,
+        workspace_id: row.get(2)?,
+        pos_x: row.get(3)?,
+        pos_y: row.get(4)?,
+        width: row.get(5)?,
+        height: row.get(6)?,
+        monitor: row.get(7)?,
+        is_open: row.get::<_, i64>(8)? != 0,
+        last_active: row.get(9)?,
+    })
+}
+
 fn row_to_tab(row: &rusqlite::Row) -> rusqlite::Result<TabRow> {
     Ok(TabRow {
         id: row.get(0)?,
         window_id: row.get(1)?,
-        workspace_id: row.get(2)?,
-        title: row.get(3)?,
-        title_is_custom: row.get::<_, i64>(4)? != 0,
-        agent_id: row.get(5)?,
-        agent_label: row.get(6)?,
-        command: row.get(7)?,
-        cwd: row.get(8)?,
-        tab_order: row.get(9)?,
-        session_id: row.get(10)?,
-        scrollback: row.get(11)?,
-        created_at: row.get(12)?,
-        last_active: row.get(13)?,
+        title: row.get(2)?,
+        title_is_custom: row.get::<_, i64>(3)? != 0,
+        agent_id: row.get(4)?,
+        agent_label: row.get(5)?,
+        command: row.get(6)?,
+        cwd: row.get(7)?,
+        tab_order: row.get(8)?,
+        session_id: row.get(9)?,
+        scrollback: row.get(10)?,
+        created_at: row.get(11)?,
+        last_active: row.get(12)?,
     })
 }
 
 // ── Commands: workspaces ─────────────────────────────────────────
+// Un workspace es una configuración nombrada y persistida de ventanas + sus tabs
+// (no una carpeta raíz). Se crea explícitamente con "Guardar como workspace...".
 
 #[tauri::command]
-pub fn db_get_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<Workspace>, String> {
+pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<WorkspaceSummary>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, name, root_path, created_at, last_active FROM workspaces ORDER BY last_active DESC")
+        .prepare(
+            "SELECT w.id, w.name, w.last_active,
+                    COUNT(DISTINCT win.id) AS window_count,
+                    COUNT(t.id) AS tab_count
+             FROM workspaces w
+             LEFT JOIN windows win ON win.workspace_id = w.id AND win.is_open = 1
+             LEFT JOIN tabs t ON t.window_id = win.id
+             GROUP BY w.id
+             ORDER BY w.last_active DESC",
+        )
         .map_err(|e| e.to_string())?;
 
     let workspaces = stmt
         .query_map([], |row| {
-            Ok(Workspace {
+            Ok(WorkspaceSummary {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                root_path: row.get(2)?,
-                created_at: row.get(3)?,
-                last_active: row.get(4)?,
+                last_active: row.get(2)?,
+                window_count: row.get(3)?,
+                tab_count: row.get(4)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -222,76 +276,119 @@ pub fn db_get_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<Workspace
     Ok(workspaces)
 }
 
+/// Crea (o renombra si ya existía con otro nombre) un workspace, y reasigna las
+/// ventanas indicadas (las abiertas actualmente) a ese workspace.
 #[tauri::command]
-pub fn db_create_workspace(
+pub fn db_save_workspace(
     name: String,
-    root_path: String,
+    window_labels: Vec<String>,
     db: tauri::State<DbConnection>,
-) -> Result<String, String> {
+) -> Result<Workspace, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
+    let now = now_ts();
     let id = Uuid::new_v4().to_string();
-    let now = now_ts();
 
     conn.execute(
-        "INSERT INTO workspaces (id, name, root_path, created_at, last_active)
-         VALUES (?1, ?2, ?3, ?4, ?4)",
-        rusqlite::params![id, name, root_path, now],
+        "INSERT INTO workspaces (id, name, created_at, last_active) VALUES (?1, ?2, ?3, ?3)",
+        rusqlite::params![id, name, now],
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(id)
+    for label in &window_labels {
+        conn.execute(
+            "UPDATE windows SET workspace_id = ?1, last_active = ?2 WHERE label = ?3",
+            rusqlite::params![id, now, label],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(Workspace { id, name, created_at: now, last_active: now })
 }
 
 #[tauri::command]
-pub fn db_touch_workspace(
-    root_path: String,
-    name: String,
+pub fn db_get_workspace_windows(
+    workspace_id: String,
     db: tauri::State<DbConnection>,
-) -> Result<String, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let now = now_ts();
-
-    conn.execute(
-        "INSERT INTO workspaces (id, name, root_path, created_at, last_active)
-         VALUES (?1, ?2, ?3, ?4, ?4)
-         ON CONFLICT(root_path) DO UPDATE SET last_active = excluded.last_active",
-        rusqlite::params![Uuid::new_v4().to_string(), name, root_path, now],
-    )
-    .map_err(|e| e.to_string())?;
-
-    conn.query_row(
-        "SELECT id FROM workspaces WHERE root_path = ?1",
-        [&root_path],
-        |row| row.get(0),
-    )
-    .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn db_get_recent_workspaces(
-    limit: u32,
-    db: tauri::State<DbConnection>,
-) -> Result<Vec<Workspace>, String> {
+) -> Result<Vec<WindowRow>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, name, root_path, created_at, last_active FROM workspaces ORDER BY last_active DESC LIMIT ?1")
+        .prepare(
+            "SELECT id, label, workspace_id, pos_x, pos_y, width, height, monitor, is_open, last_active
+             FROM windows WHERE workspace_id = ?1 AND is_open = 1",
+        )
         .map_err(|e| e.to_string())?;
 
-    let workspaces = stmt
-        .query_map([limit], |row| {
-            Ok(Workspace {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                root_path: row.get(2)?,
-                created_at: row.get(3)?,
-                last_active: row.get(4)?,
-            })
-        })
+    let windows = stmt
+        .query_map([&workspace_id], row_to_window)
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
 
-    Ok(workspaces)
+    Ok(windows)
+}
+
+/// Marca como cerradas (is_open = 0) todas las ventanas de un workspace.
+/// Usado cuando el usuario elige "cerrar las actuales" al cambiar de workspace.
+#[tauri::command]
+pub fn db_close_workspace_windows(
+    workspace_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE windows SET is_open = 0 WHERE workspace_id = ?1",
+        [&workspace_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn db_rename_workspace(
+    workspace_id: String,
+    name: String,
+    db: tauri::State<DbConnection>,
+) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let affected = conn
+        .execute(
+            "UPDATE workspaces SET name = ?1 WHERE id = ?2",
+            rusqlite::params![name, workspace_id],
+        )
+        .map_err(|e| e.to_string())?;
+    if affected == 0 {
+        return Err("Workspace no encontrado".to_string());
+    }
+    Ok(())
+}
+
+/// Elimina un workspace guardado (sus ventanas/tabs se borran en cascada vía FK).
+/// Rechaza borrar el workspace por defecto o uno que todavía tiene ventanas abiertas
+/// (evita que el autosave de esas ventanas quede apuntando a un workspace_id inexistente).
+#[tauri::command]
+pub fn db_delete_workspace(
+    workspace_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<(), String> {
+    if workspace_id == DEFAULT_WORKSPACE_ID {
+        return Err("No se puede eliminar el workspace por defecto".to_string());
+    }
+
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let open_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM windows WHERE workspace_id = ?1 AND is_open = 1",
+            [&workspace_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if open_count > 0 {
+        return Err("Cierra las ventanas de este workspace antes de eliminarlo".to_string());
+    }
+
+    conn.execute("DELETE FROM workspaces WHERE id = ?1", [&workspace_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // ── Commands: windows + tabs (estado de sesión) ──────────────────
@@ -308,7 +405,6 @@ pub fn db_save_window_state(
         "INSERT INTO windows (id, label, workspace_id, pos_x, pos_y, width, height, monitor, is_open, last_active)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9)
          ON CONFLICT(label) DO UPDATE SET
-           workspace_id = excluded.workspace_id,
            pos_x = excluded.pos_x, pos_y = excluded.pos_y,
            width = excluded.width, height = excluded.height,
            monitor = excluded.monitor,
@@ -336,12 +432,11 @@ pub fn db_save_window_state(
 
     for t in &state.tabs {
         conn.execute(
-            "INSERT INTO tabs (id, window_id, workspace_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, created_at, last_active)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)",
+            "INSERT INTO tabs (id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, created_at, last_active)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
             rusqlite::params![
                 t.id,
                 window_id,
-                t.workspace_id,
                 t.title,
                 t.title_is_custom as i64,
                 t.agent_id,
@@ -372,20 +467,7 @@ pub fn db_load_window_state(
             "SELECT id, label, workspace_id, pos_x, pos_y, width, height, monitor, is_open, last_active
              FROM windows WHERE label = ?1",
             [&label],
-            |row| {
-                Ok(WindowRow {
-                    id: row.get(0)?,
-                    label: row.get(1)?,
-                    workspace_id: row.get(2)?,
-                    pos_x: row.get(3)?,
-                    pos_y: row.get(4)?,
-                    width: row.get(5)?,
-                    height: row.get(6)?,
-                    monitor: row.get(7)?,
-                    is_open: row.get::<_, i64>(8)? != 0,
-                    last_active: row.get(9)?,
-                })
-            },
+            row_to_window,
         )
         .optional()
         .map_err(|e| e.to_string())?;
@@ -394,7 +476,7 @@ pub fn db_load_window_state(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, window_id, workspace_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, created_at, last_active
+            "SELECT id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, created_at, last_active
              FROM tabs WHERE window_id = ?1 ORDER BY tab_order ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -419,20 +501,7 @@ pub fn db_get_open_window_labels(db: tauri::State<DbConnection>) -> Result<Vec<W
         .map_err(|e| e.to_string())?;
 
     let windows = stmt
-        .query_map([], |row| {
-            Ok(WindowRow {
-                id: row.get(0)?,
-                label: row.get(1)?,
-                workspace_id: row.get(2)?,
-                pos_x: row.get(3)?,
-                pos_y: row.get(4)?,
-                width: row.get(5)?,
-                height: row.get(6)?,
-                monitor: row.get(7)?,
-                is_open: row.get::<_, i64>(8)? != 0,
-                last_active: row.get(9)?,
-            })
-        })
+        .query_map([], row_to_window)
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();

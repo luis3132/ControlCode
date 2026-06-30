@@ -21,7 +21,9 @@ export function TerminalPanel() {
             style={{
               position: "absolute",
               inset: 0,
-              visibility: tab.id === activeTabId ? "visible" : "hidden",
+              // Sin "visible" explícito: así hereda el visibility del contenedor de
+              // AppShell (que lo oculta fuera de /workspace) en vez de sobreescribirlo.
+              visibility: tab.id === activeTabId ? undefined : "hidden",
               pointerEvents: tab.id === activeTabId ? "auto" : "none",
               zIndex: tab.id === activeTabId ? 1 : 0,
             }}

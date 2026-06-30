@@ -9,6 +9,7 @@
   "btn.next": "Siguiente →",
   "btn.back": "← Atrás",
   "btn.open": "Abrir",
+  "btn.save": "Guardar",
 
   "home.step1": "1 · Carpeta del proyecto",
   "home.step2": "2 · Agente / TUI",
@@ -18,9 +19,31 @@
   "home.dialogTitle": "Seleccionar proyecto",
   "home.error.noFolder": "Selecciona una carpeta",
 
-  "home.recent.title": "Recientes",
-  "home.recent.empty": "Todavía no hay proyectos recientes",
+  "home.recent.title": "Workspaces",
+  "home.recent.empty": "Todavía no hay workspaces guardados",
   "home.recent.lastActive": "Abierto {{time}}",
+
+  "workspace.list.summary": "{{windows}} ventanas ({{tabs}} tabs)",
+  "workspace.save.title": "Guardar como workspace...",
+  "workspace.save.placeholder": "Nombre del workspace (ej: cliente)",
+  "workspace.save.error.empty": "Escribe un nombre",
+  "workspace.open.title": "Abrir \"{{name}}\"",
+  "workspace.open.body": "¿Quieres cerrar las ventanas que tienes abiertas ahora, o mantenerlas abiertas junto a este workspace?",
+  "workspace.open.keepCurrent": "Mantener actuales",
+  "workspace.open.closeCurrent": "Cerrar actuales",
+
+  "topbar.saveWorkspace": "Guardar workspace",
+
+  "workspace.manage.link": "Gestionar",
+  "workspace.manage.title": "Gestionar workspaces",
+  "workspace.manage.subtitle": "Renombra, elimina o abre tus disposiciones guardadas de ventanas/tabs",
+  "workspace.manage.rename": "Renombrar",
+  "workspace.manage.delete": "Eliminar",
+
+  "app.exit.title": "¿Cerrar la app?",
+  "app.exit.body": "Hay {{count}} ventanas abiertas. ¿Quieres cerrarlas todas, o solo esta?",
+  "app.exit.closeCurrent": "Cerrar solo esta ventana",
+  "app.exit.closeAll": "Cerrar todo",
 
   "sidebar.expand": "Expandir",
   "sidebar.collapse": "Colapsar",

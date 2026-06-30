@@ -22,11 +22,13 @@ pub fn run() {
             terminal::pty_write,
             terminal::pty_resize,
             terminal::pty_kill,
-            // Persistencia SQLite — workspaces
-            database::db_get_workspaces,
-            database::db_create_workspace,
-            database::db_touch_workspace,
-            database::db_get_recent_workspaces,
+            // Persistencia SQLite — workspaces (layouts guardados de ventanas/tabs)
+            database::db_list_workspaces,
+            database::db_save_workspace,
+            database::db_get_workspace_windows,
+            database::db_close_workspace_windows,
+            database::db_rename_workspace,
+            database::db_delete_workspace,
             // Persistencia SQLite — ventanas y tabs
             database::db_save_window_state,
             database::db_load_window_state,
@@ -47,6 +49,8 @@ pub fn run() {
             window::get_all_window_bounds,
             window::get_cursor_position,
             window::get_home_dir,
+            window::open_workspace,
+            window::confirm_exit_all,
             // Detección de agentes
             agents::detect_agents,
         ])
@@ -65,49 +69,21 @@ pub fn run() {
         .setup(|app| {
             let db = app.state::<DbConnection>();
             let open_windows = database::db_get_open_window_labels(db)?;
-
-            if let Some(main_state) = open_windows.iter().find(|w| w.label == "main") {
-                if let Some(main_win) = app.get_webview_window("main") {
-                    if let (Some(width), Some(height)) = (main_state.width, main_state.height) {
-                        let _ = main_win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                            width: width as u32,
-                            height: height as u32,
-                        }));
-                    }
-                    if let (Some(x), Some(y)) = (main_state.pos_x, main_state.pos_y) {
-                        let _ = main_win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
-                    }
-                }
-            }
-
-            let db_for_counts = app.state::<DbConnection>();
-            for w in open_windows.iter().filter(|w| w.label != "main") {
-                let tab_count = database::count_tabs_for_window(&db_for_counts, &w.id).unwrap_or(0);
-                if tab_count == 0 {
-                    continue;
-                }
-
-                let mut builder = tauri::WebviewWindowBuilder::new(
-                    app,
-                    &w.label,
-                    tauri::WebviewUrl::App("/".into()),
-                )
-                .title(&w.label)
-                .decorations(false);
-
-                if let (Some(width), Some(height)) = (w.width, w.height) {
-                    builder = builder.inner_size(width as f64, height as f64);
-                } else {
-                    builder = builder.inner_size(900.0, 650.0);
-                }
-                if let (Some(x), Some(y)) = (w.pos_x, w.pos_y) {
-                    builder = builder.position(x as f64, y as f64);
-                }
-
-                builder.build()?;
-            }
+            window::restore_windows(app.handle(), open_windows)?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // A nivel de app (no por ventana individual, ver comentario en on_window_event):
+            // si hay varias ventanas abiertas y se intenta salir de la app entera, se pausa
+            // la salida y se le pregunta al frontend si quiere cerrar todo o solo la actual.
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                let window_count = app_handle.webview_windows().len();
+                if window_count > 1 {
+                    api.prevent_exit();
+                    let _ = app_handle.emit("cc-app-exit-requested", window_count);
+                }
+            }
+        });
 }

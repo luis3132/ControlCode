@@ -19,7 +19,7 @@ async function fetchScrollback(ptyId: number | null): Promise<string | null> {
 
 async function saveNow() {
   const win = getCurrentWindow();
-  const { tabs, workspaceRoot } = useTabsStore.getState();
+  const { tabs, workspaceId } = useTabsStore.getState();
 
   let bounds: { x: number | null; y: number | null; width: number | null; height: number | null } = {
     x: null, y: null, width: null, height: null,
@@ -32,22 +32,9 @@ async function saveNow() {
     // ventana ya cerrándose; se guarda solo el estado de tabs
   }
 
-  let workspaceId: string | null = null;
-  if (workspaceRoot) {
-    try {
-      workspaceId = await invoke<string>("db_touch_workspace", {
-        rootPath: workspaceRoot,
-        name: workspaceRoot.split("/").filter(Boolean).pop() ?? workspaceRoot,
-      });
-    } catch {
-      workspaceId = null;
-    }
-  }
-
   const tabsPayload = await Promise.all(
     tabs.map(async (t, i) => ({
       id: t.id,
-      workspaceId: null,
       title: t.title,
       titleIsCustom: t.titleIsCustom ?? false,
       agentId: t.agentId,
@@ -86,7 +73,7 @@ export function initTabsPersistence() {
 
   useTabsStore.subscribe((state, prevState) => {
     if (!state.hydrated) return;
-    if (state.tabs === prevState.tabs && state.workspaceRoot === prevState.workspaceRoot) return;
+    if (state.tabs === prevState.tabs && state.workspaceId === prevState.workspaceId) return;
     scheduleSave();
   });
 

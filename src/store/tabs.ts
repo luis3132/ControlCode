@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+export const DEFAULT_WORKSPACE_ID = "default";
+
 export type AgentId = string;
 
 export interface AgentInfo {
@@ -29,7 +31,8 @@ interface TabsState {
   activeTabId: string | null;
   detectedAgents: AgentInfo[];
   sidebarCollapsed: boolean;
-  workspaceRoot: string | null;
+  /** Workspace (layout guardado de ventanas/tabs) al que pertenece ESTA ventana. */
+  workspaceId: string;
   hydrated: boolean;
 
   addTab: (params: {
@@ -49,8 +52,8 @@ interface TabsState {
   updateTab: (tabId: string, patch: Partial<Tab>) => void;
   setDetectedAgents: (agents: AgentInfo[]) => void;
   toggleSidebar: () => void;
-  setWorkspaceRoot: (root: string | null) => void;
-  hydrateFromBackend: (tabs: Tab[]) => void;
+  setWorkspaceId: (workspaceId: string) => void;
+  hydrateFromBackend: (tabs: Tab[], workspaceId?: string) => void;
   setHydrated: (hydrated: boolean) => void;
 }
 
@@ -64,7 +67,7 @@ export const useTabsStore = create<TabsState>((set) => ({
   // bash siempre disponible como fallback mientras detect_agents carga
   detectedAgents: [{ id: "bash", label: "Terminal (bash)", command: "bash", available: true }],
   sidebarCollapsed: false,
-  workspaceRoot: null,
+  workspaceId: DEFAULT_WORKSPACE_ID,
   hydrated: false,
 
   addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId }) => {
@@ -138,15 +141,16 @@ export const useTabsStore = create<TabsState>((set) => ({
   toggleSidebar: () =>
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
 
-  setWorkspaceRoot: (root) => set({ workspaceRoot: root }),
+  setWorkspaceId: (workspaceId) => set({ workspaceId }),
 
-  hydrateFromBackend: (tabs) =>
+  hydrateFromBackend: (tabs, workspaceId) =>
     set((state) => {
+      const base = workspaceId ? { workspaceId } : {};
       if (state.tabs.length === 0) {
-        return { tabs, activeTabId: tabs[0]?.id ?? null };
+        return { ...base, tabs, activeTabId: tabs[0]?.id ?? null };
       }
       // Ya hay tabs en memoria (flujo cc-detach/cc-receive-tab) — anexar sin pisarlas.
-      return { tabs: [...tabs, ...state.tabs] };
+      return { ...base, tabs: [...tabs, ...state.tabs] };
     }),
 
   setHydrated: (hydrated) => set({ hydrated }),

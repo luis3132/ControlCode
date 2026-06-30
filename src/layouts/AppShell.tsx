@@ -10,6 +10,7 @@ import { TabBar } from "../components/tabs/TabBar";
 import { PathBar } from "../components/workspace/PathBar";
 import { TerminalPanel } from "../components/terminal/TerminalPanel";
 import { ResizeHandles } from "../components/ResizeHandles";
+import { AppExitListener } from "../components/app/AppExitListener";
 
 interface RestoredTabRow {
   id: string;
@@ -24,6 +25,7 @@ interface RestoredTabRow {
 }
 
 interface RestoredWindowState {
+  window: { workspaceId: string };
   tabs: RestoredTabRow[];
 }
 
@@ -59,7 +61,7 @@ export function AppShell() {
     invoke<RestoredWindowState | null>("db_load_window_state", { label: myLabel })
       .then((restored) => {
         if (restored && restored.tabs.length > 0) {
-          hydrateFromBackend(restored.tabs.map(toFrontendTab));
+          hydrateFromBackend(restored.tabs.map(toFrontendTab), restored.window.workspaceId);
           navigate("/workspace");
         }
       })
@@ -118,14 +120,13 @@ export function AppShell() {
       text-gray-900 dark:text-white">
 
       <ResizeHandles />
+      <AppExitListener />
       <TopBar />
 
-      {tabs.length > 0 && (
-        <>
-          <TabBar />
-          <PathBar />
-        </>
-      )}
+      {/* TabBar siempre visible si hay tabs (estilo Chrome: se ve aunque estés en Home,
+          y es la forma de volver a una terminal). PathBar solo tiene sentido en /workspace. */}
+      {tabs.length > 0 && <TabBar />}
+      {isWorkspace && tabs.length > 0 && <PathBar />}
 
       <div className="relative flex-1 min-h-0 overflow-hidden">
         {/* TerminalPanel siempre montado para preservar PTYs */}

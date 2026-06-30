@@ -9,6 +9,7 @@
   "btn.next": "Next →",
   "btn.back": "← Back",
   "btn.open": "Open",
+  "btn.save": "Save",
 
   "home.step1": "1 · Project folder",
   "home.step2": "2 · Agent / TUI",
@@ -18,9 +19,31 @@
   "home.dialogTitle": "Select project",
   "home.error.noFolder": "Select a folder first",
 
-  "home.recent.title": "Recent",
-  "home.recent.empty": "No recent projects yet",
+  "home.recent.title": "Workspaces",
+  "home.recent.empty": "No saved workspaces yet",
   "home.recent.lastActive": "Opened {{time}}",
+
+  "workspace.list.summary": "{{windows}} windows ({{tabs}} tabs)",
+  "workspace.save.title": "Save as workspace...",
+  "workspace.save.placeholder": "Workspace name (e.g. cliente)",
+  "workspace.save.error.empty": "Enter a name",
+  "workspace.open.title": "Open \"{{name}}\"",
+  "workspace.open.body": "Do you want to close the windows you have open now, or keep them open alongside this workspace?",
+  "workspace.open.keepCurrent": "Keep current open",
+  "workspace.open.closeCurrent": "Close current",
+
+  "topbar.saveWorkspace": "Save workspace",
+
+  "workspace.manage.link": "Manage",
+  "workspace.manage.title": "Manage workspaces",
+  "workspace.manage.subtitle": "Rename, delete or open your saved window/tab layouts",
+  "workspace.manage.rename": "Rename",
+  "workspace.manage.delete": "Delete",
+
+  "app.exit.title": "Close the app?",
+  "app.exit.body": "You have {{count}} windows open. Do you want to close all of them, or only this one?",
+  "app.exit.closeCurrent": "Close this window only",
+  "app.exit.closeAll": "Close all",
 
   "sidebar.expand": "Expand",
   "sidebar.collapse": "Collapse",

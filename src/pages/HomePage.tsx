@@ -1,38 +1,30 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { Button, Input } from "neogestify-ui-components";
 import { FolderIcon, HomeIcon, ArrowRightIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 import { useTabsStore, AgentInfo } from "../store/tabs";
 import { useSettingsStore } from "../store/settings";
-import { RecentWorkspaces, RecentWorkspace } from "../components/home/RecentWorkspaces";
-
-function baseName(path: string): string {
-  return path.split("/").filter(Boolean).pop() ?? path;
-}
+import { useWorkspacesStore, WorkspaceSummary } from "../store/workspaces";
+import { WorkspaceList } from "../components/home/WorkspaceList";
+import { OpenWorkspaceDialog } from "../components/workspace/OpenWorkspaceDialog";
 
 export function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { addTab, detectedAgents, setWorkspaceRoot } = useTabsStore();
+  const { addTab, detectedAgents } = useTabsStore();
   const { customAgents } = useSettingsStore();
+  const { workspaces, loadWorkspaces } = useWorkspacesStore();
   const [selectedCwd, setSelectedCwd] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [pathError, setPathError] = useState("");
-  const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspace[]>([]);
+  const [openTarget, setOpenTarget] = useState<WorkspaceSummary | null>(null);
 
   useEffect(() => {
-    invoke<{ id: string; name: string; rootPath: string; lastActive: number }[]>(
-      "db_get_recent_workspaces",
-      { limit: 5 }
-    )
-      .then((rows) => setRecentWorkspaces(rows.map((r) => ({
-        id: r.id, name: r.name, rootPath: r.rootPath, lastActive: r.lastActive,
-      }))))
-      .catch(console.error);
-  }, []);
+    loadWorkspaces();
+  }, [loadWorkspaces]);
 
   const allAgents: AgentInfo[] = [
     ...detectedAgents,
@@ -61,10 +53,7 @@ export function HomePage() {
   const handleOpen = () => {
     if (!selectedCwd.trim()) { setPathError(t("home.error.noFolder")); return; }
     if (!selectedAgent) return;
-    const root = selectedCwd.trim();
-    addTab({ cwd: root, agent: selectedAgent });
-    setWorkspaceRoot(root);
-    invoke("db_touch_workspace", { rootPath: root, name: baseName(root) }).catch(console.error);
+    addTab({ cwd: selectedCwd.trim(), agent: selectedAgent });
     navigate("/workspace");
   };
 
@@ -85,11 +74,6 @@ export function HomePage() {
             {t("app.subtitle")}
           </p>
         </div>
-
-        <RecentWorkspaces
-          workspaces={recentWorkspaces}
-          onSelect={(rootPath) => { setSelectedCwd(rootPath); setPathError(""); }}
-        />
 
         {/* Folder */}
         <div className="flex flex-col gap-3">
@@ -184,7 +168,17 @@ export function HomePage() {
           <ArrowRightIcon className="w-4 h-4" />
         </Button>
 
+        {workspaces.length > 0 && (
+          <div className="pt-6 mt-2 border-t border-gray-200 dark:border-gray-800">
+            <WorkspaceList workspaces={workspaces} onSelect={setOpenTarget} />
+          </div>
+        )}
+
       </div>
+
+      {openTarget && (
+        <OpenWorkspaceDialog workspace={openTarget} onClose={() => setOpenTarget(null)} />
+      )}
     </div>
   );
 }
