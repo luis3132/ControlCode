@@ -18,6 +18,10 @@
   "home.dialogTitle": "Seleccionar proyecto",
   "home.error.noFolder": "Selecciona una carpeta",
 
+  "home.recent.title": "Recientes",
+  "home.recent.empty": "Todavía no hay proyectos recientes",
+  "home.recent.lastActive": "Abierto {{time}}",
+
   "sidebar.expand": "Expandir",
   "sidebar.collapse": "Colapsar",
   "sidebar.home": "Home",

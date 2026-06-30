@@ -18,6 +18,10 @@
   "home.dialogTitle": "Select project",
   "home.error.noFolder": "Select a folder first",
 
+  "home.recent.title": "Recent",
+  "home.recent.empty": "No recent projects yet",
+  "home.recent.lastActive": "Opened {{time}}",
+
   "sidebar.expand": "Expand",
   "sidebar.collapse": "Collapse",
   "sidebar.home": "Home",

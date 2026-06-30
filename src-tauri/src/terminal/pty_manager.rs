@@ -12,9 +12,15 @@ struct PtySession {
 }
 
 type PtyRegistry = Arc<Mutex<HashMap<u32, PtySession>>>;
+type PtyBuffers = Arc<Mutex<HashMap<u32, Vec<u8>>>>;
+
+/// Tope del buffer de scrollback que se conserva por PTY, para poder reproducirlo
+/// cuando una tab se mueve a otra ventana sin matar el proceso.
+const MAX_BUFFER_BYTES: usize = 3 * 1024 * 1024;
 
 lazy_static::lazy_static! {
     static ref PTY_REGISTRY: PtyRegistry = Arc::new(Mutex::new(HashMap::new()));
+    static ref PTY_BUFFERS: PtyBuffers = Arc::new(Mutex::new(HashMap::new()));
     static ref PTY_COUNTER: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
 }
 
@@ -28,6 +34,16 @@ pub struct PtyExitPayload {
     pub code: i32,
 }
 
+fn append_to_buffer(id: u32, chunk: &[u8]) {
+    let mut buffers = PTY_BUFFERS.lock().unwrap();
+    let buf = buffers.entry(id).or_default();
+    buf.extend_from_slice(chunk);
+    if buf.len() > MAX_BUFFER_BYTES {
+        let excess = buf.len() - MAX_BUFFER_BYTES;
+        buf.drain(0..excess);
+    }
+}
+
 /// Crea un PTY, lanza el proceso dentro, y emite eventos `pty-data-{id}` al frontend.
 #[tauri::command]
 pub async fn pty_create(command: String, cwd: String, app: AppHandle) -> Result<u32, String> {
@@ -38,7 +54,12 @@ pub async fn pty_create(command: String, cwd: String, app: AppHandle) -> Result<
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-    let mut cmd = CommandBuilder::new(&command);
+    let mut parts = command.split_whitespace();
+    let program = parts.next().unwrap_or(&command);
+    let mut cmd = CommandBuilder::new(program);
+    for arg in parts {
+        cmd.arg(arg);
+    }
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
@@ -68,6 +89,7 @@ pub async fn pty_create(command: String, cwd: String, app: AppHandle) -> Result<
         let mut registry = PTY_REGISTRY.lock().unwrap();
         registry.insert(id, PtySession { master: pair.master, writer, killer: child });
     }
+    PTY_BUFFERS.lock().unwrap().insert(id, Vec::new());
 
     let app_clone = app.clone();
     let event_name = format!("pty-data-{id}");
@@ -79,6 +101,7 @@ pub async fn pty_create(command: String, cwd: String, app: AppHandle) -> Result<
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    append_to_buffer(id, &buf[..n]);
                     let data = String::from_utf8_lossy(&buf[..n]).to_string();
                     app_clone.emit(&event_name, PtyDataPayload { data }).ok();
                 }
@@ -87,9 +110,24 @@ pub async fn pty_create(command: String, cwd: String, app: AppHandle) -> Result<
         }
         app_clone.emit(&exit_event, PtyExitPayload { code: 0 }).ok();
         PTY_REGISTRY.lock().unwrap().remove(&id);
+        PTY_BUFFERS.lock().unwrap().remove(&id);
     });
 
     Ok(id)
+}
+
+/// Se "conecta" a un PTY que ya existe (p. ej. al mover una tab a otra ventana sin
+/// matar el proceso) y devuelve el scrollback acumulado para reproducirlo en el xterm nuevo.
+#[tauri::command]
+pub fn pty_attach(id: u32) -> Result<String, String> {
+    if !PTY_REGISTRY.lock().unwrap().contains_key(&id) {
+        return Err(format!("PTY session {id} not found"));
+    }
+    let buffers = PTY_BUFFERS.lock().unwrap();
+    Ok(buffers
+        .get(&id)
+        .map(|b| String::from_utf8_lossy(b).into_owned())
+        .unwrap_or_default())
 }
 
 /// Escribe datos (input del usuario desde xterm.js) al PTY.
@@ -131,5 +169,6 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
     if let Some(mut session) = PTY_REGISTRY.lock().unwrap().remove(&id) {
         session.killer.kill().map_err(|e| format!("Kill error: {e}"))?;
     }
+    PTY_BUFFERS.lock().unwrap().remove(&id);
     Ok(())
 }

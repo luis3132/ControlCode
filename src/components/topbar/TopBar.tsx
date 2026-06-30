@@ -120,7 +120,7 @@ export function TopBar() {
         })}
       </nav>
 
-      <div className="flex items-center justify-end gap-1 pr-2">
+      <div className="flex items-center justify-end gap-1 pr-1">
         {/* Settings + ThemeToggle */}
         <div className="flex items-center gap-1 pr-2" data-tauri-drag-region="false">
           <ThemeToggle />
@@ -131,8 +131,8 @@ export function TopBar() {
             className={`
             w-8! h-8! flex items-center justify-center transition-all duration-200
             ${location.pathname === "/settings"
-                ? "bg-gray-100! dark:bg-white/10! text-gray-900! dark:text-white!"
-                : "text-gray-400! dark:text-gray-500! hover:text-gray-700! dark:hover:text-white! hover:bg-gray-100! dark:hover:bg-white/6!"}
+                ? "bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white"
+                : "text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10"}
           `}
           >
             <GearIcon className="w-4 h-4" />
@@ -143,7 +143,7 @@ export function TopBar() {
         <div className="w-px h-5 bg-gray-200 dark:bg-white/10 mx-1" data-tauri-drag-region="false" />
 
         {/* Controles de ventana */}
-        <div className="flex items-center pr-1" data-tauri-drag-region="false">
+        <div className="flex items-center" data-tauri-drag-region="false">
           <button
             onClick={() => win.minimize()}
             title="Minimizar"

@@ -14,10 +14,14 @@ export interface AgentInfo {
 export interface Tab {
   id: string;
   title: string;
+  titleIsCustom?: boolean;
   cwd: string;
   agentId: AgentId;
+  agentLabel: string;
   command: string;
   ptyId: number | null;
+  sessionId?: string;
+  scrollback?: string;
 }
 
 interface TabsState {
@@ -25,15 +29,29 @@ interface TabsState {
   activeTabId: string | null;
   detectedAgents: AgentInfo[];
   sidebarCollapsed: boolean;
+  workspaceRoot: string | null;
+  hydrated: boolean;
 
-  addTab: (params: { cwd: string; agent: AgentInfo }) => string;
+  addTab: (params: {
+    cwd: string;
+    agent: AgentInfo;
+    title?: string;
+    titleIsCustom?: boolean;
+    ptyId?: number | null;
+    sessionId?: string;
+  }) => string;
   closeTab: (id: string) => void;
   activateTab: (id: string) => void;
   renameTab: (id: string, title: string) => void;
   reorderTabs: (fromIndex: number, toIndex: number) => void;
   setPtyId: (tabId: string, ptyId: number) => void;
+  setSessionId: (tabId: string, sessionId: string) => void;
+  updateTab: (tabId: string, patch: Partial<Tab>) => void;
   setDetectedAgents: (agents: AgentInfo[]) => void;
   toggleSidebar: () => void;
+  setWorkspaceRoot: (root: string | null) => void;
+  hydrateFromBackend: (tabs: Tab[]) => void;
+  setHydrated: (hydrated: boolean) => void;
 }
 
 function baseName(path: string): string {
@@ -46,17 +64,28 @@ export const useTabsStore = create<TabsState>((set) => ({
   // bash siempre disponible como fallback mientras detect_agents carga
   detectedAgents: [{ id: "bash", label: "Terminal (bash)", command: "bash", available: true }],
   sidebarCollapsed: false,
+  workspaceRoot: null,
+  hydrated: false,
 
-  addTab: ({ cwd, agent }) => {
+  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId }) => {
     const id = crypto.randomUUID();
-    const title =
-      agent.id === "bash"
-        ? baseName(cwd)
-        : `${agent.label} — ${baseName(cwd)}`;
+    const computedTitle =
+      title ??
+      (agent.id === "bash" ? baseName(cwd) : `${agent.label} — ${baseName(cwd)}`);
     set((state) => ({
       tabs: [
         ...state.tabs,
-        { id, title, cwd, agentId: agent.id, command: agent.command, ptyId: null },
+        {
+          id,
+          title: computedTitle,
+          titleIsCustom,
+          cwd,
+          agentId: agent.id,
+          agentLabel: agent.label,
+          command: agent.command,
+          ptyId: ptyId ?? null,
+          sessionId,
+        },
       ],
       activeTabId: id,
     }));
@@ -78,7 +107,7 @@ export const useTabsStore = create<TabsState>((set) => ({
 
   renameTab: (id, title) =>
     set((state) => ({
-      tabs: state.tabs.map((t) => (t.id === id ? { ...t, title } : t)),
+      tabs: state.tabs.map((t) => (t.id === id ? { ...t, title, titleIsCustom: true } : t)),
     })),
 
   reorderTabs: (fromIndex, toIndex) =>
@@ -94,8 +123,31 @@ export const useTabsStore = create<TabsState>((set) => ({
       tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, ptyId } : t)),
     })),
 
+  setSessionId: (tabId, sessionId) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, sessionId } : t)),
+    })),
+
+  updateTab: (tabId, patch) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, ...patch } : t)),
+    })),
+
   setDetectedAgents: (agents) => set({ detectedAgents: agents }),
 
   toggleSidebar: () =>
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+
+  setWorkspaceRoot: (root) => set({ workspaceRoot: root }),
+
+  hydrateFromBackend: (tabs) =>
+    set((state) => {
+      if (state.tabs.length === 0) {
+        return { tabs, activeTabId: tabs[0]?.id ?? null };
+      }
+      // Ya hay tabs en memoria (flujo cc-detach/cc-receive-tab) — anexar sin pisarlas.
+      return { tabs: [...tabs, ...state.tabs] };
+    }),
+
+  setHydrated: (hydrated) => set({ hydrated }),
 }));

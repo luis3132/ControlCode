@@ -7,18 +7,42 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import "xterm/css/xterm.css";
 
+import { RESUMABLE_AGENT_IDS } from "../lib/agentResume";
+import { consumePtyTransferring } from "../lib/ptyTransfer";
+
 interface TerminalProps {
   command?: string;
   cwd?: string;
+  agentId?: string;
+  /** Si se pasa, no se lanza un proceso nuevo: se reconecta a este PTY ya vivo
+   * (p. ej. una tab movida desde otra ventana) y se reproduce su scrollback. */
+  attachPtyId?: number;
+  /** Scrollback persistido de una sesión anterior (proceso ya muerto, sin PTY vivo
+   * al que conectarse): se escribe antes de lanzar el proceso nuevo, a modo de historial. */
+  initialScrollback?: string;
   onReady?: (id: number) => void;
   onExit?: (code: number) => void;
+  onSessionDiscovered?: (sessionId: string) => void;
 }
+
+// El agente puede tardar en escribir su primer log (p. ej. hasta el primer mensaje
+// del usuario), así que se sigue intentando mientras la tab esté abierta, no solo
+// los primeros segundos tras lanzarla.
+const SESSION_DISCOVERY_INTERVAL_MS = 3000;
+const SESSION_DISCOVERY_MAX_ATTEMPTS = Infinity;
+// Margen de seguridad: los timestamps de archivo tienen resolución de 1s y puede haber
+// un pequeño desfase entre este reloj y el de pty_create.
+const SESSION_DISCOVERY_LOOKBACK_S = 3;
 
 export function Terminal({
   command = "bash",
   cwd,
+  agentId,
+  attachPtyId,
+  initialScrollback,
   onReady,
   onExit,
+  onSessionDiscovered,
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const ptyIdRef = useRef<number | null>(null);
@@ -75,10 +99,76 @@ export function Terminal({
     // ── 2. Crear la sesión PTY en Rust ───────────────────────
     let unlistenData: UnlistenFn | null = null;
     let unlistenExit: UnlistenFn | null = null;
+    let discoveryTimer: ReturnType<typeof setTimeout> | null = null;
+    let discoveryAttempts = 0;
+    let cancelled = false;
+
+    const pollSessionId = (resolvedCwd: string, startedAfter: number) => {
+      if (!agentId || !RESUMABLE_AGENT_IDS.includes(agentId) || !onSessionDiscovered) return;
+
+      const attempt = async () => {
+        if (cancelled) return;
+        discoveryAttempts += 1;
+        try {
+          const found = await invoke<string | null>("discover_session_id", {
+            agentId,
+            cwd: resolvedCwd,
+            startedAfter,
+          });
+          if (found) {
+            onSessionDiscovered(found);
+            return;
+          }
+        } catch {
+          // ignorar, se reintenta
+        }
+        if (!cancelled && discoveryAttempts < SESSION_DISCOVERY_MAX_ATTEMPTS) {
+          discoveryTimer = setTimeout(attempt, SESSION_DISCOVERY_INTERVAL_MS);
+        }
+      };
+
+      discoveryTimer = setTimeout(attempt, SESSION_DISCOVERY_INTERVAL_MS);
+    };
+
+    const attachListeners = async (ptyId: number) => {
+      // ── 3. Escuchar stdout del PTY ──────────────────────
+      unlistenData = await listen<{ data: string }>(
+        `pty-data-${ptyId}`,
+        (event) => {
+          term.write(event.payload.data);
+        }
+      );
+
+      // ── 4. Escuchar salida del proceso ──────────────────
+      unlistenExit = await listen<{ code: number }>(
+        `pty-exit-${ptyId}`,
+        (event) => {
+          setStatus("exited");
+          term.write(
+            `\r\n\x1b[90m${t("terminal.exitCode", { code: event.payload.code })}\x1b[0m\r\n`
+          );
+          onExit?.(event.payload.code);
+        }
+      );
+    };
 
     const initPty = async () => {
       try {
+        if (attachPtyId != null) {
+          // Reconectar a un PTY que ya está vivo en otra ventana: nada de spawnear de nuevo.
+          const buffered = await invoke<string>("pty_attach", { id: attachPtyId });
+          ptyIdRef.current = attachPtyId;
+          if (buffered) term.write(buffered);
+          setStatus("running");
+          onReady?.(attachPtyId);
+          await attachListeners(attachPtyId);
+          return;
+        }
+
+        if (initialScrollback) term.write(initialScrollback);
+
         const resolvedCwd: string = cwd ?? await invoke<string>("get_home_dir");
+        const startedAfter = Math.floor(Date.now() / 1000) - SESSION_DISCOVERY_LOOKBACK_S;
 
         const ptyId = await invoke<number>("pty_create", {
           command,
@@ -87,26 +177,8 @@ export function Terminal({
         ptyIdRef.current = ptyId;
         setStatus("running");
         onReady?.(ptyId);
-
-        // ── 3. Escuchar stdout del PTY ──────────────────────
-        unlistenData = await listen<{ data: string }>(
-          `pty-data-${ptyId}`,
-          (event) => {
-            term.write(event.payload.data);
-          }
-        );
-
-        // ── 4. Escuchar salida del proceso ──────────────────
-        unlistenExit = await listen<{ code: number }>(
-          `pty-exit-${ptyId}`,
-          (event) => {
-            setStatus("exited");
-            term.write(
-              `\r\n\x1b[90m${t("terminal.exitCode", { code: event.payload.code })}\x1b[0m\r\n`
-            );
-            onExit?.(event.payload.code);
-          }
-        );
+        pollSessionId(resolvedCwd, startedAfter);
+        await attachListeners(ptyId);
       } catch (err) {
         term.write(`\r\n\x1b[31m${t("terminal.ptyError", { error: err })}\x1b[0m\r\n`);
         setStatus("exited");
@@ -143,11 +215,15 @@ export function Terminal({
 
     // ── 7. Cleanup ───────────────────────────────────────────
     return () => {
+      cancelled = true;
+      if (discoveryTimer) clearTimeout(discoveryTimer);
       resizeObserver.disconnect();
       unlistenData?.();
       unlistenExit?.();
       if (ptyIdRef.current !== null) {
-        invoke("pty_kill", { id: ptyIdRef.current }).catch(console.error);
+        if (!consumePtyTransferring(ptyIdRef.current)) {
+          invoke("pty_kill", { id: ptyIdRef.current }).catch(console.error);
+        }
         ptyIdRef.current = null;
       }
       term.dispose();

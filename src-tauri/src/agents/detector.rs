@@ -21,6 +21,7 @@ const AGENTS: &[AgentCandidate] = &[
     AgentCandidate { id: "claude-code", label: "Claude Code", command: "claude",  version_flag: "--version" },
     AgentCandidate { id: "gemini-cli",  label: "Gemini CLI",  command: "gemini",  version_flag: "--version" },
     AgentCandidate { id: "codex",       label: "Codex",       command: "codex",   version_flag: "--version" },
+    AgentCandidate { id: "opencode",    label: "OpenCode",    command: "opencode", version_flag: "--version" },
 ];
 
 fn probe_agent(candidate: &AgentCandidate) -> AgentInfo {

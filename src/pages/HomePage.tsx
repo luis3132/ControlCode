@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -7,15 +7,32 @@ import { FolderIcon, HomeIcon, ArrowRightIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 import { useTabsStore, AgentInfo } from "../store/tabs";
 import { useSettingsStore } from "../store/settings";
+import { RecentWorkspaces, RecentWorkspace } from "../components/home/RecentWorkspaces";
+
+function baseName(path: string): string {
+  return path.split("/").filter(Boolean).pop() ?? path;
+}
 
 export function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { addTab, detectedAgents } = useTabsStore();
+  const { addTab, detectedAgents, setWorkspaceRoot } = useTabsStore();
   const { customAgents } = useSettingsStore();
   const [selectedCwd, setSelectedCwd] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [pathError, setPathError] = useState("");
+  const [recentWorkspaces, setRecentWorkspaces] = useState<RecentWorkspace[]>([]);
+
+  useEffect(() => {
+    invoke<{ id: string; name: string; rootPath: string; lastActive: number }[]>(
+      "db_get_recent_workspaces",
+      { limit: 5 }
+    )
+      .then((rows) => setRecentWorkspaces(rows.map((r) => ({
+        id: r.id, name: r.name, rootPath: r.rootPath, lastActive: r.lastActive,
+      }))))
+      .catch(console.error);
+  }, []);
 
   const allAgents: AgentInfo[] = [
     ...detectedAgents,
@@ -44,7 +61,10 @@ export function HomePage() {
   const handleOpen = () => {
     if (!selectedCwd.trim()) { setPathError(t("home.error.noFolder")); return; }
     if (!selectedAgent) return;
-    addTab({ cwd: selectedCwd.trim(), agent: selectedAgent });
+    const root = selectedCwd.trim();
+    addTab({ cwd: root, agent: selectedAgent });
+    setWorkspaceRoot(root);
+    invoke("db_touch_workspace", { rootPath: root, name: baseName(root) }).catch(console.error);
     navigate("/workspace");
   };
 
@@ -65,6 +85,11 @@ export function HomePage() {
             {t("app.subtitle")}
           </p>
         </div>
+
+        <RecentWorkspaces
+          workspaces={recentWorkspaces}
+          onSelect={(rootPath) => { setSelectedCwd(rootPath); setPathError(""); }}
+        />
 
         {/* Folder */}
         <div className="flex flex-col gap-3">

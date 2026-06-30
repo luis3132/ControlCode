@@ -7,15 +7,9 @@ import { useTabsStore } from "../../store/tabs";
 import { TabItem } from "./TabItem";
 import { TabContextMenu } from "./TabContextMenu";
 import { NewTabWizard } from "../wizard/NewTabWizard";
-
-function PlusIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-      <line x1="6" y1="1" x2="6" y2="11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <line x1="1" y1="6" x2="11" y2="6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
+import { refreshSessionTitle } from "../../lib/sessionTitle";
+import { markPtyTransferring } from "../../lib/ptyTransfer";
+import { AddIcon } from "neogestify-ui-components";
 
 interface ContextMenuState {
   tabId: string;
@@ -26,7 +20,7 @@ interface ContextMenuState {
 
 export function TabBar() {
   const { t } = useTranslation();
-  const { tabs, activeTabId, activateTab, closeTab, renameTab, reorderTabs, addTab } =
+  const { tabs, activeTabId, activateTab, closeTab, renameTab, reorderTabs, addTab, updateTab } =
     useTabsStore();
   const navigate = useNavigate();
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -47,7 +41,7 @@ export function TabBar() {
     const rect = barRef.current?.getBoundingClientRect();
     const insideBar = rect &&
       e.clientX >= rect.left && e.clientX <= rect.right &&
-      e.clientY >= rect.top  && e.clientY <= rect.bottom;
+      e.clientY >= rect.top && e.clientY <= rect.bottom;
 
     // Soltado dentro del TabBar → reorder (ya manejado por onDrop), nada más
     if (insideBar) {
@@ -84,27 +78,41 @@ export function TabBar() {
     }
 
     if (mergeTarget) {
-      // Merge: enviar tab a la otra ventana vía evento Tauri
+      // Merge: enviar tab (con su PTY vivo) a la otra ventana vía evento Tauri
       await invoke("broadcast_event", {
         event: "cc-receive-tab",
         payload: JSON.stringify({
           targetLabel: mergeTarget,
-          cwd: tab.cwd, command: tab.command, agentId: tab.agentId, title: tab.title,
+          cwd: tab.cwd, command: tab.command, agentId: tab.agentId,
+          agentLabel: tab.agentLabel, title: tab.title, sessionId: tab.sessionId,
+          ptyId: tab.ptyId,
         }),
       });
     } else {
-      // Fuera de cualquier ventana → nueva ventana
+      // Fuera de cualquier ventana → nueva ventana, llevándose el mismo PTY
       localStorage.setItem("cc-detach", JSON.stringify({
-        cwd: tab.cwd, command: tab.command, agentId: tab.agentId, title: tab.title,
+        cwd: tab.cwd, command: tab.command, agentId: tab.agentId,
+        agentLabel: tab.agentLabel, title: tab.title, sessionId: tab.sessionId,
+        ptyId: tab.ptyId,
       }));
       await invoke("open_new_window", { label: `cc-window-${Date.now()}` });
     }
 
+    if (tab.ptyId != null) markPtyTransferring(tab.ptyId);
     closeTab(tab.id);
     if (tabs.length === 1) await getCurrentWindow().close();
 
     setDraggedIndex(null);
     setDragOverIndex(null);
+  };
+
+  const closeTabWithTitleRefresh = async (tabId: string) => {
+    const tab = tabs.find((t) => t.id === tabId);
+    if (tab) {
+      const title = await refreshSessionTitle(tab);
+      if (title !== tab.title) updateTab(tab.id, { title });
+    }
+    closeTab(tabId);
   };
 
   const handleContextMenu = async (e: React.MouseEvent, tabId: string) => {
@@ -124,9 +132,13 @@ export function TabBar() {
         cwd: tab.cwd,
         command: tab.command,
         agentId: tab.agentId,
+        agentLabel: tab.agentLabel,
         title: tab.title,
+        sessionId: tab.sessionId,
+        ptyId: tab.ptyId,
       }),
     });
+    if (tab.ptyId != null) markPtyTransferring(tab.ptyId);
     closeTab(tabId);
     // Auto-cierre si era la última tab
     if (tabs.length === 1) {
@@ -138,9 +150,9 @@ export function TabBar() {
     <>
       <div
         ref={barRef}
-        className="flex items-stretch h-9 shrink-0 overflow-x-auto
+        className="flex items-stretch h-10 shrink-0 overflow-x-auto
           bg-gray-100 dark:bg-gray-900
-          border-b border-gray-200 dark:border-white/[0.08]"
+          border-b border-gray-200 dark:border-white/8"
         onDragOver={(e) => e.preventDefault()}
         onDrop={() => {
           if (draggedIndex !== null) reorderTabs(draggedIndex, tabs.length - 1);
@@ -161,7 +173,7 @@ export function TabBar() {
             }}
             onClose={(e) => {
               e.stopPropagation();
-              closeTab(tab.id);
+              closeTabWithTitleRefresh(tab.id);
             }}
             onRenameCommit={(title) => renameTab(tab.id, title)}
             onDragStart={() => setDraggedIndex(index)}
@@ -178,10 +190,10 @@ export function TabBar() {
           className="flex items-center justify-center w-9 h-9 shrink-0
             text-gray-400 dark:text-white/30
             hover:text-gray-600 dark:hover:text-white/70
-            hover:bg-gray-200 dark:hover:bg-white/[0.06]
+            hover:bg-gray-200 dark:hover:bg-white/6
             transition-colors duration-150"
         >
-          <PlusIcon />
+          <AddIcon className="w-6 h-6" />
         </button>
 
         <div className="flex-1 h-full" />
@@ -194,7 +206,7 @@ export function TabBar() {
           otherWindows={contextMenu.otherWindows}
           onClose={() => setContextMenu(null)}
           onMoveToWindow={(label) => handleMoveToWindow(label, contextMenu.tabId)}
-          onCloseTab={() => closeTab(contextMenu.tabId)}
+          onCloseTab={() => closeTabWithTitleRefresh(contextMenu.tabId)}
         />
       )}
 
