@@ -11,7 +11,7 @@
 <script>
   // Prevenir flash de contenido sin estilo (FOUC)
   const theme = localStorage.getItem('theme') || 'light';
-  if (theme === 'dark') {
+  if (theme === 'dark' | theme === null) {
     document.documentElement.classList.add('dark');
   } else {
     document.documentElement.classList.remove('dark');

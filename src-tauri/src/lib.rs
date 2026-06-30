@@ -29,6 +29,9 @@ pub fn run() {
             // Gestión de ventanas
             window::open_new_window,
             window::broadcast_event,
+            window::get_window_labels,
+            window::get_all_window_bounds,
+            window::get_cursor_position,
             window::get_home_dir,
             // Detección de agentes
             agents::detect_agents,

@@ -1,10 +1,28 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { AddIcon } from "neogestify-ui-components";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTranslation } from "react-i18next";
 import { useTabsStore } from "../../store/tabs";
 import { TabItem } from "./TabItem";
+import { TabContextMenu } from "./TabContextMenu";
 import { NewTabWizard } from "../wizard/NewTabWizard";
+
+function PlusIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <line x1="6" y1="1" x2="6" y2="11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <line x1="1" y1="6" x2="11" y2="6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+interface ContextMenuState {
+  tabId: string;
+  x: number;
+  y: number;
+  otherWindows: string[];
+}
 
 export function TabBar() {
   const { t } = useTranslation();
@@ -14,6 +32,8 @@ export function TabBar() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
 
   const handleDrop = (toIndex: number) => {
     if (draggedIndex !== null && draggedIndex !== toIndex) {
@@ -23,11 +43,112 @@ export function TabBar() {
     setDragOverIndex(null);
   };
 
+  const handleDragEnd = async (e: React.DragEvent, tabIdx: number) => {
+    const rect = barRef.current?.getBoundingClientRect();
+    const insideBar = rect &&
+      e.clientX >= rect.left && e.clientX <= rect.right &&
+      e.clientY >= rect.top  && e.clientY <= rect.bottom;
+
+    // Soltado dentro del TabBar → reorder (ya manejado por onDrop), nada más
+    if (insideBar) {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    if (draggedIndex === null) { setDraggedIndex(null); setDragOverIndex(null); return; }
+
+    const tab = tabs[tabIdx];
+    if (!tab) { setDraggedIndex(null); setDragOverIndex(null); return; }
+
+    // Coordenadas absolutas del cursor en píxeles físicos (funciona en Wayland)
+    const [physX, physY] = await invoke<[number, number]>("get_cursor_position");
+
+    // TopBar (h-10 = 40px lógicos) + TabBar (h-9 = 36px lógicos) = 76px lógicos → físicos
+    const scale = window.devicePixelRatio ?? 1;
+    const TAB_BAR_PHYSICAL = Math.round(76 * scale);
+
+    // Buscar si el cursor cayó sobre el TabBar de otra ventana
+    const bounds = await invoke<Record<string, [number, number, number, number]>>(
+      "get_all_window_bounds"
+    );
+    const myLabel = getCurrentWindow().label;
+    let mergeTarget: string | null = null;
+
+    for (const [label, [x, y, w]] of Object.entries(bounds)) {
+      if (label === myLabel) continue;
+      if (physX >= x && physX <= x + w && physY >= y && physY <= y + TAB_BAR_PHYSICAL) {
+        mergeTarget = label;
+        break;
+      }
+    }
+
+    if (mergeTarget) {
+      // Merge: enviar tab a la otra ventana vía evento Tauri
+      await invoke("broadcast_event", {
+        event: "cc-receive-tab",
+        payload: JSON.stringify({
+          targetLabel: mergeTarget,
+          cwd: tab.cwd, command: tab.command, agentId: tab.agentId, title: tab.title,
+        }),
+      });
+    } else {
+      // Fuera de cualquier ventana → nueva ventana
+      localStorage.setItem("cc-detach", JSON.stringify({
+        cwd: tab.cwd, command: tab.command, agentId: tab.agentId, title: tab.title,
+      }));
+      await invoke("open_new_window", { label: `cc-window-${Date.now()}` });
+    }
+
+    closeTab(tab.id);
+    if (tabs.length === 1) await getCurrentWindow().close();
+
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleContextMenu = async (e: React.MouseEvent, tabId: string) => {
+    const allLabels = await invoke<string[]>("get_window_labels");
+    const myLabel = getCurrentWindow().label;
+    const others = allLabels.filter((l) => l !== myLabel);
+    setContextMenu({ tabId, x: e.clientX, y: e.clientY, otherWindows: others });
+  };
+
+  const handleMoveToWindow = async (targetLabel: string, tabId: string) => {
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    await invoke("broadcast_event", {
+      event: "cc-receive-tab",
+      payload: JSON.stringify({
+        targetLabel,
+        cwd: tab.cwd,
+        command: tab.command,
+        agentId: tab.agentId,
+        title: tab.title,
+      }),
+    });
+    closeTab(tabId);
+    // Auto-cierre si era la última tab
+    if (tabs.length === 1) {
+      await getCurrentWindow().close();
+    }
+  };
+
   return (
     <>
-      <div className="flex items-stretch h-9 shrink-0 overflow-x-auto
-        bg-gray-100 dark:bg-[#161b22]
-        border-b border-gray-200 dark:border-white/10">
+      <div
+        ref={barRef}
+        className="flex items-stretch h-9 shrink-0 overflow-x-auto
+          bg-gray-100 dark:bg-gray-900
+          border-b border-gray-200 dark:border-white/[0.08]"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={() => {
+          if (draggedIndex !== null) reorderTabs(draggedIndex, tabs.length - 1);
+          setDraggedIndex(null);
+          setDragOverIndex(null);
+        }}
+      >
+
         {tabs.map((tab, index) => (
           <TabItem
             key={tab.id}
@@ -44,8 +165,10 @@ export function TabBar() {
             }}
             onRenameCommit={(title) => renameTab(tab.id, title)}
             onDragStart={() => setDraggedIndex(index)}
-            onDragOver={(e) => { e.preventDefault(); setDragOverIndex(index); }}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverIndex(index); }}
             onDrop={() => handleDrop(index)}
+            onDragEnd={(e) => handleDragEnd(e, index)}
+            onContextMenu={(e) => handleContextMenu(e, tab.id)}
           />
         ))}
 
@@ -53,14 +176,27 @@ export function TabBar() {
           onClick={() => setWizardOpen(true)}
           title={t("tabs.new")}
           className="flex items-center justify-center w-9 h-9 shrink-0
-            text-gray-400 dark:text-white/40
-            hover:text-gray-700 dark:hover:text-white/80
-            hover:bg-gray-200 dark:hover:bg-white/5
-            transition-colors"
+            text-gray-400 dark:text-white/30
+            hover:text-gray-600 dark:hover:text-white/70
+            hover:bg-gray-200 dark:hover:bg-white/[0.06]
+            transition-colors duration-150"
         >
-          <AddIcon />
+          <PlusIcon />
         </button>
+
+        <div className="flex-1 h-full" />
       </div>
+
+      {contextMenu && (
+        <TabContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          otherWindows={contextMenu.otherWindows}
+          onClose={() => setContextMenu(null)}
+          onMoveToWindow={(label) => handleMoveToWindow(label, contextMenu.tabId)}
+          onCloseTab={() => closeTab(contextMenu.tabId)}
+        />
+      )}
 
       <NewTabWizard
         isOpen={wizardOpen}

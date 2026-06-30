@@ -48,7 +48,7 @@ Entregable: app usable para abrir múltiples tabs con distintos agentes en disti
 
 ## FASE 2 — Persistencia y restauración de estado (2 semanas)
 
-Objetivo: que cerrar y abrir la app no pierda nada.
+Objetivo: que cerrar y abrir la app no pierda nada, tambien que cuando se abra una pestaña nueva o se haga mergue de una ventana a otra se abra con el mismo estado con el que se cerró o movió.
 
 - Diseño final del schema SQLite para workspaces, tabs, ventanas (posición, tamaño, monitor)
 - Guardar automáticamente el estado de tabs abiertas por workspace

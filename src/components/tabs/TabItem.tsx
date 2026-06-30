@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-import { CloseIcon } from "neogestify-ui-components";
 import { Tab } from "../../store/tabs";
 
 interface TabItemProps {
@@ -12,12 +11,14 @@ interface TabItemProps {
   onDragStart: () => void;
   onDragOver: (e: React.DragEvent) => void;
   onDrop: () => void;
+  onDragEnd: (e: React.DragEvent) => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }
 
 export function TabItem({
   tab, isActive, isDragOver,
   onActivate, onClose, onRenameCommit,
-  onDragStart, onDragOver, onDrop,
+  onDragStart, onDragOver, onDrop, onDragEnd, onContextMenu,
 }: TabItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(tab.title);
@@ -37,25 +38,42 @@ export function TabItem({
   return (
     <div
       draggable
-      onDragStart={onDragStart}
+      style={{ WebkitUserDrag: "element" } as React.CSSProperties}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", tab.id);
+        onDragStart();
+      }}
       onDragOver={onDragOver}
-      onDrop={onDrop}
+      onDrop={(e) => { e.stopPropagation(); onDrop(); }}
+      onDragEnd={onDragEnd}
       onClick={onActivate}
-      onDoubleClick={(e) => { e.preventDefault(); setEditValue(tab.title); setIsEditing(true); }}
+      onDoubleClick={(e) => {
+        e.preventDefault();
+        setEditValue(tab.title);
+        setIsEditing(true);
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu(e);
+      }}
       className={`
-        group relative flex items-center gap-1.5 h-9 px-3 shrink-0 max-w-44 min-w-20
-        border-r cursor-pointer select-none transition-colors
-        border-gray-200 dark:border-white/10
-        ${isActive
-          ? "bg-white dark:bg-[#0d1117] text-gray-900 dark:text-white"
-          : "bg-gray-100 dark:bg-[#161b22] text-gray-500 dark:text-white/50 hover:text-gray-800 dark:hover:text-white/70"}
+        group relative flex items-center gap-1 h-9 pl-3 pr-1.5 shrink-0
+        max-w-48 min-w-24 border-r cursor-pointer select-none
+        transition-colors duration-150
+        border-gray-200 dark:border-white/8
         ${isDragOver ? "border-l-2 border-l-blue-500" : ""}
+        ${isActive
+          ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+          : "bg-gray-100 dark:bg-gray-800/60 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-800 dark:hover:text-gray-200"}
       `}
     >
+      {/* Indicador activo */}
       {isActive && (
-        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500" />
+        <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500" />
       )}
 
+      {/* Título o input de rename */}
       {isEditing ? (
         <input
           ref={inputRef}
@@ -71,15 +89,31 @@ export function TabItem({
             text-gray-900 dark:text-white"
         />
       ) : (
-        <span className="text-xs truncate flex-1">{tab.title}</span>
+        <span className="text-xs truncate flex-1 min-w-0">{tab.title}</span>
       )}
 
+      {/* Botón cerrar — siempre visible pero sutil, hover lo destaca */}
       <button
-        onClick={onClose}
-        className="shrink-0 opacity-0 group-hover:opacity-40 hover:opacity-80! transition-opacity
-          text-gray-600 dark:text-white"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose(e);
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        title="Cerrar"
+        className="
+          shrink-0 flex items-center justify-center
+          w-4 h-4 rounded
+          text-gray-400 dark:text-gray-600
+          opacity-0 group-hover:opacity-100
+          hover:text-gray-700 dark:hover:text-white
+          hover:bg-gray-200 dark:hover:bg-white/15
+          transition-all duration-100
+        "
       >
-        <CloseIcon />
+        <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+          <line x1="1" y1="1" x2="7" y2="7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          <line x1="7" y1="1" x2="1" y2="7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
       </button>
     </div>
   );

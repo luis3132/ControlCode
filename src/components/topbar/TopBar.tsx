@@ -72,13 +72,13 @@ export function TopBar() {
   return (
     <header
       data-tauri-drag-region
-      className="flex items-center h-11 w-full shrink-0 justify-between
+      className="flex items-center h-11 w-full shrink-0 justify-between pl-2
         bg-white/80 dark:bg-gray-900/80 backdrop-blur-md
         border-b border-gray-200 dark:border-gray-800
         shadow-sm transition-colors duration-300 select-none"
     >
       {/* Logo — sin drag-region para que el click funcione */}
-      <div className="flex items-center ml-2" data-tauri-drag-region="false">
+      <div className="flex items-center" data-tauri-drag-region="false">
         <Button
           variant="link"
           onClick={() => navigate("/")}
