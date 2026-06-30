@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
@@ -11,9 +11,13 @@ import {
   CloudIcon,
   GearIcon,
   SaveIcon,
+  AddIcon,
+  BoxIcon,
 } from "neogestify-ui-components";
 import { useTabsStore } from "../../store/tabs";
+import { useWorkspacesStore } from "../../store/workspaces";
 import { SaveWorkspaceDialog } from "../workspace/SaveWorkspaceDialog";
+import { ResetDefaultDialog } from "../workspace/ResetDefaultDialog";
 import { ExitConfirmDialog } from "../app/ExitConfirmDialog";
 
 const NAV_ITEMS = [
@@ -61,14 +65,62 @@ export function TopBar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const [showSaveWorkspace, setShowSaveWorkspace] = useState(false);
   const [exitWindowCount, setExitWindowCount] = useState<number | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showResetWarning, setShowResetWarning] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const hasTabs = useTabsStore((s) => s.tabs.length > 0);
+  const workspaceId = useTabsStore((s) => s.workspaceId);
+  const resetDefaultWorkspace = useWorkspacesStore((s) => s.resetDefaultWorkspace);
+  const [workspaceName, setWorkspaceName] = useState<string | null>(null);
+
+  // Nombre del workspace de ESTA ventana (reemplaza el "Control Code" estático del logo).
+  useEffect(() => {
+    invoke<{ name: string }>("db_get_workspace", { workspaceId })
+      .then((ws) => setWorkspaceName(ws.name))
+      .catch(() => setWorkspaceName(null));
+  }, [workspaceId]);
 
   const handleCloseClick = async () => {
-    const labels = await invoke<string[]>("get_window_labels").catch(() => []);
-    if (labels.length > 1) {
-      setExitWindowCount(labels.length);
+    // Escalado al workspace de ESTA ventana, no a todas las ventanas de la app — si
+    // hay otro workspace abierto en paralelo (vía "mantener actuales" al cambiar de
+    // workspace), cerrar acá no debe tocarlo.
+    const wsWindows = await invoke<unknown[]>("db_get_workspace_windows", { workspaceId }).catch(() => []);
+    if (wsWindows.length > 1) {
+      setExitWindowCount(wsWindows.length);
     } else {
       getCurrentWindow().close();
+    }
+  };
+
+  // Cierra el menú del logo al clickear afuera.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
+
+  // Hereda el workspace de esta ventana: si ya pertenece a un workspace guardado,
+  // la nueva ventana queda agrupada con ella la próxima vez que se guarde.
+  const handleNewWindow = async () => {
+    setMenuOpen(false);
+    localStorage.setItem("cc-new-window-workspace", workspaceId);
+    await invoke("open_new_window", { label: `cc-window-${Date.now()}` }).catch(console.error);
+  };
+
+  // El bucket "default" nunca se guarda con nombre: "Nuevo workspace" simplemente lo
+  // vacía (cierra sus ventanas, borra lo que tenía) y abre una ventana en blanco ahí.
+  // Si tiene tabs sin guardar, primero se advierte (ResetDefaultDialog); si está vacío,
+  // se resetea directo sin molestar.
+  const handleNewWorkspace = async () => {
+    setMenuOpen(false);
+    const hasContent = await invoke<boolean>("default_workspace_has_content").catch(() => false);
+    if (hasContent) {
+      setShowResetWarning(true);
+    } else {
+      await resetDefaultWorkspace().catch(console.error);
     }
   };
 
@@ -90,24 +142,60 @@ export function TopBar() {
     <>
       <header
         data-tauri-drag-region
-        className="flex items-center h-11 w-full shrink-0 justify-between pl-2
+        className="relative z-20 flex items-center h-11 w-full shrink-0 justify-between pl-2
         bg-white/80 dark:bg-gray-900/80 backdrop-blur-md
         border-b border-gray-200 dark:border-gray-800
         shadow-sm transition-colors duration-300 select-none"
       >
-        {/* Logo — sin drag-region para que el click funcione */}
-        <div className="flex items-center" data-tauri-drag-region="false">
+        {/* Logo — sin drag-region para que el click funcione. Click abre un menú con
+            acciones de ventana/workspace en vez de navegar directo a Home. */}
+        <div className="relative flex items-center" data-tauri-drag-region="false" ref={menuRef}>
           <Button
             variant="link"
-            onClick={() => navigate("/")}
+            onClick={() => setMenuOpen((v) => !v)}
             className="hover:opacity-80 transition-opacity"
           >
             <span className="text-sm font-bold bg-clip-text text-transparent
             bg-linear-to-r from-blue-600 to-violet-600
             dark:from-blue-400 dark:to-violet-400">
-              Control Code
+              {workspaceName ?? "Control Code"}
             </span>
           </Button>
+
+          {menuOpen && (
+            <div className="absolute top-full left-0 mt-1 w-56 py-1 z-[100]
+              rounded-lg border border-gray-200 dark:border-gray-700
+              bg-white dark:bg-gray-800 shadow-lg">
+              <button
+                onClick={() => { setMenuOpen(false); navigate("/"); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left
+                  text-gray-700 dark:text-gray-200
+                  hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+              >
+                <HomeIcon className="w-4 h-4 shrink-0" />
+                {t("topbar.menu.home")}
+              </button>
+              <div className="h-px my-1 bg-gray-200 dark:bg-gray-700" />
+              <button
+                onClick={handleNewWindow}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left
+                  text-gray-700 dark:text-gray-200
+                  hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+              >
+                <AddIcon className="w-4 h-4 shrink-0" />
+                {t("topbar.menu.newWindow")}
+              </button>
+              <button
+                onClick={handleNewWorkspace}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left
+                  text-gray-700 dark:text-gray-200
+                  hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+              >
+                <BoxIcon className="w-4 h-4 shrink-0" />
+                {t("topbar.menu.newWorkspace")}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Nav items */}
@@ -206,11 +294,16 @@ export function TopBar() {
         <SaveWorkspaceDialog onClose={() => setShowSaveWorkspace(false)} />
       )}
 
+      {showResetWarning && (
+        <ResetDefaultDialog onClose={() => setShowResetWarning(false)} />
+      )}
+
       {exitWindowCount !== null && (
         <ExitConfirmDialog
-          windowCount={exitWindowCount}
+          title={t("workspace.closeAll.title")}
+          body={t("workspace.closeAll.body", { count: exitWindowCount })}
           onCancel={() => setExitWindowCount(null)}
-          onCloseAll={() => invoke("confirm_exit_all").catch(console.error)}
+          onCloseAll={() => invoke("close_workspace_windows", { workspaceId }).catch(console.error)}
           onCloseCurrent={() => {
             setExitWindowCount(null);
             getCurrentWindow().close().catch(console.error);

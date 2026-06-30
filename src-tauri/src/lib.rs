@@ -29,6 +29,8 @@ pub fn run() {
             database::db_close_workspace_windows,
             database::db_rename_workspace,
             database::db_delete_workspace,
+            database::db_get_workspace,
+            database::default_workspace_has_content,
             // Persistencia SQLite — ventanas y tabs
             database::db_save_window_state,
             database::db_load_window_state,
@@ -50,6 +52,8 @@ pub fn run() {
             window::get_cursor_position,
             window::get_home_dir,
             window::open_workspace,
+            window::close_workspace_windows,
+            window::reset_default_workspace,
             window::confirm_exit_all,
             // Detección de agentes
             agents::detect_agents,
@@ -67,9 +71,15 @@ pub fn run() {
             _ => {}
         })
         .setup(|app| {
+            // Al arrancar, se restaura SOLO el workspace usado más recientemente (por
+            // `last_active`, que se bumpea en cada autosave de ventana y al abrir un
+            // workspace) — no todas las ventanas de todos los workspaces mezcladas.
+            // Si nunca se creó/abrió un workspace nombrado, ese "más reciente" es
+            // simplemente `default`, así que el comportamiento típico es el mismo.
             let db = app.state::<DbConnection>();
-            let open_windows = database::db_get_open_window_labels(db)?;
-            window::restore_windows(app.handle(), open_windows)?;
+            let active_id = database::db_get_last_active_workspace_id(&db)?;
+            let windows = database::db_get_workspace_windows(active_id, app.state::<DbConnection>())?;
+            window::restore_windows(app.handle(), windows)?;
             Ok(())
         })
         .build(tauri::generate_context!())

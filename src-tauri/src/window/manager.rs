@@ -75,8 +75,67 @@ pub async fn open_workspace(
     }
 
     let db = app.state::<DbConnection>();
-    let rows = database::db_get_workspace_windows(workspace_id, db)?;
+    database::touch_workspace_now(&db, &workspace_id)?;
+    let rows = database::db_get_workspace_windows(workspace_id, app.state::<DbConnection>())?;
     restore_windows(&app, rows)
+}
+
+/// Cierra solo las ventanas (nativas) que pertenecen a `workspace_id` — usado por el
+/// botón de cerrar del TopBar cuando hay más de una ventana en el workspace actual y el
+/// usuario elige "cerrar todo". A diferencia de `confirm_exit_all`, esto NO mata el
+/// proceso ni toca ventanas de otros workspaces que puedan estar abiertas a la vez (ej.
+/// si se abrió otro workspace eligiendo "mantener actuales"). Cada `win.close()` dispara
+/// el `WindowEvent::CloseRequested` normal, que ya persiste `is_open = 0` por su cuenta.
+#[tauri::command]
+pub async fn close_workspace_windows(
+    app: tauri::AppHandle,
+    workspace_id: String,
+) -> Result<(), String> {
+    let rows = database::db_get_workspace_windows(workspace_id, app.state::<DbConnection>())?;
+    for w in &rows {
+        if let Some(win) = app.get_webview_window(&w.label) {
+            let _ = win.close();
+        }
+    }
+    Ok(())
+}
+
+/// "Nuevo workspace" del TopBar: el bucket `default` (oculto, nunca se guarda con
+/// nombre) se vacía por completo — cierra sus ventanas abiertas y borra sus filas
+/// guardadas — y se abre una ventana nueva en blanco en ese mismo `default` recién
+/// reseteado. Si el usuario quiere conservar lo que había, primero debe usar
+/// "Guardar workspace" (que mueve esas ventanas a un workspace con id propio antes
+/// de que esto las descarte).
+#[tauri::command]
+pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String> {
+    let default_id = database::DEFAULT_WORKSPACE_ID;
+
+    let open_rows =
+        database::db_get_workspace_windows(default_id.to_string(), app.state::<DbConnection>())?;
+    for w in &open_rows {
+        if let Some(win) = app.get_webview_window(&w.label) {
+            let _ = win.close();
+        }
+    }
+
+    let db = app.state::<DbConnection>();
+    database::delete_workspace_windows(&db, default_id)?;
+    database::touch_workspace_now(&db, default_id)?;
+
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let label = format!("cc-window-{millis}");
+    tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App("/".into()))
+        .title(&label)
+        .inner_size(900.0, 650.0)
+        .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+        .decorations(false)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 /// Cierra la app entera ignorando el guardián de `ExitRequested` (llamado tras

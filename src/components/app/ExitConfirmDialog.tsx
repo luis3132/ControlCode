@@ -2,19 +2,24 @@ import { useTranslation } from "react-i18next";
 import { Button, Modal } from "neogestify-ui-components";
 
 interface ExitConfirmDialogProps {
-  windowCount: number;
+  title: string;
+  body: string;
   onCloseAll: () => void;
   onCloseCurrent: () => void;
   onCancel: () => void;
 }
 
-/** Diálogo "¿cerrar todo o solo esta ventana?" — puramente presentacional. */
-export function ExitConfirmDialog({ windowCount, onCloseAll, onCloseCurrent, onCancel }: ExitConfirmDialogProps) {
+/**
+ * Diálogo "¿cerrar todo o solo esta ventana?" — puramente presentacional.
+ * `title`/`body` los define quien lo usa: el alcance de "todo" varía según el
+ * disparador (todas las ventanas del workspace actual, o toda la app al salir).
+ */
+export function ExitConfirmDialog({ title, body, onCloseAll, onCloseCurrent, onCancel }: ExitConfirmDialogProps) {
   const { t } = useTranslation();
 
   return (
     <Modal
-      title={t("app.exit.title")}
+      title={title}
       onClose={onCancel}
       size="sm"
       closeOnEsc
@@ -30,7 +35,7 @@ export function ExitConfirmDialog({ windowCount, onCloseAll, onCloseCurrent, onC
       }
     >
       <p className="text-sm text-gray-600 dark:text-gray-300">
-        {t("app.exit.body", { count: windowCount })}
+        {body}
       </p>
     </Modal>
   );

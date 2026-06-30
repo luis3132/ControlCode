@@ -243,24 +243,90 @@ fn row_to_tab(row: &rusqlite::Row) -> rusqlite::Result<TabRow> {
 // Un workspace es una configuración nombrada y persistida de ventanas + sus tabs
 // (no una carpeta raíz). Se crea explícitamente con "Guardar como workspace...".
 
+/// Marca un workspace como usado ahora. Se llama en cada autosave de ventana y al
+/// abrir un workspace explícitamente, para que el arranque de la app sepa cuál fue
+/// el último workspace activo (no necesariamente "default").
+pub fn touch_workspace_now(db: &DbConnection, workspace_id: &str) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE workspaces SET last_active = ?1 WHERE id = ?2",
+        rusqlite::params![now_ts(), workspace_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Id del workspace usado más recientemente (por `last_active`) — el que se restaura
+/// automáticamente al arrancar la app. Siempre devuelve algo: `default` existe siempre.
+pub fn db_get_last_active_workspace_id(db: &DbConnection) -> Result<String, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT id FROM workspaces ORDER BY last_active DESC LIMIT 1",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Si `default` tiene algún tab abierto sin guardar, "Nuevo workspace" (que lo resetea)
+/// debe advertir antes de descartarlo. Cuenta tabs de ventanas `is_open=1` bajo `default`.
+#[tauri::command]
+pub fn default_workspace_has_content(db: tauri::State<DbConnection>) -> Result<bool, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM tabs t JOIN windows w ON w.id = t.window_id
+             WHERE w.workspace_id = ?1 AND w.is_open = 1",
+            [DEFAULT_WORKSPACE_ID],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(count > 0)
+}
+
+#[tauri::command]
+pub fn db_get_workspace(
+    workspace_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Workspace, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT id, name, created_at, last_active FROM workspaces WHERE id = ?1",
+        [&workspace_id],
+        |row| {
+            Ok(Workspace {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                created_at: row.get(2)?,
+                last_active: row.get(3)?,
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<WorkspaceSummary>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
+            // Sin filtro de is_open: esto es "lo guardado", no "lo abierto ahora mismo" —
+            // un workspace cerrado (todas sus ventanas con is_open=0) sigue teniendo sus
+            // tabs/cwd/scrollback persistidos, y debe seguir mostrando esos conteos.
             "SELECT w.id, w.name, w.last_active,
                     COUNT(DISTINCT win.id) AS window_count,
                     COUNT(t.id) AS tab_count
              FROM workspaces w
-             LEFT JOIN windows win ON win.workspace_id = w.id AND win.is_open = 1
+             LEFT JOIN windows win ON win.workspace_id = w.id
              LEFT JOIN tabs t ON t.window_id = win.id
+             WHERE w.id != ?1
              GROUP BY w.id
              ORDER BY w.last_active DESC",
         )
         .map_err(|e| e.to_string())?;
 
     let workspaces = stmt
-        .query_map([], |row| {
+        .query_map([DEFAULT_WORKSPACE_ID], |row| {
             Ok(WorkspaceSummary {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -276,12 +342,26 @@ pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<Workspac
     Ok(workspaces)
 }
 
-/// Crea (o renombra si ya existía con otro nombre) un workspace, y reasigna las
-/// ventanas indicadas (las abiertas actualmente) a ese workspace.
+/// Borra (en cascada, vía FK) todas las ventanas/tabs guardadas de un workspace, sin
+/// tocar el registro del workspace en sí. Usado para "resetear" el bucket `default`:
+/// como nunca se guarda con nombre, "Nuevo workspace" simplemente lo vacía por completo
+/// en vez de crear un id nuevo — si el usuario quiere conservarlo, usa "Guardar workspace".
+pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM windows WHERE workspace_id = ?1", [workspace_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Crea un workspace nuevo con `name`, y le transfiere todas las ventanas abiertas
+/// que comparten el `source_workspace_id` (el workspace actual de la ventana desde la
+/// que se guarda) — no todas las ventanas que estén abiertas en el proceso. Así, una
+/// ventana "scratch" abierta vía "Nuevo workspace" (que vive en el bucket por defecto,
+/// oculto) no se cuela al guardar el workspace con el que sí estás trabajando.
 #[tauri::command]
 pub fn db_save_workspace(
     name: String,
-    window_labels: Vec<String>,
+    source_workspace_id: String,
     db: tauri::State<DbConnection>,
 ) -> Result<Workspace, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
@@ -294,13 +374,11 @@ pub fn db_save_workspace(
     )
     .map_err(|e| e.to_string())?;
 
-    for label in &window_labels {
-        conn.execute(
-            "UPDATE windows SET workspace_id = ?1, last_active = ?2 WHERE label = ?3",
-            rusqlite::params![id, now, label],
-        )
-        .map_err(|e| e.to_string())?;
-    }
+    conn.execute(
+        "UPDATE windows SET workspace_id = ?1, last_active = ?2 WHERE workspace_id = ?3 AND is_open = 1",
+        rusqlite::params![id, now, source_workspace_id],
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(Workspace { id, name, created_at: now, last_active: now })
 }
@@ -420,6 +498,15 @@ pub fn db_save_window_state(
             state.monitor,
             now
         ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // El autosave de una ventana es justamente "uso" de su workspace: bumpear
+    // last_active acá es lo que hace que el arranque siguiente reabra el workspace
+    // correcto en vez de uno desactualizado.
+    conn.execute(
+        "UPDATE workspaces SET last_active = ?1 WHERE id = ?2",
+        rusqlite::params![now, state.workspace_id],
     )
     .map_err(|e| e.to_string())?;
 

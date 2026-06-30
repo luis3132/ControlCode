@@ -45,7 +45,7 @@ function toFrontendTab(row: RestoredTabRow): Tab {
 }
 
 export function AppShell() {
-  const { tabs, setDetectedAgents, addTab, hydrateFromBackend, setHydrated } = useTabsStore();
+  const { tabs, setDetectedAgents, addTab, hydrateFromBackend, setHydrated, setWorkspaceId } = useTabsStore();
   const location = useLocation();
   const navigate = useNavigate();
   const isWorkspace = location.pathname === "/workspace";
@@ -63,6 +63,15 @@ export function AppShell() {
         if (restored && restored.tabs.length > 0) {
           hydrateFromBackend(restored.tabs.map(toFrontendTab), restored.window.workspaceId);
           navigate("/workspace");
+        } else {
+          // Ventana genuinamente nueva (sin estado guardado): si el menú "Nueva
+          // ventana"/"Nuevo workspace" del TopBar dejó un workspaceId destino, adoptarlo
+          // antes de que arranque el autosave (si no, esta ventana quedaría en "default").
+          const handoff = localStorage.getItem("cc-new-window-workspace");
+          if (handoff) {
+            localStorage.removeItem("cc-new-window-workspace");
+            setWorkspaceId(handoff);
+          }
         }
       })
       .catch(console.error)

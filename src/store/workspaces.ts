@@ -14,7 +14,12 @@ interface WorkspacesState {
   workspaces: WorkspaceSummary[];
   loading: boolean;
   loadWorkspaces: () => Promise<void>;
-  /** Guarda la disposición actual de ventanas (la propia + las que se le pasen) bajo un nombre nuevo. */
+  /** Vacía el bucket "default" (cierra sus ventanas y borra lo guardado) y abre una
+   *  ventana nueva en blanco ahí — "Nuevo workspace" del TopBar. Si el usuario quería
+   *  conservar lo anterior debía guardarlo antes con "Guardar workspace". */
+  resetDefaultWorkspace: () => Promise<void>;
+  /** Guarda bajo un nombre nuevo todas las ventanas abiertas que comparten el workspace
+   *  actual de esta ventana (no necesariamente todas las ventanas abiertas en el proceso). */
   saveCurrentAsWorkspace: (name: string) => Promise<string>;
   /** Abre un workspace guardado; si closeCurrent, cierra primero todas las ventanas abiertas. */
   openWorkspace: (id: string, closeCurrent: boolean) => Promise<void>;
@@ -37,11 +42,16 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
     }
   },
 
+  resetDefaultWorkspace: async () => {
+    await invoke("reset_default_workspace");
+    await get().loadWorkspaces();
+  },
+
   saveCurrentAsWorkspace: async (name) => {
-    const labels = await invoke<string[]>("get_window_labels");
+    const sourceWorkspaceId = useTabsStore.getState().workspaceId;
     const ws = await invoke<{ id: string; name: string }>("db_save_workspace", {
       name,
-      windowLabels: labels,
+      sourceWorkspaceId,
     });
     useTabsStore.getState().setWorkspaceId(ws.id);
     await get().loadWorkspaces();

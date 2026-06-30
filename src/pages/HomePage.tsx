@@ -58,7 +58,7 @@ export function HomePage() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center h-full px-8
+    <div className="flex flex-col items-center h-full px-8 py-10 overflow-y-auto
       bg-gray-50 dark:bg-gray-950">
 
       <div className="w-full max-w-md flex flex-col gap-10">

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -15,6 +16,7 @@ import { ExitConfirmDialog } from "./ExitConfirmDialog";
  * salir del proceso completo).
  */
 export function AppExitListener() {
+  const { t } = useTranslation();
   const [windowCount, setWindowCount] = useState<number | null>(null);
 
   useEffect(() => {
@@ -28,7 +30,8 @@ export function AppExitListener() {
 
   return (
     <ExitConfirmDialog
-      windowCount={windowCount}
+      title={t("app.exit.title")}
+      body={t("app.exit.body", { count: windowCount })}
       onCancel={() => setWindowCount(null)}
       onCloseAll={() => invoke("confirm_exit_all").catch(console.error)}
       onCloseCurrent={() => {

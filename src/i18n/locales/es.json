@@ -32,7 +32,17 @@
   "workspace.open.keepCurrent": "Mantener actuales",
   "workspace.open.closeCurrent": "Cerrar actuales",
 
+  "workspace.resetDefault.title": "¿Descartar el workspace actual?",
+  "workspace.resetDefault.body": "Tienes tabs sin guardar en el workspace actual. Crear uno nuevo las va a cerrar y descartar — guárdalo primero si quieres conservarlas.",
+  "workspace.resetDefault.confirm": "Descartar y crear nuevo",
+
+  "workspace.closeAll.title": "¿Cerrar las ventanas de este workspace?",
+  "workspace.closeAll.body": "Este workspace tiene {{count}} ventanas abiertas. ¿Quieres cerrarlas todas, o solo esta?",
+
   "topbar.saveWorkspace": "Guardar workspace",
+  "topbar.menu.home": "Inicio",
+  "topbar.menu.newWindow": "Nueva ventana",
+  "topbar.menu.newWorkspace": "Nuevo workspace",
 
   "workspace.manage.link": "Gestionar",
   "workspace.manage.title": "Gestionar workspaces",

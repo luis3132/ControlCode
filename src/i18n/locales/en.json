@@ -32,7 +32,17 @@
   "workspace.open.keepCurrent": "Keep current open",
   "workspace.open.closeCurrent": "Close current",
 
+  "workspace.resetDefault.title": "Discard current workspace?",
+  "workspace.resetDefault.body": "You have unsaved tabs in the current workspace. Creating a new one will close and discard them — save it first if you want to keep them.",
+  "workspace.resetDefault.confirm": "Discard and create new",
+
+  "workspace.closeAll.title": "Close this workspace's windows?",
+  "workspace.closeAll.body": "This workspace has {{count}} windows open. Do you want to close all of them, or only this one?",
+
   "topbar.saveWorkspace": "Save workspace",
+  "topbar.menu.home": "Home",
+  "topbar.menu.newWindow": "New window",
+  "topbar.menu.newWorkspace": "New workspace",
 
   "workspace.manage.link": "Manage",
   "workspace.manage.title": "Manage workspaces",
