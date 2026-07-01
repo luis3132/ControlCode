@@ -88,7 +88,7 @@ export function TopBar() {
     if (wsWindows.length > 1) {
       setExitWindowCount(wsWindows.length);
     } else {
-      getCurrentWindow().close();
+      invoke("close_and_forget_window", { label: getCurrentWindow().label }).catch(console.error);
     }
   };
 
@@ -315,7 +315,7 @@ export function TopBar() {
           onCloseAll={() => invoke("close_workspace_windows", { workspaceId }).catch(console.error)}
           onCloseCurrent={() => {
             setExitWindowCount(null);
-            getCurrentWindow().close().catch(console.error);
+            invoke("close_and_forget_window", { label: getCurrentWindow().label }).catch(console.error);
           }}
         />
       )}

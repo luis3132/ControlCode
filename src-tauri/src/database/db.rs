@@ -514,6 +514,7 @@ pub fn db_delete_workspace(
 pub fn db_save_window_state(
     state: WindowStatePayload,
     db: tauri::State<DbConnection>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let now = now_ts();
@@ -577,6 +578,11 @@ pub fn db_save_window_state(
         )
         .map_err(|e| e.to_string())?;
     }
+
+    // El conteo de tabs de este workspace pudo haber cambiado (tab agregada/cerrada) —
+    // se notifica a todas las ventanas (ej. el Home de otra ventana) para que refresquen.
+    use tauri::Emitter;
+    let _ = app.emit("cc-workspace-changed", ());
 
     Ok(())
 }
@@ -654,12 +660,85 @@ pub fn db_get_open_window_labels(db: tauri::State<DbConnection>) -> Result<Vec<W
     Ok(windows)
 }
 
+/// Marca una ventana como cerrada (is_open = 0) sin borrar su fila. Es el comportamiento
+/// por defecto de CUALQUIER cierre nativo, incluidos los cierres EN BLOQUE (cerrar todo un
+/// workspace, cambiar de workspace cerrando las anteriores, salida completa de la app) —
+/// en esos casos se quiere preservar todo para la próxima restauración. El cierre de UNA
+/// sola ventana mientras el resto del workspace sigue vivo pasa por
+/// `forget_or_close_single_window` en cambio (ver más abajo), no por acá.
 #[tauri::command]
 pub fn db_mark_window_closed(label: String, db: tauri::State<DbConnection>) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute("UPDATE windows SET is_open = 0 WHERE label = ?1", [&label])
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Se usa cuando el usuario cierra explícitamente UNA sola ventana (no un cierre en
+/// bloque, ver comentario de `db_mark_window_closed`). Si el workspace todavía tiene
+/// otras ventanas vivas, esta fila se borra directamente (igual que pasa al cerrar una
+/// tab) para que el conteo de ventanas y la próxima apertura del workspace reflejen la
+/// baja de inmediato, en vez de resucitarla la próxima vez que se abra ese workspace. Si
+/// era la última ventana viva del workspace, en cambio se preserva (`is_open = 0`) — ese
+/// caso equivale a "cerrar" el workspace entero, que sí debe quedar restaurable.
+///
+/// Devuelve `Some(workspace_id)` cuando esta era la última ventana viva de su workspace
+/// (el caso "preservado") — el llamador usa esto para decidir si hay que abrirle una
+/// ventana en blanco de reemplazo (ver `create_blank_window_row`), y `None` si se borró
+/// (todavía quedan otras ventanas del mismo workspace) o si el label no existía.
+pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<Option<String>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT id, workspace_id FROM windows WHERE label = ?1",
+            [label],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let Some((window_id, workspace_id)) = row else { return Ok(None) };
+
+    let sibling_open_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM windows WHERE workspace_id = ?1 AND is_open = 1 AND id != ?2",
+            rusqlite::params![workspace_id, window_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if sibling_open_count > 0 {
+        conn.execute("DELETE FROM windows WHERE id = ?1", [&window_id])
+            .map_err(|e| e.to_string())?;
+        Ok(None)
+    } else {
+        conn.execute("UPDATE windows SET is_open = 0 WHERE id = ?1", [&window_id])
+            .map_err(|e| e.to_string())?;
+        Ok(Some(workspace_id))
+    }
+}
+
+/// Crea la fila de una ventana en blanco (sin tabs) para un workspace específico y
+/// devuelve el label a usar para la ventana nativa correspondiente. Usado cuando un
+/// workspace se queda en cero ventanas vivas mientras el proceso sigue corriendo (otras
+/// ventanas de otros workspaces siguen abiertas) — así el workspace no desaparece de la
+/// vista silenciosamente, queda con una ventana lista para usar.
+pub fn create_blank_window_row(db: &DbConnection, workspace_id: &str) -> Result<String, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let now = now_ts();
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let label = format!("cc-window-{millis}");
+    conn.execute(
+        "INSERT INTO windows (id, label, workspace_id, pos_x, pos_y, width, height, monitor, is_open, last_active)
+         VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 1, ?4)",
+        rusqlite::params![Uuid::new_v4().to_string(), label, workspace_id, now],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(label)
 }
 
 /// Renombra el label de una ventana ya guardada. Usado al abrir un workspace en caliente

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Button, Input } from "neogestify-ui-components";
 import { FolderIcon, HomeIcon, ArrowRightIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
@@ -16,7 +17,7 @@ export function HomePage() {
   const navigate = useNavigate();
   const { addTab, detectedAgents } = useTabsStore();
   const { customAgents } = useSettingsStore();
-  const { workspaces, loadWorkspaces } = useWorkspacesStore();
+  const { workspaces, loadWorkspaces, focusIfOpen } = useWorkspacesStore();
   const [selectedCwd, setSelectedCwd] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [pathError, setPathError] = useState("");
@@ -24,6 +25,11 @@ export function HomePage() {
 
   useEffect(() => {
     loadWorkspaces();
+    // El número de ventanas/tabs de un workspace puede cambiar desde OTRA ventana
+    // (cerrar una ventana, agregar una tab, etc.) — sin esto, el conteo se quedaba
+    // congelado en lo que había al montar esta página.
+    const unlisten = listen("cc-workspace-changed", () => loadWorkspaces());
+    return () => { unlisten.then((fn) => fn()); };
   }, [loadWorkspaces]);
 
   const allAgents: AgentInfo[] = [
@@ -35,6 +41,13 @@ export function HomePage() {
   ].filter((a) => a.available);
 
   const canOpen = selectedCwd.trim() !== "" && selectedAgent !== null;
+
+  // Si el workspace elegido ya tiene ventanas vivas, se enfocan en vez de abrir otro
+  // juego duplicado de ventanas para el mismo workspace.
+  const handleSelectWorkspace = async (ws: WorkspaceSummary) => {
+    const focused = await focusIfOpen(ws.id);
+    if (!focused) setOpenTarget(ws);
+  };
 
   const handleHome = async () => {
     const home = await invoke<string>("get_home_dir");
@@ -170,7 +183,7 @@ export function HomePage() {
 
         {workspaces.length > 0 && (
           <div className="pt-6 mt-2 border-t border-gray-200 dark:border-gray-800">
-            <WorkspaceList workspaces={workspaces} onSelect={setOpenTarget} />
+            <WorkspaceList workspaces={workspaces} onSelect={handleSelectWorkspace} />
           </div>
         )}
 

@@ -36,7 +36,7 @@ export function AppExitListener() {
       onCloseAll={() => invoke("confirm_exit_all").catch(console.error)}
       onCloseCurrent={() => {
         setWindowCount(null);
-        getCurrentWindow().close().catch(console.error);
+        invoke("close_and_forget_window", { label: getCurrentWindow().label }).catch(console.error);
       }}
     />
   );

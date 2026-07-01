@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -49,9 +49,25 @@ export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const isWorkspace = location.pathname === "/workspace";
+  const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
     invoke<AgentInfo[]>("detect_agents").then(setDetectedAgents);
+  }, []);
+
+  // Maximizada, la ventana ocupa el área de trabajo del monitor borde a borde — con la
+  // ventana transparent:true, esquinas redondeadas ahí se verían como triángulos
+  // recortados (sin nada detrás), así que se quitan mientras esté maximizada.
+  useEffect(() => {
+    const win = getCurrentWindow();
+    win.isMaximized().then(setIsMaximized);
+
+    let unlisten: (() => void) | undefined;
+    win.onResized(async () => {
+      setIsMaximized(await win.isMaximized());
+    }).then((fn) => { unlisten = fn; });
+
+    return () => { unlisten?.(); };
   }, []);
 
   // Restaura el estado de tabs de esta ventana (mismas tabs/cwd/agente/orden con que se cerró).
@@ -60,11 +76,18 @@ export function AppShell() {
     const myLabel = getCurrentWindow().label;
     invoke<RestoredWindowState | null>("db_load_window_state", { label: myLabel })
       .then((restored) => {
-        if (restored && restored.tabs.length > 0) {
-          hydrateFromBackend(restored.tabs.map(toFrontendTab), restored.window.workspaceId);
-          navigate("/workspace");
+        if (restored) {
+          // Ya existe una fila para esta ventana en la DB (con o sin tabs — ej. la
+          // ventana en blanco que el backend crea cuando un workspace se queda sin
+          // ninguna ventana viva) — su workspace_id es la fuente de verdad, se adopta
+          // siempre, no solo cuando trae tabs.
+          setWorkspaceId(restored.window.workspaceId);
+          if (restored.tabs.length > 0) {
+            hydrateFromBackend(restored.tabs.map(toFrontendTab));
+            navigate("/workspace");
+          }
         } else {
-          // Ventana genuinamente nueva (sin estado guardado): si el menú "Nueva
+          // Ventana genuinamente nueva (sin fila en la DB todavía): si el menú "Nueva
           // ventana"/"Nuevo workspace" del TopBar dejó un workspaceId destino, adoptarlo
           // antes de que arranque el autosave (si no, esta ventana quedaría en "default").
           const handoff = localStorage.getItem("cc-new-window-workspace");
@@ -124,9 +147,10 @@ export function AppShell() {
   }, [tabs.length, isWorkspace, navigate]);
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden rounded-xl
+    <div className={`flex flex-col h-screen overflow-hidden
       bg-gray-50 dark:bg-[#0d1117]
-      text-gray-900 dark:text-white">
+      text-gray-900 dark:text-white
+      ${isMaximized ? "" : "rounded-xl"}`}>
 
       <ResizeHandles />
       <AppExitListener />

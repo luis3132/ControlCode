@@ -23,6 +23,11 @@ interface WorkspacesState {
   saveCurrentAsWorkspace: (name: string) => Promise<string>;
   /** Abre un workspace guardado; si closeCurrent, cierra primero todas las ventanas abiertas. */
   openWorkspace: (id: string, closeCurrent: boolean) => Promise<void>;
+  /** Si el workspace ya tiene ventanas nativas vivas, las enfoca (en vez de abrir otro
+   *  juego de ventanas duplicado) y devuelve `true` — el llamador no debe mostrar el
+   *  diálogo de "cerrar actuales/mantener". Si devuelve `false`, el workspace no está
+   *  abierto en ningún lado y el flujo normal (mostrar el diálogo) debe seguir. */
+  focusIfOpen: (id: string) => Promise<boolean>;
   renameWorkspace: (id: string, name: string) => Promise<void>;
   /** Falla (con mensaje legible) si el workspace tiene ventanas abiertas o es el de por defecto. */
   deleteWorkspace: (id: string) => Promise<void>;
@@ -61,6 +66,15 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
   openWorkspace: async (id, closeCurrent) => {
     await invoke("open_workspace", { workspaceId: id, closeCurrent });
     await get().loadWorkspaces();
+  },
+
+  focusIfOpen: async (id) => {
+    const liveWindows = await invoke<{ label: string }[]>("db_get_workspace_windows", {
+      workspaceId: id,
+    }).catch(() => []);
+    if (liveWindows.length === 0) return false;
+    await invoke("focus_window", { label: liveWindows[0].label }).catch(console.error);
+    return true;
   },
 
   renameWorkspace: async (id, name) => {

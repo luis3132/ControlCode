@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { listen } from "@tauri-apps/api/event";
 import { Button, Input } from "neogestify-ui-components";
 import { EditIcon, TrashIcon, CheckIcon, CancelIcon, BackIcon } from "neogestify-ui-components";
 import { useWorkspacesStore, WorkspaceSummary } from "../store/workspaces";
@@ -24,7 +25,7 @@ function formatRelative(unixSeconds: number, t: (key: string, opts?: Record<stri
 export function WorkspacesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { workspaces, loadWorkspaces, renameWorkspace, deleteWorkspace } = useWorkspacesStore();
+  const { workspaces, loadWorkspaces, renameWorkspace, deleteWorkspace, focusIfOpen } = useWorkspacesStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +33,8 @@ export function WorkspacesPage() {
 
   useEffect(() => {
     loadWorkspaces();
+    const unlisten = listen("cc-workspace-changed", () => loadWorkspaces());
+    return () => { unlisten.then((fn) => fn()); };
   }, [loadWorkspaces]);
 
   const startEdit = (ws: WorkspaceSummary) => {
@@ -54,6 +57,13 @@ export function WorkspacesPage() {
     } catch (e) {
       setError(String(e));
     }
+  };
+
+  // Si el workspace elegido ya tiene ventanas vivas, se enfocan en vez de abrir otro
+  // juego duplicado de ventanas para el mismo workspace.
+  const handleSelectWorkspace = async (ws: WorkspaceSummary) => {
+    const focused = await focusIfOpen(ws.id);
+    if (!focused) setOpenTarget(ws);
   };
 
   const handleDelete = async (ws: WorkspaceSummary) => {
@@ -125,7 +135,7 @@ export function WorkspacesPage() {
                 ) : (
                   <>
                     <button
-                      onClick={() => setOpenTarget(ws)}
+                      onClick={() => handleSelectWorkspace(ws)}
                       className="flex flex-col min-w-0 text-left flex-1"
                     >
                       <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">

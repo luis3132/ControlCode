@@ -85,6 +85,25 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
     Ok(())
 }
 
+/// Crea una ventana nativa en blanco (sin tabs) para un workspace específico. Usado
+/// cuando un workspace se queda sin ninguna ventana viva que mostrar: al cerrar la única
+/// ventana que le quedaba (ver `close_and_forget_window`), o al intentar "abrir" un
+/// workspace guardado cuyas filas están todas vacías o inexistentes (`restore_windows`
+/// se salta a propósito las filas sin tabs, para no resucitar tear-offs vacíos — así que
+/// si eso deja al workspace sin ninguna ventana recreada, hay que abrirle una en blanco).
+fn spawn_blank_window(app: &AppHandle, db: &DbConnection, workspace_id: &str) -> Result<(), String> {
+    let label = database::create_blank_window_row(db, workspace_id)?;
+    tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App("/".into()))
+        .title(&label)
+        .inner_size(900.0, 650.0)
+        .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+        .decorations(false)
+        .transparent(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Abre un workspace guardado. Si `close_current` es true, las ventanas que había
 /// abiertas antes de esta llamada se cierran DESPUÉS de abrir las del workspace elegido
 /// (no antes) — así la app nunca queda momentáneamente sin ninguna ventana viva, lo que
@@ -119,6 +138,16 @@ pub async fn open_workspace(
         }
     }
 
+    // Si el workspace no tenía filas (0 ventanas guardadas) o todas sus filas eran
+    // tear-offs vacíos que `restore_windows` se saltó, no quedó ninguna ventana viva
+    // para este workspace pese a haberlo "abierto" — se le abre una en blanco en vez de
+    // dejar al usuario sin nada visible.
+    let live_now = database::db_get_workspace_windows(workspace_id.clone(), app.state::<DbConnection>())?;
+    if live_now.is_empty() {
+        spawn_blank_window(&app, &db, &workspace_id)?;
+    }
+
+    let _ = app.emit("cc-workspace-changed", ());
     Ok(())
 }
 
@@ -139,6 +168,7 @@ pub async fn close_workspace_windows(
             let _ = win.close();
         }
     }
+    let _ = app.emit("cc-workspace-changed", ());
     Ok(())
 }
 
@@ -178,6 +208,7 @@ pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String
         .build()
         .map_err(|e| e.to_string())?;
 
+    let _ = app.emit("cc-workspace-changed", ());
     Ok(())
 }
 
@@ -193,6 +224,50 @@ pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String
 pub fn confirm_exit_all(app: tauri::AppHandle) {
     app.cleanup_before_exit();
     std::process::exit(0);
+}
+
+/// Cierra una única ventana que el usuario eligió cerrar explícitamente, dejando el resto
+/// corriendo (botón de cerrar del TopBar, o "cerrar solo esta ventana" en cualquiera de
+/// los diálogos de confirmación) — a diferencia de un cierre en bloque (todo un workspace,
+/// cambiar de workspace, salir de la app entera), acá si el workspace todavía tiene otras
+/// ventanas vivas la fila se borra de inmediato en vez de solo marcarse `is_open = 0`. Ver
+/// `forget_or_close_single_window` para el detalle de esa decisión.
+///
+/// Si esta resulta ser la última ventana viva del workspace Y el proceso sigue corriendo
+/// gracias a ventanas de OTROS workspaces, se le abre una ventana en blanco de reemplazo —
+/// si no, el workspace desaparecería silenciosamente de la vista mientras la app sigue
+/// viva. Si en cambio esta era literalmente la última ventana de toda la app, no se crea
+/// nada: cerrarla debe seguir pudiendo salir de la app con normalidad.
+#[tauri::command]
+pub async fn close_and_forget_window(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    let db = app.state::<DbConnection>();
+    let other_windows_remain = app.webview_windows().len() > 1;
+    let preserved_workspace_id = database::forget_or_close_single_window(&db, &label)?;
+
+    if let Some(win) = app.get_webview_window(&label) {
+        win.close().map_err(|e| e.to_string())?;
+    }
+
+    if let (Some(workspace_id), true) = (preserved_workspace_id, other_windows_remain) {
+        spawn_blank_window(&app, &db, &workspace_id)?;
+    }
+
+    let _ = app.emit("cc-workspace-changed", ());
+    Ok(())
+}
+
+/// Trae al frente una ventana nativa ya abierta (des-minimiza + foco). Usado cuando el
+/// usuario intenta "abrir" un workspace que ya tiene ventanas vivas — en vez de crear
+/// ventanas duplicadas para el mismo workspace (el caos que reportó el usuario: dos
+/// juegos de ventanas para el mismo layout guardado), simplemente se enfoca la que ya
+/// existe.
+#[tauri::command]
+pub fn focus_window(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window(&label) {
+        let _ = win.unminimize();
+        win.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Abre una nueva ventana nativa de Tauri.

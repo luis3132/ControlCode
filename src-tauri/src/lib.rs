@@ -54,6 +54,8 @@ pub fn run() {
             window::get_home_dir,
             window::open_workspace,
             window::close_workspace_windows,
+            window::focus_window,
+            window::close_and_forget_window,
             window::reset_default_workspace,
             window::confirm_exit_all,
             // Detección de agentes
@@ -65,6 +67,10 @@ pub fn run() {
                 if let Some(db) = window.app_handle().try_state::<DbConnection>() {
                     let _ = database::db_mark_window_closed(label, db);
                 }
+                // Cualquier cierre de ventana cambia el conteo de ventanas/tabs de algún
+                // workspace — se notifica a TODAS las ventanas (ej. el Home de otra
+                // ventana) para que refresquen la lista en vez de quedar con datos viejos.
+                let _ = window.app_handle().emit("cc-workspace-changed", ());
             }
             tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
                 let _ = window.emit("cc-window-bounds-changed", ());
