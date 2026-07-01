@@ -29,6 +29,21 @@ fn needs_schema_v3(conn: &Connection) -> bool {
         || conn.prepare("SELECT workspace_id FROM tabs LIMIT 1").is_ok()
 }
 
+/// Detecta el scaffolding viejo (sin usar) de `skills`/`project_skills`, previo a la
+/// Fase 5: `skills.file_path` en vez de `source_path`, o `project_skills` sin `id`
+/// sintético. Ninguna de las dos tablas tuvo datos reales en producción todavía.
+fn needs_schema_v4(conn: &Connection) -> bool {
+    conn.prepare("SELECT source_path FROM skills LIMIT 1").is_err()
+        || conn.prepare("SELECT id FROM project_skills LIMIT 1").is_err()
+}
+
+/// Detecta si a `tabs` le falta `opened_at` (fecha/hora en que el usuario abrió la tab
+/// por primera vez — distinto de `created_at`, que se re-estampa en cada autosave porque
+/// la fila se borra y reinserta completa).
+fn needs_schema_v6(conn: &Connection) -> bool {
+    conn.prepare("SELECT opened_at FROM tabs LIMIT 1").is_err()
+}
+
 pub fn init_db() -> SqlResult<DbConnection> {
     let conn = Connection::open(db_path())?;
 
@@ -37,6 +52,16 @@ pub fn init_db() -> SqlResult<DbConnection> {
     if needs_schema_v3(&conn) {
         conn.execute_batch(
             "DROP TABLE IF EXISTS tabs; DROP TABLE IF EXISTS windows; DROP TABLE IF EXISTS workspaces;",
+        )?;
+    }
+    if needs_schema_v4(&conn) {
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS project_skills; DROP TABLE IF EXISTS skills;",
+        )?;
+    }
+    if needs_schema_v6(&conn) {
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS project_skills; DROP TABLE IF EXISTS tabs;",
         )?;
     }
 
@@ -73,28 +98,80 @@ pub fn init_db() -> SqlResult<DbConnection> {
              tab_order       INTEGER NOT NULL DEFAULT 0,
              session_id      TEXT,
              scrollback      TEXT,
+             opened_at       INTEGER NOT NULL,
              created_at      INTEGER NOT NULL,
              last_active     INTEGER NOT NULL
          );
 
+         -- Copia global: una fila por skill instalada bajo el directorio configurado.
+         -- `source_path` es la carpeta canónica que contiene SKILL.md; los proyectos
+         -- nunca reciben una copia propia de los archivos, solo un symlink a este path.
+         -- `categories`/`compatible_agents`/`compatible_versions` van como JSON (TEXT):
+         -- son metadata de solo-lectura derivada del frontmatter, la DB es cache.
          CREATE TABLE IF NOT EXISTS skills (
-             id           TEXT PRIMARY KEY,
-             name         TEXT NOT NULL,
-             description  TEXT,
-             file_path    TEXT NOT NULL,
-             installed_at INTEGER NOT NULL
+             id                  TEXT PRIMARY KEY,
+             name                TEXT NOT NULL,
+             description         TEXT,
+             version             TEXT NOT NULL DEFAULT '0.1.0',
+             categories          TEXT NOT NULL DEFAULT '[]',
+             compatible_agents   TEXT NOT NULL DEFAULT '[]',
+             compatible_versions TEXT NOT NULL DEFAULT '{}',
+             author              TEXT,
+             license             TEXT,
+             homepage            TEXT,
+             source_path         TEXT NOT NULL UNIQUE,
+             installed_at        INTEGER NOT NULL,
+             updated_at          INTEGER NOT NULL
          );
 
+         -- Intención de attach: \"esta skill debe estar activa en este workspace (todas
+         -- sus tabs) o en esta tab puntual\". El symlink físico se deriva de esta fila
+         -- en attach/detach y se re-verifica en el health check; no se persiste un
+         -- link_path por-tab porque scope='workspace' puede implicar N tabs a la vez.
          CREATE TABLE IF NOT EXISTS project_skills (
-             skill_id     TEXT NOT NULL REFERENCES skills(id),
-             workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+             id           TEXT PRIMARY KEY,
+             skill_id     TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+             workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
              scope        TEXT NOT NULL DEFAULT 'workspace',
-             tab_id       TEXT REFERENCES tabs(id),
-             PRIMARY KEY (skill_id, workspace_id, scope, tab_id)
-         );",
+             tab_id       TEXT REFERENCES tabs(id) ON DELETE CASCADE,
+             enabled      INTEGER NOT NULL DEFAULT 1,
+             created_at   INTEGER NOT NULL,
+             UNIQUE (skill_id, workspace_id, scope, tab_id)
+         );
+         CREATE INDEX IF NOT EXISTS idx_project_skills_workspace ON project_skills(workspace_id);
+         CREATE INDEX IF NOT EXISTS idx_project_skills_skill ON project_skills(skill_id);
+
+         CREATE TABLE IF NOT EXISTS settings (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         );
+
+         -- Historial de tabs cerradas ('Sesiones'). A propósito NO tiene FK hacia
+         -- `windows`/`tabs` (esas se borran y reescriben constantemente, ver
+         -- db_save_window_state) — solo hacia `workspaces(id) ON DELETE CASCADE`, que
+         -- únicamente se borra si el workspace entero se elimina. Así sobrevive al reset
+         -- del bucket `default` (que borra sus `windows`/`tabs` pero nunca la fila de
+         -- `workspaces` en sí). `skills` se denormaliza como JSON (mismo patrón que
+         -- `skills.categories`) porque `project_skills.tab_id` sí cascadea con `tabs` y
+         -- se perdería en el mismo borrado que dispara este archivo.
+         CREATE TABLE IF NOT EXISTS session_history (
+             id           TEXT PRIMARY KEY,
+             workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+             agent_id     TEXT NOT NULL,
+             agent_label  TEXT NOT NULL,
+             command      TEXT NOT NULL,
+             cwd          TEXT NOT NULL,
+             title        TEXT,
+             session_id   TEXT,
+             skills       TEXT NOT NULL DEFAULT '[]',
+             opened_at    INTEGER NOT NULL,
+             closed_at    INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_session_history_workspace ON session_history(workspace_id);",
     )?;
 
     ensure_default_workspace(&conn)?;
+    ensure_default_settings(&conn)?;
 
     Ok(Arc::new(Mutex::new(conn)))
 }
@@ -112,6 +189,58 @@ fn ensure_default_workspace(conn: &Connection) -> SqlResult<()> {
         )?;
     }
     Ok(())
+}
+
+/// Siembra los valores por defecto de `settings` que el backend necesita leer de forma
+/// autónoma (sin que el frontend se los pase en cada llamada), como el directorio global
+/// de skills. Solo inserta si la key todavía no existe — no pisa un valor ya elegido.
+fn ensure_default_settings(conn: &Connection) -> SqlResult<()> {
+    let has_skills_dir: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM settings WHERE key = 'skills_dir'",
+        [],
+        |r| r.get(0),
+    )?;
+    if has_skills_dir == 0 {
+        let home = dirs::home_dir().expect("Cannot determine home directory");
+        let default_dir = home.join(".controlcode").join("skills");
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('skills_dir', ?1)",
+            [default_dir.to_string_lossy().to_string()],
+        )?;
+    }
+    Ok(())
+}
+
+/// Lee una key de `settings`. No es un comando Tauri para poder llamarse desde otros
+/// módulos backend (ej. `skills::resolve_skills_dir`) sin pasar por la capa de invoke.
+pub fn get_setting(db: &DbConnection, key: &str) -> Result<Option<String>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0))
+        .optional()
+        .map_err(|e| e.to_string())
+}
+
+/// Escribe/actualiza una key de `settings`. Ver `get_setting` sobre por qué no es
+/// directamente un `#[tauri::command]`.
+pub fn set_setting(db: &DbConnection, key: &str, value: &str) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![key, value],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn db_get_setting(key: String, db: tauri::State<DbConnection>) -> Result<Option<String>, String> {
+    get_setting(&db, &key)
+}
+
+#[tauri::command]
+pub fn db_set_setting(key: String, value: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+    set_setting(&db, &key, &value)
 }
 
 pub const DEFAULT_WORKSPACE_ID: &str = "default";
@@ -168,6 +297,7 @@ pub struct TabRow {
     pub tab_order: i32,
     pub session_id: Option<String>,
     pub scrollback: Option<String>,
+    pub opened_at: i64,
     pub created_at: i64,
     pub last_active: i64,
 }
@@ -185,6 +315,7 @@ pub struct TabStatePayload {
     pub tab_order: i32,
     pub session_id: Option<String>,
     pub scrollback: Option<String>,
+    pub opened_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -234,8 +365,9 @@ fn row_to_tab(row: &rusqlite::Row) -> rusqlite::Result<TabRow> {
         tab_order: row.get(8)?,
         session_id: row.get(9)?,
         scrollback: row.get(10)?,
-        created_at: row.get(11)?,
-        last_active: row.get(12)?,
+        opened_at: row.get(11)?,
+        created_at: row.get(12)?,
+        last_active: row.get(13)?,
     })
 }
 
@@ -348,6 +480,25 @@ pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<Workspac
 /// en vez de crear un id nuevo — si el usuario quiere conservarlo, usa "Guardar workspace".
 pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
+
+    // Antes de perder todo (cascada windows→tabs→project_skills.tab_id), archivar cada
+    // tab en `session_history` — este es justamente el caso que le importa al usuario:
+    // "Nuevo workspace" resetea `default` por completo, pero su historial de sesiones no.
+    let mut tab_ids_stmt = conn
+        .prepare(
+            "SELECT t.id FROM tabs t JOIN windows w ON w.id = t.window_id WHERE w.workspace_id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let tab_ids: Vec<String> = tab_ids_stmt
+        .query_map([workspace_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(tab_ids_stmt);
+    for tab_id in &tab_ids {
+        archive_tab_row(&conn, tab_id, workspace_id)?;
+    }
+
     conn.execute("DELETE FROM windows WHERE workspace_id = ?1", [workspace_id])
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -508,6 +659,170 @@ pub fn db_delete_workspace(
     Ok(())
 }
 
+// ── Sesiones (historial de tabs cerradas) ─────────────────────────
+
+/// Archiva el estado actual de una tab en `session_history` justo ANTES de que su fila
+/// desaparezca de `tabs` (autosave que ya no la incluye, o borrado de su ventana). Si
+/// `session_id` no es nulo y ya existe una entrada con ese mismo id (la misma
+/// conversación real del agente, cerrada/reabierta varias veces), actualiza esa fila en
+/// vez de duplicarla — el historial muestra "sesiones", no un log de cada cierre.
+fn archive_tab_row(conn: &Connection, tab_id: &str, workspace_id: &str) -> Result<(), String> {
+    let row: Option<(String, String, String, String, Option<String>, Option<String>, i64)> = conn
+        .query_row(
+            "SELECT agent_id, agent_label, command, cwd, title, session_id, opened_at FROM tabs WHERE id = ?1",
+            [tab_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let Some((agent_id, agent_label, command, cwd, title, session_id, opened_at)) = row else { return Ok(()) };
+
+    // Skills activas para esta tab al momento de archivar: por-tab (scope='tab') o
+    // por-workspace (scope='workspace'). Se "congelan" acá porque `project_skills.tab_id`
+    // cascadea con `tabs` y desaparecería en el mismo borrado que dispara este archivo.
+    let mut stmt = conn
+        .prepare(
+            "SELECT s.name FROM project_skills ps JOIN skills s ON s.id = ps.skill_id
+             WHERE ps.enabled = 1 AND (
+               (ps.scope = 'tab' AND ps.tab_id = ?1) OR
+               (ps.scope = 'workspace' AND ps.workspace_id = ?2)
+             )",
+        )
+        .map_err(|e| e.to_string())?;
+    let skill_names: Vec<String> = stmt
+        .query_map(rusqlite::params![tab_id, workspace_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    let skills_json = serde_json::to_string(&skill_names).unwrap_or_else(|_| "[]".to_string());
+    let now = now_ts();
+
+    if let Some(sid) = &session_id {
+        let existing_id: Option<String> = conn
+            .query_row("SELECT id FROM session_history WHERE session_id = ?1", [sid], |r| r.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?;
+
+        if let Some(hid) = existing_id {
+            // opened_at NO se toca: representa cuándo se abrió esa conversación por
+            // primera vez, no la última vez que se retomó/cerró.
+            conn.execute(
+                "UPDATE session_history SET agent_id=?1, agent_label=?2, command=?3, cwd=?4, title=?5, skills=?6, closed_at=?7 WHERE id=?8",
+                rusqlite::params![agent_id, agent_label, command, cwd, title, skills_json, now, hid],
+            )
+            .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+    }
+
+    conn.execute(
+        "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, opened_at, closed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        rusqlite::params![
+            Uuid::new_v4().to_string(),
+            workspace_id,
+            agent_id,
+            agent_label,
+            command,
+            cwd,
+            title,
+            session_id,
+            skills_json,
+            opened_at,
+            now
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionHistoryEntry {
+    pub id: String,
+    pub workspace_id: String,
+    pub agent_id: String,
+    pub agent_label: String,
+    pub command: String,
+    pub cwd: String,
+    pub title: Option<String>,
+    pub session_id: Option<String>,
+    pub skills: Vec<String>,
+    pub opened_at: i64,
+    pub closed_at: i64,
+}
+
+/// Historial de tabs cerradas de un workspace, más reciente primero. Filtrado
+/// estrictamente por `workspace_id` — dos workspaces nunca comparten entradas.
+#[tauri::command]
+pub fn db_list_session_history(
+    workspace_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Vec<SessionHistoryEntry>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, opened_at, closed_at
+             FROM session_history WHERE workspace_id = ?1 ORDER BY closed_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let entries = stmt
+        .query_map([&workspace_id], |row| {
+            let skills_json: String = row.get(8)?;
+            let skills: Vec<String> = serde_json::from_str(&skills_json).unwrap_or_default();
+            Ok(SessionHistoryEntry {
+                id: row.get(0)?,
+                workspace_id: row.get(1)?,
+                agent_id: row.get(2)?,
+                agent_label: row.get(3)?,
+                command: row.get(4)?,
+                cwd: row.get(5)?,
+                title: row.get(6)?,
+                session_id: row.get(7)?,
+                skills,
+                opened_at: row.get(9)?,
+                closed_at: row.get(10)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(entries)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenTabLocation {
+    pub window_label: String,
+    pub tab_id: String,
+}
+
+/// Busca si `session_id` ya está abierto en alguna tab viva (ventana `is_open = 1`) de
+/// ESE workspace — usado por "Reabrir" en Sesiones: si la conversación ya está abierta en
+/// algún lado, hay que enfocar esa tab en vez de abrir un duplicado.
+#[tauri::command]
+pub fn find_open_tab_for_session(
+    session_id: String,
+    workspace_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Option<OpenTabLocation>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT w.label, t.id FROM tabs t
+         JOIN windows w ON w.id = t.window_id
+         WHERE t.session_id = ?1 AND w.workspace_id = ?2 AND w.is_open = 1
+         LIMIT 1",
+        rusqlite::params![session_id, workspace_id],
+        |row| Ok(OpenTabLocation { window_label: row.get(0)?, tab_id: row.get(1)? }),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 // ── Commands: windows + tabs (estado de sesión) ──────────────────
 
 #[tauri::command]
@@ -554,13 +869,31 @@ pub fn db_save_window_state(
         .query_row("SELECT id FROM windows WHERE label = ?1", [&state.label], |r| r.get(0))
         .map_err(|e| e.to_string())?;
 
+    // Tabs que estaban guardadas en esta ventana y ya no vienen en el payload nuevo =
+    // tabs que el usuario cerró — se archivan en `session_history` antes de perderlas
+    // (ver comentario de `archive_tab_row`).
+    let mut existing_ids_stmt = conn
+        .prepare("SELECT id FROM tabs WHERE window_id = ?1")
+        .map_err(|e| e.to_string())?;
+    let existing_ids: Vec<String> = existing_ids_stmt
+        .query_map([&window_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(existing_ids_stmt);
+    let incoming_ids: std::collections::HashSet<&str> =
+        state.tabs.iter().map(|t| t.id.as_str()).collect();
+    for closed_id in existing_ids.iter().filter(|id| !incoming_ids.contains(id.as_str())) {
+        archive_tab_row(&conn, closed_id, &state.workspace_id)?;
+    }
+
     conn.execute("DELETE FROM tabs WHERE window_id = ?1", [&window_id])
         .map_err(|e| e.to_string())?;
 
     for t in &state.tabs {
         conn.execute(
-            "INSERT INTO tabs (id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, created_at, last_active)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+            "INSERT INTO tabs (id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, opened_at, created_at, last_active)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)",
             rusqlite::params![
                 t.id,
                 window_id,
@@ -573,6 +906,7 @@ pub fn db_save_window_state(
                 t.tab_order,
                 t.session_id,
                 t.scrollback,
+                t.opened_at,
                 now
             ],
         )
@@ -608,7 +942,7 @@ pub fn db_load_window_state(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, created_at, last_active
+            "SELECT id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, opened_at, created_at, last_active
              FROM tabs WHERE window_id = ?1 ORDER BY tab_order ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -709,6 +1043,21 @@ pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<O
         .map_err(|e| e.to_string())?;
 
     if sibling_open_count > 0 {
+        // Se archivan sus tabs antes de borrar la ventana (cascada windows→tabs) — mismo
+        // motivo que en `delete_workspace_windows`.
+        let mut tab_ids_stmt = conn
+            .prepare("SELECT id FROM tabs WHERE window_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let tab_ids: Vec<String> = tab_ids_stmt
+            .query_map([&window_id], |r| r.get(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(tab_ids_stmt);
+        for tab_id in &tab_ids {
+            archive_tab_row(&conn, tab_id, &workspace_id)?;
+        }
+
         conn.execute("DELETE FROM windows WHERE id = ?1", [&window_id])
             .map_err(|e| e.to_string())?;
         Ok(None)

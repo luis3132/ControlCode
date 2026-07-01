@@ -1,6 +1,7 @@
 mod agents;
 mod database;
 mod session;
+mod skills;
 mod terminal;
 mod window;
 
@@ -32,6 +33,8 @@ pub fn run() {
             database::db_get_workspace,
             database::default_workspace_has_content,
             database::db_get_window_workspace,
+            database::db_list_session_history,
+            database::find_open_tab_for_session,
             // Persistencia SQLite — ventanas y tabs
             database::db_save_window_state,
             database::db_load_window_state,
@@ -60,6 +63,23 @@ pub fn run() {
             window::confirm_exit_all,
             // Detección de agentes
             agents::detect_agents,
+            // Settings genéricos (key-value)
+            database::db_get_setting,
+            database::db_set_setting,
+            // Gestión de skills (symlinks globales)
+            skills::get_skills_dir,
+            skills::set_skills_dir,
+            skills::preview_skill_metadata,
+            skills::install_skill,
+            skills::list_skills,
+            skills::list_skill_usage,
+            skills::get_skill_detail,
+            skills::update_skill_content,
+            skills::delete_skill,
+            skills::attach_skill,
+            skills::detach_skill,
+            skills::check_symlinks_health,
+            skills::sync_workspace_skills,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { .. } => {

@@ -232,6 +232,9 @@ export function TabBar() {
         onConfirm={({ cwd, agent }) => {
           addTab({ cwd, agent });
           navigate("/workspace");
+          // Best-effort: si el workspace tiene skills a nivel workspace ya attacheadas,
+          // esta tab nueva las hereda. No bloquea la UI ni se reporta si falla.
+          invoke("sync_workspace_skills", { workspaceId }).catch(() => {});
         }}
       />
     </>

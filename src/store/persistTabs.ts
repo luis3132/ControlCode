@@ -8,6 +8,20 @@ const SCROLLBACK_REFRESH_MS = 20_000;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let initialized = false;
 
+// `saveNow` es async (espera bounds + scrollback de cada PTY vía IPC) y se dispara desde
+// dos fuentes independientes (debounce de 400ms y el refresco periódico de 20s) — sin
+// serializar, dos llamadas superpuestas pueden llegar a `db_save_window_state` en orden
+// distinto al que se dispararon (la más vieja termina después si tiene más tabs/PTYs que
+// leer), y como ese comando hace DELETE+INSERT completo, la que llega última pisa a la
+// otra — así se perdía un rename de tab reciente bajo un snapshot viejo. Encolar cada
+// llamada tras la anterior garantiza que se ejecuten en el mismo orden en que se
+// dispararon, y cada una lee el estado más fresco al empezar (no al encolarse).
+let saveChain: Promise<void> = Promise.resolve();
+
+function enqueueSave() {
+  saveChain = saveChain.then(saveNow, saveNow);
+}
+
 async function fetchScrollback(ptyId: number | null): Promise<string | null> {
   if (ptyId == null) return null;
   try {
@@ -44,6 +58,7 @@ async function saveNow() {
       tabOrder: i,
       sessionId: t.sessionId ?? null,
       scrollback: await fetchScrollback(t.ptyId),
+      openedAt: t.openedAt,
     }))
   );
 
@@ -63,7 +78,7 @@ async function saveNow() {
 
 function scheduleSave() {
   if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(saveNow, SAVE_DEBOUNCE_MS);
+  debounceTimer = setTimeout(enqueueSave, SAVE_DEBOUNCE_MS);
 }
 
 /** Centraliza el guardado automático del estado de tabs/ventana hacia SQLite. */
@@ -84,7 +99,7 @@ export function initTabsPersistence() {
   // Refresco periódico del scrollback (aunque no cambie nada en el array de tabs,
   // el contenido de la terminal sí cambia) para no perder mucho si la app se cae.
   setInterval(() => {
-    if (useTabsStore.getState().hydrated) saveNow();
+    if (useTabsStore.getState().hydrated) enqueueSave();
   }, SCROLLBACK_REFRESH_MS);
 
   // Sin listener de onCloseRequested a propósito: en Tauri 2, registrar uno

@@ -22,8 +22,8 @@ import { ExitConfirmDialog } from "../app/ExitConfirmDialog";
 
 const NAV_ITEMS = [
   { id: "home", Icon: HomeIcon, labelKey: "sidebar.home", path: "/" },
-  { id: "sessions", Icon: ClockIcon, labelKey: "sidebar.sessions", path: null },
-  { id: "skills", Icon: StackIcon, labelKey: "sidebar.skills", path: null },
+  { id: "sessions", Icon: ClockIcon, labelKey: "sidebar.sessions", path: "/sessions" },
+  { id: "skills", Icon: StackIcon, labelKey: "sidebar.skills", path: "/skills" },
   { id: "marketplace", Icon: CloudIcon, labelKey: "sidebar.marketplace", path: null },
 ] as const;
 

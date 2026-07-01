@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { AlertaToast } from "neogestify-ui-components";
 import { useTabsStore } from "./tabs";
+import { useSkillsStore } from "./skills";
 
 export interface WorkspaceSummary {
   id: string;
@@ -66,6 +68,12 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
   openWorkspace: async (id, closeCurrent) => {
     await invoke("open_workspace", { workspaceId: id, closeCurrent });
     await get().loadWorkspaces();
+    // Best-effort: no bloquea la apertura del workspace si el check falla.
+    useSkillsStore.getState().checkHealth(id).then((issues) => {
+      if (issues.length > 0) {
+        AlertaToast("Skills", `${issues.length} skill symlink(s) need attention`, "warning", 6000);
+      }
+    }).catch(() => {});
   },
 
   focusIfOpen: async (id) => {

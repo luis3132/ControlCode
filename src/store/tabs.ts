@@ -24,6 +24,8 @@ export interface Tab {
   ptyId: number | null;
   sessionId?: string;
   scrollback?: string;
+  /** Unix seconds — cuándo se abrió esta tab por primera vez (no se toca en autosaves). */
+  openedAt: number;
 }
 
 interface TabsState {
@@ -88,6 +90,7 @@ export const useTabsStore = create<TabsState>((set) => ({
           command: agent.command,
           ptyId: ptyId ?? null,
           sessionId,
+          openedAt: Math.floor(Date.now() / 1000),
         },
       ],
       activeTabId: id,

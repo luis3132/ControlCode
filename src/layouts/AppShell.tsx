@@ -22,6 +22,7 @@ interface RestoredTabRow {
   cwd: string;
   sessionId: string | null;
   scrollback: string | null;
+  openedAt: number;
 }
 
 interface RestoredWindowState {
@@ -41,11 +42,12 @@ function toFrontendTab(row: RestoredTabRow): Tab {
     ptyId: null,
     sessionId: row.sessionId ?? undefined,
     scrollback: row.scrollback ?? undefined,
+    openedAt: row.openedAt,
   };
 }
 
 export function AppShell() {
-  const { tabs, setDetectedAgents, addTab, hydrateFromBackend, setHydrated, setWorkspaceId } = useTabsStore();
+  const { tabs, setDetectedAgents, addTab, activateTab, hydrateFromBackend, setHydrated, setWorkspaceId } = useTabsStore();
   const location = useLocation();
   const navigate = useNavigate();
   const isWorkspace = location.pathname === "/workspace";
@@ -134,6 +136,22 @@ export function AppShell() {
           sessionId: data.sessionId ?? undefined,
           ptyId: data.ptyId ?? null,
         });
+        navigate("/workspace");
+      } catch { /* ignore */ }
+    }).then((fn) => { unlisten = fn; });
+    return () => unlisten?.();
+  }, []);
+
+  // "Reabrir" desde Sesiones: si esa conversación ya está abierta en ESTA ventana, la
+  // enfoca (activa la tab) en vez de dejar que se abra una duplicada en otra parte.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<string>("cc-focus-tab", (event) => {
+      try {
+        const data = JSON.parse(event.payload);
+        const myLabel = getCurrentWindow().label;
+        if (data.targetLabel !== myLabel) return;
+        activateTab(data.tabId);
         navigate("/workspace");
       } catch { /* ignore */ }
     }).then((fn) => { unlisten = fn; });

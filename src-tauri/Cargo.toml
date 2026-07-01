@@ -35,3 +35,10 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 dirs = "5"
 lazy_static = "1"
+
+# Fase 5 — Skills manager (symlinks globales)
+serde_yaml = "0.9"
+symlink = "0.1"
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }

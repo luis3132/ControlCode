@@ -1,16 +1,30 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { Button, Input } from "neogestify-ui-components";
-import { TrashIcon, AddIcon, ThemeToggle } from "neogestify-ui-components";
+import { TrashIcon, AddIcon, ThemeToggle, FolderIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n/index";
 import { useSettingsStore } from "../store/settings";
+import { useSkillsStore } from "../store/skills";
 
 export function SettingsPage() {
   const { t } = useTranslation();
   const { customAgents, addCustomAgent, removeCustomAgent } = useSettingsStore();
+  const { skillsDir, loadSkillsDir, setSkillsDir } = useSkillsStore();
   const [label, setLabel] = useState("");
   const [command, setCommand] = useState("");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    loadSkillsDir();
+  }, [loadSkillsDir]);
+
+  const handleChangeSkillsDir = async () => {
+    const selected = await open({ directory: true, multiple: false, title: t("settings.skillsDir") });
+    if (typeof selected === "string" && selected) {
+      await setSkillsDir(selected);
+    }
+  };
 
   const handleAdd = () => {
     if (!label.trim() || !command.trim()) {
@@ -83,6 +97,30 @@ export function SettingsPage() {
                   <option value="en">English</option>
                 </select>
               </div>
+            </div>
+          </section>
+
+          {/* Directorio de skills */}
+          <section className="bg-linear-to-br from-white to-gray-50
+            dark:from-gray-800 dark:to-gray-900
+            rounded-xl border border-gray-200 dark:border-gray-700
+            shadow-sm hover:shadow-md transition-shadow duration-300 p-6">
+
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">
+              {t("settings.skillsDir")}
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+              {t("settings.skillsDir.desc")}
+            </p>
+
+            <div className="flex items-center gap-2">
+              <FolderIcon className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
+              <span className="text-xs font-mono text-gray-600 dark:text-gray-300 truncate flex-1">
+                {skillsDir || "…"}
+              </span>
+              <Button variant="outline" onClick={handleChangeSkillsDir} className="!text-sm shrink-0">
+                {t("settings.skillsDir.change")}
+              </Button>
             </div>
           </section>
 
