@@ -163,7 +163,7 @@ export function TopBar() {
           </Button>
 
           {menuOpen && (
-            <div className="absolute top-full left-0 mt-1 w-56 py-1 z-[100]
+            <div className="absolute top-full left-0 mt-1 w-56 py-1 z-100
               rounded-lg border border-gray-200 dark:border-gray-700
               bg-white dark:bg-gray-800 shadow-lg">
               <button
