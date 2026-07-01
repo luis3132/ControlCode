@@ -405,6 +405,45 @@ pub fn db_get_workspace_windows(
     Ok(windows)
 }
 
+/// Todas las ventanas guardadas de un workspace, sin importar `is_open` — a diferencia de
+/// `db_get_workspace_windows` (que filtra `is_open = 1` y sirve para saber qué está VIVO
+/// ahora mismo, ej. contar ventanas para el diálogo de cierre), esta es la que se usa para
+/// RESTAURAR: un workspace guardado y cerrado tiene, por definición, todas sus filas en
+/// `is_open = 0` — filtrar por eso ahí devolvía siempre cero filas y "abrir workspace"
+/// no recreaba ninguna ventana.
+pub fn db_get_all_workspace_windows(
+    workspace_id: &str,
+    db: &DbConnection,
+) -> Result<Vec<WindowRow>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, label, workspace_id, pos_x, pos_y, width, height, monitor, is_open, last_active
+             FROM windows WHERE workspace_id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let windows = stmt
+        .query_map([workspace_id], row_to_window)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(windows)
+}
+
+/// Marca una ventana como abierta (is_open = 1). El autosave normal (`db_save_window_state`)
+/// nunca toca `is_open` en su `ON CONFLICT` — así que al recrear una ventana nativa a partir
+/// de una fila que estaba guardada como cerrada (el caso típico al restaurar: se cerró, por
+/// eso quedó guardada), hay que marcarla abierta explícitamente o los conteos de "ventanas
+/// vivas" (confirmación de cierre, borrar workspace, etc.) seguirían viéndola como cerrada.
+pub fn mark_window_open(db: &DbConnection, window_id: &str) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.execute("UPDATE windows SET is_open = 1 WHERE id = ?1", [window_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Marca como cerradas (is_open = 0) todas las ventanas de un workspace.
 /// Usado cuando el usuario elige "cerrar las actuales" al cambiar de workspace.
 #[tauri::command]
@@ -601,6 +640,21 @@ pub fn db_mark_window_closed(label: String, db: tauri::State<DbConnection>) -> R
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute("UPDATE windows SET is_open = 0 WHERE label = ?1", [&label])
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Renombra el label de una ventana ya guardada. Usado al abrir un workspace en caliente
+/// (`open_workspace`) cuando el label original (típicamente "main") ya está ocupado por
+/// la ventana nativa actual — el label es único a nivel de proceso, así que hay que
+/// reasignarle uno libre antes de crear la ventana nueva, y el frontend de esa ventana
+/// nueva carga su estado justamente buscando por su propio label nativo.
+pub fn rename_window_label(db: &DbConnection, window_id: &str, new_label: &str) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE windows SET label = ?1 WHERE id = ?2",
+        rusqlite::params![new_label, window_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 

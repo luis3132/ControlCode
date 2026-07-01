@@ -10,34 +10,58 @@ const MIN_WINDOW_HEIGHT: f64 = 600.0;
 /// Usada tanto al arrancar la app (restaura todo lo que estaba `is_open = 1`) como al
 /// abrir un workspace guardado en caliente desde la UI.
 ///
-/// Si ya existe una ventana con label "main", se reposiciona la ventana default de Tauri
-/// en vez de crear una nueva (Tauri ya la crea desde tauri.conf.json). Ventanas tear-off
-/// sin tabs guardadas se omiten para no resucitar ventanas vacías.
-pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>) -> Result<(), String> {
+/// `reuse_main`: solo debe ser `true` en el arranque de la app, cuando Tauri ya creó la
+/// ventana "main" desde `tauri.conf.json` y todavía no hay ninguna otra ventana viva — ahí
+/// se reposiciona esa ventana en vez de crear una nueva. Si es `false` (abrir un workspace
+/// en caliente mientras la app ya está corriendo), la fila con label "main" se trata como
+/// cualquier otra: como ese label ya está ocupado por la ventana actual, se le asigna uno
+/// nuevo antes de crear la ventana (ver más abajo) — si no, esa fila se saltaba por
+/// completo y "mantener actuales" no abría nada.
+///
+/// En general, si el label guardado de una fila ya pertenece a una ventana nativa viva
+/// (colisión), se renombra esa fila en SQLite a un label libre antes de construirla — el
+/// label es único a nivel de proceso, y el frontend de la ventana nueva carga su estado
+/// buscando por su propio label nativo, así que renombrar la fila es suficiente.
+///
+/// Ventanas tear-off sin tabs guardadas se omiten para no resucitar ventanas vacías.
+pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) -> Result<(), String> {
     let db = app.state::<DbConnection>();
+    let live_labels: std::collections::HashSet<String> = app.webview_windows().into_keys().collect();
 
-    if let Some(main_state) = rows.iter().find(|w| w.label == "main") {
-        if let Some(main_win) = app.get_webview_window("main") {
-            if let (Some(width), Some(height)) = (main_state.width, main_state.height) {
-                let _ = main_win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                    width: width as u32,
-                    height: height as u32,
-                }));
+    for w in rows.iter() {
+        if reuse_main && w.label == "main" {
+            if let Some(main_win) = app.get_webview_window("main") {
+                if let (Some(width), Some(height)) = (w.width, w.height) {
+                    let _ = main_win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                        width: width as u32,
+                        height: height as u32,
+                    }));
+                }
+                if let (Some(x), Some(y)) = (w.pos_x, w.pos_y) {
+                    let _ = main_win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+                }
             }
-            if let (Some(x), Some(y)) = (main_state.pos_x, main_state.pos_y) {
-                let _ = main_win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
-            }
+            database::mark_window_open(&db, &w.id)?;
+            continue;
         }
-    }
 
-    for w in rows.iter().filter(|w| w.label != "main") {
         let tab_count = database::count_tabs_for_window(&db, &w.id).unwrap_or(0);
         if tab_count == 0 {
             continue;
         }
 
-        let mut builder = tauri::WebviewWindowBuilder::new(app, &w.label, tauri::WebviewUrl::App("/".into()))
-            .title(&w.label)
+        let mut label = w.label.clone();
+        if live_labels.contains(&label) {
+            let millis = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            label = format!("cc-window-{millis}");
+            database::rename_window_label(&db, &w.id, &label)?;
+        }
+
+        let mut builder = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App("/".into()))
+            .title(&label)
             .decorations(false)
             .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
 
@@ -54,30 +78,47 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>) -> Result<(), Stri
         }
 
         builder.build().map_err(|e| e.to_string())?;
+        database::mark_window_open(&db, &w.id)?;
     }
 
     Ok(())
 }
 
-/// Abre un workspace guardado: si `close_current` es true, cierra primero todas las
-/// ventanas actualmente abiertas (su estado ya quedó persistido por el autosave normal);
-/// luego recrea las ventanas del workspace elegido.
+/// Abre un workspace guardado. Si `close_current` es true, las ventanas que había
+/// abiertas antes de esta llamada se cierran DESPUÉS de abrir las del workspace elegido
+/// (no antes) — así la app nunca queda momentáneamente sin ninguna ventana viva, lo que
+/// dispararía `RunEvent::ExitRequested` con cero ventanas y mataría el proceso entero
+/// antes de que las nuevas llegaran a crearse. Su estado ya quedó persistido por el
+/// autosave normal antes de cerrarlas.
+///
+/// `reuse_main` siempre es `false` acá (nunca es un arranque en frío): la ventana "main"
+/// ya está en uso por la ventana actual, así que cualquier fila que la tenía como label
+/// se renombra a uno libre dentro de `restore_windows`.
 #[tauri::command]
 pub async fn open_workspace(
     app: tauri::AppHandle,
     workspace_id: String,
     close_current: bool,
 ) -> Result<(), String> {
-    if close_current {
-        for (_, win) in app.webview_windows() {
+    let db = app.state::<DbConnection>();
+    database::touch_workspace_now(&db, &workspace_id)?;
+    let rows = database::db_get_all_workspace_windows(&workspace_id, &db)?;
+
+    let previously_open: Vec<String> = if close_current {
+        app.webview_windows().into_keys().collect()
+    } else {
+        Vec::new()
+    };
+
+    restore_windows(&app, rows, false)?;
+
+    for label in previously_open {
+        if let Some(win) = app.get_webview_window(&label) {
             let _ = win.close();
         }
     }
 
-    let db = app.state::<DbConnection>();
-    database::touch_workspace_now(&db, &workspace_id)?;
-    let rows = database::db_get_workspace_windows(workspace_id, app.state::<DbConnection>())?;
-    restore_windows(&app, rows)
+    Ok(())
 }
 
 /// Cierra solo las ventanas (nativas) que pertenecen a `workspace_id` — usado por el

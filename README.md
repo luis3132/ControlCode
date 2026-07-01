@@ -9,7 +9,7 @@ A desktop command center for AI coding agents (Claude Code, Gemini CLI, Codex, O
 - **Embedded terminals as tabs** — each tab runs a real pty in a chosen working directory with a chosen agent (Claude Code, Gemini CLI, Codex, OpenCode, or a plain shell).
 - **Hierarchical workspaces** — group tabs under a project root, with each tab scoped to its own subfolder so an agent's context doesn't leak into sibling folders.
 - **Persistence** — open tabs, their working directories, agents, and order are saved to a local SQLite database and restored on relaunch.
-- **Multi-window tab tear-off** — drag a tab out to spin it into its own native window, or drag it back to merge it into another window, without killing the underlying process.
+- **Multi-window tab tear-off (implemented)** — drag a tab out to spin it into its own native window, or drop it onto another window's tab bar to merge it there, without killing the underlying pty. Window position/size is persisted and restored on relaunch.
 - **Skills manager (planned)** — install a skill once under `~/.controlcode/skills/` and attach it to projects via symlinks instead of copying files.
 - **Skills marketplace (planned)** — discover and install skills from GitHub repos, JSON manifests, or local folders.
 - **Session manager (planned)** — browse, filter, reopen, and export the history of past agent sessions.

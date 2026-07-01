@@ -78,8 +78,8 @@ pub fn run() {
             // simplemente `default`, así que el comportamiento típico es el mismo.
             let db = app.state::<DbConnection>();
             let active_id = database::db_get_last_active_workspace_id(&db)?;
-            let windows = database::db_get_workspace_windows(active_id, app.state::<DbConnection>())?;
-            window::restore_windows(app.handle(), windows)?;
+            let windows = database::db_get_all_workspace_windows(&active_id, &db)?;
+            window::restore_windows(app.handle(), windows, true)?;
             Ok(())
         })
         .build(tauri::generate_context!())
