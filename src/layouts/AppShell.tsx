@@ -124,7 +124,7 @@ export function AppShell() {
   }, [tabs.length, isWorkspace, navigate]);
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden
+    <div className="flex flex-col h-screen overflow-hidden rounded-xl
       bg-gray-50 dark:bg-[#0d1117]
       text-gray-900 dark:text-white">
 

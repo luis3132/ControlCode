@@ -63,6 +63,7 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
         let mut builder = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App("/".into()))
             .title(&label)
             .decorations(false)
+            .transparent(true)
             .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
 
         if let (Some(width), Some(height)) = (w.width, w.height) {
@@ -173,6 +174,7 @@ pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String
         .inner_size(900.0, 650.0)
         .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         .decorations(false)
+        .transparent(true)
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -201,6 +203,7 @@ pub async fn open_new_window(app: tauri::AppHandle, label: String) -> Result<(),
         .inner_size(900.0, 650.0)
         .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         .decorations(false)
+        .transparent(true)
         .build()
         .map_err(|e| e.to_string())?;
     Ok(())

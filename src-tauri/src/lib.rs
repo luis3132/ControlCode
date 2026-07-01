@@ -31,6 +31,7 @@ pub fn run() {
             database::db_delete_workspace,
             database::db_get_workspace,
             database::default_workspace_has_content,
+            database::db_get_window_workspace,
             // Persistencia SQLite — ventanas y tabs
             database::db_save_window_state,
             database::db_load_window_state,

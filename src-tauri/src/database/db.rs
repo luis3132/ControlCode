@@ -616,6 +616,25 @@ pub fn db_load_window_state(
     Ok(Some(RestoredWindowState { window, tabs }))
 }
 
+/// Workspace al que pertenece una ventana nativa viva, buscando por su label. Usado antes
+/// de aceptar un "merge" de tab entre ventanas (arrastrar una tab al tab bar de otra
+/// ventana): si el workspace de destino no coincide con el de origen, el merge se rechaza
+/// para no mezclar tabs de distintos workspaces por accidente.
+#[tauri::command]
+pub fn db_get_window_workspace(
+    label: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Option<String>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT workspace_id FROM windows WHERE label = ?1",
+        [&label],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn db_get_open_window_labels(db: tauri::State<DbConnection>) -> Result<Vec<WindowRow>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;

@@ -20,7 +20,7 @@ interface ContextMenuState {
 
 export function TabBar() {
   const { t } = useTranslation();
-  const { tabs, activeTabId, activateTab, closeTab, renameTab, reorderTabs, addTab, updateTab } =
+  const { tabs, activeTabId, activateTab, closeTab, renameTab, reorderTabs, addTab, updateTab, workspaceId } =
     useTabsStore();
   const navigate = useNavigate();
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -78,6 +78,19 @@ export function TabBar() {
     }
 
     if (mergeTarget) {
+      // No mezclar tabs entre ventanas de distintos workspaces por accidente — si el
+      // destino pertenece a otro workspace, no se hace merge, pero el drop sigue siendo
+      // un detach válido: cae al mismo camino de "nueva ventana" de abajo en vez de no
+      // hacer nada (que dejaba la tab sin ningún destino).
+      const targetWorkspaceId = await invoke<string | null>("db_get_window_workspace", {
+        label: mergeTarget,
+      }).catch(() => null);
+      if (targetWorkspaceId !== null && targetWorkspaceId !== workspaceId) {
+        mergeTarget = null;
+      }
+    }
+
+    if (mergeTarget) {
       // Merge: enviar tab (con su PTY vivo) a la otra ventana vía evento Tauri
       await invoke("broadcast_event", {
         event: "cc-receive-tab",
@@ -89,12 +102,15 @@ export function TabBar() {
         }),
       });
     } else {
-      // Fuera de cualquier ventana → nueva ventana, llevándose el mismo PTY
+      // Fuera de cualquier ventana → nueva ventana, llevándose el mismo PTY. Hereda el
+      // workspace de ESTA ventana (misma handoff key que usa TopBar para "Nueva ventana")
+      // para que la tab destacada no quede huérfana en el bucket "default".
       localStorage.setItem("cc-detach", JSON.stringify({
         cwd: tab.cwd, command: tab.command, agentId: tab.agentId,
         agentLabel: tab.agentLabel, title: tab.title, sessionId: tab.sessionId,
         ptyId: tab.ptyId,
       }));
+      localStorage.setItem("cc-new-window-workspace", workspaceId);
       await invoke("open_new_window", { label: `cc-window-${Date.now()}` });
     }
 

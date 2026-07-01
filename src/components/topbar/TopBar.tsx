@@ -14,7 +14,7 @@ import {
   AddIcon,
   BoxIcon,
 } from "neogestify-ui-components";
-import { useTabsStore } from "../../store/tabs";
+import { useTabsStore, DEFAULT_WORKSPACE_ID } from "../../store/tabs";
 import { useWorkspacesStore } from "../../store/workspaces";
 import { SaveWorkspaceDialog } from "../workspace/SaveWorkspaceDialog";
 import { ResetDefaultDialog } from "../workspace/ResetDefaultDialog";
@@ -227,26 +227,35 @@ export function TopBar() {
         </nav>
 
         <div className="flex items-center justify-end gap-1 pr-1">
-          {/* Settings + ThemeToggle */}
+          {/* Save workspace + Settings + ThemeToggle (tema al final) */}
           <div className="flex items-center gap-1 pr-2" data-tauri-drag-region="false">
-            {hasTabs && (
+            {hasTabs && workspaceId === DEFAULT_WORKSPACE_ID && (
               <Button
-                variant="toggle"
+                variant="icon"
+                size="sm"
                 title={t("topbar.saveWorkspace")}
                 onClick={() => setShowSaveWorkspace(true)}
+                className="text-gray-400! dark:text-gray-500!
+                  hover:text-gray-700! dark:hover:text-white!
+                  hover:bg-gray-100! dark:hover:bg-white/10!"
               >
                 <SaveIcon className="w-4 h-4" />
               </Button>
             )}
-            <ThemeToggle />
             <Button
-              variant="toggle"
+              variant="icon"
+              size="sm"
               title={t("sidebar.settings")}
               onClick={() => navigate("/settings")}
-              isActive={location.pathname === "/settings"}
+              className={
+                location.pathname === "/settings"
+                  ? "bg-gray-100! dark:bg-white/10! text-gray-900! dark:text-white!"
+                  : "text-gray-400! dark:text-gray-500! hover:text-gray-700! dark:hover:text-white! hover:bg-gray-100! dark:hover:bg-white/10!"
+              }
             >
               <GearIcon className="w-4 h-4" />
             </Button>
+            <ThemeToggle />
           </div>
 
           {/* Separador */}

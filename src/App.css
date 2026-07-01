@@ -18,14 +18,16 @@ body,
   height: 100%;
   width: 100%;
   overflow: hidden;
-  background: #f9fafb;
+  /* Transparente: la ventana nativa es transparent:true (ver tauri.conf.json) para que
+     las esquinas redondeadas del panel (AppShell) no queden recortadas en cuadrado por
+     un fondo opaco detrás — el color real de fondo vive en AppShell, no acá. */
+  background: transparent;
   color: #111827;
 }
 
 html.dark,
 html.dark body,
 html.dark #root {
-  background: #030712;
   color: #f9fafb;
 }
 
