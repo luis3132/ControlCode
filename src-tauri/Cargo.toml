@@ -40,5 +40,10 @@ lazy_static = "1"
 serde_yaml = "0.9"
 symlink = "0.1"
 
+# Fase 6 — Marketplace de skills (registries remotos)
+# rustls en vez de la TLS nativa del sistema: evita depender de libssl/openssl-dev
+# instalado en la máquina del usuario para poder compilar/correr.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

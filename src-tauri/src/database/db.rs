@@ -161,6 +161,23 @@ pub fn init_db() -> SqlResult<DbConnection> {
          -- `workspaces` en sí). `skills` se denormaliza como JSON (mismo patrón que
          -- `skills.categories`) porque `project_skills.tab_id` sí cascadea con `tabs` y
          -- se perdería en el mismo borrado que dispara este archivo.
+         -- Fase 6 — Fuentes de skills remotas (marketplace). `cache_json` guarda la última
+         -- lista de skills resuelta por `marketplace::refresh_registry` (ver ese módulo
+         -- para el formato) — se sirve desde acá en vez de refetchear en cada
+         -- `list_marketplace_skills`, y sobrevive a reinicios de la app.
+         CREATE TABLE IF NOT EXISTS registries (
+             id           TEXT PRIMARY KEY,
+             name         TEXT NOT NULL,
+             source_type  TEXT NOT NULL,
+             location     TEXT NOT NULL,
+             priority     INTEGER NOT NULL DEFAULT 0,
+             enabled      INTEGER NOT NULL DEFAULT 1,
+             last_fetched INTEGER,
+             cache_json   TEXT,
+             cache_error  TEXT,
+             created_at   INTEGER NOT NULL
+         );
+
          CREATE TABLE IF NOT EXISTS session_history (
              id           TEXT PRIMARY KEY,
              workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -179,6 +196,7 @@ pub fn init_db() -> SqlResult<DbConnection> {
 
     ensure_default_workspace(&conn)?;
     ensure_default_settings(&conn)?;
+    ensure_default_registries(&conn)?;
 
     Ok(Arc::new(Mutex::new(conn)))
 }
@@ -193,6 +211,25 @@ fn ensure_default_workspace(conn: &Connection) -> SqlResult<()> {
         conn.execute(
             "INSERT INTO workspaces (id, name, created_at, last_active) VALUES (?1, ?2, ?3, ?3)",
             rusqlite::params![DEFAULT_WORKSPACE_ID, "Sin guardar", now],
+        )?;
+    }
+    Ok(())
+}
+
+/// Siembra el registry público de ejemplo listado en plan.md (Fase 6) la primera vez que
+/// arranca la app, para que el marketplace no se vea vacío antes de que el usuario agregue
+/// el suyo. Sin `cache_json` todavía — se resuelve recién cuando el usuario visita la
+/// página de Marketplace y dispara el primer refresh (evita pegarle a la red en cada
+/// arranque). Solo se siembra si la tabla está vacía, nunca pisa registries que el usuario
+/// ya haya agregado o borrado a propósito.
+fn ensure_default_registries(conn: &Connection) -> SqlResult<()> {
+    let has_any: i64 = conn.query_row("SELECT COUNT(*) FROM registries", [], |r| r.get(0))?;
+    if has_any == 0 {
+        let now = now_ts();
+        conn.execute(
+            "INSERT INTO registries (id, name, source_type, location, priority, enabled, created_at)
+             VALUES (?1, 'anthropics/skills', 'github', 'anthropics/skills', 0, 1, ?2)",
+            rusqlite::params![Uuid::new_v4().to_string(), now],
         )?;
     }
     Ok(())

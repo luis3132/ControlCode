@@ -24,7 +24,7 @@ const NAV_ITEMS = [
   { id: "home", Icon: HomeIcon, labelKey: "sidebar.home", path: "/" },
   { id: "sessions", Icon: ClockIcon, labelKey: "sidebar.sessions", path: "/sessions" },
   { id: "skills", Icon: StackIcon, labelKey: "sidebar.skills", path: "/skills" },
-  { id: "marketplace", Icon: CloudIcon, labelKey: "sidebar.marketplace", path: null },
+  { id: "marketplace", Icon: CloudIcon, labelKey: "sidebar.marketplace", path: "/marketplace" },
 ] as const;
 
 // Iconos SVG para los controles de ventana

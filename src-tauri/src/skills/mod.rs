@@ -196,6 +196,26 @@ fn parse_frontmatter(content: &str) -> SkillFrontmatter {
     split_frontmatter(content).0
 }
 
+/// Subconjunto del frontmatter que le sirve a `marketplace` para describir una skill
+/// descubierta por auto-scan (sin `registry.json`) sin exponerle el tipo privado
+/// `SkillFrontmatter`.
+pub(crate) struct ScannedSkillMeta {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub categories: Vec<String>,
+    pub compatible_agents: Vec<String>,
+}
+
+pub(crate) fn scan_frontmatter_for_marketplace(content: &str) -> ScannedSkillMeta {
+    let meta = parse_frontmatter(content);
+    ScannedSkillMeta {
+        name: meta.name,
+        description: meta.description,
+        categories: meta.categories,
+        compatible_agents: meta.compatible_agents,
+    }
+}
+
 /// Reconstruye un SKILL.md completo a partir de metadata + body — usado cuando el
 /// usuario completa metadata faltante al instalar (o al editar), para que el archivo
 /// en disco quede con el frontmatter final en vez de mantener el original incompleto.
@@ -339,7 +359,18 @@ pub fn install_skill(
     overrides: Option<SkillFrontmatterInput>,
     db: tauri::State<DbConnection>,
 ) -> Result<SkillInfo, String> {
-    let (file, source) = resolve_skill_file(&source_file)?;
+    install_skill_internal(&source_file, overrides, &db)
+}
+
+/// Cuerpo real de `install_skill`, separado del comando Tauri para poder reusarlo desde
+/// `marketplace::install_marketplace_skill` (que arma un `source_file` local temporal a
+/// partir de una skill remota descargada, no de una elegida a mano por el usuario).
+pub(crate) fn install_skill_internal(
+    source_file: &str,
+    overrides: Option<SkillFrontmatterInput>,
+    db: &DbConnection,
+) -> Result<SkillInfo, String> {
+    let (file, source) = resolve_skill_file(source_file)?;
     let Some((parsed_meta, original_content)) = scan_skill_file(&file) else {
         return Err(format!("No se pudo leer {source_file}"));
     };

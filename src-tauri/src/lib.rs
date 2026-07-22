@@ -1,5 +1,6 @@
 mod agents;
 mod database;
+mod marketplace;
 mod session;
 mod skills;
 mod terminal;
@@ -80,6 +81,15 @@ pub fn run() {
             skills::detach_skill,
             skills::check_symlinks_health,
             skills::sync_workspace_skills,
+            // Marketplace de skills (registries remotos)
+            marketplace::list_registries,
+            marketplace::add_registry,
+            marketplace::remove_registry,
+            marketplace::set_registry_enabled,
+            marketplace::reorder_registries,
+            marketplace::refresh_registry,
+            marketplace::list_marketplace_skills,
+            marketplace::install_marketplace_skill,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { .. } => {
