@@ -190,6 +190,22 @@ pub fn set_registry_enabled(
     Ok(())
 }
 
+#[tauri::command]
+pub fn rename_registry(id: String, name: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("El nombre no puede estar vacío".to_string());
+    }
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let affected = conn
+        .execute("UPDATE registries SET name = ?1 WHERE id = ?2", params![trimmed, id])
+        .map_err(|e| e.to_string())?;
+    if affected == 0 {
+        return Err("Registry no encontrado".to_string());
+    }
+    Ok(())
+}
+
 /// Reordena prioridades a partir del orden final de ids que manda el frontend
 /// (drag-and-drop de la lista de repos en la vista de gestión).
 #[tauri::command]
@@ -293,19 +309,24 @@ pub fn list_marketplace_skills(
 ) -> Result<Vec<MarketplaceSkillEntry>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT cache_json FROM registries WHERE enabled = 1 ORDER BY priority ASC")
+        .prepare("SELECT name, cache_json FROM registries WHERE enabled = 1 ORDER BY priority ASC")
         .map_err(|e| e.to_string())?;
-    let cached: Vec<Option<String>> = stmt
-        .query_map([], |r| r.get(0))
+    let cached: Vec<(String, Option<String>)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
 
     let query_lower = query.as_deref().map(|q| q.to_lowercase());
     let mut out = Vec::new();
-    for json in cached.into_iter().flatten() {
+    for (live_name, json) in cached {
+        let Some(json) = json else { continue };
         let entries: Vec<MarketplaceSkillEntry> = serde_json::from_str(&json).unwrap_or_default();
-        for entry in entries {
+        for mut entry in entries {
+            // El nombre cacheado puede haber quedado viejo si el usuario renombró el
+            // registry después del último refresh — se pisa acá en vez de invalidar el
+            // cache entero solo por un rename.
+            entry.registry_name = live_name.clone();
             if let Some(cat) = &category {
                 if !entry.categories.iter().any(|c| c == cat) {
                     continue;

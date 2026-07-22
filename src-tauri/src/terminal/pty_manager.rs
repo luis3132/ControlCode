@@ -52,10 +52,18 @@ fn append_to_buffer(id: u32, chunk: &[u8]) {
 }
 
 /// Crea un PTY, lanza el proceso dentro, y emite eventos `pty-data-{id}` al frontend.
+///
+/// `cols`/`rows` los manda el frontend ya medidos contra el tamaño real del contenedor
+/// (`fitAddon.fit()`, ver Terminal.tsx) — antes se creaba fijo en 80x24 y recién se
+/// resizeaba al tamaño real cuando disparaba el ResizeObserver, ya con el proceso vivo.
+/// Muchas TUIs (agentes incluidos) leen el tamaño del terminal una sola vez al arrancar
+/// y no vuelven a redibujar bien tras un `SIGWINCH` post-arranque — quedaban con
+/// contenido cortado/desbordado hasta el primer redibujado manual. Con el tamaño correcto
+/// desde el primer byte, ese problema no llega a existir.
 #[tauri::command]
-pub async fn pty_create(command: String, cwd: String, app: AppHandle) -> Result<u32, String> {
+pub async fn pty_create(command: String, cwd: String, cols: u16, rows: u16, app: AppHandle) -> Result<u32, String> {
     let pty_system = native_pty_system();
-    let size = PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 };
+    let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
 
     let pair = pty_system
         .openpty(size)

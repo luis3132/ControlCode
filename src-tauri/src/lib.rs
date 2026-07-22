@@ -84,6 +84,7 @@ pub fn run() {
             // Marketplace de skills (registries remotos)
             marketplace::list_registries,
             marketplace::add_registry,
+            marketplace::rename_registry,
             marketplace::remove_registry,
             marketplace::set_registry_enabled,
             marketplace::reorder_registries,

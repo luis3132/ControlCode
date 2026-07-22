@@ -9,8 +9,12 @@ import "xterm/css/xterm.css";
 
 import { RESUMABLE_AGENT_IDS } from "../lib/agentResume";
 import { consumePtyTransferring } from "../lib/ptyTransfer";
+import { awaitSkillSetup } from "../lib/pendingSkillSetup";
 
 interface TerminalProps {
+  /** Id de la tab en el store — solo se usa para esperar (si aplica) a que sus symlinks
+   * de skills elegidas en el wizard terminen de crearse antes de lanzar el proceso. */
+  tabId?: string;
   command?: string;
   cwd?: string;
   agentId?: string;
@@ -41,6 +45,7 @@ const SESSION_DISCOVERY_MAX_ATTEMPTS = 60; // con backoff, cubre ~35 minutos ant
 const SESSION_DISCOVERY_LOOKBACK_S = 3;
 
 export function Terminal({
+  tabId,
   command = "bash",
   cwd,
   agentId,
@@ -98,9 +103,26 @@ export function Terminal({
     term.loadAddon(webLinksAddon);
     term.open(containerRef.current);
 
-    requestAnimationFrame(() => {
-      fitAddon.fit();
-    });
+    // Mide cols/rows reales ANTES de spawnear el proceso (ver pty_create en Rust: el
+    // PTY nace con este tamaño, no con uno fijo que se corrige después).
+    //
+    // - `document.fonts.ready`: si fit() mide con la fuente de fallback (porque
+    //   "Cascadia Code"/"JetBrains Mono"/"Fira Code" todavía no cargó), calcula cols/rows
+    //   para celdas de un tamaño que no es el real — al terminar de cargar la fuente, el
+    //   contenido real desborda o queda recortado por el `overflow: hidden` del
+    //   contenedor (el "overflow"/márgenes raros reportados).
+    // - Doble rAF: el primero solo garantiza que el layout se pintó una vez; fit() antes
+    //   de eso puede medir un contenedor todavía en 0×0 (tab recién creada).
+    const fitOnce = async () => {
+      await document.fonts.ready.catch(() => {});
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      try {
+        fitAddon.fit();
+      } catch {
+        // ignorar si el terminal fue dispose()d mientras esperábamos
+      }
+    };
 
     // ── 2. Crear la sesión PTY en Rust ───────────────────────
     let unlistenData: UnlistenFn | null = null;
@@ -168,14 +190,30 @@ export function Terminal({
           // Reconectar a un PTY que ya está vivo en otra ventana: nada de spawnear de nuevo.
           const buffered = await invoke<string>("pty_attach", { id: attachPtyId });
           ptyIdRef.current = attachPtyId;
+          await fitOnce();
           if (buffered) term.write(buffered);
           setStatus("running");
           onReady?.(attachPtyId);
           await attachListeners(attachPtyId);
+          // La ventana a la que se reconecta puede tener un tamaño distinto al de la
+          // ventana donde el PTY nació (tear-off, merge entre ventanas) — sincronizarlo.
+          if (!cancelled) {
+            invoke("pty_resize", { id: attachPtyId, cols: term.cols, rows: term.rows }).catch(console.error);
+          }
           return;
         }
 
         if (initialScrollback) term.write(initialScrollback);
+
+        // Si el wizard dejó un setup de skills pendiente para esta tab (symlinks
+        // todavía escribiéndose en su cwd), esperarlo antes de lanzar el proceso — si
+        // el agente arranca primero, algunos escanean su carpeta de skills solo al
+        // boot y nunca verían las que el usuario acaba de elegir.
+        if (tabId) await awaitSkillSetup(tabId);
+        if (cancelled) return;
+
+        await fitOnce();
+        if (cancelled) return;
 
         const resolvedCwd: string = cwd ?? await invoke<string>("get_home_dir");
         const startedAfter = Math.floor(Date.now() / 1000) - SESSION_DISCOVERY_LOOKBACK_S;
@@ -183,6 +221,8 @@ export function Terminal({
         const ptyId = await invoke<number>("pty_create", {
           command,
           cwd: resolvedCwd,
+          cols: term.cols,
+          rows: term.rows,
         });
         ptyIdRef.current = ptyId;
         setStatus("running");

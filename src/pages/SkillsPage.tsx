@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button } from "neogestify-ui-components";
-import { AddIcon, BackIcon, EditIcon, TrashIcon, ChevronDownIcon, CopyIcon } from "neogestify-ui-components";
+import { Button, Input } from "neogestify-ui-components";
+import { AddIcon, EditIcon, TrashIcon, ChevronDownIcon, CopyIcon, SearchIcon, StackIcon, InfoIcon } from "neogestify-ui-components";
 import { useSkillsStore, SkillSummary } from "../store/skills";
 import { useTabsStore } from "../store/tabs";
 import { InstallSkillDialog } from "../components/skills/InstallSkillDialog";
 import { DeleteSkillDialog } from "../components/skills/DeleteSkillDialog";
 import { AttachSkillDialog } from "../components/skills/AttachSkillDialog";
+import { PageHeader } from "../components/common/PageHeader";
 
 export function SkillsPage() {
   const { t } = useTranslation();
@@ -19,6 +20,7 @@ export function SkillsPage() {
   const [deleteTarget, setDeleteTarget] = useState<SkillSummary | null>(null);
   const [attachTarget, setAttachTarget] = useState<SkillSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     loadSkills();
@@ -33,44 +35,45 @@ export function SkillsPage() {
     }
   };
 
+  const filtered = skills.filter((s) => {
+    if (!query.trim()) return true;
+    const haystack = `${s.name} ${s.description ?? ""} ${s.categories.join(" ")}`.toLowerCase();
+    return haystack.includes(query.trim().toLowerCase());
+  });
+
   return (
     <main className="min-h-full px-6 py-10 bg-gray-50 dark:bg-gray-950">
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-5xl mx-auto">
 
-        <div className="flex items-center justify-between gap-3 mb-10">
-          <div className="flex items-center gap-3">
-            <Button variant="icon" onClick={() => navigate("/")} title={t("btn.back")}>
-              <BackIcon className="w-4 h-4" />
+        <PageHeader
+          icon={<StackIcon className="w-5 h-5" />}
+          title={t("skills.manage.title")}
+          subtitle={t("skills.manage.subtitle")}
+          action={
+            <Button variant="primary" onClick={() => setInstallOpen(true)} className="flex items-center gap-1.5 !text-sm w-fit">
+              <AddIcon className="w-4 h-4" />
+              {t("skills.install.btn")}
             </Button>
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                {t("skills.manage.title")}
-              </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                {t("skills.manage.subtitle")}
-              </p>
-            </div>
-          </div>
-          <Button variant="primary" onClick={() => setInstallOpen(true)} className="flex items-center gap-1.5 !text-sm w-fit">
-            <AddIcon className="w-4 h-4" />
-            {t("skills.install.btn")}
-          </Button>
-        </div>
+          }
+        />
 
-        {error && <p className="text-sm text-red-500 dark:text-red-400 mb-4">{error}</p>}
+        {error && <p className="text-sm text-red-500 dark:text-red-400 mb-4 px-1">{error}</p>}
 
         {brokenSymlinks.length > 0 && (
-          <div className="mb-6 p-4 rounded-lg border border-amber-300 dark:border-amber-700
-            bg-amber-50 dark:bg-amber-500/10">
-            <p className="text-sm font-semibold text-amber-700 dark:text-amber-400 mb-2">
-              {t("skills.health.title")}
-            </p>
-            <ul className="flex flex-col gap-1">
+          <div className="mb-6 rounded-xl border border-amber-300 dark:border-amber-700
+            bg-amber-50 dark:bg-amber-500/10 overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-amber-200 dark:border-amber-700/50">
+              <InfoIcon className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+                {t("skills.health.title")}
+              </p>
+            </div>
+            <ul className="flex flex-col divide-y divide-amber-200/60 dark:divide-amber-700/30">
               {brokenSymlinks.map((issue, i) => {
                 const skill = skills.find((s) => s.name === issue.skillName);
                 const usage = skill?.usedBy.find((u) => u.tabId === issue.tabId);
                 return (
-                  <li key={i} className="flex items-center justify-between gap-2 text-xs font-mono text-amber-800 dark:text-amber-300">
+                  <li key={i} className="flex items-center justify-between gap-2 px-4 py-2 text-xs font-mono text-amber-800 dark:text-amber-300">
                     <span className="truncate">
                       {issue.skillName} — {issue.tabTitle ?? issue.tabId} ({t(`skills.health.${issue.issue === "stale_target" ? "staleTarget" : issue.issue}`)})
                     </span>
@@ -99,38 +102,63 @@ export function SkillsPage() {
           </div>
         )}
 
+        {skills.length > 0 && (
+          <div className="mb-4">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t("skills.searchPlaceholder")}
+              variant="outline"
+              icon={<SearchIcon className="w-4 h-4" />}
+              clearable
+              onClear={() => setQuery("")}
+            />
+          </div>
+        )}
+
         {skills.length === 0 ? (
-          <p className="text-sm italic text-gray-400 dark:text-gray-500">{t("skills.list.empty")}</p>
+          <div className="flex flex-col items-center gap-2 py-14 text-gray-400 dark:text-gray-500">
+            <StackIcon className="w-8 h-8 opacity-30" />
+            <p className="text-sm">{t("skills.list.empty")}</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <p className="text-sm italic text-gray-400 dark:text-gray-500 text-center py-8">
+            {t("skills.searchEmpty")}
+          </p>
         ) : (
-          <div className="flex flex-col gap-2">
-            {skills.map((skill) => {
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 items-start">
+            {filtered.map((skill) => {
               const expanded = expandedId === skill.id;
               return (
                 <div
                   key={skill.id}
-                  className="rounded-lg border border-gray-200 dark:border-gray-700
+                  className="rounded-xl border border-gray-200 dark:border-gray-700
                     bg-white dark:bg-gray-800/50
-                    hover:border-gray-300 dark:hover:border-gray-600
-                    transition-colors"
+                    hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm
+                    transition-all"
                 >
-                  <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="flex items-start gap-3 px-4 py-3">
+                    <span className="flex items-center justify-center w-9 h-9 rounded-full shrink-0
+                      bg-blue-50 dark:bg-blue-500/10 text-blue-500 dark:text-blue-400">
+                      <StackIcon className="w-4 h-4" />
+                    </span>
                     <button
                       onClick={() => navigate(`/skills/${skill.id}`)}
                       className="flex flex-col min-w-0 text-left flex-1"
                     >
                       <span className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">
                         {skill.name}
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400">
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400 shrink-0">
                           v{skill.version}
                         </span>
                       </span>
                       {skill.description && (
-                        <span className="text-xs text-gray-400 dark:text-gray-500 truncate">
+                        <span className="text-xs text-gray-400 dark:text-gray-500 line-clamp-2">
                           {skill.description}
                         </span>
                       )}
                       {skill.categories.length > 0 && (
-                        <span className="flex flex-wrap gap-1 mt-1">
+                        <span className="flex flex-wrap gap-1 mt-1.5">
                           {skill.categories.map((c) => (
                             <span key={c} className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400">
                               {c}
@@ -139,23 +167,27 @@ export function SkillsPage() {
                         </span>
                       )}
                     </button>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button
-                        variant="icon"
-                        onClick={() => setExpandedId(expanded ? null : skill.id)}
-                        title={t("skills.list.usedBy", { count: skill.usedBy.length })}
-                        className="flex items-center gap-1 !text-xs"
-                      >
-                        {skill.usedBy.length}
-                        <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
-                      </Button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-1 px-4 pb-3">
+                    <Button
+                      variant="icon"
+                      onClick={() => setExpandedId(expanded ? null : skill.id)}
+                      title={t("skills.list.usedBy", { count: skill.usedBy.length })}
+                      className="flex items-center gap-1 !text-xs"
+                    >
+                      {skill.usedBy.length}
+                      <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
+                    </Button>
+                    <div className="flex items-center gap-0.5 shrink-0">
                       <Button variant="icon" onClick={() => setAttachTarget(skill)} title={t("skills.attach.title", { name: skill.name })}>
                         <CopyIcon className="w-4 h-4" />
                       </Button>
                       <Button variant="icon" onClick={() => navigate(`/skills/${skill.id}`)} title={t("skills.detail.title")}>
                         <EditIcon className="w-4 h-4" />
                       </Button>
-                      <Button variant="danger" onClick={() => setDeleteTarget(skill)} title={t("skills.delete.confirm")}>
+                      <Button variant="icon" onClick={() => setDeleteTarget(skill)} title={t("skills.delete.confirm")}
+                        className="hover:text-red-500! dark:hover:text-red-400!">
                         <TrashIcon className="w-4 h-4" />
                       </Button>
                     </div>
@@ -173,7 +205,7 @@ export function SkillsPage() {
                             <li
                               key={i}
                               className="flex items-center justify-between gap-2 text-xs font-mono
-                                text-gray-500 dark:text-gray-400 px-2 py-1 rounded bg-gray-50 dark:bg-white/5"
+                                text-gray-500 dark:text-gray-400 px-2 py-1 rounded-lg bg-gray-50 dark:bg-white/5"
                             >
                               <span className="truncate">
                                 {u.workspaceName}

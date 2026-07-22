@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button, TextArea, Loading } from "neogestify-ui-components";
-import { BackIcon } from "neogestify-ui-components";
+import { StackIcon } from "neogestify-ui-components";
 import { useSkillsStore } from "../store/skills";
+import { PageHeader } from "../components/common/PageHeader";
 
 export function SkillDetailPage() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { getSkillDetail, updateSkillContent } = useSkillsStore();
   const [loading, setLoading] = useState(true);
@@ -70,12 +70,7 @@ export function SkillDetailPage() {
   return (
     <main className="min-h-full px-6 py-10 bg-gray-50 dark:bg-gray-950">
       <div className="max-w-3xl mx-auto">
-        <div className="flex items-center gap-3 mb-6">
-          <Button variant="icon" onClick={() => navigate("/skills")} title={t("btn.back")}>
-            <BackIcon className="w-4 h-4" />
-          </Button>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white truncate">{name}</h2>
-        </div>
+        <PageHeader icon={<StackIcon className="w-5 h-5" />} title={name} />
 
         {meta && (
           <div className="flex flex-wrap items-center gap-2 mb-6 text-xs">

@@ -645,14 +645,22 @@ fn remove_symlink_best_effort(path: &Path) {
     }
 }
 
-/// Convención de path del symlink dentro del cwd de una tab, según el agente. Solo
-/// Claude Code tiene una convención de discovery de skills confirmada; para el resto
-/// no se symlinkea nada todavía (devuelve `None`) hasta verificar si tienen un
-/// mecanismo equivalente.
-/// TODO: verificar convención real de skills para gemini-cli/codex/opencode.
+/// Convención de path del symlink dentro del cwd de una tab, según el agente —
+/// verificado contra la documentación real de cada CLI (no asumido):
+/// - Claude Code: `.claude/skills/<slug>/SKILL.md` (docs.claude.com/en/docs/claude-code/skills).
+/// - Gemini CLI, OpenCode, Codex y Kimi Code adoptan el mismo estándar abierto de
+///   "Agent Skills" bajo `.agents/skills/<slug>/SKILL.md` a nivel de proyecto — un solo
+///   symlink ahí lo ven los cuatro sin duplicar nada. Gemini CLI también acepta
+///   `.gemini/skills/` pero `.agents/skills/` tiene prioridad si ambas existen, así que
+///   alcanza con esa. Fuentes: github.com/google-gemini/gemini-cli/blob/main/docs/cli/skills.md,
+///   opencode.ai/docs/skills, learn.chatgpt.com/docs/build-skills,
+///   github.com/MoonshotAI/kimi-cli/blob/main/docs/en/customization/skills.md.
 pub fn link_path_for(cwd: &str, agent_id: &str, slug: &str) -> Option<PathBuf> {
     match agent_id {
         "claude-code" => Some(Path::new(cwd).join(".claude").join("skills").join(slug)),
+        "gemini-cli" | "opencode" | "codex" | "kimi-code" => {
+            Some(Path::new(cwd).join(".agents").join("skills").join(slug))
+        }
         _ => None,
     }
 }

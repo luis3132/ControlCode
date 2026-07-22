@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Input } from "neogestify-ui-components";
-import { EditIcon, TrashIcon, CheckIcon, CancelIcon, BackIcon } from "neogestify-ui-components";
+import { EditIcon, TrashIcon, CheckIcon, CancelIcon, BoxIcon } from "neogestify-ui-components";
 import { useWorkspacesStore, WorkspaceSummary } from "../store/workspaces";
 import { OpenWorkspaceDialog } from "../components/workspace/OpenWorkspaceDialog";
+import { PageHeader } from "../components/common/PageHeader";
 
 function formatRelative(unixSeconds: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const diffSeconds = Math.max(0, Math.floor(Date.now() / 1000) - unixSeconds);
@@ -24,7 +24,6 @@ function formatRelative(unixSeconds: number, t: (key: string, opts?: Record<stri
 
 export function WorkspacesPage() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const { workspaces, loadWorkspaces, renameWorkspace, deleteWorkspace, focusIfOpen } = useWorkspacesStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -79,19 +78,11 @@ export function WorkspacesPage() {
     <main className="min-h-full px-6 py-10 bg-gray-50 dark:bg-gray-950">
       <div className="max-w-2xl mx-auto">
 
-        <div className="flex items-center gap-3 mb-10">
-          <Button variant="icon" onClick={() => navigate("/")} title={t("btn.back")}>
-            <BackIcon className="w-4 h-4" />
-          </Button>
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-              {t("workspace.manage.title")}
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {t("workspace.manage.subtitle")}
-            </p>
-          </div>
-        </div>
+        <PageHeader
+          icon={<BoxIcon className="w-5 h-5" />}
+          title={t("workspace.manage.title")}
+          subtitle={t("workspace.manage.subtitle")}
+        />
 
         {error && (
           <p className="text-sm text-red-500 dark:text-red-400 mb-4">{error}</p>

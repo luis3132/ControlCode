@@ -29,7 +29,8 @@ export function WorkspaceList({ workspaces, onSelect }: WorkspaceListProps) {
   if (workspaces.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="w-full rounded-xl border border-gray-200 dark:border-gray-700
+      bg-white dark:bg-gray-800/50 p-5 flex flex-col gap-3 shadow-sm">
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-semibold uppercase tracking-widest
           text-gray-400 dark:text-gray-500">
@@ -48,8 +49,8 @@ export function WorkspaceList({ workspaces, onSelect }: WorkspaceListProps) {
           <button
             key={ws.id}
             onClick={() => onSelect(ws)}
-            className="flex items-center justify-between gap-3 px-3 py-2 rounded-sm border text-left
-              border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60
+            className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border text-left
+              border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-white/[0.02]
               hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm
               transition-all duration-150"
           >

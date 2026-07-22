@@ -1,9 +1,22 @@
-/** Agentes para los que se sabe construir un comando de "resume por session id". */
+/** Agentes para los que se sabe construir un comando de "resume por session id".
+ * Verificado contra la documentación real de cada CLI (no asumido):
+ * - claude-code: code.claude.com/docs/en/sessions — `--resume <id>` apunta a una sesión
+ *   puntual sin importar el cwd (distinto de `--continue`, que retoma la más reciente
+ *   DEL directorio actual — no es lo que queremos acá, nosotros ya sabemos el id exacto).
+ * - gemini-cli: github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md
+ *   — mismo flag `--resume <id>` (además de aceptar índice numérico o vacío).
+ * - codex: learn.chatgpt.com/docs/build-skills / Inventive HQ — `resume <id>` es
+ *   subcomando, no flag.
+ * - opencode: opencode.ai docs — `--session <id>` (alias `-s`) apunta a una sesión
+ *   puntual; `--continue`/`-c` (sin id) retoma la más reciente, no aplica acá.
+ * - kimi-code: moonshotai.github.io/kimi-code/en/reference/kimi-command.html —
+ *   `--session <id>` (alias `-S`, mayúscula — distinta de `-s`/`--continue` corta). */
 const RESUME_BUILDERS: Record<string, (cmd: string, sessionId: string) => string> = {
   "claude-code": (cmd, id) => `${cmd} --resume ${id}`,
   "gemini-cli": (cmd, id) => `${cmd} --resume ${id}`,
   codex: (cmd, id) => `${cmd} resume ${id}`,
   opencode: (cmd, id) => `${cmd} --session ${id}`,
+  "kimi-code": (cmd, id) => `${cmd} --session ${id}`,
 };
 
 export const RESUMABLE_AGENT_IDS = Object.keys(RESUME_BUILDERS);

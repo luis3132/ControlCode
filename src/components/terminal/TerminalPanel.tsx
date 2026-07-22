@@ -29,6 +29,7 @@ export function TerminalPanel() {
             }}
           >
             <Terminal
+              tabId={tab.id}
               command={buildResumeCommand(tab.agentId, tab.command, tab.sessionId)}
               cwd={tab.cwd}
               agentId={tab.agentId}

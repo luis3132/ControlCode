@@ -22,6 +22,9 @@ const AGENTS: &[AgentCandidate] = &[
     AgentCandidate { id: "gemini-cli",  label: "Gemini CLI",  command: "gemini",  version_flag: "--version" },
     AgentCandidate { id: "codex",       label: "Codex",       command: "codex",   version_flag: "--version" },
     AgentCandidate { id: "opencode",    label: "OpenCode",    command: "opencode", version_flag: "--version" },
+    // Moonshot AI — repo en transición de nombre kimi-cli → kimi-code, el binario real
+    // sigue siendo `kimi` (moonshotai.github.io/kimi-code/en/reference/kimi-command.html).
+    AgentCandidate { id: "kimi-code",   label: "Kimi Code",   command: "kimi",    version_flag: "--version" },
 ];
 
 fn probe_agent(candidate: &AgentCandidate) -> AgentInfo {

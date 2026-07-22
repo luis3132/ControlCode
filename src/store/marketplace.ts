@@ -38,6 +38,7 @@ interface MarketplaceState {
   loadRegistries: () => Promise<void>;
   loadSkills: (query?: string, category?: string) => Promise<void>;
   addRegistry: (name: string, sourceType: RegistrySourceType, location: string) => Promise<void>;
+  renameRegistry: (id: string, name: string) => Promise<void>;
   removeRegistry: (id: string) => Promise<void>;
   setRegistryEnabled: (id: string, enabled: boolean) => Promise<void>;
   refreshRegistry: (id: string) => Promise<void>;
@@ -72,6 +73,12 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
 
   addRegistry: async (name, sourceType, location) => {
     await invoke("add_registry", { name, sourceType, location });
+    await get().loadRegistries();
+    await get().loadSkills();
+  },
+
+  renameRegistry: async (id, name) => {
+    await invoke("rename_registry", { id, name });
     await get().loadRegistries();
     await get().loadSkills();
   },

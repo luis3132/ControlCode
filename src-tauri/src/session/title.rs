@@ -226,6 +226,14 @@ fn codex_title(path: &Path, fallback: &str) -> SessionTitleResult {
 }
 
 // ── OpenCode: ~/.local/share/opencode/storage/session/<projectID>/<id>.json ──
+// ATENCIÓN: esta ruta y formato (JSON por sesión) nunca se verificaron contra la fuente
+// real de OpenCode — quedaron asumidos por analogía con Claude Code. Una investigación
+// posterior (ver historial) confirmó que OpenCode en realidad persiste sus sesiones en
+// SQLite, no en archivos JSON sueltos — así que todo este bloque probablemente nunca
+// encuentra nada real y siempre degrada a `fallback_result` (no rompe nada, pero el
+// título automático / resume de OpenCode no funciona). Arreglarlo bien requiere la
+// ubicación real del .db y su schema, que no pudimos confirmar. `discover_session_id`
+// para "opencode" queda con este mismo problema.
 
 fn opencode_data_dir() -> PathBuf {
     std::env::var("XDG_DATA_HOME")

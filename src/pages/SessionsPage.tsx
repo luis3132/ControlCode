@@ -4,9 +4,10 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "neogestify-ui-components";
-import { BackIcon, FolderIcon, ArrowRightIcon } from "neogestify-ui-components";
+import { FolderIcon, ArrowRightIcon, ClockIcon } from "neogestify-ui-components";
 import { useSessionsStore } from "../store/sessions";
 import { useTabsStore } from "../store/tabs";
+import { PageHeader } from "../components/common/PageHeader";
 
 interface OpenTabLocation {
   windowLabel: string;
@@ -80,19 +81,11 @@ export function SessionsPage() {
     <main className="min-h-full px-6 py-10 bg-gray-50 dark:bg-gray-950">
       <div className="max-w-2xl mx-auto">
 
-        <div className="flex items-center gap-3 mb-10">
-          <Button variant="icon" onClick={() => navigate("/")} title={t("btn.back")}>
-            <BackIcon className="w-4 h-4" />
-          </Button>
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-              {t("sessions.title")}
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {t("sessions.subtitle")}
-            </p>
-          </div>
-        </div>
+        <PageHeader
+          icon={<ClockIcon className="w-5 h-5" />}
+          title={t("sessions.title")}
+          subtitle={t("sessions.subtitle")}
+        />
 
         {history.length === 0 ? (
           <p className="text-sm italic text-gray-400 dark:text-gray-500">
