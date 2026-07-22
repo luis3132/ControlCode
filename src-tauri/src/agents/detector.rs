@@ -55,15 +55,26 @@ fn probe_agent(candidate: &AgentCandidate) -> AgentInfo {
 
 /// Detecta qué agentes de IA están instalados en el PATH del sistema.
 /// Siempre incluye bash como último elemento con available: true.
+///
+/// `probe_agent` hace hasta 2 spawns de proceso bloqueantes por candidato (`which` +
+/// `--version`) — sin `spawn_blocking`, ese trabajo síncrono corre directo sobre un
+/// worker thread del executor async de Tauri (esta función es `async fn` pero no tiene
+/// ningún `.await` real), bloqueándolo mientras dura. Se llama una vez por cada ventana
+/// nueva que monta `AppShell`, así que con varias ventanas abriéndose a la vez podía
+/// demorar otros comandos async programados en ese mismo worker.
 #[tauri::command]
 pub async fn detect_agents() -> Result<Vec<AgentInfo>, String> {
-    let mut agents: Vec<AgentInfo> = AGENTS.iter().map(probe_agent).collect();
-    agents.push(AgentInfo {
-        id: "bash".to_string(),
-        label: "Terminal (bash)".to_string(),
-        command: "bash".to_string(),
-        available: true,
-        version: None,
-    });
-    Ok(agents)
+    tokio::task::spawn_blocking(|| {
+        let mut agents: Vec<AgentInfo> = AGENTS.iter().map(probe_agent).collect();
+        agents.push(AgentInfo {
+            id: "bash".to_string(),
+            label: "Terminal (bash)".to_string(),
+            command: "bash".to_string(),
+            available: true,
+            version: None,
+        });
+        agents
+    })
+    .await
+    .map_err(|e| e.to_string())
 }

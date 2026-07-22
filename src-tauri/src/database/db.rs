@@ -47,6 +47,13 @@ fn needs_schema_v6(conn: &Connection) -> bool {
 pub fn init_db() -> SqlResult<DbConnection> {
     let conn = Connection::open(db_path())?;
 
+    // SQLite trae el enforcement de FK apagado por defecto en cada conexión — sin esto,
+    // todos los `ON DELETE CASCADE` del schema (workspaces→windows→tabs→project_skills,
+    // skills→project_skills, workspaces→session_history) son un no-op silencioso: borrar
+    // un workspace/ventana/skill deja filas huérfanas en las tablas hijas para siempre
+    // en vez de limpiarlas.
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+
     // Pre-MVP: no hay datos reales que preservar, así que en vez de migrar
     // incrementalmente se recrean las tablas si el schema está desactualizado.
     if needs_schema_v3(&conn) {
@@ -542,8 +549,13 @@ pub fn db_get_workspace_windows(
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
+            // ORDER BY last_active: el frontend usa la primera fila para decidir qué
+            // ventana enfocar cuando el workspace ya tiene varias vivas (focusIfOpen) —
+            // sin orden explícito, la fila que llegaba primero era arbitraria (orden de
+            // inserción de SQLite), no necesariamente la usada más recientemente.
             "SELECT id, label, workspace_id, pos_x, pos_y, width, height, monitor, is_open, last_active
-             FROM windows WHERE workspace_id = ?1 AND is_open = 1",
+             FROM windows WHERE workspace_id = ?1 AND is_open = 1
+             ORDER BY last_active DESC",
         )
         .map_err(|e| e.to_string())?;
 

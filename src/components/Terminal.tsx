@@ -26,10 +26,16 @@ interface TerminalProps {
 }
 
 // El agente puede tardar en escribir su primer log (p. ej. hasta el primer mensaje
-// del usuario), así que se sigue intentando mientras la tab esté abierta, no solo
-// los primeros segundos tras lanzarla.
-const SESSION_DISCOVERY_INTERVAL_MS = 3000;
-const SESSION_DISCOVERY_MAX_ATTEMPTS = Infinity;
+// del usuario), así que no basta con probar solo los primeros segundos tras lanzarla.
+// Pero cada intento para gemini-cli/codex escanea y LEE EL CONTENIDO de todos los
+// archivos de sesión del sistema (de cualquier proyecto, no solo este cwd) cuyo mtime
+// sea posterior al arranque de la tab — repetir eso cada 3s indefinidamente durante
+// toda la vida de una tab que jamás llega a resolverse (agente sin sesión, cwd sin
+// permisos, etc.) es I/O desperdiciado sin límite. Se usa backoff hasta un techo y un
+// número acotado de intentos en vez de un intervalo fijo infinito.
+const SESSION_DISCOVERY_INITIAL_MS = 3000;
+const SESSION_DISCOVERY_MAX_INTERVAL_MS = 30_000;
+const SESSION_DISCOVERY_MAX_ATTEMPTS = 60; // con backoff, cubre ~35 minutos antes de rendirse
 // Margen de seguridad: los timestamps de archivo tienen resolución de 1s y puede haber
 // un pequeño desfase entre este reloj y el de pty_create.
 const SESSION_DISCOVERY_LOOKBACK_S = 3;
@@ -123,11 +129,15 @@ export function Terminal({
           // ignorar, se reintenta
         }
         if (!cancelled && discoveryAttempts < SESSION_DISCOVERY_MAX_ATTEMPTS) {
-          discoveryTimer = setTimeout(attempt, SESSION_DISCOVERY_INTERVAL_MS);
+          const delay = Math.min(
+            SESSION_DISCOVERY_INITIAL_MS * 2 ** Math.floor(discoveryAttempts / 3),
+            SESSION_DISCOVERY_MAX_INTERVAL_MS
+          );
+          discoveryTimer = setTimeout(attempt, delay);
         }
       };
 
-      discoveryTimer = setTimeout(attempt, SESSION_DISCOVERY_INTERVAL_MS);
+      discoveryTimer = setTimeout(attempt, SESSION_DISCOVERY_INITIAL_MS);
     };
 
     const attachListeners = async (ptyId: number) => {

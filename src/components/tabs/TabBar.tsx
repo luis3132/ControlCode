@@ -9,6 +9,7 @@ import { TabContextMenu } from "./TabContextMenu";
 import { NewTabWizard } from "../wizard/NewTabWizard";
 import { refreshSessionTitle } from "../../lib/sessionTitle";
 import { markPtyTransferring } from "../../lib/ptyTransfer";
+import { flushPendingSave } from "../../store/persistTabs";
 import { AddIcon } from "neogestify-ui-components";
 
 interface ContextMenuState {
@@ -90,33 +91,50 @@ export function TabBar() {
       }
     }
 
-    if (mergeTarget) {
-      // Merge: enviar tab (con su PTY vivo) a la otra ventana vía evento Tauri
-      await invoke("broadcast_event", {
-        event: "cc-receive-tab",
-        payload: JSON.stringify({
-          targetLabel: mergeTarget,
+    // Solo se cierra la tab de origen si el destino (merge u open_new_window) confirmó
+    // éxito — si cualquiera de los dos falla (ventana destino recién cerrada, error del
+    // backend), cerrar igual dejaría el PTY vivo huérfano: sin ninguna tab en memoria que
+    // lo referencie, invisible para el autosave de cualquier ventana.
+    try {
+      if (mergeTarget) {
+        // Merge: enviar tab (con su PTY vivo) a la otra ventana vía evento Tauri
+        await invoke("broadcast_event", {
+          event: "cc-receive-tab",
+          payload: JSON.stringify({
+            targetLabel: mergeTarget,
+            cwd: tab.cwd, command: tab.command, agentId: tab.agentId,
+            agentLabel: tab.agentLabel, title: tab.title, sessionId: tab.sessionId,
+            ptyId: tab.ptyId,
+          }),
+        });
+      } else {
+        // Fuera de cualquier ventana → nueva ventana, llevándose el mismo PTY. Hereda el
+        // workspace de ESTA ventana (misma handoff key que usa TopBar para "Nueva ventana")
+        // para que la tab destacada no quede huérfana en el bucket "default".
+        localStorage.setItem("cc-detach", JSON.stringify({
           cwd: tab.cwd, command: tab.command, agentId: tab.agentId,
           agentLabel: tab.agentLabel, title: tab.title, sessionId: tab.sessionId,
           ptyId: tab.ptyId,
-        }),
-      });
-    } else {
-      // Fuera de cualquier ventana → nueva ventana, llevándose el mismo PTY. Hereda el
-      // workspace de ESTA ventana (misma handoff key que usa TopBar para "Nueva ventana")
-      // para que la tab destacada no quede huérfana en el bucket "default".
-      localStorage.setItem("cc-detach", JSON.stringify({
-        cwd: tab.cwd, command: tab.command, agentId: tab.agentId,
-        agentLabel: tab.agentLabel, title: tab.title, sessionId: tab.sessionId,
-        ptyId: tab.ptyId,
-      }));
-      localStorage.setItem("cc-new-window-workspace", workspaceId);
-      await invoke("open_new_window", { label: `cc-window-${Date.now()}` });
+        }));
+        localStorage.setItem("cc-new-window-workspace", workspaceId);
+        await invoke("open_new_window", { label: `cc-window-${Date.now()}` });
+      }
+    } catch (err) {
+      console.error("No se pudo mover la tab a otra ventana, se conserva en el origen", err);
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      return;
     }
 
     if (tab.ptyId != null) markPtyTransferring(tab.ptyId);
     closeTab(tab.id);
-    if (tabs.length === 1) await getCurrentWindow().close();
+    if (tabs.length === 1) {
+      // Sin este flush, la ventana se cierra con el autosave de "sin tabs" todavía
+      // pendiente en el debounce — su fila en SQLite queda con la tab que se acaba de
+      // mover, duplicada con la copia que ya persistió el destino.
+      await flushPendingSave();
+      await getCurrentWindow().close();
+    }
 
     setDraggedIndex(null);
     setDragOverIndex(null);
@@ -141,23 +159,31 @@ export function TabBar() {
   const handleMoveToWindow = async (targetLabel: string, tabId: string) => {
     const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
-    await invoke("broadcast_event", {
-      event: "cc-receive-tab",
-      payload: JSON.stringify({
-        targetLabel,
-        cwd: tab.cwd,
-        command: tab.command,
-        agentId: tab.agentId,
-        agentLabel: tab.agentLabel,
-        title: tab.title,
-        sessionId: tab.sessionId,
-        ptyId: tab.ptyId,
-      }),
-    });
+    try {
+      await invoke("broadcast_event", {
+        event: "cc-receive-tab",
+        payload: JSON.stringify({
+          targetLabel,
+          cwd: tab.cwd,
+          command: tab.command,
+          agentId: tab.agentId,
+          agentLabel: tab.agentLabel,
+          title: tab.title,
+          sessionId: tab.sessionId,
+          ptyId: tab.ptyId,
+        }),
+      });
+    } catch (err) {
+      console.error("No se pudo mover la tab a otra ventana, se conserva en el origen", err);
+      return;
+    }
     if (tab.ptyId != null) markPtyTransferring(tab.ptyId);
     closeTab(tabId);
-    // Auto-cierre si era la última tab
+    // Auto-cierre si era la última tab. Flush explícito por la misma razón que en
+    // handleDragEnd: sin esto, la ventana se cierra con el guardado de "sin tabs"
+    // todavía pendiente en el debounce, y su fila queda duplicando la tab movida.
     if (tabs.length === 1) {
+      await flushPendingSave();
       await getCurrentWindow().close();
     }
   };

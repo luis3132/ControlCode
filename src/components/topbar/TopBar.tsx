@@ -74,10 +74,14 @@ export function TopBar() {
   const [workspaceName, setWorkspaceName] = useState<string | null>(null);
 
   // Nombre del workspace de ESTA ventana (reemplaza el "Control Code" estático del logo).
+  // Guard contra respuestas fuera de orden: si `workspaceId` cambia dos veces rápido, la
+  // resolución del valor viejo puede llegar después de la del nuevo y pisarlo.
   useEffect(() => {
+    let stale = false;
     invoke<{ name: string }>("db_get_workspace", { workspaceId })
-      .then((ws) => setWorkspaceName(ws.name))
-      .catch(() => setWorkspaceName(null));
+      .then((ws) => { if (!stale) setWorkspaceName(ws.name); })
+      .catch(() => { if (!stale) setWorkspaceName(null); });
+    return () => { stale = true; };
   }, [workspaceId]);
 
   const handleCloseClick = async () => {

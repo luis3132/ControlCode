@@ -18,6 +18,13 @@ type PtyBuffers = Arc<Mutex<HashMap<u32, Vec<u8>>>>;
 /// cuando una tab se mueve a otra ventana sin matar el proceso.
 const MAX_BUFFER_BYTES: usize = 3 * 1024 * 1024;
 
+/// Margen sobre `MAX_BUFFER_BYTES` que se deja acumular antes de recortar. `drain` es
+/// O(tamaño del buffer) (memmove de todo lo que queda tras el hueco): sin este margen,
+/// un proceso que escupe output sin parar (build, npm install) dispara ese memmove de
+/// ~3MB en CADA chunk leído de 4KB una vez lleno el buffer. Recortando en lotes de
+/// TRIM_MARGIN_BYTES en vez de byte a byte, el mismo trabajo se amortiza ~100x.
+const TRIM_MARGIN_BYTES: usize = 512 * 1024;
+
 lazy_static::lazy_static! {
     static ref PTY_REGISTRY: PtyRegistry = Arc::new(Mutex::new(HashMap::new()));
     static ref PTY_BUFFERS: PtyBuffers = Arc::new(Mutex::new(HashMap::new()));
@@ -38,7 +45,7 @@ fn append_to_buffer(id: u32, chunk: &[u8]) {
     let mut buffers = PTY_BUFFERS.lock().unwrap();
     let buf = buffers.entry(id).or_default();
     buf.extend_from_slice(chunk);
-    if buf.len() > MAX_BUFFER_BYTES {
+    if buf.len() > MAX_BUFFER_BYTES + TRIM_MARGIN_BYTES {
         let excess = buf.len() - MAX_BUFFER_BYTES;
         buf.drain(0..excess);
     }

@@ -719,8 +719,22 @@ pub fn attach_skill(
     let skill = fetch_skill_row(&conn, &skill_id)?;
     let tabs = tabs_for_scope(&conn, &workspace_id, tab_id.as_deref())?;
 
+    // Si una tab falla a mitad del loop (ej. destino ya existe y no es symlink), las
+    // symlinks ya creadas para tabs anteriores no deben quedar huérfanas en disco sin
+    // fila en `project_skills` — ni `check_symlinks_health` ni `delete_skill` las verían.
+    // Se deshacen las que sí se crearon en esta llamada antes de propagar el error.
+    let mut created: Vec<(&str, &str)> = Vec::new();
     for (_, cwd, agent_id) in &tabs {
-        ensure_symlink(&skill, cwd, agent_id)?;
+        if let Err(e) = ensure_symlink(&skill, cwd, agent_id) {
+            let slug = slug_from_source_path(&skill.source_path);
+            for (cwd, agent_id) in &created {
+                if let Some(link_path) = link_path_for(cwd, agent_id, &slug) {
+                    remove_symlink_best_effort(&link_path);
+                }
+            }
+            return Err(e);
+        }
+        created.push((cwd.as_str(), agent_id.as_str()));
     }
 
     let now = now_ts();
