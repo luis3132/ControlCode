@@ -14,6 +14,7 @@ import { OpenWorkspaceDialog } from "../components/workspace/OpenWorkspaceDialog
 import { SkillPickerStep } from "../components/wizard/SkillPickerStep";
 import { flushPendingSave } from "../store/persistTabs";
 import { registerPendingSkillSetup } from "../lib/pendingSkillSetup";
+import { agentIcon } from "../lib/agentIcons";
 
 export function HomePage() {
   const { t } = useTranslation();
@@ -154,35 +155,46 @@ export function HomePage() {
               <div className="grid grid-cols-2 gap-2">
                 {allAgents.map((agent) => {
                   const isSelected = agent.id === selectedAgent?.id;
+                  const AgentIcon = agentIcon(agent.id, agent.command);
                   return (
                     <button
                       key={agent.id}
                       onClick={() => { setSelectedAgent(agent); setSelectedSkillIds([]); }}
                       className={`
-                        group flex flex-col gap-1 px-4 py-3 rounded-xl border text-left
+                        group flex items-center gap-3 px-4 py-3 rounded-xl border text-left
                         transition-all duration-200
                         ${isSelected
                           ? "border-blue-500 bg-linear-to-br from-blue-50 to-violet-50 dark:from-blue-500/10 dark:to-violet-500/10 shadow-sm"
                           : "border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-white/[0.02] hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm"}
                       `}
                     >
-                      <span className={`text-sm font-semibold transition-colors
+                      <span className={`shrink-0 flex items-center justify-center w-9 h-9 rounded-lg
+                        transition-colors duration-200
                         ${isSelected
-                          ? "text-blue-700 dark:text-blue-300"
-                          : "text-gray-800 dark:text-gray-100 group-hover:text-gray-900 dark:group-hover:text-white"}`}>
-                        {agent.label}
+                          ? "bg-blue-500/10 text-blue-600 dark:bg-blue-400/15 dark:text-blue-300"
+                          : "bg-gray-200/70 text-gray-500 dark:bg-white/6 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-200"}`}>
+                        <AgentIcon className="w-5 h-5" />
                       </span>
-                      <span className={`text-xs font-mono transition-colors
-                        ${isSelected
-                          ? "text-blue-500/70 dark:text-blue-400/70"
-                          : "text-gray-400 dark:text-gray-500"}`}>
-                        {agent.command}
-                      </span>
-                      {agent.isCustom && (
-                        <span className="text-[10px] font-medium text-violet-500 dark:text-violet-400">
-                          custom
+
+                      <span className="flex flex-col gap-0.5 min-w-0">
+                        <span className={`text-sm font-semibold truncate transition-colors
+                          ${isSelected
+                            ? "text-blue-700 dark:text-blue-300"
+                            : "text-gray-800 dark:text-gray-100 group-hover:text-gray-900 dark:group-hover:text-white"}`}>
+                          {agent.label}
                         </span>
-                      )}
+                        <span className={`text-xs font-mono truncate transition-colors
+                          ${isSelected
+                            ? "text-blue-500/70 dark:text-blue-400/70"
+                            : "text-gray-400 dark:text-gray-500"}`}>
+                          {agent.command}
+                        </span>
+                        {agent.isCustom && (
+                          <span className="text-[10px] font-medium text-violet-500 dark:text-violet-400">
+                            custom
+                          </span>
+                        )}
+                      </span>
                     </button>
                   );
                 })}

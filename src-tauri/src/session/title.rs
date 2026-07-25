@@ -281,13 +281,63 @@ fn opencode_session_id_from_path(path: &Path) -> Option<String> {
     path.file_stem().map(|s| s.to_string_lossy().to_string())
 }
 
+// ── TUIs personalizadas ───────────────────────────────────────────────
+
+/// Archivo de sesión más reciente de una TUI custom: el más nuevo bajo la carpeta que el
+/// usuario declaró, buscando tanto `.jsonl` como `.json` (las dos formas que usan los CLIs
+/// conocidos). A diferencia de las TUIs de fábrica no se filtra por cwd — no hay forma
+/// genérica de saber cómo esa TUI mapea un proyecto a una carpeta — así que el filtro por
+/// `after` (el momento en que arrancó ESTE proceso) es lo único que evita agarrar la
+/// sesión de otra tab. Por eso `get_session_title` no lo usa sin un `after`.
+fn custom_session_file(agent: &crate::agents::CustomAgent, after: Option<i64>) -> Option<PathBuf> {
+    let root = agent.resolved_sessions_dir()?;
+    let mut files = Vec::new();
+    collect_files(&root, "jsonl", &mut files);
+    collect_files(&root, "json", &mut files);
+    newest_matching(&files, after, None)
+}
+
+/// Archivo de la sesión con ESTE id exacto, ya sea porque el id es el nombre del archivo
+/// o porque aparece adentro. Recorre la carpeta declarada; devuelve `None` si no aparece.
+fn custom_session_file_by_id(
+    agent: &crate::agents::CustomAgent,
+    session_id: &str,
+) -> Option<PathBuf> {
+    let root = agent.resolved_sessions_dir()?;
+    let mut files = Vec::new();
+    collect_files(&root, "jsonl", &mut files);
+    collect_files(&root, "json", &mut files);
+    files.into_iter().find(|p| custom_session_id(agent, p).as_deref() == Some(session_id))
+}
+
+fn custom_session_id(agent: &crate::agents::CustomAgent, path: &Path) -> Option<String> {
+    match agent.session_id_source() {
+        crate::agents::SessionIdSource::Filename => {
+            path.file_stem().map(|s| s.to_string_lossy().to_string())
+        }
+        crate::agents::SessionIdSource::Field(key) => find_string_field(path, &[key.as_str()]),
+    }
+}
+
+/// Título de una sesión de TUI custom: se reusa la heurística genérica de "primer mensaje
+/// del usuario" que ya sirve para Codex, porque cubre las formas JSONL más comunes
+/// (`role: user` + `content` string o bloques de texto) sin conocer el formato exacto.
+fn custom_title(path: &Path, fallback: &str) -> SessionTitleResult {
+    codex_title(path, fallback)
+}
+
 // ── Comandos públicos ─────────────────────────────────────────────────
 
 /// Busca el archivo/registro de sesión más reciente para `cwd` (creado después de
 /// `started_after`) y devuelve el session_id real que el agente le asignó, para poder
 /// reanudarlo más adelante con la flag de resume de cada CLI.
 #[tauri::command]
-pub fn discover_session_id(agent_id: String, cwd: String, started_after: i64) -> Option<String> {
+pub fn discover_session_id(
+    agent_id: String,
+    cwd: String,
+    started_after: i64,
+    db: tauri::State<crate::database::DbConnection>,
+) -> Option<String> {
     match agent_id.as_str() {
         "claude-code" => {
             let path = claude_session_file(&cwd, None, Some(started_after))?;
@@ -305,7 +355,14 @@ pub fn discover_session_id(agent_id: String, cwd: String, started_after: i64) ->
             let path = opencode_session_file(&cwd, Some(started_after))?;
             opencode_session_id_from_path(&path)
         }
-        _ => None,
+        // TUI custom: solo si el usuario declaró dónde guarda sus sesiones.
+        other => {
+            let conn = db.lock().ok()?;
+            let agent = crate::agents::find(&conn, other)?;
+            drop(conn);
+            let path = custom_session_file(&agent, Some(started_after))?;
+            custom_session_id(&agent, &path)
+        }
     }
 }
 
@@ -317,6 +374,7 @@ pub fn get_session_title(
     cwd: String,
     session_id: Option<String>,
     fallback: String,
+    db: tauri::State<crate::database::DbConnection>,
 ) -> SessionTitleResult {
     match agent_id.as_str() {
         "claude-code" => match claude_session_file(&cwd, session_id.as_deref(), None) {
@@ -335,6 +393,20 @@ pub fn get_session_title(
             Some(path) => opencode_title(&path, &fallback),
             None => fallback_result(&fallback),
         },
-        _ => fallback_result(&fallback),
+        // TUI custom: se busca el archivo por su id exacto, nunca "el más reciente" — sin
+        // saber cómo esa TUI mapea proyectos a carpetas, "el más reciente" podría ser la
+        // sesión de otra tab y el título quedaría cruzado.
+        other => {
+            let Some(id) = session_id else { return fallback_result(&fallback) };
+            let Ok(conn) = db.lock() else { return fallback_result(&fallback) };
+            let Some(agent) = crate::agents::find(&conn, other) else {
+                return fallback_result(&fallback);
+            };
+            drop(conn);
+            match custom_session_file_by_id(&agent, &id) {
+                Some(path) => custom_title(&path, &fallback),
+                None => fallback_result(&fallback),
+            }
+        }
     }
 }

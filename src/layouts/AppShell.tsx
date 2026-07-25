@@ -11,6 +11,7 @@ import { PathBar } from "../components/workspace/PathBar";
 import { TerminalPanel } from "../components/terminal/TerminalPanel";
 import { ResizeHandles } from "../components/ResizeHandles";
 import { AppExitListener } from "../components/app/AppExitListener";
+import { useSettingsStore } from "../store/settings";
 
 interface RestoredTabRow {
   id: string;
@@ -55,6 +56,9 @@ export function AppShell() {
 
   useEffect(() => {
     invoke<AgentInfo[]>("detect_agents").then(setDetectedAgents);
+    // Las TUIs custom viven en SQLite (el backend también las consulta), así que hay que
+    // traerlas explícitamente en cada ventana en vez de que se rehidraten solas.
+    useSettingsStore.getState().loadCustomAgents().catch(console.error);
   }, []);
 
   // Maximizada, la ventana ocupa el área de trabajo del monitor borde a borde — con la

@@ -1,40 +1,54 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, Input } from "neogestify-ui-components";
-import { TrashIcon, AddIcon, ThemeToggle, FolderIcon } from "neogestify-ui-components";
+import { Button } from "neogestify-ui-components";
+import { TrashIcon, EditIcon, ThemeToggle, FolderIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n/index";
-import { useSettingsStore } from "../store/settings";
+import { CustomAgent, useSettingsStore } from "../store/settings";
 import { useSkillsStore } from "../store/skills";
+import { CustomAgentForm } from "../components/settings/CustomAgentForm";
+
+/** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
+ *  formulario solo para saber si reanuda sesiones o si le gestionamos skills. */
+function AgentCapabilities({ agent }: { agent: CustomAgent }) {
+  const { t } = useTranslation();
+  const caps = [
+    agent.resumeArgs && t("settings.tuis.cap.resume"),
+    agent.skillsDir && t("settings.tuis.cap.skills"),
+    agent.sessionsDir && t("settings.tuis.cap.sessions"),
+    Object.keys(agent.env ?? {}).length > 0 && t("settings.tuis.cap.env"),
+  ].filter(Boolean) as string[];
+
+  if (caps.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {caps.map((c) => (
+        <span key={c} className="text-[10px] px-1.5 py-0.5 rounded
+          bg-blue-500/10 text-blue-600 dark:bg-blue-400/15 dark:text-blue-300">
+          {c}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export function SettingsPage() {
   const { t } = useTranslation();
-  const { customAgents, addCustomAgent, removeCustomAgent } = useSettingsStore();
+  const { customAgents, loadCustomAgents, saveCustomAgent, removeCustomAgent } = useSettingsStore();
   const { skillsDir, loadSkillsDir, setSkillsDir } = useSkillsStore();
-  const [label, setLabel] = useState("");
-  const [command, setCommand] = useState("");
-  const [error, setError] = useState("");
+  /** Id de la TUI que se está editando en línea; `null` = solo el formulario de alta. */
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
     loadSkillsDir();
-  }, [loadSkillsDir]);
+    loadCustomAgents().catch(console.error);
+  }, [loadSkillsDir, loadCustomAgents]);
 
   const handleChangeSkillsDir = async () => {
     const selected = await open({ directory: true, multiple: false, title: t("settings.skillsDir") });
     if (typeof selected === "string" && selected) {
       await setSkillsDir(selected);
     }
-  };
-
-  const handleAdd = () => {
-    if (!label.trim() || !command.trim()) {
-      setError(t("settings.tuis.error"));
-      return;
-    }
-    addCustomAgent({ label: label.trim(), command: command.trim() });
-    setLabel("");
-    setCommand("");
-    setError("");
   };
 
   const handleLanguage = (lang: string) => {
@@ -145,65 +159,52 @@ export function SettingsPage() {
             ) : (
               <div className="flex flex-col gap-2 mb-5">
                 {customAgents.map((agent) => (
-                  <div
-                    key={agent.id}
-                    className="flex items-center justify-between gap-3 px-4 py-3
-                      rounded-lg border border-gray-200 dark:border-gray-700
-                      bg-gray-50 dark:bg-gray-800/50
-                      hover:border-gray-300 dark:hover:border-gray-600
-                      transition-colors"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                      <div className="flex flex-col gap-0.5 min-w-0">
-                        <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">
-                          {agent.label}
-                        </span>
-                        <span className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">
-                          {agent.command}
-                        </span>
+                  editingId === agent.id ? (
+                    <CustomAgentForm
+                      key={agent.id}
+                      initial={agent}
+                      onSubmit={async (draft) => {
+                        await saveCustomAgent(draft);
+                        setEditingId(null);
+                      }}
+                      onCancel={() => setEditingId(null)}
+                    />
+                  ) : (
+                    <div
+                      key={agent.id}
+                      className="flex items-center justify-between gap-3 px-4 py-3
+                        rounded-lg border border-gray-200 dark:border-gray-700
+                        bg-gray-50 dark:bg-gray-800/50
+                        hover:border-gray-300 dark:hover:border-gray-600
+                        transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">
+                            {agent.label}
+                          </span>
+                          <span className="text-xs font-mono text-gray-400 dark:text-gray-500 truncate">
+                            {agent.command}
+                          </span>
+                          <AgentCapabilities agent={agent} />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button variant="outline" onClick={() => setEditingId(agent.id)}>
+                          <EditIcon className="w-4 h-4" />
+                        </Button>
+                        <Button variant="danger" onClick={() => removeCustomAgent(agent.id)}>
+                          <TrashIcon className="w-4 h-4" />
+                        </Button>
                       </div>
                     </div>
-                    <Button variant="danger" onClick={() => removeCustomAgent(agent.id)}>
-                      <TrashIcon className="w-4 h-4" />
-                    </Button>
-                  </div>
+                  )
                 ))}
               </div>
             )}
 
-            {/* Add form */}
-            <div className="flex flex-col gap-3 p-4 rounded-lg border border-dashed
-              border-gray-300 dark:border-gray-600
-              bg-gray-50/50 dark:bg-gray-900/30">
-              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                {t("settings.tuis.addSection")}
-              </p>
-              <div className="flex gap-2">
-                <Input
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-                  placeholder={t("settings.tuis.namePlaceholder")}
-                  variant="outline"
-                />
-                <Input
-                  value={command}
-                  onChange={(e) => setCommand(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-                  placeholder={t("settings.tuis.commandPlaceholder")}
-                  variant="outline"
-                />
-              </div>
-              {error && (
-                <p className="text-xs text-red-500 dark:text-red-400">{error}</p>
-              )}
-              <Button variant="primary" onClick={handleAdd}
-                className="flex items-center gap-1.5 !text-sm w-fit">
-                <AddIcon className="w-4 h-4" />
-                {t("btn.add")}
-              </Button>
-            </div>
+            <CustomAgentForm onSubmit={saveCustomAgent} />
           </section>
 
         </div>

@@ -286,15 +286,32 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 
 fn resolve_skills_dir(db: &DbConnection) -> Result<PathBuf, String> {
     let value = crate::database::get_setting(db, "skills_dir")?;
-    let dir = match value {
-        Some(v) => PathBuf::from(v),
-        None => {
-            let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
-            home.join(".controlcode").join("skills")
-        }
-    };
+    let dir = skills_dir_from_value(value)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
+}
+
+/// Igual que `resolve_skills_dir` pero a partir de una `&Connection` ya lockeada — la
+/// reconciliación de symlinks corre en medio de operaciones que ya tienen el lock de la
+/// DB tomado (attach/detach, cierre de tabs/ventanas), y volver a lockear ahí sería un
+/// deadlock. No crea el directorio: acá solo se usa para decidir si un symlink existente
+/// apunta a la copia global (o sea, si lo gestiona Control Code) o es del usuario.
+fn skills_dir_from_conn(conn: &rusqlite::Connection) -> Result<PathBuf, String> {
+    let value: Option<String> = conn
+        .query_row("SELECT value FROM settings WHERE key = 'skills_dir'", [], |r| r.get(0))
+        .optional()
+        .map_err(|e| e.to_string())?;
+    skills_dir_from_value(value)
+}
+
+fn skills_dir_from_value(value: Option<String>) -> Result<PathBuf, String> {
+    match value {
+        Some(v) => Ok(PathBuf::from(v)),
+        None => {
+            let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+            Ok(home.join(".controlcode").join("skills"))
+        }
+    }
 }
 
 // ── Row <-> struct mapping ────────────────────────────────────────
@@ -321,6 +338,11 @@ fn row_to_skill_info(row: &rusqlite::Row) -> rusqlite::Result<SkillInfo> {
 }
 
 const SKILL_COLUMNS: &str = "id, name, description, categories, compatible_agents, compatible_versions, version, author, license, homepage, source_path, installed_at, updated_at";
+
+/// Mismas columnas y en el mismo orden que `SKILL_COLUMNS` (las lee el mismo
+/// `row_to_skill_info`), pero calificadas con el alias `s` — necesario en las queries que
+/// joinean `skills` con `tabs`/`windows`, donde `id`/`name` serían ambiguos.
+const SKILL_COLUMNS_QUALIFIED: &str = "s.id, s.name, s.description, s.categories, s.compatible_agents, s.compatible_versions, s.version, s.author, s.license, s.homepage, s.source_path, s.installed_at, s.updated_at";
 
 // ── Commands ─────────────────────────────────────────────────────
 
@@ -611,17 +633,14 @@ pub fn delete_skill(skill_id: String, db: tauri::State<DbConnection>) -> Result<
         .query_row("SELECT source_path FROM skills WHERE id = ?1", [&skill_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
 
-    // Remover symlinks físicos de cada attachment antes de borrar la fila (el cascade
-    // de la FK solo limpia la DB, no el filesystem). Best-effort: un symlink ya roto o
-    // ya removido manualmente no debe bloquear el borrado de la skill.
-    let slug = slug_from_source_path(&source_path);
-    for (cwd, agent_id) in collect_linked_tabs(&conn, &skill_id)? {
-        if let Some(link_path) = link_path_for(&cwd, &agent_id, &slug) {
-            remove_symlink_best_effort(&link_path);
-        }
-    }
+    // Los symlinks físicos de cada attachment hay que removerlos aparte: el cascade de la
+    // FK solo limpia la DB, no el filesystem. Se anotan los directorios afectados ANTES de
+    // borrar la fila (después ya no hay `project_skills` desde donde derivarlos) y se
+    // reconcilian una vez que la skill dejó de existir.
+    let affected = collect_linked_tabs(&conn, &skill_id)?;
 
     conn.execute("DELETE FROM skills WHERE id = ?1", [&skill_id]).map_err(|e| e.to_string())?;
+    reconcile_link_dirs(&conn, &affected);
     drop(conn);
 
     let _ = std::fs::remove_dir_all(&source_path);
@@ -655,14 +674,200 @@ fn remove_symlink_best_effort(path: &Path) {
 ///   alcanza con esa. Fuentes: github.com/google-gemini/gemini-cli/blob/main/docs/cli/skills.md,
 ///   opencode.ai/docs/skills, learn.chatgpt.com/docs/build-skills,
 ///   github.com/MoonshotAI/kimi-cli/blob/main/docs/en/customization/skills.md.
-pub fn link_path_for(cwd: &str, agent_id: &str, slug: &str) -> Option<PathBuf> {
-    match agent_id {
-        "claude-code" => Some(Path::new(cwd).join(".claude").join("skills").join(slug)),
-        "gemini-cli" | "opencode" | "codex" | "kimi-code" => {
-            Some(Path::new(cwd).join(".agents").join("skills").join(slug))
-        }
-        _ => None,
+/// Carpeta que contiene los symlinks de skills de un (cwd, agente) — el "directorio
+/// gestionado" que la reconciliación deja idéntico al set de skills que piden las tabs
+/// vivas de ese cwd.
+///
+/// Solo resuelve los agentes soportados de fábrica; para una TUI custom hay que usar
+/// `links_dir_for_conn`, que consulta la carpeta que el usuario le declaró.
+pub fn links_dir_for(cwd: &str, agent_id: &str) -> Option<PathBuf> {
+    let subdir = match agent_id {
+        "claude-code" => ".claude/skills",
+        "gemini-cli" | "opencode" | "codex" | "kimi-code" => ".agents/skills",
+        _ => return None,
+    };
+    Some(Path::new(cwd).join(subdir))
+}
+
+/// Igual que `links_dir_for` pero cayendo a la configuración de la TUI custom cuando el
+/// id no es uno de los conocidos. Es la variante que usa todo el camino de reconciliación
+/// (que siempre tiene la conexión a mano); `links_dir_for` queda para los casos donde no
+/// hay DB disponible.
+fn links_dir_for_conn(conn: &rusqlite::Connection, cwd: &str, agent_id: &str) -> Option<PathBuf> {
+    if let Some(dir) = links_dir_for(cwd, agent_id) {
+        return Some(dir);
     }
+    let custom = crate::agents::find(conn, agent_id)?;
+    let raw = custom.skills_dir?;
+    let raw = raw.trim().trim_start_matches("./");
+    if raw.is_empty() {
+        return None;
+    }
+    Some(Path::new(cwd).join(raw))
+}
+
+fn link_path_for_conn(
+    conn: &rusqlite::Connection,
+    cwd: &str,
+    agent_id: &str,
+    slug: &str,
+) -> Option<PathBuf> {
+    Some(links_dir_for_conn(conn, cwd, agent_id)?.join(slug))
+}
+
+/// Una skill sin `compatible_agents` declarados aplica a cualquier agente; si los declara,
+/// solo a los listados.
+fn agent_is_compatible(skill: &SkillInfo, agent_id: &str) -> bool {
+    skill.compatible_agents.is_empty() || skill.compatible_agents.iter().any(|a| a == agent_id)
+}
+
+/// Skills que las tabs VIVAS (las de ventanas con `is_open = 1`) que corren en este
+/// cwd con este agente tienen attacheadas — por su workspace (scope='workspace') o
+/// directamente por la tab (scope='tab').
+///
+/// El filtro por ventana abierta es lo que liga las skills a lo que está realmente
+/// abierto: las tabs de un workspace cerrado siguen existiendo como filas (para poder
+/// restaurarlo) pero ya no reclaman ningún symlink, así que abrir otro workspace en la
+/// misma carpeta no arrastra las skills del anterior.
+fn desired_skills_for_link_dir(
+    conn: &rusqlite::Connection,
+    cwd: &str,
+    agent_id: &str,
+) -> Result<Vec<SkillInfo>, String> {
+    let query = format!(
+        "SELECT DISTINCT {SKILL_COLUMNS_QUALIFIED} FROM skills s
+         JOIN tabs t ON t.cwd = ?1 AND t.agent_id = ?2
+         JOIN windows w ON w.id = t.window_id AND w.is_open = 1
+         JOIN project_skills ps ON ps.skill_id = s.id AND ps.workspace_id = w.workspace_id
+         WHERE ps.enabled = 1
+           AND (ps.scope = 'workspace' OR (ps.scope = 'tab' AND ps.tab_id = t.id))"
+    );
+    let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([cwd, agent_id], row_to_skill_info)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
+/// Deja el directorio de skills de un (cwd, agente) exactamente con los symlinks que
+/// piden sus tabs vivas: borra los que sobraron (de un workspace/tab anterior que ya no
+/// está abierto, o de una skill que se detacheó) y crea/repara los que faltan.
+///
+/// Solo toca symlinks que apuntan dentro del directorio global de skills — o sea, los que
+/// creó Control Code. Un `.claude/skills/<x>` propio del usuario (carpeta real o symlink
+/// a otro lado) nunca se borra.
+///
+/// Best-effort por diseño: corre en el arranque de cada tab y en cada cierre de
+/// tab/ventana, donde un conflicto puntual (ej. una carpeta real ocupando el path de un
+/// symlink) no debe abortar la operación — `check_symlinks_health` lo reporta después.
+pub(crate) fn reconcile_link_dir(
+    conn: &rusqlite::Connection,
+    cwd: &str,
+    agent_id: &str,
+) -> Result<(), String> {
+    let Some(dir) = links_dir_for_conn(conn, cwd, agent_id) else { return Ok(()) };
+    let skills_dir = skills_dir_from_conn(conn)?;
+
+    let desired: Vec<SkillInfo> = desired_skills_for_link_dir(conn, cwd, agent_id)?
+        .into_iter()
+        .filter(|s| agent_is_compatible(s, agent_id))
+        .collect();
+    let keep: std::collections::HashSet<String> =
+        desired.iter().map(|s| slug_from_source_path(&s.source_path)).collect();
+
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = path.symlink_metadata() else { continue };
+            if !meta.file_type().is_symlink() {
+                continue; // carpeta/archivo real del usuario
+            }
+            // `read_link` funciona igual con un symlink roto, así que uno colgado que
+            // apunta a la copia global (skill borrada a mano) también se limpia acá.
+            let Ok(target) = std::fs::read_link(&path) else { continue };
+            if !target.starts_with(&skills_dir) {
+                continue; // symlink que no gestiona Control Code
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !keep.contains(&name) {
+                remove_symlink_best_effort(&path);
+            }
+        }
+    }
+
+    for skill in &desired {
+        let _ = ensure_symlink(conn, skill, cwd, agent_id);
+    }
+
+    // Si no quedó ninguna skill, tampoco queda el directorio vacío tirado en el repo del
+    // usuario (`remove_dir` falla solo si no está vacío, que es justo lo que queremos).
+    let _ = std::fs::remove_dir(&dir);
+
+    Ok(())
+}
+
+/// `reconcile_link_dir` sobre varios (cwd, agente) deduplicados. Los llamadores suelen
+/// juntar los pares afectados antes de mutar la DB (cerrar una tab, cerrar una ventana) y
+/// reconciliar después, cuando el estado nuevo ya está persistido.
+pub(crate) fn reconcile_link_dirs(conn: &rusqlite::Connection, pairs: &[(String, String)]) {
+    let mut seen = std::collections::HashSet::new();
+    for (cwd, agent_id) in pairs {
+        if seen.insert((cwd.clone(), agent_id.clone())) {
+            let _ = reconcile_link_dir(conn, cwd, agent_id);
+        }
+    }
+}
+
+/// (cwd, agent_id) de todas las tabs de una ventana — para reconciliar sus directorios
+/// después de cerrarla/borrarla.
+pub(crate) fn link_dirs_of_window(
+    conn: &rusqlite::Connection,
+    window_id: &str,
+) -> Vec<(String, String)> {
+    let Ok(mut stmt) = conn.prepare("SELECT cwd, agent_id FROM tabs WHERE window_id = ?1") else {
+        return Vec::new();
+    };
+    let Ok(rows) = stmt.query_map([window_id], |r| Ok((r.get(0)?, r.get(1)?))) else {
+        return Vec::new();
+    };
+    rows.filter_map(|r| r.ok()).collect()
+}
+
+/// (cwd, agent_id) de todas las tabs de un workspace — misma idea que
+/// `link_dirs_of_window` pero para operaciones que afectan al workspace entero.
+pub(crate) fn link_dirs_of_workspace(
+    conn: &rusqlite::Connection,
+    workspace_id: &str,
+) -> Vec<(String, String)> {
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT t.cwd, t.agent_id FROM tabs t JOIN windows w ON w.id = t.window_id
+         WHERE w.workspace_id = ?1",
+    ) else {
+        return Vec::new();
+    };
+    let Ok(rows) = stmt.query_map([workspace_id], |r| Ok((r.get(0)?, r.get(1)?))) else {
+        return Vec::new();
+    };
+    rows.filter_map(|r| r.ok()).collect()
+}
+
+/// Reconcilia el directorio de skills de una tab puntual. El frontend lo llama justo
+/// antes de lanzar el proceso del agente (ver `Terminal.tsx`): es el momento en que hay
+/// que garantizar que en esa carpeta están las skills de ESTA tab/workspace y ninguna
+/// otra, porque varios agentes escanean su carpeta de skills una sola vez, al arrancar.
+#[tauri::command]
+pub fn reconcile_tab_skills(tab_id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let row: Option<(String, String)> = conn
+        .query_row("SELECT cwd, agent_id FROM tabs WHERE id = ?1", [&tab_id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some((cwd, agent_id)) = row else { return Ok(()) };
+    reconcile_link_dir(&conn, &cwd, &agent_id)
 }
 
 // ── Attach / detach (symlinks) ────────────────────────────────────
@@ -685,6 +890,12 @@ fn fetch_skill_row(conn: &rusqlite::Connection, skill_id: &str) -> Result<SkillI
 /// Tabs (id, cwd, agent_id) de un workspace, o de una sola tab puntual si `tab_id` está
 /// presente. Usado por attach/detach/health-check para resolver a qué tabs concretas
 /// aplica un `project_skills` row, sin duplicar la lógica de scope en cada comando.
+///
+/// Solo devuelve tabs de ventanas abiertas: un workspace guardado y cerrado conserva sus
+/// filas de `tabs` para poder restaurarse, pero sus skills no deben existir en disco
+/// mientras no esté abierto (si no, se filtran al workspace que sí esté usando esa
+/// carpeta). Los symlinks de esas tabs se crean al restaurarlas, vía
+/// `reconcile_tab_skills`.
 fn tabs_for_scope(
     conn: &rusqlite::Connection,
     workspace_id: &str,
@@ -692,15 +903,23 @@ fn tabs_for_scope(
 ) -> Result<Vec<(String, String, String)>, String> {
     if let Some(tab_id) = tab_id {
         let row: Option<(String, String, String)> = conn
-            .query_row("SELECT id, cwd, agent_id FROM tabs WHERE id = ?1", [tab_id], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-            })
+            .query_row(
+                "SELECT t.id, t.cwd, t.agent_id FROM tabs t
+                 JOIN windows w ON w.id = t.window_id AND w.is_open = 1
+                 WHERE t.id = ?1",
+                [tab_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
             .optional()
             .map_err(|e| e.to_string())?;
         Ok(row.into_iter().collect())
     } else {
         let mut stmt = conn
-            .prepare("SELECT t.id, t.cwd, t.agent_id FROM tabs t JOIN windows w ON w.id = t.window_id WHERE w.workspace_id = ?1")
+            .prepare(
+                "SELECT t.id, t.cwd, t.agent_id FROM tabs t
+                 JOIN windows w ON w.id = t.window_id AND w.is_open = 1
+                 WHERE w.workspace_id = ?1",
+            )
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([workspace_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
@@ -712,13 +931,18 @@ fn tabs_for_scope(
 /// Crea (idempotente) el symlink de `skill` en el cwd de una tab. No-op si ya apunta al
 /// `source_path` correcto; reemplaza si apunta a otro lado; error claro si el destino
 /// existe y no es un symlink (evita pisar un directorio/archivo real del usuario).
-fn ensure_symlink(skill: &SkillInfo, cwd: &str, agent_id: &str) -> Result<(), String> {
-    if !skill.compatible_agents.is_empty() && !skill.compatible_agents.iter().any(|a| a == agent_id) {
+fn ensure_symlink(
+    conn: &rusqlite::Connection,
+    skill: &SkillInfo,
+    cwd: &str,
+    agent_id: &str,
+) -> Result<(), String> {
+    if !agent_is_compatible(skill, agent_id) {
         return Ok(()); // skill no aplica a este agente, no es un error
     }
     let slug = slug_from_source_path(&skill.source_path);
-    let Some(link_path) = link_path_for(cwd, agent_id, &slug) else {
-        return Ok(()); // agente sin convención de skills confirmada todavía, se saltea
+    let Some(link_path) = link_path_for_conn(conn, cwd, agent_id, &slug) else {
+        return Ok(()); // agente sin carpeta de skills conocida ni declarada, se saltea
     };
 
     if let Ok(meta) = link_path.symlink_metadata() {
@@ -764,10 +988,10 @@ pub fn attach_skill(
     // Se deshacen las que sí se crearon en esta llamada antes de propagar el error.
     let mut created: Vec<(&str, &str)> = Vec::new();
     for (_, cwd, agent_id) in &tabs {
-        if let Err(e) = ensure_symlink(&skill, cwd, agent_id) {
+        if let Err(e) = ensure_symlink(&conn, &skill, cwd, agent_id) {
             let slug = slug_from_source_path(&skill.source_path);
             for (cwd, agent_id) in &created {
-                if let Some(link_path) = link_path_for(cwd, agent_id, &slug) {
+                if let Some(link_path) = link_path_for_conn(&conn, cwd, agent_id, &slug) {
                     remove_symlink_best_effort(&link_path);
                 }
             }
@@ -785,6 +1009,13 @@ pub fn attach_skill(
     )
     .map_err(|e| e.to_string())?;
 
+    // Ya con la fila persistida, dejar los directorios afectados exactamente con el set
+    // de skills que corresponde — barre de paso cualquier symlink colgado de un workspace
+    // anterior que hubiera usado la misma carpeta.
+    let pairs: Vec<(String, String)> =
+        tabs.iter().map(|(_, cwd, agent)| (cwd.clone(), agent.clone())).collect();
+    reconcile_link_dirs(&conn, &pairs);
+
     Ok(())
 }
 
@@ -797,15 +1028,7 @@ pub fn detach_skill(
     db: tauri::State<DbConnection>,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let skill = fetch_skill_row(&conn, &skill_id)?;
     let tabs = tabs_for_scope(&conn, &workspace_id, tab_id.as_deref())?;
-    let slug = slug_from_source_path(&skill.source_path);
-
-    for (_, cwd, agent_id) in &tabs {
-        if let Some(link_path) = link_path_for(cwd, agent_id, &slug) {
-            remove_symlink_best_effort(&link_path);
-        }
-    }
 
     conn.execute(
         "DELETE FROM project_skills WHERE skill_id = ?1 AND workspace_id = ?2 AND scope = ?3
@@ -814,34 +1037,29 @@ pub fn detach_skill(
     )
     .map_err(|e| e.to_string())?;
 
+    // El symlink se quita reconciliando, no borrándolo a mano: la misma skill puede seguir
+    // attacheada por otra vía (detachearla de una tab cuando el workspace entero la tiene
+    // activa no debe dejar a esa tab sin la skill).
+    let pairs: Vec<(String, String)> =
+        tabs.iter().map(|(_, cwd, agent)| (cwd.clone(), agent.clone())).collect();
+    reconcile_link_dirs(&conn, &pairs);
+
     Ok(())
 }
 
-/// Recrea los symlinks de todas las skills attacheadas a nivel workspace contra el set
-/// actual de tabs de ese workspace — usado tras crear una tab nueva, para que herede
-/// automáticamente las skills de scope='workspace' ya activas (best-effort: una tab con
-/// un agente incompatible o sin convención de skills confirmada simplemente se saltea).
+/// Deja los symlinks de TODAS las tabs abiertas de un workspace alineados con sus
+/// attachments — usado tras crear una tab nueva (para que herede las skills de
+/// scope='workspace' ya activas) y tras abrir un workspace.
+///
+/// Reconcilia en vez de solo crear: además de agregar lo que falta, quita de esas
+/// carpetas las skills que quedaron de otro workspace o de una tab ya cerrada.
 #[tauri::command]
 pub fn sync_workspace_skills(workspace_id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
-
-    let skill_ids: Vec<String> = {
-        let mut stmt = conn
-            .prepare("SELECT DISTINCT skill_id FROM project_skills WHERE workspace_id = ?1 AND scope = 'workspace' AND enabled = 1")
-            .map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([&workspace_id], |row| row.get(0)).map_err(|e| e.to_string())?;
-        rows.filter_map(|r| r.ok()).collect()
-    };
-
     let tabs = tabs_for_scope(&conn, &workspace_id, None)?;
-    for skill_id in skill_ids {
-        let skill = fetch_skill_row(&conn, &skill_id)?;
-        for (_, cwd, agent_id) in &tabs {
-            // Best-effort: una tab con conflicto de symlink no debe bloquear el resto.
-            let _ = ensure_symlink(&skill, cwd, agent_id);
-        }
-    }
-
+    let pairs: Vec<(String, String)> =
+        tabs.into_iter().map(|(_, cwd, agent)| (cwd, agent)).collect();
+    reconcile_link_dirs(&conn, &pairs);
     Ok(())
 }
 
@@ -873,10 +1091,10 @@ pub fn check_symlinks_health(
         let _ = project_skill_id;
 
         for (tab_id, cwd, agent_id) in tabs {
-            if !skill.compatible_agents.is_empty() && !skill.compatible_agents.iter().any(|a| a == &agent_id) {
+            if !agent_is_compatible(&skill, &agent_id) {
                 continue;
             }
-            let Some(link_path) = link_path_for(&cwd, &agent_id, &slug) else { continue };
+            let Some(link_path) = link_path_for_conn(&conn, &cwd, &agent_id, &slug) else { continue };
 
             let title: Option<String> = conn
                 .query_row("SELECT title FROM tabs WHERE id = ?1", [&tab_id], |r| r.get(0))
@@ -916,6 +1134,7 @@ pub fn check_symlinks_health(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::db_mark_window_closed;
     use rusqlite::Connection;
     use tauri::Manager;
 
@@ -926,6 +1145,7 @@ mod tests {
         CREATE TABLE skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, version TEXT NOT NULL DEFAULT '0.1.0', categories TEXT NOT NULL DEFAULT '[]', compatible_agents TEXT NOT NULL DEFAULT '[]', compatible_versions TEXT NOT NULL DEFAULT '{}', author TEXT, license TEXT, homepage TEXT, source_path TEXT NOT NULL UNIQUE, installed_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
         CREATE TABLE project_skills (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, workspace_id TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'workspace', tab_id TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, UNIQUE (skill_id, workspace_id, scope, tab_id));
         CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE custom_agents (id TEXT PRIMARY KEY, label TEXT NOT NULL, command TEXT NOT NULL, resume_args TEXT, skills_dir TEXT, sessions_dir TEXT, session_id_from TEXT NOT NULL DEFAULT 'filename', env_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL);
     ";
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -1017,7 +1237,7 @@ mod tests {
         attach_skill(info.id.clone(), workspace_id.clone(), "tab".to_string(), Some(tab_id.clone()), state.clone())
             .expect("attach_skill debería funcionar");
 
-        let expected_link = link_path_for(&tab_cwd.to_string_lossy(), "claude-code", &slug_from_source_path(&info.source_path)).unwrap();
+        let expected_link = links_dir_for(&tab_cwd.to_string_lossy(), "claude-code").unwrap().join(slug_from_source_path(&info.source_path));
         let link_meta = std::fs::symlink_metadata(&expected_link).expect("el symlink debe existir en disco");
         assert!(link_meta.file_type().is_symlink(), "debe ser un symlink, no una copia");
         let target = std::fs::read_link(&expected_link).unwrap();
@@ -1068,6 +1288,185 @@ mod tests {
         let listed = list_skills(state.clone()).unwrap();
         assert!(listed.is_empty());
         assert!(!Path::new(&info.source_path).exists(), "la copia global debe haberse borrado");
+    }
+
+    /// Dos workspaces distintos trabajando sobre LA MISMA carpeta no deben verse las
+    /// skills entre sí: al abrir el segundo, la carpeta queda solo con las suyas.
+    #[test]
+    fn skills_do_not_leak_between_workspaces_sharing_a_folder() {
+        let (db, ws_a, tab_a, shared_cwd, _skills_dir) = setup();
+        let app = tauri::test::mock_app();
+        app.manage(db);
+        let state = app.state::<DbConnection>();
+
+        // Segundo workspace + ventana + tab, apuntando al MISMO cwd que el primero.
+        // Arranca con la ventana cerrada: recién se "abre" más abajo.
+        {
+            let conn = state.lock().unwrap();
+            conn.execute(
+                "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws-b', 'WS B', 0, 0)",
+                [],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO windows (id, label, workspace_id, is_open, last_active) VALUES ('win-b', 'win-b', 'ws-b', 0, 0)",
+                [],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO tabs (id, window_id, title, agent_id, agent_label, command, cwd, created_at, last_active)
+                 VALUES ('tab-b', 'win-b', 'Tab B', 'claude-code', 'Claude Code', 'claude', ?1, 0, 0)",
+                [shared_cwd.to_string_lossy().to_string()],
+            ).unwrap();
+        }
+
+        let source_a = temp_dir("skill-a");
+        write_source_skill(&source_a);
+        let skill_a = install_skill(source_a.join("SKILL.md").to_string_lossy().to_string(), None, state.clone()).unwrap();
+
+        let source_b = temp_dir("skill-b");
+        std::fs::create_dir_all(&source_b).unwrap();
+        std::fs::write(
+            source_b.join("SKILL.md"),
+            "---\nname: solo-de-ws-b\ncompatible_agents: [claude-code]\n---\nCuerpo.\n",
+        ).unwrap();
+        let skill_b = install_skill(source_b.join("SKILL.md").to_string_lossy().to_string(), None, state.clone()).unwrap();
+
+        let link_a = links_dir_for(&shared_cwd.to_string_lossy(), "claude-code").unwrap().join(slug_from_source_path(&skill_a.source_path));
+        let link_b = links_dir_for(&shared_cwd.to_string_lossy(), "claude-code").unwrap().join(slug_from_source_path(&skill_b.source_path));
+
+        // Workspace A (abierto) attachea su skill a nivel workspace.
+        attach_skill(skill_a.id.clone(), ws_a.clone(), "workspace".to_string(), None, state.clone()).unwrap();
+        assert!(link_a.symlink_metadata().is_ok(), "la skill del workspace A debe estar en la carpeta");
+
+        // Attachear la skill de B mientras su ventana está cerrada no toca la carpeta:
+        // las skills se materializan cuando el workspace está abierto, no antes.
+        attach_skill(skill_b.id.clone(), "ws-b".to_string(), "tab".to_string(), Some("tab-b".to_string()), state.clone()).unwrap();
+        assert!(link_b.symlink_metadata().is_err(), "un workspace cerrado no debe dejar skills en disco");
+
+        // Se cierra A y se abre B — el cambio de workspace que reportaba el bug.
+        db_mark_window_closed("win".to_string(), state.clone()).unwrap();
+        assert!(link_a.symlink_metadata().is_err(), "al cerrar A su skill debe salir de la carpeta");
+
+        {
+            let conn = state.lock().unwrap();
+            conn.execute("UPDATE windows SET is_open = 1 WHERE id = 'win-b'", []).unwrap();
+        }
+        reconcile_tab_skills("tab-b".to_string(), state.clone()).unwrap();
+
+        assert!(link_b.symlink_metadata().is_ok(), "la tab de B debe tener su propia skill");
+        assert!(link_a.symlink_metadata().is_err(), "y NINGUNA del workspace anterior");
+
+        // Volver a A restaura lo suyo y se lleva lo de B.
+        {
+            let conn = state.lock().unwrap();
+            conn.execute("UPDATE windows SET is_open = 0 WHERE id = 'win-b'", []).unwrap();
+            conn.execute("UPDATE windows SET is_open = 1 WHERE label = 'win'", []).unwrap();
+        }
+        reconcile_tab_skills(tab_a, state.clone()).unwrap();
+        assert!(link_a.symlink_metadata().is_ok());
+        assert!(link_b.symlink_metadata().is_err());
+    }
+
+    /// Un symlink que el usuario puso a mano en `.claude/skills/` (o una carpeta real)
+    /// no lo gestiona Control Code y la reconciliación no debe borrarlo.
+    #[test]
+    fn reconcile_leaves_user_owned_entries_alone() {
+        let (db, workspace_id, tab_id, tab_cwd, _skills_dir) = setup();
+        let app = tauri::test::mock_app();
+        app.manage(db);
+        let state = app.state::<DbConnection>();
+
+        let links_dir = links_dir_for(&tab_cwd.to_string_lossy(), "claude-code").unwrap();
+        std::fs::create_dir_all(&links_dir).unwrap();
+
+        // Carpeta real con una skill propia del proyecto.
+        let own = links_dir.join("skill-propia");
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::write(own.join("SKILL.md"), "---\nname: propia\n---\nCuerpo.\n").unwrap();
+
+        // Symlink a un destino fuera del directorio global de skills.
+        let elsewhere = temp_dir("fuera-del-dir-global");
+        let foreign_link = links_dir.join("skill-externa");
+        symlink::symlink_dir(&elsewhere, &foreign_link).unwrap();
+
+        let source = temp_dir("source-skill");
+        write_source_skill(&source);
+        let info = install_skill(source.join("SKILL.md").to_string_lossy().to_string(), None, state.clone()).unwrap();
+        attach_skill(info.id.clone(), workspace_id.clone(), "tab".to_string(), Some(tab_id.clone()), state.clone()).unwrap();
+        reconcile_tab_skills(tab_id.clone(), state.clone()).unwrap();
+
+        assert!(own.join("SKILL.md").exists(), "la skill propia del proyecto debe sobrevivir");
+        assert!(foreign_link.symlink_metadata().is_ok(), "un symlink ajeno debe sobrevivir");
+
+        // Detachear se lleva SOLO la gestionada por Control Code.
+        detach_skill(info.id.clone(), workspace_id, "tab".to_string(), Some(tab_id), state.clone()).unwrap();
+        let managed = links_dir_for(&tab_cwd.to_string_lossy(), "claude-code").unwrap().join(slug_from_source_path(&info.source_path));
+        assert!(managed.symlink_metadata().is_err());
+        assert!(own.join("SKILL.md").exists());
+        assert!(foreign_link.symlink_metadata().is_ok());
+    }
+
+    /// Una TUI custom recibe skills en la carpeta que el usuario le declaró — y una que
+    /// no declaró ninguna simplemente se saltea, sin ensuciar el proyecto.
+    #[test]
+    fn custom_agents_get_skills_in_their_declared_folder() {
+        let (db, workspace_id, _tab_id, _tab_cwd, _skills_dir) = setup();
+        let app = tauri::test::mock_app();
+        app.manage(db);
+        let state = app.state::<DbConnection>();
+
+        let configured_cwd = temp_dir("custom-configured");
+        let bare_cwd = temp_dir("custom-bare");
+        {
+            let conn = state.lock().unwrap();
+            conn.execute(
+                "INSERT INTO custom_agents (id, label, command, skills_dir, session_id_from, env_json, created_at)
+                 VALUES ('mitui', 'Mi TUI', 'mitui', '.mitui/skills', 'filename', '{}', 0)",
+                [],
+            ).unwrap();
+            // Misma TUI custom pero sin carpeta de skills declarada.
+            conn.execute(
+                "INSERT INTO custom_agents (id, label, command, session_id_from, env_json, created_at)
+                 VALUES ('sintui', 'Sin skills', 'sintui', 'filename', '{}', 0)",
+                [],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO tabs (id, window_id, title, agent_id, agent_label, command, cwd, created_at, last_active)
+                 VALUES ('tab-custom', 'win-test', 'Custom', 'mitui', 'Mi TUI', 'mitui', ?1, 0, 0)",
+                [configured_cwd.to_string_lossy().to_string()],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO tabs (id, window_id, title, agent_id, agent_label, command, cwd, created_at, last_active)
+                 VALUES ('tab-bare', 'win-test', 'Bare', 'sintui', 'Sin skills', 'sintui', ?1, 0, 0)",
+                [bare_cwd.to_string_lossy().to_string()],
+            ).unwrap();
+        }
+
+        let source = temp_dir("source-skill");
+        write_source_skill(&source);
+        let info = install_skill(source.join("SKILL.md").to_string_lossy().to_string(), None, state.clone()).unwrap();
+        // La skill de prueba declara compatible_agents [claude-code, gemini-cli]; para que
+        // aplique a una TUI custom hay que sacarle esa restricción (una skill sin agentes
+        // declarados vale para cualquiera).
+        {
+            let conn = state.lock().unwrap();
+            conn.execute("UPDATE skills SET compatible_agents = '[]' WHERE id = ?1", [&info.id]).unwrap();
+        }
+
+        // Attach a nivel workspace: aplica a las dos tabs.
+        attach_skill(info.id.clone(), workspace_id.clone(), "workspace".to_string(), None, state.clone()).unwrap();
+
+        let slug = slug_from_source_path(&info.source_path);
+        let custom_link = configured_cwd.join(".mitui").join("skills").join(&slug);
+        assert!(custom_link.symlink_metadata().is_ok(), "la TUI custom debe recibir la skill en su carpeta declarada");
+        assert_eq!(std::fs::read_link(&custom_link).unwrap(), Path::new(&info.source_path));
+
+        // La que no declaró carpeta no debe haber recibido nada en ningún lado.
+        assert!(std::fs::read_dir(&bare_cwd).unwrap().next().is_none(),
+            "una TUI sin carpeta de skills declarada no debe dejar nada en el proyecto");
+
+        // Y el ciclo completo también funciona: detachear se lleva el symlink.
+        detach_skill(info.id.clone(), workspace_id, "workspace".to_string(), None, state.clone()).unwrap();
+        assert!(custom_link.symlink_metadata().is_err());
     }
 
     #[test]

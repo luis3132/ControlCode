@@ -75,6 +75,57 @@ pub struct MarketplaceSkillEntry {
     pub files: Vec<String>,
 }
 
+/// Progreso de la resolución de un registry, emitido al frontend como evento
+/// `cc-registry-progress`. `total` es `None` mientras la fase no sea contable (todavía no
+/// sabemos cuántos archivos hay que mirar) — la UI muestra un spinner indeterminado en ese
+/// caso y una barra con porcentaje cuando sí llega un total.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryProgress {
+    pub registry_id: String,
+    /// "connecting" | "listing" | "scanning" | "saving" | "done" | "error"
+    pub phase: String,
+    pub current: u32,
+    pub total: Option<u32>,
+    /// Qué se está mirando ahora mismo (ej. el path de la skill), para dar sensación de
+    /// avance real cuando el porcentaje se mueve lento.
+    pub detail: Option<String>,
+}
+
+/// Emisor de progreso atado a un registry. Se pasa por las funciones de resolución para
+/// que no tengan que conocer ni el nombre del evento ni el `AppHandle`.
+struct ProgressReporter {
+    app: tauri::AppHandle,
+    registry_id: String,
+}
+
+impl ProgressReporter {
+    fn new(app: tauri::AppHandle, registry_id: &str) -> Self {
+        Self { app, registry_id: registry_id.to_string() }
+    }
+
+    fn emit(&self, phase: &str, current: u32, total: Option<u32>, detail: Option<String>) {
+        use tauri::Emitter;
+        // Best-effort: que no se pueda notificar el progreso nunca debe hacer fallar la
+        // operación que se está reportando.
+        let _ = self.app.emit(
+            "cc-registry-progress",
+            RegistryProgress {
+                registry_id: self.registry_id.clone(),
+                phase: phase.to_string(),
+                current,
+                total,
+                detail,
+            },
+        );
+    }
+
+    /// Fase sin porcentaje posible todavía (resolver la branch, pedir el árbol del repo).
+    fn phase(&self, phase: &str) {
+        self.emit(phase, 0, None, None);
+    }
+}
+
 #[derive(Deserialize)]
 struct RegistryManifest {
     #[serde(default)]
@@ -139,19 +190,38 @@ pub fn list_registries(db: tauri::State<DbConnection>) -> Result<Vec<RegistrySum
     Ok(rows)
 }
 
+/// `id` lo puede proponer el frontend: los eventos `cc-registry-progress` viajan
+/// etiquetados con el id del registry, y como esta llamada recién resuelve cuando el
+/// repo terminó de resolverse (que es justo lo que se está reportando), quien quiera
+/// mostrar el progreso necesita conocer el id ANTES de llamar. Si no viene, se genera acá.
 #[tauri::command]
 pub async fn add_registry(
+    id: Option<String>,
     name: String,
     source_type: String,
     location: String,
     db: tauri::State<'_, DbConnection>,
+    app: tauri::AppHandle,
 ) -> Result<RegistrySummary, String> {
     if source_type != "local" && source_type != "github" {
         return Err(format!(
             "Tipo de registry no soportado todavía: {source_type} (solo 'local' o 'github')"
         ));
     }
-    let id = Uuid::new_v4().to_string();
+
+    // La ubicación se guarda ya normalizada (un link de GitHub queda como `owner/repo`),
+    // así la lista de repos muestra siempre la misma forma sin importar cómo se agregó.
+    let location = match source_type.as_str() {
+        "github" => {
+            // Se valida acá para fallar con un mensaje claro antes de crear la fila, en vez
+            // de dejar un registry roto que solo se queja al refrescarse.
+            parse_github_location(&location)?;
+            normalize_github_location(&location)
+        }
+        _ => location.trim().to_string(),
+    };
+
+    let id = id.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| Uuid::new_v4().to_string());
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let next_priority: i32 = conn
@@ -164,7 +234,7 @@ pub async fn add_registry(
         )
         .map_err(|e| e.to_string())?;
     }
-    refresh_registry_internal(&id, &db).await
+    refresh_registry_internal(&id, &db, app).await
 }
 
 #[tauri::command]
@@ -225,8 +295,9 @@ pub fn reorder_registries(ids: Vec<String>, db: tauri::State<DbConnection>) -> R
 pub async fn refresh_registry(
     id: String,
     db: tauri::State<'_, DbConnection>,
+    app: tauri::AppHandle,
 ) -> Result<RegistrySummary, String> {
-    refresh_registry_internal(&id, &db).await
+    refresh_registry_internal(&id, &db, app).await
 }
 
 /// Vuelve a resolver la lista de skills de un registry (fetch de red para `github`, scan
@@ -236,7 +307,9 @@ pub async fn refresh_registry(
 async fn refresh_registry_internal(
     id: &str,
     db: &DbConnection,
+    app: tauri::AppHandle,
 ) -> Result<RegistrySummary, String> {
+    let progress = ProgressReporter::new(app, id);
     let (name, source_type, location, priority, enabled) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         conn.query_row(
@@ -256,10 +329,12 @@ async fn refresh_registry_internal(
     };
 
     let result: Result<Vec<MarketplaceSkillEntry>, String> = match source_type.as_str() {
-        "local" => scan_local_registry(id, &name, &location),
-        "github" => fetch_github_registry(id, &name, &location).await,
+        "local" => scan_local_registry(id, &name, &location, &progress),
+        "github" => fetch_github_registry(id, &name, &location, &progress).await,
         other => Err(format!("Tipo de registry desconocido: {other}")),
     };
+
+    progress.phase("saving");
 
     let now = now_ts();
     {
@@ -284,6 +359,14 @@ async fn refresh_registry_internal(
     }
 
     let skill_count = result.as_ref().map(|v| v.len() as i64).unwrap_or(0);
+    match &result {
+        Ok(entries) => {
+            let n = entries.len() as u32;
+            progress.emit("done", n, Some(n), None);
+        }
+        Err(e) => progress.emit("error", 0, None, Some(e.clone())),
+    }
+
     Ok(RegistrySummary {
         id: id.to_string(),
         name,
@@ -387,7 +470,9 @@ fn scan_local_registry(
     registry_id: &str,
     registry_name: &str,
     location: &str,
+    progress: &ProgressReporter,
 ) -> Result<Vec<MarketplaceSkillEntry>, String> {
+    progress.phase("listing");
     let base = PathBuf::from(location);
     if !base.is_dir() {
         return Err(format!("{location} no es una carpeta accesible"));
@@ -398,8 +483,10 @@ fn scan_local_registry(
         let raw = std::fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?;
         let manifest: RegistryManifest =
             serde_json::from_str(&raw).map_err(|e| format!("registry.json inválido: {e}"))?;
+        let total = manifest.skills.len() as u32;
         let mut out = Vec::new();
-        for s in manifest.skills {
+        for (i, s) in manifest.skills.into_iter().enumerate() {
+            progress.emit("scanning", i as u32, Some(total), Some(s.path.clone()));
             if !base.join(&s.path).join("SKILL.md").is_file() {
                 continue; // declarada en el manifest pero ausente en disco, se saltea
             }
@@ -422,12 +509,20 @@ fn scan_local_registry(
     // Sin manifest: cada subcarpeta directa con un SKILL.md adentro es una skill (mismo
     // criterio "Scan automático" que el plan pide para repos sin manifest formal).
     let mut out = Vec::new();
-    let entries = std::fs::read_dir(&base).map_err(|e| e.to_string())?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
+    let dirs: Vec<PathBuf> = std::fs::read_dir(&base)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    let total = dirs.len() as u32;
+    for (i, path) in dirs.into_iter().enumerate() {
+        progress.emit(
+            "scanning",
+            i as u32,
+            Some(total),
+            path.file_name().map(|n| n.to_string_lossy().to_string()),
+        );
         let skill_md = path.join("SKILL.md");
         let Ok(content) = std::fs::read_to_string(&skill_md) else { continue };
         let meta = scan_frontmatter_for_marketplace(&content);
@@ -473,14 +568,70 @@ fn gh_client() -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
+const GITHUB_FORMAT_HINT: &str =
+    "Pegá el link del repo (https://github.com/owner/repo) o escribilo como owner/repo";
+
+/// Reescribe un link de GitHub como la forma corta `owner/repo[@branch][:subpath]`, para
+/// que el resto del módulo tenga un único formato que entender. Acepta lo que el usuario
+/// tenga a mano al copiar:
+///
+/// - `https://github.com/owner/repo` (con o sin `.git`, `/` final o `?query#hash`)
+/// - `https://github.com/owner/repo/tree/branch/sub/carpeta` — la vista de navegación del
+///   repo, que es la URL que uno copia estando parado en una subcarpeta
+/// - `git@github.com:owner/repo.git` (remoto SSH)
+/// - `github.com/owner/repo` (sin esquema)
+///
+/// Cualquier otra cosa se devuelve tal cual: puede ser ya la forma corta, y si no lo es,
+/// el error correspondiente lo da `parse_github_location`.
+fn normalize_github_location(input: &str) -> String {
+    let raw = input.trim();
+    let raw = raw.split(['?', '#']).next().unwrap_or(raw);
+
+    let rest = raw
+        .strip_prefix("git@github.com:")
+        .or_else(|| raw.strip_prefix("ssh://git@github.com/"))
+        .or_else(|| raw.strip_prefix("https://github.com/"))
+        .or_else(|| raw.strip_prefix("http://github.com/"))
+        .or_else(|| raw.strip_prefix("https://www.github.com/"))
+        .or_else(|| raw.strip_prefix("github.com/"));
+
+    let Some(rest) = rest else { return raw.to_string() };
+
+    let rest = rest.trim_matches('/');
+    let mut segments = rest.split('/').filter(|s| !s.is_empty());
+    let (Some(owner), Some(repo)) = (segments.next(), segments.next()) else {
+        return raw.to_string();
+    };
+    let repo = repo.strip_suffix(".git").unwrap_or(repo);
+
+    // `/tree/<branch>/<subpath...>` y `/blob/<branch>/<subpath...>` son las dos formas en
+    // que GitHub arma la URL cuando estás navegando dentro del repo.
+    let mut out = format!("{owner}/{repo}");
+    if matches!(segments.next(), Some("tree") | Some("blob")) {
+        if let Some(branch) = segments.next() {
+            out.push('@');
+            out.push_str(branch);
+            let subpath: Vec<&str> = segments.collect();
+            if !subpath.is_empty() {
+                out.push(':');
+                out.push_str(&subpath.join("/"));
+            }
+        }
+    }
+    out
+}
+
 /// Parsea `owner/repo[@branch][:subpath]` — ej. `anthropics/skills`,
-/// `anthropics/skills@main:examples`.
+/// `anthropics/skills@main:examples`. Acepta también un link completo, normalizándolo
+/// primero (ver `normalize_github_location`), para que un registry guardado con una URL
+/// cruda por una versión anterior siga funcionando.
 fn parse_github_location(
     location: &str,
 ) -> Result<(String, String, Option<String>, Option<String>), String> {
-    let (repo_part, subpath) = match location.split_once(':') {
+    let normalized = normalize_github_location(location);
+    let (repo_part, subpath) = match normalized.split_once(':') {
         Some((r, p)) => (r, Some(p.trim_start_matches('/').trim_end_matches('/').to_string())),
-        None => (location, None),
+        None => (normalized.as_str(), None),
     };
     let (owner_repo, branch) = match repo_part.split_once('@') {
         Some((r, b)) => (r, Some(b.to_string())),
@@ -489,13 +640,45 @@ fn parse_github_location(
     let mut parts = owner_repo.splitn(2, '/');
     let owner = parts
         .next()
+        .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "Formato esperado: owner/repo".to_string())?;
+        .ok_or_else(|| GITHUB_FORMAT_HINT.to_string())?;
     let repo = parts
         .next()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "Formato esperado: owner/repo".to_string())?;
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.contains('/'))
+        .ok_or_else(|| GITHUB_FORMAT_HINT.to_string())?;
     Ok((owner.to_string(), repo.to_string(), branch, subpath))
+}
+
+/// Valida y normaliza una ubicación desde la UI sin llegar a crear el registry — el
+/// diálogo de "agregar repositorio" la usa mientras el usuario tipea, para mostrarle en
+/// qué se traduce el link que pegó (o el error, si no es un repo válido).
+#[tauri::command]
+pub fn preview_registry_location(source_type: String, location: String) -> Result<String, String> {
+    match source_type.as_str() {
+        "github" => {
+            let (owner, repo, branch, subpath) = parse_github_location(&location)?;
+            let mut out = format!("{owner}/{repo}");
+            if let Some(b) = branch {
+                out.push('@');
+                out.push_str(&b);
+            }
+            if let Some(s) = subpath {
+                out.push(':');
+                out.push_str(&s);
+            }
+            Ok(out)
+        }
+        "local" => {
+            let path = PathBuf::from(location.trim());
+            if !path.is_dir() {
+                return Err(format!("{} no es una carpeta accesible", path.display()));
+            }
+            Ok(path.to_string_lossy().to_string())
+        }
+        other => Err(format!("Tipo de registry no soportado: {other}")),
+    }
 }
 
 async fn resolve_branch(
@@ -535,11 +718,15 @@ async fn fetch_github_registry(
     registry_id: &str,
     registry_name: &str,
     location: &str,
+    progress: &ProgressReporter,
 ) -> Result<Vec<MarketplaceSkillEntry>, String> {
     let (owner, repo, branch_opt, subpath) = parse_github_location(location)?;
     let client = gh_client()?;
+
+    progress.phase("connecting");
     let branch = resolve_branch(&client, &owner, &repo, branch_opt).await?;
 
+    progress.phase("listing");
     let tree_url = format!("https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1");
     let resp = client.get(&tree_url).send().await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
@@ -570,8 +757,10 @@ async fn fetch_github_registry(
         let manifest: RegistryManifest =
             serde_json::from_str(&text).map_err(|e| format!("registry.json inválido: {e}"))?;
 
+        let total = manifest.skills.len() as u32;
         let mut out = Vec::new();
-        for s in manifest.skills {
+        for (i, s) in manifest.skills.into_iter().enumerate() {
+            progress.emit("scanning", i as u32, Some(total), Some(s.path.clone()));
             let folder = if prefix.is_empty() { s.path.clone() } else { format!("{prefix}/{}", s.path) };
             let files: Vec<String> = scoped
                 .iter()
@@ -605,8 +794,13 @@ async fn fetch_github_registry(
         .map(|e| e.path.clone())
         .collect();
 
+    // Esta es la parte lenta y la única realmente contable: un GET por cada SKILL.md del
+    // repo. Un repo grande son decenas de requests secuenciales, así que el porcentaje que
+    // sale de acá es el que le da sentido a la barra.
+    let total = skill_md_paths.len() as u32;
     let mut out = Vec::new();
-    for skill_md in skill_md_paths {
+    for (i, skill_md) in skill_md_paths.into_iter().enumerate() {
+        progress.emit("scanning", i as u32, Some(total), Some(skill_md.clone()));
         let Some((folder, _)) = skill_md.rsplit_once('/') else { continue }; // SKILL.md en la raíz, sin carpeta propia: se ignora
         let Ok(raw) = fetch_raw_github(&client, &owner, &repo, &branch, &skill_md).await else { continue };
         let content = String::from_utf8_lossy(&raw);
@@ -668,4 +862,67 @@ async fn install_from_github(
 
     let _ = std::fs::remove_dir_all(&tmp_root);
     install_result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pegar el link del repo tiene que dar exactamente lo mismo que escribirlo a mano en
+    /// la forma corta — incluyendo cuando el link viene de estar navegando una subcarpeta.
+    #[test]
+    fn github_links_normalize_to_the_short_form() {
+        let cases = [
+            ("anthropics/skills", "anthropics/skills"),
+            ("https://github.com/anthropics/skills", "anthropics/skills"),
+            ("https://github.com/anthropics/skills/", "anthropics/skills"),
+            ("https://github.com/anthropics/skills.git", "anthropics/skills"),
+            ("http://github.com/anthropics/skills", "anthropics/skills"),
+            ("https://www.github.com/anthropics/skills", "anthropics/skills"),
+            ("github.com/anthropics/skills", "anthropics/skills"),
+            ("git@github.com:anthropics/skills.git", "anthropics/skills"),
+            ("ssh://git@github.com/anthropics/skills", "anthropics/skills"),
+            ("  https://github.com/anthropics/skills  ", "anthropics/skills"),
+            ("https://github.com/anthropics/skills?tab=readme", "anthropics/skills"),
+            ("https://github.com/anthropics/skills#readme", "anthropics/skills"),
+            // Navegando dentro del repo: branch y subcarpeta salen de la propia URL.
+            ("https://github.com/anthropics/skills/tree/main", "anthropics/skills@main"),
+            (
+                "https://github.com/anthropics/skills/tree/main/document-skills",
+                "anthropics/skills@main:document-skills",
+            ),
+            (
+                "https://github.com/anthropics/skills/blob/v2/examples/nested",
+                "anthropics/skills@v2:examples/nested",
+            ),
+            // La forma corta con branch/subpath se respeta tal cual.
+            ("anthropics/skills@main:examples", "anthropics/skills@main:examples"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(normalize_github_location(input), expected, "input: {input}");
+        }
+    }
+
+    #[test]
+    fn parse_accepts_links_and_short_form_alike() {
+        for input in ["anthropics/skills", "https://github.com/anthropics/skills.git"] {
+            let (owner, repo, branch, subpath) = parse_github_location(input).unwrap();
+            assert_eq!((owner.as_str(), repo.as_str()), ("anthropics", "skills"));
+            assert_eq!(branch, None);
+            assert_eq!(subpath, None);
+        }
+
+        let (owner, repo, branch, subpath) =
+            parse_github_location("https://github.com/anthropics/skills/tree/main/document-skills").unwrap();
+        assert_eq!((owner.as_str(), repo.as_str()), ("anthropics", "skills"));
+        assert_eq!(branch.as_deref(), Some("main"));
+        assert_eq!(subpath.as_deref(), Some("document-skills"));
+    }
+
+    #[test]
+    fn parse_rejects_things_that_are_not_a_repo() {
+        for bad in ["", "   ", "anthropics", "/skills", "anthropics/", "https://example.com/foo/bar/baz"] {
+            assert!(parse_github_location(bad).is_err(), "debería fallar: {bad:?}");
+        }
+    }
 }

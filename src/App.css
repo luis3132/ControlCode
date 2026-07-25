@@ -66,3 +66,11 @@ html.dark ::-webkit-scrollbar-thumb:hover {
 .xterm {
   height: 100%;
 }
+
+/* Barra de progreso indeterminada (ver AddRegistryDialog): mientras no se sabe cuántos
+   archivos hay que mirar, el segmento recorre la barra para indicar actividad en vez de
+   mostrar un porcentaje inventado. */
+@keyframes cc-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}

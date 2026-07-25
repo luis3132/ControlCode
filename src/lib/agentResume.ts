@@ -1,3 +1,5 @@
+import { useSettingsStore } from "../store/settings";
+
 /** Agentes para los que se sabe construir un comando de "resume por session id".
  * Verificado contra la documentación real de cada CLI (no asumido):
  * - claude-code: code.claude.com/docs/en/sessions — `--resume <id>` apunta a una sesión
@@ -21,9 +23,25 @@ const RESUME_BUILDERS: Record<string, (cmd: string, sessionId: string) => string
 
 export const RESUMABLE_AGENT_IDS = Object.keys(RESUME_BUILDERS);
 
+/** ¿Esta TUI sabe reanudar una sesión puntual? Incluye las custom que lo declararon. */
+export function isResumable(agentId: string): boolean {
+  if (agentId in RESUME_BUILDERS) return true;
+  const custom = useSettingsStore.getState().customAgents.find((a) => a.id === agentId);
+  return Boolean(custom?.resumeArgs);
+}
+
 /** Construye el comando efectivo a lanzar en el PTY: relanza la sesión real si se conoce su id. */
 export function buildResumeCommand(agentId: string, command: string, sessionId?: string): string {
   if (!sessionId) return command;
+
   const build = RESUME_BUILDERS[agentId];
-  return build ? build(command, sessionId) : command;
+  if (build) return build(command, sessionId);
+
+  // TUI custom: el usuario declaró los argumentos de reanudación con el placeholder
+  // {session} (el backend rechaza guardarlos sin él, así que acá siempre está).
+  const custom = useSettingsStore.getState().customAgents.find((a) => a.id === agentId);
+  if (custom?.resumeArgs) {
+    return `${command} ${custom.resumeArgs.split("{session}").join(sessionId)}`;
+  }
+  return command;
 }

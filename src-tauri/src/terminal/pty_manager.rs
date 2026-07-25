@@ -61,7 +61,17 @@ fn append_to_buffer(id: u32, chunk: &[u8]) {
 /// contenido cortado/desbordado hasta el primer redibujado manual. Con el tamaño correcto
 /// desde el primer byte, ese problema no llega a existir.
 #[tauri::command]
-pub async fn pty_create(command: String, cwd: String, cols: u16, rows: u16, app: AppHandle) -> Result<u32, String> {
+pub async fn pty_create(
+    command: String,
+    cwd: String,
+    cols: u16,
+    rows: u16,
+    // `env`: variables extra a inyectar en el proceso — las declara la TUI custom que se
+    // está lanzando (ver `agents::CustomAgent::env`). Se aplican DESPUÉS de las de la app,
+    // así una TUI puede pisar `TERM`/`COLORTERM` si de verdad lo necesita.
+    env: Option<std::collections::HashMap<String, String>>,
+    app: AppHandle,
+) -> Result<u32, String> {
     let pty_system = native_pty_system();
     let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
 
@@ -78,6 +88,9 @@ pub async fn pty_create(command: String, cwd: String, cols: u16, rows: u16, app:
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    for (k, v) in env.unwrap_or_default() {
+        cmd.env(k, v);
+    }
 
     let child = pair
         .slave

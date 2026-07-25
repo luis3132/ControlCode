@@ -7,9 +7,10 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import "xterm/css/xterm.css";
 
-import { RESUMABLE_AGENT_IDS } from "../lib/agentResume";
+import { isResumable } from "../lib/agentResume";
 import { consumePtyTransferring } from "../lib/ptyTransfer";
 import { awaitSkillSetup } from "../lib/pendingSkillSetup";
+import { useSettingsStore } from "../store/settings";
 
 interface TerminalProps {
   /** Id de la tab en el store — solo se usa para esperar (si aplica) a que sus symlinks
@@ -132,7 +133,7 @@ export function Terminal({
     let cancelled = false;
 
     const pollSessionId = (resolvedCwd: string, startedAfter: number) => {
-      if (!agentId || !RESUMABLE_AGENT_IDS.includes(agentId) || !onSessionDiscovered) return;
+      if (!agentId || !isResumable(agentId) || !onSessionDiscovered) return;
 
       const attempt = async () => {
         if (cancelled) return;
@@ -212,6 +213,14 @@ export function Terminal({
         if (tabId) await awaitSkillSetup(tabId);
         if (cancelled) return;
 
+        // Toda tab que arranca (nueva, restaurada o reabierta desde el historial) deja su
+        // carpeta de skills con exactamente las suyas: las de su workspace más las
+        // propias, y ninguna de otro workspace/tab que hubiera usado antes esa carpeta.
+        // Tiene que pasar ANTES de spawnear: varios agentes escanean sus skills una sola
+        // vez, al boot.
+        if (tabId) await invoke("reconcile_tab_skills", { tabId }).catch(console.error);
+        if (cancelled) return;
+
         await fitOnce();
         if (cancelled) return;
 
@@ -223,6 +232,10 @@ export function Terminal({
           cwd: resolvedCwd,
           cols: term.cols,
           rows: term.rows,
+          // Variables extra declaradas por la TUI custom, si esta tab corre una.
+          env: agentId
+            ? useSettingsStore.getState().customAgents.find((a) => a.id === agentId)?.env ?? null
+            : null,
         });
         ptyIdRef.current = ptyId;
         setStatus("running");

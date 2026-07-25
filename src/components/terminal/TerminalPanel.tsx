@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Terminal } from "../Terminal";
 import { useTabsStore } from "../../store/tabs";
-import { buildResumeCommand, RESUMABLE_AGENT_IDS } from "../../lib/agentResume";
+import { buildResumeCommand, isResumable } from "../../lib/agentResume";
 
 export function TerminalPanel() {
   const { t } = useTranslation();
@@ -14,7 +14,7 @@ export function TerminalPanel() {
       {tabs.map((tab) => {
         // El resume del agente ya reconstruye su propia conversación; reproducir
         // también el scrollback crudo aquí duplicaría/ensuciaría la salida.
-        const isResuming = !!tab.sessionId && RESUMABLE_AGENT_IDS.includes(tab.agentId);
+        const isResuming = !!tab.sessionId && isResumable(tab.agentId);
         return (
           <div
             key={tab.id}

@@ -28,6 +28,16 @@ export interface MarketplaceSkillEntry {
   files: string[];
 }
 
+/** Payload del evento `cc-registry-progress` (ver `marketplace/mod.rs`). */
+export interface RegistryProgress {
+  registryId: string;
+  phase: "connecting" | "listing" | "scanning" | "saving" | "done" | "error";
+  current: number;
+  /** `null` mientras la fase no sea contable — la UI muestra spinner en vez de barra. */
+  total: number | null;
+  detail: string | null;
+}
+
 interface MarketplaceState {
   registries: RegistrySummary[];
   skills: MarketplaceSkillEntry[];
@@ -37,7 +47,9 @@ interface MarketplaceState {
 
   loadRegistries: () => Promise<void>;
   loadSkills: (query?: string, category?: string) => Promise<void>;
-  addRegistry: (name: string, sourceType: RegistrySourceType, location: string) => Promise<void>;
+  /** `id` es opcional pero conviene mandarlo: los eventos de progreso vienen etiquetados
+   *  con él, y esta promesa recién resuelve cuando el repo terminó de resolverse. */
+  addRegistry: (name: string, sourceType: RegistrySourceType, location: string, id?: string) => Promise<void>;
   renameRegistry: (id: string, name: string) => Promise<void>;
   removeRegistry: (id: string) => Promise<void>;
   setRegistryEnabled: (id: string, enabled: boolean) => Promise<void>;
@@ -71,8 +83,8 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
     }
   },
 
-  addRegistry: async (name, sourceType, location) => {
-    await invoke("add_registry", { name, sourceType, location });
+  addRegistry: async (name, sourceType, location, id) => {
+    await invoke("add_registry", { id: id ?? null, name, sourceType, location });
     await get().loadRegistries();
     await get().loadSkills();
   },

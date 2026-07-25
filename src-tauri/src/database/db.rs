@@ -38,8 +38,8 @@ fn needs_schema_v4(conn: &Connection) -> bool {
 }
 
 /// Detecta si a `tabs` le falta `opened_at` (fecha/hora en que el usuario abrió la tab
-/// por primera vez — distinto de `created_at`, que se re-estampa en cada autosave porque
-/// la fila se borra y reinserta completa).
+/// por primera vez, tal como la reporta el frontend, sin depender de cuándo se persistió
+/// la fila).
 fn needs_schema_v6(conn: &Connection) -> bool {
     conn.prepare("SELECT opened_at FROM tabs LIMIT 1").is_err()
 }
@@ -153,6 +153,32 @@ pub fn init_db() -> SqlResult<DbConnection> {
              value TEXT NOT NULL
          );
 
+         -- TUIs que el usuario agrega a mano (las soportadas de fábrica están hardcodeadas
+         -- en `agents::AGENTS`). Vive en SQLite y no en el frontend porque Rust necesita
+         -- consultarla sin que haya una ventana involucrada: la reconciliación de symlinks
+         -- de skills corre al cerrar una ventana, y ahí hay que saber en qué carpeta
+         -- guarda sus skills esta TUI. Todos los campos de integración son opcionales —
+         -- una TUI con solo label+command sigue siendo válida, simplemente no participa
+         -- de resume/skills/sesiones.
+         CREATE TABLE IF NOT EXISTS custom_agents (
+             id              TEXT PRIMARY KEY,
+             label           TEXT NOT NULL,
+             command         TEXT NOT NULL,
+             -- Argumentos de reanudación con el placeholder {session}, ej. '--resume {session}'
+             -- o 'resume {session}' (subcomando). NULL/vacío = esta TUI no reanuda sesiones.
+             resume_args     TEXT,
+             -- Carpeta de skills RELATIVA al cwd del proyecto, ej. '.agents/skills'.
+             skills_dir      TEXT,
+             -- Carpeta donde la TUI guarda sus sesiones, ej. '~/.mitui/sessions'.
+             sessions_dir    TEXT,
+             -- Cómo sacar el id de sesión del archivo encontrado: 'filename' (el nombre del
+             -- archivo ES el id) o 'field:<clave>' (buscar esa clave en el JSON/JSONL).
+             session_id_from TEXT NOT NULL DEFAULT 'filename',
+             -- Variables de entorno extra al lanzar el proceso, como objeto JSON.
+             env_json        TEXT NOT NULL DEFAULT '{}',
+             created_at      INTEGER NOT NULL
+         );
+
          -- Historial de tabs cerradas ('Sesiones'). A propósito NO tiene FK hacia
          -- `windows`/`tabs` (esas se borran y reescriben constantemente, ver
          -- db_save_window_state) — solo hacia `workspaces(id) ON DELETE CASCADE`, que
@@ -226,14 +252,26 @@ fn ensure_default_registries(conn: &Connection) -> SqlResult<()> {
     let has_any: i64 = conn.query_row("SELECT COUNT(*) FROM registries", [], |r| r.get(0))?;
     if has_any == 0 {
         let now = now_ts();
-        conn.execute(
-            "INSERT INTO registries (id, name, source_type, location, priority, enabled, created_at)
-             VALUES (?1, 'anthropics/skills', 'github', 'anthropics/skills', 0, 1, ?2)",
-            rusqlite::params![Uuid::new_v4().to_string(), now],
-        )?;
+        // `priority` define el orden en que se agregan las skills en el marketplace:
+        // autoskills va primero por ser el repo oficial de la app.
+        for &(priority, name, location) in DEFAULT_REGISTRIES {
+            conn.execute(
+                "INSERT INTO registries (id, name, source_type, location, priority, enabled, created_at)
+                 VALUES (?1, ?2, 'github', ?3, ?4, 1, ?5)",
+                rusqlite::params![Uuid::new_v4().to_string(), name, location, priority, now],
+            )?;
+        }
     }
     Ok(())
 }
+
+/// Repos preconfigurados al primer arranque (`priority`, nombre visible, `owner/repo`).
+/// Solo se siembran si la tabla está vacía — quitarlos después es decisión del usuario y
+/// no se vuelven a insertar.
+const DEFAULT_REGISTRIES: &[(i32, &str, &str)] = &[
+    (0, "autoskills (midudev)", "midudev/autoskills"),
+    (1, "anthropics/skills", "anthropics/skills"),
+];
 
 /// Siembra los valores por defecto de `settings` que el backend necesita leer de forma
 /// autónoma (sin que el frontend se los pase en cada llamada), como el directorio global
@@ -543,8 +581,12 @@ pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result
         archive_tab_row(&conn, tab_id, workspace_id)?;
     }
 
+    let affected_dirs = crate::skills::link_dirs_of_workspace(&conn, workspace_id);
+
     conn.execute("DELETE FROM windows WHERE workspace_id = ?1", [workspace_id])
         .map_err(|e| e.to_string())?;
+
+    crate::skills::reconcile_link_dirs(&conn, &affected_dirs);
     Ok(())
 }
 
@@ -652,11 +694,13 @@ pub fn db_close_workspace_windows(
     db: tauri::State<DbConnection>,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
+    let affected_dirs = crate::skills::link_dirs_of_workspace(&conn, &workspace_id);
     conn.execute(
         "UPDATE windows SET is_open = 0 WHERE workspace_id = ?1",
         [&workspace_id],
     )
     .map_err(|e| e.to_string())?;
+    crate::skills::reconcile_link_dirs(&conn, &affected_dirs);
     Ok(())
 }
 
@@ -932,17 +976,44 @@ pub fn db_save_window_state(
     drop(existing_ids_stmt);
     let incoming_ids: std::collections::HashSet<&str> =
         state.tabs.iter().map(|t| t.id.as_str()).collect();
+
+    // Directorios de skills que quedan sin dueño al desaparecer estas tabs — se
+    // reconcilian al final, ya con las filas borradas (ver `skills::reconcile_link_dir`).
+    let mut orphaned_dirs: Vec<(String, String)> = Vec::new();
     for closed_id in existing_ids.iter().filter(|id| !incoming_ids.contains(id.as_str())) {
         archive_tab_row(&conn, closed_id, &state.workspace_id)?;
+        if let Ok(pair) = conn.query_row(
+            "SELECT cwd, agent_id FROM tabs WHERE id = ?1",
+            [closed_id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        ) {
+            orphaned_dirs.push(pair);
+        }
+        conn.execute("DELETE FROM tabs WHERE id = ?1", [closed_id]).map_err(|e| e.to_string())?;
     }
 
-    conn.execute("DELETE FROM tabs WHERE window_id = ?1", [&window_id])
-        .map_err(|e| e.to_string())?;
-
+    // Upsert por id en vez de borrar todas las tabs de la ventana y reinsertarlas: con
+    // `PRAGMA foreign_keys = ON`, ese borrado disparaba el `ON DELETE CASCADE` de
+    // `project_skills.tab_id` y se llevaba puestos TODOS los attachments de scope='tab'
+    // en cada autosave (cada ~400ms), o sea que una skill asignada a una tab puntual
+    // dejaba de estar asignada casi de inmediato. Al no borrar la fila, el id de la tab
+    // es estable y el attachment sobrevive hasta que la tab se cierra de verdad (arriba).
     for t in &state.tabs {
         conn.execute(
             "INSERT INTO tabs (id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, opened_at, created_at, last_active)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)
+             ON CONFLICT(id) DO UPDATE SET
+               window_id = excluded.window_id,
+               title = excluded.title,
+               title_is_custom = excluded.title_is_custom,
+               agent_id = excluded.agent_id,
+               agent_label = excluded.agent_label,
+               command = excluded.command,
+               cwd = excluded.cwd,
+               tab_order = excluded.tab_order,
+               session_id = excluded.session_id,
+               scrollback = excluded.scrollback,
+               last_active = excluded.last_active",
             rusqlite::params![
                 t.id,
                 window_id,
@@ -961,6 +1032,8 @@ pub fn db_save_window_state(
         )
         .map_err(|e| e.to_string())?;
     }
+
+    crate::skills::reconcile_link_dirs(&conn, &orphaned_dirs);
 
     // El conteo de tabs de este workspace pudo haber cambiado (tab agregada/cerrada) —
     // se notifica a todas las ventanas (ej. el Home de otra ventana) para que refresquen.
@@ -1052,8 +1125,23 @@ pub fn db_get_open_window_labels(db: tauri::State<DbConnection>) -> Result<Vec<W
 #[tauri::command]
 pub fn db_mark_window_closed(label: String, db: tauri::State<DbConnection>) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
+
+    let window_id: Option<String> = conn
+        .query_row("SELECT id FROM windows WHERE label = ?1", [&label], |r| r.get(0))
+        .optional()
+        .map_err(|e| e.to_string())?;
+
     conn.execute("UPDATE windows SET is_open = 0 WHERE label = ?1", [&label])
         .map_err(|e| e.to_string())?;
+
+    // Las tabs siguen guardadas (la ventana es restaurable) pero ya no están corriendo:
+    // sus symlinks de skills salen del proyecto para no filtrarse al próximo workspace
+    // que abra esa misma carpeta. Se recrean al restaurar, vía `reconcile_tab_skills`.
+    if let Some(window_id) = window_id {
+        let dirs = crate::skills::link_dirs_of_window(&conn, &window_id);
+        crate::skills::reconcile_link_dirs(&conn, &dirs);
+    }
+
     Ok(())
 }
 
@@ -1083,6 +1171,11 @@ pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<O
 
     let Some((window_id, workspace_id)) = row else { return Ok(None) };
 
+    // Los directorios de skills de sus tabs se anotan antes de tocar nada: en ambas ramas
+    // (borrar la ventana o marcarla cerrada) esas tabs dejan de estar vivas y sus
+    // symlinks tienen que salir del proyecto.
+    let affected_dirs = crate::skills::link_dirs_of_window(&conn, &window_id);
+
     let sibling_open_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM windows WHERE workspace_id = ?1 AND is_open = 1 AND id != ?2",
@@ -1109,10 +1202,12 @@ pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<O
 
         conn.execute("DELETE FROM windows WHERE id = ?1", [&window_id])
             .map_err(|e| e.to_string())?;
+        crate::skills::reconcile_link_dirs(&conn, &affected_dirs);
         Ok(None)
     } else {
         conn.execute("UPDATE windows SET is_open = 0 WHERE id = ?1", [&window_id])
             .map_err(|e| e.to_string())?;
+        crate::skills::reconcile_link_dirs(&conn, &affected_dirs);
         Ok(Some(workspace_id))
     }
 }
