@@ -105,6 +105,11 @@ pub fn init_db() -> SqlResult<DbConnection> {
              tab_order       INTEGER NOT NULL DEFAULT 0,
              session_id      TEXT,
              scrollback      TEXT,
+             -- Entrada de `session_history` de la que salió esta tab (al reabrirla desde
+             -- Sesiones). Es lo que hace que volver a cerrarla ACTUALICE esa entrada en vez
+             -- de crear una nueva: sin esto, una sesión sin `session_id` resuelto se
+             -- duplicaba en el historial en cada ciclo de abrir/cerrar.
+             history_id      TEXT,
              opened_at       INTEGER NOT NULL,
              created_at      INTEGER NOT NULL,
              last_active     INTEGER NOT NULL
@@ -220,9 +225,16 @@ pub fn init_db() -> SqlResult<DbConnection> {
          CREATE INDEX IF NOT EXISTS idx_session_history_workspace ON session_history(workspace_id);",
     )?;
 
+    // Columna agregada después de que `tabs` ya existía en instalaciones reales, así que
+    // se suma con ALTER en vez de recrear la tabla (que perdería las tabs guardadas).
+    if conn.prepare("SELECT history_id FROM tabs LIMIT 1").is_err() {
+        conn.execute("ALTER TABLE tabs ADD COLUMN history_id TEXT", [])?;
+    }
+
     ensure_default_workspace(&conn)?;
     ensure_default_settings(&conn)?;
     ensure_default_registries(&conn)?;
+    dedupe_session_history(&conn)?;
 
     Ok(Arc::new(Mutex::new(conn)))
 }
@@ -379,6 +391,8 @@ pub struct TabRow {
     pub tab_order: i32,
     pub session_id: Option<String>,
     pub scrollback: Option<String>,
+    /// Entrada de `session_history` de la que salió esta tab (ver el schema de `tabs`).
+    pub history_id: Option<String>,
     pub opened_at: i64,
     pub created_at: i64,
     pub last_active: i64,
@@ -397,6 +411,7 @@ pub struct TabStatePayload {
     pub tab_order: i32,
     pub session_id: Option<String>,
     pub scrollback: Option<String>,
+    pub history_id: Option<String>,
     pub opened_at: i64,
 }
 
@@ -447,9 +462,10 @@ fn row_to_tab(row: &rusqlite::Row) -> rusqlite::Result<TabRow> {
         tab_order: row.get(8)?,
         session_id: row.get(9)?,
         scrollback: row.get(10)?,
-        opened_at: row.get(11)?,
-        created_at: row.get(12)?,
-        last_active: row.get(13)?,
+        history_id: row.get(11)?,
+        opened_at: row.get(12)?,
+        created_at: row.get(13)?,
+        last_active: row.get(14)?,
     })
 }
 
@@ -760,53 +776,84 @@ pub fn db_delete_workspace(
 /// conversación real del agente, cerrada/reabierta varias veces), actualiza esa fila en
 /// vez de duplicarla — el historial muestra "sesiones", no un log de cada cierre.
 fn archive_tab_row(conn: &Connection, tab_id: &str, workspace_id: &str) -> Result<(), String> {
-    let row: Option<(String, String, String, String, Option<String>, Option<String>, i64)> = conn
+    #[allow(clippy::type_complexity)]
+    let row: Option<(String, String, String, String, Option<String>, Option<String>, Option<String>, i64)> = conn
         .query_row(
-            "SELECT agent_id, agent_label, command, cwd, title, session_id, opened_at FROM tabs WHERE id = ?1",
+            "SELECT agent_id, agent_label, command, cwd, title, session_id, history_id, opened_at FROM tabs WHERE id = ?1",
             [tab_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let Some((agent_id, agent_label, command, cwd, title, session_id, opened_at)) = row else { return Ok(()) };
+    let Some((agent_id, agent_label, command, cwd, title, session_id, history_id, opened_at)) = row
+    else { return Ok(()) };
 
     // Skills activas para esta tab al momento de archivar: por-tab (scope='tab') o
     // por-workspace (scope='workspace'). Se "congelan" acá porque `project_skills.tab_id`
     // cascadea con `tabs` y desaparecería en el mismo borrado que dispara este archivo.
     let mut stmt = conn
         .prepare(
-            "SELECT s.name FROM project_skills ps JOIN skills s ON s.id = ps.skill_id
+            "SELECT DISTINCT s.id, s.name, ps.scope FROM project_skills ps
+             JOIN skills s ON s.id = ps.skill_id
              WHERE ps.enabled = 1 AND (
                (ps.scope = 'tab' AND ps.tab_id = ?1) OR
                (ps.scope = 'workspace' AND ps.workspace_id = ?2)
              )",
         )
         .map_err(|e| e.to_string())?;
-    let skill_names: Vec<String> = stmt
-        .query_map(rusqlite::params![tab_id, workspace_id], |r| r.get(0))
+    let archived: Vec<ArchivedSkill> = stmt
+        .query_map(rusqlite::params![tab_id, workspace_id], |r| {
+            Ok(ArchivedSkill { id: r.get(0)?, name: r.get(1)?, scope: r.get(2)? })
+        })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
-    let skills_json = serde_json::to_string(&skill_names).unwrap_or_else(|_| "[]".to_string());
+    let skills_json = serde_json::to_string(&archived).unwrap_or_else(|_| "[]".to_string());
     let now = now_ts();
 
-    if let Some(sid) = &session_id {
-        let existing_id: Option<String> = conn
-            .query_row("SELECT id FROM session_history WHERE session_id = ?1", [sid], |r| r.get(0))
+    // A qué entrada del historial corresponde esta tab, en orden de confianza:
+    //
+    // 1. `history_id` — la tab se abrió DESDE el historial, así que sabemos exactamente
+    //    cuál actualizar. Es el único camino que funciona para sesiones que nunca
+    //    resolvieron un `session_id` (bash, o un agente cuyo id no se llegó a descubrir):
+    //    sin esto, cada ciclo de abrir/cerrar insertaba una fila nueva.
+    // 2. `session_id` — misma conversación real del agente, aunque la tab sea otra.
+    // 3. Sin ninguno de los dos, y sin id de sesión que la distinga, una tab del mismo
+    //    agente en la misma carpeta es indistinguible de la anterior: se actualiza esa
+    //    entrada en vez de acumular copias.
+    let existing_id: Option<String> = if let Some(hid) = &history_id {
+        conn.query_row("SELECT id FROM session_history WHERE id = ?1", [hid], |r| r.get(0))
             .optional()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+    } else if let Some(sid) = &session_id {
+        conn.query_row("SELECT id FROM session_history WHERE session_id = ?1", [sid], |r| r.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?
+    } else {
+        conn.query_row(
+            "SELECT id FROM session_history
+             WHERE workspace_id = ?1 AND agent_id = ?2 AND cwd = ?3 AND session_id IS NULL
+             ORDER BY closed_at DESC LIMIT 1",
+            rusqlite::params![workspace_id, agent_id, cwd],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    };
 
-        if let Some(hid) = existing_id {
-            // opened_at NO se toca: representa cuándo se abrió esa conversación por
-            // primera vez, no la última vez que se retomó/cerró.
-            conn.execute(
-                "UPDATE session_history SET agent_id=?1, agent_label=?2, command=?3, cwd=?4, title=?5, skills=?6, closed_at=?7 WHERE id=?8",
-                rusqlite::params![agent_id, agent_label, command, cwd, title, skills_json, now, hid],
-            )
-            .map_err(|e| e.to_string())?;
-            return Ok(());
-        }
+    if let Some(hid) = existing_id {
+        // opened_at NO se toca: representa cuándo se abrió esa conversación por
+        // primera vez, no la última vez que se retomó/cerró.
+        //
+        // `session_id` sí se escribe: una sesión que se archivó sin id y lo resolvió al
+        // reabrirse tiene que quedar identificada de acá en adelante.
+        conn.execute(
+            "UPDATE session_history SET agent_id=?1, agent_label=?2, command=?3, cwd=?4, title=?5, session_id=COALESCE(?6, session_id), skills=?7, closed_at=?8 WHERE id=?9",
+            rusqlite::params![agent_id, agent_label, command, cwd, title, session_id, skills_json, now, hid],
+        )
+        .map_err(|e| e.to_string())?;
+        return Ok(());
     }
 
     conn.execute(
@@ -842,9 +889,88 @@ pub struct SessionHistoryEntry {
     pub cwd: String,
     pub title: Option<String>,
     pub session_id: Option<String>,
-    pub skills: Vec<String>,
+    pub skills: Vec<ArchivedSkill>,
     pub opened_at: i64,
     pub closed_at: i64,
+}
+
+/// Una skill tal como estaba activa en la tab en el momento de cerrarla. Se guarda el
+/// `id` para poder reattachear exactamente la misma copia instalada, y el `name` para
+/// poder reconocerla (o buscarla en el marketplace) si esa copia ya no existe.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchivedSkill {
+    pub id: String,
+    pub name: String,
+    /// 'tab' o 'workspace' — con qué alcance estaba attacheada.
+    pub scope: String,
+}
+
+/// Colapsa las entradas duplicadas que dejó la versión anterior: cada vez que se reabría
+/// y volvía a cerrar una sesión SIN `session_id` resuelto se insertaba una fila nueva en
+/// vez de actualizar la existente, así que el historial mostraba N copias de la misma
+/// conversación.
+///
+/// Dos filas son la misma sesión si comparten workspace + agente + carpeta + `session_id`
+/// (tratando NULL como "sin id"). De cada grupo sobrevive la cerrada más recientemente —
+/// la que tiene el título y las skills más actuales — pero heredando el `opened_at` más
+/// viejo del grupo, que es cuándo empezó realmente la conversación.
+fn dedupe_session_history(conn: &Connection) -> SqlResult<()> {
+    // El opened_at se normaliza ANTES de borrar: después ya no habría de dónde sacarlo.
+    conn.execute(
+        "UPDATE session_history SET
+           opened_at = (SELECT MIN(h2.opened_at) FROM session_history h2
+                        WHERE h2.workspace_id = session_history.workspace_id
+                          AND h2.agent_id = session_history.agent_id
+                          AND h2.cwd = session_history.cwd
+                          AND COALESCE(h2.session_id, '') = COALESCE(session_history.session_id, ''))",
+        [],
+    )?;
+
+    // `rowid` desempata para que el resultado sea determinista si dos filas del mismo
+    // grupo comparten `closed_at`.
+    conn.execute(
+        "DELETE FROM session_history WHERE rowid NOT IN (
+           SELECT (
+             SELECT h2.rowid FROM session_history h2
+             WHERE h2.workspace_id = h.workspace_id
+               AND h2.agent_id = h.agent_id
+               AND h2.cwd = h.cwd
+               AND COALESCE(h2.session_id, '') = COALESCE(h.session_id, '')
+             ORDER BY h2.closed_at DESC, h2.rowid DESC
+             LIMIT 1
+           )
+           FROM session_history h
+         )",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Skills archivadas de una entrada del historial, sobre una conexión ya lockeada.
+pub fn archived_skills_of_session(
+    conn: &Connection,
+    history_id: &str,
+) -> Result<Vec<ArchivedSkill>, String> {
+    let json: Option<String> = conn
+        .query_row("SELECT skills FROM session_history WHERE id = ?1", [history_id], |r| r.get(0))
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(json.as_deref().map(parse_archived_skills).unwrap_or_default())
+}
+
+/// Lee la columna `skills` de `session_history` tolerando el formato viejo, que era un
+/// array plano de nombres (`["git-helper"]`) sin id ni scope. Esas entradas se leen como
+/// skills sin id: se pueden mostrar y buscar por nombre, pero no reattachear directo.
+fn parse_archived_skills(json: &str) -> Vec<ArchivedSkill> {
+    if let Ok(v) = serde_json::from_str::<Vec<ArchivedSkill>>(json) {
+        return v;
+    }
+    serde_json::from_str::<Vec<String>>(json)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|name| ArchivedSkill { id: String::new(), name, scope: "tab".to_string() })
+        .collect()
 }
 
 /// Historial de tabs cerradas de un workspace, más reciente primero. Filtrado
@@ -865,7 +991,7 @@ pub fn db_list_session_history(
     let entries = stmt
         .query_map([&workspace_id], |row| {
             let skills_json: String = row.get(8)?;
-            let skills: Vec<String> = serde_json::from_str(&skills_json).unwrap_or_default();
+            let skills = parse_archived_skills(&skills_json);
             Ok(SessionHistoryEntry {
                 id: row.get(0)?,
                 workspace_id: row.get(1)?,
@@ -1000,8 +1126,8 @@ pub fn db_save_window_state(
     // es estable y el attachment sobrevive hasta que la tab se cierra de verdad (arriba).
     for t in &state.tabs {
         conn.execute(
-            "INSERT INTO tabs (id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, opened_at, created_at, last_active)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)
+            "INSERT INTO tabs (id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, opened_at, created_at, last_active)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)
              ON CONFLICT(id) DO UPDATE SET
                window_id = excluded.window_id,
                title = excluded.title,
@@ -1013,6 +1139,7 @@ pub fn db_save_window_state(
                tab_order = excluded.tab_order,
                session_id = excluded.session_id,
                scrollback = excluded.scrollback,
+               history_id = excluded.history_id,
                last_active = excluded.last_active",
             rusqlite::params![
                 t.id,
@@ -1026,6 +1153,7 @@ pub fn db_save_window_state(
                 t.tab_order,
                 t.session_id,
                 t.scrollback,
+                t.history_id,
                 t.opened_at,
                 now
             ],
@@ -1064,7 +1192,7 @@ pub fn db_load_window_state(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, opened_at, created_at, last_active
+            "SELECT id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, opened_at, created_at, last_active
              FROM tabs WHERE window_id = ?1 ORDER BY tab_order ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -1255,4 +1383,136 @@ pub fn count_tabs_for_window(db: &DbConnection, window_id: &str) -> Result<i64, 
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.query_row("SELECT COUNT(*) FROM tabs WHERE window_id = ?1", [window_id], |row| row.get(0))
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn history_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM session_history", [], |r| r.get(0)).unwrap()
+    }
+
+    /// Schema mínimo para ejercitar el archivado: solo las tablas que toca.
+    fn setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
+             CREATE TABLE windows (id TEXT PRIMARY KEY, label TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL, is_open INTEGER NOT NULL DEFAULT 1, last_active INTEGER NOT NULL);
+             CREATE TABLE tabs (id TEXT PRIMARY KEY, window_id TEXT NOT NULL, title TEXT, title_is_custom INTEGER NOT NULL DEFAULT 0, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, tab_order INTEGER NOT NULL DEFAULT 0, session_id TEXT, scrollback TEXT, history_id TEXT, opened_at INTEGER NOT NULL, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
+             CREATE TABLE skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, source_path TEXT NOT NULL);
+             CREATE TABLE project_skills (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, workspace_id TEXT NOT NULL, scope TEXT NOT NULL, tab_id TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
+             CREATE TABLE session_history (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT, session_id TEXT, skills TEXT NOT NULL DEFAULT '[]', opened_at INTEGER NOT NULL, closed_at INTEGER NOT NULL);
+             INSERT INTO workspaces VALUES ('ws', 'WS', 0, 0);
+             INSERT INTO windows VALUES ('win', 'win', 'ws', 1, 0);",
+        ).unwrap();
+        conn
+    }
+
+    fn insert_tab(conn: &Connection, id: &str, session_id: Option<&str>, history_id: Option<&str>) {
+        conn.execute(
+            "INSERT INTO tabs (id, window_id, title, agent_id, agent_label, command, cwd, session_id, history_id, opened_at, created_at, last_active)
+             VALUES (?1, 'win', 'Mi sesión', 'claude-code', 'Claude Code', 'claude', '/proj', ?2, ?3, 100, 0, 0)",
+            rusqlite::params![id, session_id, history_id],
+        ).unwrap();
+    }
+
+    /// El bug reportado: reabrir una sesión desde el historial y volver a cerrarla dejaba
+    /// DOS entradas de la misma sesión en vez de actualizar la que ya estaba.
+    #[test]
+    fn reopening_and_closing_a_session_updates_its_history_entry() {
+        for session_id in [None, Some("sess-1")] {
+            let conn = setup();
+
+            // Primer ciclo: la tab se abre y se cierra → una entrada.
+            insert_tab(&conn, "tab-1", session_id, None);
+            archive_tab_row(&conn, "tab-1", "ws").unwrap();
+            assert_eq!(history_count(&conn), 1, "el primer cierre crea una sola entrada");
+
+            let (hid, opened_at): (String, i64) = conn
+                .query_row("SELECT id, opened_at FROM session_history", [], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap();
+            assert_eq!(opened_at, 100);
+
+            // Segundo ciclo: se reabre DESDE el historial (la tab nueva lleva history_id)
+            // y se vuelve a cerrar. Debe seguir habiendo una sola entrada.
+            conn.execute("DELETE FROM tabs WHERE id = 'tab-1'", []).unwrap();
+            insert_tab(&conn, "tab-2", session_id, Some(&hid));
+            archive_tab_row(&conn, "tab-2", "ws").unwrap();
+            assert_eq!(history_count(&conn), 1, "reabrir y cerrar no debe duplicar la sesión (session_id: {session_id:?})");
+
+            let same_id: String = conn.query_row("SELECT id FROM session_history", [], |r| r.get(0)).unwrap();
+            assert_eq!(same_id, hid, "debe ser la MISMA entrada, actualizada");
+        }
+    }
+
+    /// Sin `history_id` ni `session_id` tampoco se acumulan copias: una tab del mismo
+    /// agente en la misma carpeta es indistinguible de la anterior.
+    #[test]
+    fn sessions_without_any_id_do_not_pile_up() {
+        let conn = setup();
+        for i in 0..3 {
+            let tab_id = format!("tab-{i}");
+            insert_tab(&conn, &tab_id, None, None);
+            archive_tab_row(&conn, &tab_id, "ws").unwrap();
+            conn.execute("DELETE FROM tabs WHERE id = ?1", [&tab_id]).unwrap();
+        }
+        assert_eq!(history_count(&conn), 1);
+    }
+
+    /// Una sesión archivada sin id que resuelve uno al reabrirse queda identificada, sin
+    /// dejar atrás la entrada vieja.
+    #[test]
+    fn discovered_session_id_is_written_back_to_the_existing_entry() {
+        let conn = setup();
+        insert_tab(&conn, "tab-1", None, None);
+        archive_tab_row(&conn, "tab-1", "ws").unwrap();
+        let hid: String = conn.query_row("SELECT id FROM session_history", [], |r| r.get(0)).unwrap();
+
+        conn.execute("DELETE FROM tabs WHERE id = 'tab-1'", []).unwrap();
+        insert_tab(&conn, "tab-2", Some("sess-descubierta"), Some(&hid));
+        archive_tab_row(&conn, "tab-2", "ws").unwrap();
+
+        assert_eq!(history_count(&conn), 1);
+        let sid: Option<String> = conn
+            .query_row("SELECT session_id FROM session_history", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(sid.as_deref(), Some("sess-descubierta"));
+    }
+
+    /// Los duplicados que dejó la versión anterior se colapsan al arrancar, conservando
+    /// el opened_at más viejo y los datos del cierre más reciente.
+    #[test]
+    fn existing_duplicates_are_collapsed_on_startup() {
+        let conn = setup();
+        for (i, (opened, closed, title)) in
+            [(100, 200, "viejo"), (300, 400, "medio"), (500, 600, "nuevo")].iter().enumerate()
+        {
+            conn.execute(
+                "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, opened_at, closed_at)
+                 VALUES (?1, 'ws', 'claude-code', 'Claude Code', 'claude', '/proj', ?2, NULL, '[]', ?3, ?4)",
+                rusqlite::params![format!("h{i}"), title, opened, closed],
+            ).unwrap();
+        }
+        // Otra sesión, distinta carpeta: no debe tocarse.
+        conn.execute(
+            "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, opened_at, closed_at)
+             VALUES ('otra', 'ws', 'claude-code', 'Claude Code', 'claude', '/otro', 'otra', NULL, '[]', 10, 20)",
+            [],
+        ).unwrap();
+
+        dedupe_session_history(&conn).unwrap();
+
+        assert_eq!(history_count(&conn), 2, "los 3 duplicados quedan en 1, la otra sesión intacta");
+        let (title, opened, closed): (String, i64, i64) = conn
+            .query_row(
+                "SELECT title, opened_at, closed_at FROM session_history WHERE cwd = '/proj'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(title, "nuevo", "sobrevive la del cierre más reciente");
+        assert_eq!(opened, 100, "pero hereda cuándo empezó realmente la conversación");
+        assert_eq!(closed, 600);
+    }
 }

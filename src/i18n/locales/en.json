@@ -52,6 +52,18 @@
   "sessions.opened": "Opened {{time}}",
   "sessions.closed": "Closed {{time}} ago",
 
+  "sessions.missingSkills.title": "This session is missing skills",
+  "sessions.missingSkills.body": "\"{{session}}\" had skills that are no longer installed ({{count}}). If you open it as is, the agent won't have them.",
+  "sessions.missingSkills.allRestored": "All the skills \"{{session}}\" had are back. You can open it.",
+  "sessions.missingSkills.present": "Installed",
+  "sessions.missingSkills.availableIn": "Missing — available in {{registry}}",
+  "sessions.missingSkills.notFound": "Missing — not in any added repository",
+  "sessions.missingSkills.notFoundHint": "For the ones not listed, add the repository that has them from Marketplace (or refresh the ones you already have) and try again.",
+  "sessions.missingSkills.install": "Install",
+  "sessions.missingSkills.installAll": "Install available ones",
+  "sessions.missingSkills.continueAnyway": "Open anyway",
+  "sessions.missingSkills.open": "Open session",
+
   "workspace.manage.link": "Manage",
   "workspace.manage.title": "Manage workspaces",
   "workspace.manage.subtitle": "Rename, delete or open your saved window/tab layouts",

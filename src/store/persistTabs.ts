@@ -80,6 +80,7 @@ async function saveNow(opts: { refreshScrollback: boolean } = { refreshScrollbac
       cwd: t.cwd,
       tabOrder: i,
       sessionId: t.sessionId ?? null,
+      historyId: t.historyId ?? null,
       scrollback: await resolveScrollback(t.ptyId),
       openedAt: t.openedAt,
     }))

@@ -1127,6 +1127,152 @@ pub fn check_symlinks_health(
     Ok(issues)
 }
 
+// ── Skills de una sesión archivada ────────────────────────────────
+
+/// Dónde volver a bajar una skill que ya no está instalada.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSource {
+    pub registry_id: String,
+    pub registry_name: String,
+    /// Id de la skill DENTRO de ese registry (no el id de la copia instalada).
+    pub marketplace_skill_id: String,
+}
+
+/// Estado de una de las skills que tenía una sesión al cerrarse.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSkillStatus {
+    pub name: String,
+    pub scope: String,
+    /// Id de la copia instalada que la cubre hoy — puede diferir del archivado si el
+    /// usuario la borró y la reinstaló (misma skill, id nuevo).
+    pub installed_skill_id: Option<String>,
+    /// Si falta: de dónde se puede volver a bajar, si algún repo habilitado la ofrece.
+    pub available_from: Option<SkillSource>,
+}
+
+impl SessionSkillStatus {
+    fn is_missing(&self) -> bool {
+        self.installed_skill_id.is_none()
+    }
+}
+
+/// Busca una skill por nombre entre los repos habilitados, leyendo el cache que dejó el
+/// último refresh (no hace red: si el cache está viejo, el usuario refresca desde el
+/// Marketplace). Devuelve la primera coincidencia por orden de prioridad de repo.
+fn find_in_marketplace(conn: &rusqlite::Connection, name: &str) -> Option<SkillSource> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, cache_json FROM registries
+             WHERE enabled = 1 AND cache_json IS NOT NULL ORDER BY priority ASC",
+        )
+        .ok()?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .ok()?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let wanted = name.to_lowercase();
+    for (registry_id, registry_name, cache_json) in rows {
+        let entries: Vec<crate::marketplace::MarketplaceSkillEntry> =
+            serde_json::from_str(&cache_json).unwrap_or_default();
+        if let Some(entry) = entries.iter().find(|e| {
+            e.name.to_lowercase() == wanted || e.id.to_lowercase() == wanted
+        }) {
+            return Some(SkillSource {
+                registry_id,
+                registry_name,
+                marketplace_skill_id: entry.id.clone(),
+            });
+        }
+    }
+    None
+}
+
+/// Resuelve, para cada skill archivada de una sesión, si sigue instalada y —si no— dónde
+/// volver a bajarla. Es lo que le permite a la UI avisar "esta sesión tenía N skills y
+/// falta X" antes de reabrirla.
+#[tauri::command]
+pub fn check_session_skills(
+    history_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Vec<SessionSkillStatus>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let archived = crate::database::archived_skills_of_session(&conn, &history_id)?;
+
+    let mut out = Vec::with_capacity(archived.len());
+    for a in archived {
+        // Primero por id (la copia exacta que tenía la sesión); si esa copia ya no está,
+        // se acepta otra instalada con el mismo nombre — para el usuario "tiene la skill".
+        let by_id: Option<String> = if a.id.is_empty() {
+            None
+        } else {
+            conn.query_row("SELECT id FROM skills WHERE id = ?1", [&a.id], |r| r.get(0))
+                .optional()
+                .map_err(|e| e.to_string())?
+        };
+        let installed_skill_id = match by_id {
+            Some(id) => Some(id),
+            None => conn
+                .query_row("SELECT id FROM skills WHERE name = ?1", [&a.name], |r| r.get(0))
+                .optional()
+                .map_err(|e| e.to_string())?,
+        };
+
+        let available_from = if installed_skill_id.is_none() {
+            find_in_marketplace(&conn, &a.name)
+        } else {
+            None
+        };
+
+        out.push(SessionSkillStatus {
+            name: a.name,
+            scope: a.scope,
+            installed_skill_id,
+            available_from,
+        });
+    }
+    Ok(out)
+}
+
+/// Reattachea a una tab las skills que tenía la sesión archivada y siguen instaladas.
+/// Devuelve las que NO se pudieron restaurar (siguen faltando), para que la UI pueda
+/// insistir con la advertencia si hiciera falta.
+///
+/// Todo se attachea con scope='tab' aunque en su momento viniera del workspace: la sesión
+/// se está reabriendo como una tab puntual, y heredar del workspace de destino (que puede
+/// ser otro) no reproduciría lo que esa terminal tenía.
+#[tauri::command]
+pub fn restore_session_skills(
+    history_id: String,
+    workspace_id: String,
+    tab_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Vec<String>, String> {
+    let statuses = check_session_skills(history_id, db.clone())?;
+
+    let mut still_missing = Vec::new();
+    for status in statuses {
+        match status.installed_skill_id {
+            Some(skill_id) => {
+                // Best-effort por skill: un conflicto de symlink en una no debe impedir
+                // que se restauren las demás.
+                let _ = attach_skill(
+                    skill_id,
+                    workspace_id.clone(),
+                    "tab".to_string(),
+                    Some(tab_id.clone()),
+                    db.clone(),
+                );
+            }
+            None => still_missing.push(status.name),
+        }
+    }
+    Ok(still_missing)
+}
+
 // ── Integration test: ejercita el módulo real contra SQLite + filesystem reales,
 // sin tocar la DB del usuario (`~/.controlcode/data.db`). Usa `tauri::test::mock_app`
 // para obtener un `tauri::State<DbConnection>` legítimo (no se puede construir a mano,
@@ -1146,6 +1292,8 @@ mod tests {
         CREATE TABLE project_skills (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, workspace_id TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'workspace', tab_id TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, UNIQUE (skill_id, workspace_id, scope, tab_id));
         CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE custom_agents (id TEXT PRIMARY KEY, label TEXT NOT NULL, command TEXT NOT NULL, resume_args TEXT, skills_dir TEXT, sessions_dir TEXT, session_id_from TEXT NOT NULL DEFAULT 'filename', env_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL);
+        CREATE TABLE session_history (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT, session_id TEXT, skills TEXT NOT NULL DEFAULT '[]', opened_at INTEGER NOT NULL, closed_at INTEGER NOT NULL);
+        CREATE TABLE registries (id TEXT PRIMARY KEY, name TEXT NOT NULL, source_type TEXT NOT NULL, location TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, last_fetched INTEGER, cache_json TEXT, cache_error TEXT, created_at INTEGER NOT NULL);
     ";
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -1467,6 +1615,108 @@ mod tests {
         // Y el ciclo completo también funciona: detachear se lleva el symlink.
         detach_skill(info.id.clone(), workspace_id, "workspace".to_string(), None, state.clone()).unwrap();
         assert!(custom_link.symlink_metadata().is_err());
+    }
+
+    /// Ciclo del pedido: una sesión se cierra con dos skills, una se desinstala, y al
+    /// reabrirla la app sabe cuál falta, de dónde bajarla, y restaura las que sí están.
+    #[test]
+    fn archived_session_skills_are_checked_and_restored() {
+        let (db, workspace_id, tab_id, tab_cwd, _skills_dir) = setup();
+        let app = tauri::test::mock_app();
+        app.manage(db);
+        let state = app.state::<DbConnection>();
+
+        let source_a = temp_dir("kept-skill");
+        write_source_skill(&source_a);
+        let kept = install_skill(source_a.join("SKILL.md").to_string_lossy().to_string(), None, state.clone()).unwrap();
+
+        let source_b = temp_dir("gone-skill");
+        std::fs::create_dir_all(&source_b).unwrap();
+        std::fs::write(
+            source_b.join("SKILL.md"),
+            "---\nname: la-que-falta\ncompatible_agents: [claude-code]\n---\nCuerpo.\n",
+        ).unwrap();
+        let gone = install_skill(source_b.join("SKILL.md").to_string_lossy().to_string(), None, state.clone()).unwrap();
+
+        // La sesión archivada guarda id + nombre + scope de cada skill que tenía.
+        {
+            let conn = state.lock().unwrap();
+            let archived = serde_json::json!([
+                { "id": kept.id, "name": kept.name, "scope": "tab" },
+                { "id": gone.id, "name": gone.name, "scope": "workspace" },
+            ]).to_string();
+            conn.execute(
+                "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, opened_at, closed_at)
+                 VALUES ('hist-1', ?1, 'claude-code', 'Claude Code', 'claude', ?2, 'Sesión vieja', 'sess-1', ?3, 0, 0)",
+                rusqlite::params![workspace_id, tab_cwd.to_string_lossy(), archived],
+            ).unwrap();
+            // Un repo habilitado que SÍ ofrece la que se va a borrar.
+            let cache = serde_json::json!([{
+                "id": "la-que-falta", "registryId": "reg-1", "registryName": "Mi repo",
+                "name": "la-que-falta", "description": null, "categories": [],
+                "compatibleAgents": [], "folderPath": "la-que-falta", "files": []
+            }]).to_string();
+            conn.execute(
+                "INSERT INTO registries (id, name, source_type, location, priority, enabled, cache_json, created_at)
+                 VALUES ('reg-1', 'Mi repo', 'github', 'alguien/repo', 0, 1, ?1, 0)",
+                [cache],
+            ).unwrap();
+        }
+
+        // Con las dos instaladas no falta nada.
+        let statuses = check_session_skills("hist-1".to_string(), state.clone()).unwrap();
+        assert_eq!(statuses.len(), 2);
+        assert!(statuses.iter().all(|s| !s.is_missing()), "con ambas instaladas no debe faltar ninguna");
+
+        // Se desinstala una: ahora la app tiene que saber cuál falta y de dónde bajarla.
+        delete_skill(gone.id.clone(), state.clone()).unwrap();
+        let statuses = check_session_skills("hist-1".to_string(), state.clone()).unwrap();
+        let missing: Vec<&SessionSkillStatus> = statuses.iter().filter(|s| s.is_missing()).collect();
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].name, "la-que-falta");
+        assert_eq!(
+            missing[0].available_from.as_ref().map(|a| a.registry_name.as_str()),
+            Some("Mi repo"),
+            "debe decir en qué repositorio está para poder reinstalarla"
+        );
+
+        // Restaurar sobre la tab: se reattachea la que está y se reporta la que no.
+        let still_missing =
+            restore_session_skills("hist-1".to_string(), workspace_id, tab_id, state.clone()).unwrap();
+        assert_eq!(still_missing, vec!["la-que-falta".to_string()]);
+
+        let kept_link = links_dir_for(&tab_cwd.to_string_lossy(), "claude-code")
+            .unwrap()
+            .join(slug_from_source_path(&kept.source_path));
+        assert!(kept_link.symlink_metadata().is_ok(), "la skill que sigue instalada debe quedar activa en la tab");
+    }
+
+    /// El formato viejo del historial (array plano de nombres) se sigue leyendo: esas
+    /// entradas no tienen id, así que se resuelven por nombre contra lo instalado.
+    #[test]
+    fn legacy_archived_skill_names_still_resolve() {
+        let (db, workspace_id, _tab_id, tab_cwd, _skills_dir) = setup();
+        let app = tauri::test::mock_app();
+        app.manage(db);
+        let state = app.state::<DbConnection>();
+
+        let source = temp_dir("legacy-skill");
+        write_source_skill(&source);
+        let info = install_skill(source.join("SKILL.md").to_string_lossy().to_string(), None, state.clone()).unwrap();
+
+        {
+            let conn = state.lock().unwrap();
+            conn.execute(
+                "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, opened_at, closed_at)
+                 VALUES ('hist-legacy', ?1, 'claude-code', 'Claude Code', 'claude', ?2, NULL, NULL, '[\"git-commit-helper\"]', 0, 0)",
+                rusqlite::params![workspace_id, tab_cwd.to_string_lossy()],
+            ).unwrap();
+        }
+
+        let statuses = check_session_skills("hist-legacy".to_string(), state.clone()).unwrap();
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].name, "git-commit-helper");
+        assert_eq!(statuses[0].installed_skill_id.as_deref(), Some(info.id.as_str()));
     }
 
     #[test]

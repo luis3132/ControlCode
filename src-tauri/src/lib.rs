@@ -82,6 +82,8 @@ pub fn run() {
             skills::check_symlinks_health,
             skills::sync_workspace_skills,
             skills::reconcile_tab_skills,
+            skills::check_session_skills,
+            skills::restore_session_skills,
             agents::list_custom_agents,
             agents::upsert_custom_agent,
             agents::delete_custom_agent,

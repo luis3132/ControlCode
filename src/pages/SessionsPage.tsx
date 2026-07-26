@@ -1,17 +1,30 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "neogestify-ui-components";
 import { FolderIcon, ArrowRightIcon, ClockIcon } from "neogestify-ui-components";
-import { useSessionsStore } from "../store/sessions";
+import {
+  SessionHistoryEntry,
+  SessionSkillStatus,
+  useSessionsStore,
+} from "../store/sessions";
 import { useTabsStore } from "../store/tabs";
 import { PageHeader } from "../components/common/PageHeader";
+import { MissingSkillsDialog } from "../components/sessions/MissingSkillsDialog";
+import { flushPendingSave } from "../store/persistTabs";
+import { registerPendingSkillSetup } from "../lib/pendingSkillSetup";
 
 interface OpenTabLocation {
   windowLabel: string;
   tabId: string;
+}
+
+/** Sesión que el usuario quiso reabrir pero quedó esperando la decisión sobre skills. */
+interface PendingResume {
+  entry: SessionHistoryEntry;
+  statuses: SessionSkillStatus[];
 }
 
 function formatDateTime(unixSeconds: number): string {
@@ -39,8 +52,9 @@ function formatRelative(unixSeconds: number): string {
 export function SessionsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { history, loadHistory } = useSessionsStore();
+  const { history, loadHistory, checkSessionSkills, restoreSessionSkills } = useSessionsStore();
   const { workspaceId, addTab } = useTabsStore();
+  const [pendingResume, setPendingResume] = useState<PendingResume | null>(null);
 
   useEffect(() => {
     loadHistory(workspaceId);
@@ -50,7 +64,28 @@ export function SessionsPage() {
     return () => { unlisten.then((fn) => fn()); };
   }, [workspaceId, loadHistory]);
 
-  const handleResume = async (entry: (typeof history)[number]) => {
+  /** Abre la tab de verdad y le restaura las skills que la sesión tenía al cerrarse. */
+  const openSession = (entry: SessionHistoryEntry) => {
+    const tabId = addTab({
+      cwd: entry.cwd,
+      agent: { id: entry.agentId, label: entry.agentLabel, command: entry.command, available: true },
+      sessionId: entry.sessionId ?? undefined,
+      // Vincula la tab con la entrada del historial de la que salió: al cerrarla se
+      // actualiza ESA entrada en vez de agregar otra copia de la misma sesión.
+      historyId: entry.id,
+    });
+    navigate("/workspace");
+
+    // Mismo gate que el wizard del "+": los symlinks tienen que estar en disco ANTES de
+    // que arranque el agente, porque varios escanean sus skills solo al boot.
+    const setup = (async () => {
+      await flushPendingSave();
+      await restoreSessionSkills(entry.id, workspaceId, tabId).catch(console.error);
+    })();
+    registerPendingSkillSetup(tabId, setup);
+  };
+
+  const handleResume = async (entry: SessionHistoryEntry) => {
     // Si esta conversación ya está abierta en alguna ventana viva de este workspace,
     // enfocar esa tab en vez de abrir un duplicado.
     if (entry.sessionId) {
@@ -69,12 +104,16 @@ export function SessionsPage() {
       }
     }
 
-    addTab({
-      cwd: entry.cwd,
-      agent: { id: entry.agentId, label: entry.agentLabel, command: entry.command, available: true },
-      sessionId: entry.sessionId ?? undefined,
-    });
-    navigate("/workspace");
+    // Si alguna de las skills que tenía esta sesión ya no está instalada, se avisa ANTES
+    // de abrirla: reabrirla sin ellas es una sesión distinta a la que se cerró, y el
+    // usuario tiene que poder decidir entre reinstalarlas o seguir igual.
+    const statuses = await checkSessionSkills(entry.id).catch(() => []);
+    if (statuses.some((s) => !s.installedSkillId)) {
+      setPendingResume({ entry, statuses });
+      return;
+    }
+
+    openSession(entry);
   };
 
   return (
@@ -119,8 +158,8 @@ export function SessionsPage() {
                   {entry.skills.length > 0 && (
                     <span className="flex flex-wrap gap-1 mt-0.5">
                       {entry.skills.map((s) => (
-                        <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                          {s}
+                        <span key={s.name} className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                          {s.name}
                         </span>
                       ))}
                     </span>
@@ -144,6 +183,22 @@ export function SessionsPage() {
         )}
 
       </div>
+
+      {pendingResume && (
+        <MissingSkillsDialog
+          sessionTitle={pendingResume.entry.title ?? pendingResume.entry.agentLabel}
+          statuses={pendingResume.statuses}
+          onCancel={() => setPendingResume(null)}
+          onContinue={() => {
+            const { entry } = pendingResume;
+            setPendingResume(null);
+            // `restore_session_skills` vuelve a resolver el estado de cada skill en el
+            // momento de abrir, así que lo que se haya reinstalado en el diálogo entra
+            // solo, sin tener que propagar nada desde acá.
+            openSession(entry);
+          }}
+        />
+      )}
     </main>
   );
 }

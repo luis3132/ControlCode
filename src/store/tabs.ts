@@ -24,6 +24,10 @@ export interface Tab {
   ptyId: number | null;
   sessionId?: string;
   scrollback?: string;
+  /** Entrada de `session_history` de la que salió esta tab (reabierta desde Sesiones).
+   *  Es lo que hace que al volver a cerrarla se ACTUALICE esa entrada del historial en
+   *  vez de crear una nueva. */
+  historyId?: string;
   /** Unix seconds — cuándo se abrió esta tab por primera vez (no se toca en autosaves). */
   openedAt: number;
 }
@@ -44,6 +48,7 @@ interface TabsState {
     titleIsCustom?: boolean;
     ptyId?: number | null;
     sessionId?: string;
+    historyId?: string;
   }) => string;
   closeTab: (id: string) => void;
   activateTab: (id: string) => void;
@@ -72,7 +77,7 @@ export const useTabsStore = create<TabsState>((set) => ({
   workspaceId: DEFAULT_WORKSPACE_ID,
   hydrated: false,
 
-  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId }) => {
+  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId, historyId }) => {
     const id = crypto.randomUUID();
     const computedTitle =
       title ??
@@ -90,6 +95,7 @@ export const useTabsStore = create<TabsState>((set) => ({
           command: agent.command,
           ptyId: ptyId ?? null,
           sessionId,
+          historyId,
           openedAt: Math.floor(Date.now() / 1000),
         },
       ],

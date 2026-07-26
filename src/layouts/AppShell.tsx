@@ -23,6 +23,7 @@ interface RestoredTabRow {
   cwd: string;
   sessionId: string | null;
   scrollback: string | null;
+  historyId: string | null;
   openedAt: number;
 }
 
@@ -43,6 +44,7 @@ function toFrontendTab(row: RestoredTabRow): Tab {
     ptyId: null,
     sessionId: row.sessionId ?? undefined,
     scrollback: row.scrollback ?? undefined,
+    historyId: row.historyId ?? undefined,
     openedAt: row.openedAt,
   };
 }
