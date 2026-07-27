@@ -674,9 +674,9 @@ fn remove_symlink_best_effort(path: &Path) {
 ///   alcanza con esa. Fuentes: github.com/google-gemini/gemini-cli/blob/main/docs/cli/skills.md,
 ///   opencode.ai/docs/skills, learn.chatgpt.com/docs/build-skills,
 ///   github.com/MoonshotAI/kimi-cli/blob/main/docs/en/customization/skills.md.
-/// Carpeta que contiene los symlinks de skills de un (cwd, agente) — el "directorio
-/// gestionado" que la reconciliación deja idéntico al set de skills que piden las tabs
-/// vivas de ese cwd.
+///
+/// Devuelve la carpeta que contiene esos symlinks — el "directorio gestionado" que la
+/// reconciliación deja idéntico al set de skills que piden las tabs vivas de ese cwd.
 ///
 /// Solo resuelve los agentes soportados de fábrica; para una TUI custom hay que usar
 /// `links_dir_for_conn`, que consulta la carpeta que el usuario le declaró.
@@ -1255,6 +1255,10 @@ pub fn restore_session_skills(
 
     let mut still_missing = Vec::new();
     for status in statuses {
+        if status.is_missing() {
+            still_missing.push(status.name);
+            continue;
+        }
         match status.installed_skill_id {
             Some(skill_id) => {
                 // Best-effort por skill: un conflicto de symlink en una no debe impedir
@@ -1267,7 +1271,8 @@ pub fn restore_session_skills(
                     db.clone(),
                 );
             }
-            None => still_missing.push(status.name),
+            // `is_missing()` ya cubrió este caso arriba.
+            None => unreachable!(),
         }
     }
     Ok(still_missing)

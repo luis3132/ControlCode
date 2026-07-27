@@ -12,6 +12,7 @@ import { TerminalPanel } from "../components/terminal/TerminalPanel";
 import { ResizeHandles } from "../components/ResizeHandles";
 import { AppExitListener } from "../components/app/AppExitListener";
 import { useSettingsStore } from "../store/settings";
+import { initCliBridge } from "../lib/cliBridge";
 
 interface RestoredTabRow {
   id: string;
@@ -62,6 +63,10 @@ export function AppShell() {
     // traerlas explícitamente en cada ventana en vez de que se rehidraten solas.
     useSettingsStore.getState().loadCustomAgents().catch(console.error);
   }, []);
+
+  // Puente de la CLI `ccode`: esta ventana queda disponible para atender los comandos
+  // que solo el frontend puede resolver (crear/cerrar tabs).
+  useEffect(() => initCliBridge(), []);
 
   // Maximizada, la ventana ocupa el área de trabajo del monitor borde a borde — con la
   // ventana transparent:true, esquinas redondeadas ahí se verían como triángulos

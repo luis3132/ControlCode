@@ -158,6 +158,23 @@ pub fn pty_attach(id: u32) -> Result<String, String> {
         .unwrap_or_default())
 }
 
+/// Scrollback acumulado de un PTY vivo, sin exigir que el llamador sea el frontend.
+/// Lo usa el servidor IPC (`tab output` de la CLI); a diferencia de `pty_attach`, esto
+/// no implica "conectarse" a la sesión, solo mirarla.
+pub fn scrollback_of(id: u32) -> Option<String> {
+    let buffers = PTY_BUFFERS.lock().ok()?;
+    buffers.get(&id).map(|b| String::from_utf8_lossy(b).into_owned())
+}
+
+/// Escribe al PTY desde código Rust (servidor IPC). `pty_write` es la versión `async`
+/// que expone el mismo comportamiento al frontend vía invoke.
+pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {
+    let mut registry = PTY_REGISTRY.lock().map_err(|e| e.to_string())?;
+    let session = registry.get_mut(&id).ok_or_else(|| format!("PTY session {id} not found"))?;
+    session.writer.write_all(data.as_bytes()).map_err(|e| format!("PTY write error: {e}"))?;
+    session.writer.flush().map_err(|e| format!("PTY flush error: {e}"))
+}
+
 /// Escribe datos (input del usuario desde xterm.js) al PTY.
 #[tauri::command]
 pub async fn pty_write(id: u32, data: String) -> Result<(), String> {

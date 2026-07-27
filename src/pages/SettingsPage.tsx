@@ -7,6 +7,7 @@ import i18n from "../i18n/index";
 import { CustomAgent, useSettingsStore } from "../store/settings";
 import { useSkillsStore } from "../store/skills";
 import { CustomAgentForm } from "../components/settings/CustomAgentForm";
+import { CliInstallSection } from "../components/settings/CliInstallSection";
 
 /** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
  *  formulario solo para saber si reanuda sesiones o si le gestionamos skills. */
@@ -206,6 +207,8 @@ export function SettingsPage() {
 
             <CustomAgentForm onSubmit={saveCustomAgent} />
           </section>
+
+          <CliInstallSection />
 
         </div>
       </div>

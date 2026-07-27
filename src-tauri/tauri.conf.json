@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "bun run build && bun run stage-cli",
     "frontendDist": "../dist"
   },
   "app": {
@@ -34,6 +34,21 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": [
+      "binaries/*"
+    ],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/bin/ccode": "binaries/ccode"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/bin/ccode": "binaries/ccode"
+        }
+      }
+    }
   }
 }

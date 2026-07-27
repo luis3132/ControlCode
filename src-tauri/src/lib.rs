@@ -1,5 +1,6 @@
 mod agents;
 mod database;
+pub mod ipc;
 mod marketplace;
 mod session;
 mod skills;
@@ -84,6 +85,10 @@ pub fn run() {
             skills::reconcile_tab_skills,
             skills::check_session_skills,
             skills::restore_session_skills,
+            ipc::bridge::cli_respond,
+            ipc::install::cli_install_status,
+            ipc::install::install_cli,
+            ipc::install::uninstall_cli,
             database::db_delete_session_history,
             session::session_markdown,
             session::export_session_markdown,
@@ -129,6 +134,10 @@ pub fn run() {
             let active_id = database::db_get_last_active_workspace_id(&db)?;
             let windows = database::db_get_all_workspace_windows(&active_id, &db)?;
             window::restore_windows(app.handle(), windows, true)?;
+
+            // Servidor IPC de la CLI `controlcode` (Fase 8). Va después de restaurar las
+            // ventanas: varios comandos necesitan que exista al menos una para responder.
+            ipc::start(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -137,6 +146,11 @@ pub fn run() {
             // A nivel de app (no por ventana individual, ver comentario en on_window_event):
             // si hay varias ventanas abiertas y se intenta salir de la app entera, se pausa
             // la salida y se le pregunta al frontend si quiere cerrar todo o solo la actual.
+            if let tauri::RunEvent::Exit = event {
+                // Sin esto quedaría un handshake apuntando a un puerto muerto, y la CLI
+                // reportaría "no se pudo conectar" en vez de "la app no está corriendo".
+                ipc::cleanup();
+            }
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 let window_count = app_handle.webview_windows().len();
                 if window_count > 1 {

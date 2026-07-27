@@ -14,6 +14,17 @@ edition = "2021"
 name = "controlcode_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# La CLI sale del MISMO crate que la app para poder reusar `ipc::protocol` de la lib —
+# así el formato del mensaje no puede desincronizarse entre las dos puntas.
+#
+# Se llama `ccode` y no `controlcode` porque ese nombre ya lo ocupa el ejecutable de la
+# app (`productName` en tauri.conf.json), y cargo no puede emitir dos binarios homónimos.
+# Renombrar el de la app tampoco es opción: esta versión de Tauri no expone
+# `mainBinaryName` en su schema de configuración.
+[[bin]]
+name = "ccode"
+path = "src/bin/cli.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
