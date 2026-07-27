@@ -25,6 +25,13 @@ export interface SessionSkillStatus {
   availableFrom: SkillSource | null;
 }
 
+/** Otra tab que estaba abierta en el workspace cuando esta sesión se cerró. */
+export interface SiblingTab {
+  title: string | null;
+  agentLabel: string;
+  cwd: string;
+}
+
 export interface SessionHistoryEntry {
   id: string;
   workspaceId: string;
@@ -35,6 +42,7 @@ export interface SessionHistoryEntry {
   title: string | null;
   sessionId: string | null;
   skills: ArchivedSkill[];
+  siblingTabs: SiblingTab[];
   openedAt: number;
   closedAt: number;
 }
@@ -47,9 +55,14 @@ interface SessionsState {
   checkSessionSkills: (historyId: string) => Promise<SessionSkillStatus[]>;
   /** Reattachea a la tab las que sí están; devuelve los nombres de las que faltan. */
   restoreSessionSkills: (historyId: string, workspaceId: string, tabId: string) => Promise<string[]>;
+  /** Saca la sesión del historial. No borra el archivo de sesión del agente en disco. */
+  deleteSession: (historyId: string, workspaceId: string) => Promise<void>;
+  /** Markdown de la sesión (metadata + conversación), para previsualizar. */
+  sessionMarkdown: (historyId: string) => Promise<string>;
+  exportSession: (historyId: string, destPath: string) => Promise<void>;
 }
 
-export const useSessionsStore = create<SessionsState>((set) => ({
+export const useSessionsStore = create<SessionsState>((set, get) => ({
   history: [],
   loading: false,
 
@@ -68,4 +81,14 @@ export const useSessionsStore = create<SessionsState>((set) => ({
 
   restoreSessionSkills: async (historyId, workspaceId, tabId) =>
     invoke<string[]>("restore_session_skills", { historyId, workspaceId, tabId }),
+
+  deleteSession: async (historyId, workspaceId) => {
+    await invoke("db_delete_session_history", { historyId });
+    await get().loadHistory(workspaceId);
+  },
+
+  sessionMarkdown: async (historyId) => invoke<string>("session_markdown", { historyId }),
+
+  exportSession: async (historyId, destPath) =>
+    invoke("export_session_markdown", { historyId, destPath }),
 }));

@@ -70,7 +70,7 @@ export function SkillPickerStep({ agentId, selected, onChange }: SkillPickerStep
         </p>
       )}
 
-      <div className="flex flex-col gap-1 max-h-56 overflow-y-auto">
+      <div className="cc-scroll flex flex-col gap-1 max-h-56 pr-1">
         {filtered.length === 0 ? (
           <p className="text-xs text-gray-400 dark:text-white/30 italic py-2">
             {t("wizard.step3.searchEmpty")}

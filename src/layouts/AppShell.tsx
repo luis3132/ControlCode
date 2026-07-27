@@ -199,7 +199,7 @@ export function AppShell() {
         </div>
 
         {!isWorkspace && (
-          <div className="absolute inset-0 z-10 overflow-auto">
+          <div className="absolute inset-0 z-10 cc-scroll">
             <Outlet />
           </div>
         )}

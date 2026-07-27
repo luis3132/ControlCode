@@ -326,6 +326,33 @@ fn custom_title(path: &Path, fallback: &str) -> SessionTitleResult {
     codex_title(path, fallback)
 }
 
+/// Archivo de sesión de una entrada del historial, resolviendo por el camino propio de
+/// cada agente. A diferencia de `get_session_title`, acá interesa el archivo en sí (para
+/// leer la conversación entera), y se acepta el "más reciente del cwd" cuando no hay
+/// `session_id`: en un export, mostrar la sesión más probable es mejor que no mostrar nada.
+pub fn session_file_for(
+    agent_id: &str,
+    cwd: &str,
+    session_id: Option<&str>,
+    db: &tauri::State<crate::database::DbConnection>,
+) -> Option<PathBuf> {
+    match agent_id {
+        "claude-code" => claude_session_file(cwd, session_id, None),
+        "gemini-cli" => gemini_session_file(cwd, None),
+        "codex" => codex_session_file(cwd, None),
+        "opencode" => opencode_session_file(cwd, None),
+        other => {
+            let conn = db.lock().ok()?;
+            let agent = crate::agents::find(&conn, other)?;
+            drop(conn);
+            match session_id {
+                Some(id) => custom_session_file_by_id(&agent, id),
+                None => custom_session_file(&agent, None),
+            }
+        }
+    }
+}
+
 // ── Comandos públicos ─────────────────────────────────────────────────
 
 /// Busca el archivo/registro de sesión más reciente para `cwd` (creado después de

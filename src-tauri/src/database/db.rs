@@ -230,6 +230,12 @@ pub fn init_db() -> SqlResult<DbConnection> {
     if conn.prepare("SELECT history_id FROM tabs LIMIT 1").is_err() {
         conn.execute("ALTER TABLE tabs ADD COLUMN history_id TEXT", [])?;
     }
+    if conn.prepare("SELECT sibling_tabs FROM session_history LIMIT 1").is_err() {
+        conn.execute(
+            "ALTER TABLE session_history ADD COLUMN sibling_tabs TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )?;
+    }
 
     ensure_default_workspace(&conn)?;
     ensure_default_settings(&conn)?;
@@ -810,6 +816,29 @@ fn archive_tab_row(conn: &Connection, tab_id: &str, workspace_id: &str) -> Resul
         .filter_map(|r| r.ok())
         .collect();
     let skills_json = serde_json::to_string(&archived).unwrap_or_else(|_| "[]".to_string());
+
+    // Con qué otras tabs del workspace convivía esta al cerrarse — el "junto a qué estaba
+    // trabajando" que pide la vista de historial. Es una foto del momento del archivado:
+    // si se cierran varias tabs a la vez, cada una registra las que todavía no se
+    // archivaron, así que la última en cerrarse ve menos hermanas que la primera.
+    let siblings: Vec<SiblingTab> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.title, t.agent_label, t.cwd FROM tabs t
+                 JOIN windows w ON w.id = t.window_id
+                 WHERE w.workspace_id = ?1 AND t.id != ?2
+                 ORDER BY t.tab_order ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![workspace_id, tab_id], |r| {
+                Ok(SiblingTab { title: r.get(0)?, agent_label: r.get(1)?, cwd: r.get(2)? })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    let siblings_json = serde_json::to_string(&siblings).unwrap_or_else(|_| "[]".to_string());
+
     let now = now_ts();
 
     // A qué entrada del historial corresponde esta tab, en orden de confianza:
@@ -849,16 +878,16 @@ fn archive_tab_row(conn: &Connection, tab_id: &str, workspace_id: &str) -> Resul
         // `session_id` sí se escribe: una sesión que se archivó sin id y lo resolvió al
         // reabrirse tiene que quedar identificada de acá en adelante.
         conn.execute(
-            "UPDATE session_history SET agent_id=?1, agent_label=?2, command=?3, cwd=?4, title=?5, session_id=COALESCE(?6, session_id), skills=?7, closed_at=?8 WHERE id=?9",
-            rusqlite::params![agent_id, agent_label, command, cwd, title, session_id, skills_json, now, hid],
+            "UPDATE session_history SET agent_id=?1, agent_label=?2, command=?3, cwd=?4, title=?5, session_id=COALESCE(?6, session_id), skills=?7, sibling_tabs=?8, closed_at=?9 WHERE id=?10",
+            rusqlite::params![agent_id, agent_label, command, cwd, title, session_id, skills_json, siblings_json, now, hid],
         )
         .map_err(|e| e.to_string())?;
         return Ok(());
     }
 
     conn.execute(
-        "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, opened_at, closed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, opened_at, closed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         rusqlite::params![
             Uuid::new_v4().to_string(),
             workspace_id,
@@ -869,6 +898,7 @@ fn archive_tab_row(conn: &Connection, tab_id: &str, workspace_id: &str) -> Resul
             title,
             session_id,
             skills_json,
+            siblings_json,
             opened_at,
             now
         ],
@@ -890,8 +920,20 @@ pub struct SessionHistoryEntry {
     pub title: Option<String>,
     pub session_id: Option<String>,
     pub skills: Vec<ArchivedSkill>,
+    /// Otras tabs del workspace que estaban abiertas al cerrar esta.
+    pub sibling_tabs: Vec<SiblingTab>,
     pub opened_at: i64,
     pub closed_at: i64,
+}
+
+/// Tab que convivía con la sesión archivada, para poder mostrar con qué configuración de
+/// tabs se estaba trabajando en ese momento.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SiblingTab {
+    pub title: Option<String>,
+    pub agent_label: String,
+    pub cwd: String,
 }
 
 /// Una skill tal como estaba activa en la tab en el momento de cerrarla. Se guarda el
@@ -983,7 +1025,7 @@ pub fn db_list_session_history(
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, opened_at, closed_at
+            "SELECT id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, opened_at, closed_at
              FROM session_history WHERE workspace_id = ?1 ORDER BY closed_at DESC",
         )
         .map_err(|e| e.to_string())?;
@@ -992,6 +1034,9 @@ pub fn db_list_session_history(
         .query_map([&workspace_id], |row| {
             let skills_json: String = row.get(8)?;
             let skills = parse_archived_skills(&skills_json);
+            let siblings_json: String = row.get(9)?;
+            let sibling_tabs: Vec<SiblingTab> =
+                serde_json::from_str(&siblings_json).unwrap_or_default();
             Ok(SessionHistoryEntry {
                 id: row.get(0)?,
                 workspace_id: row.get(1)?,
@@ -1002,8 +1047,9 @@ pub fn db_list_session_history(
                 title: row.get(6)?,
                 session_id: row.get(7)?,
                 skills,
-                opened_at: row.get(9)?,
-                closed_at: row.get(10)?,
+                sibling_tabs,
+                opened_at: row.get(10)?,
+                closed_at: row.get(11)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -1018,6 +1064,61 @@ pub fn db_list_session_history(
 pub struct OpenTabLocation {
     pub window_label: String,
     pub tab_id: String,
+}
+
+/// Borra una entrada del historial. No toca el archivo de sesión del agente en disco
+/// (vive fuera de la app, en `~/.claude/projects` y equivalentes): esto solo saca la
+/// sesión de la vista de Sesiones.
+#[tauri::command]
+pub fn db_delete_session_history(
+    history_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM session_history WHERE id = ?1", [&history_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Una entrada puntual del historial, sobre una conexión ya lockeada — la usa el
+/// exportador a markdown, que necesita toda la metadata de la sesión.
+pub fn session_history_entry(
+    conn: &Connection,
+    history_id: &str,
+) -> Result<Option<SessionHistoryEntry>, String> {
+    conn.query_row(
+        "SELECT id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, opened_at, closed_at
+         FROM session_history WHERE id = ?1",
+        [history_id],
+        |row| {
+            let skills_json: String = row.get(8)?;
+            let siblings_json: String = row.get(9)?;
+            Ok(SessionHistoryEntry {
+                id: row.get(0)?,
+                workspace_id: row.get(1)?,
+                agent_id: row.get(2)?,
+                agent_label: row.get(3)?,
+                command: row.get(4)?,
+                cwd: row.get(5)?,
+                title: row.get(6)?,
+                session_id: row.get(7)?,
+                skills: parse_archived_skills(&skills_json),
+                sibling_tabs: serde_json::from_str(&siblings_json).unwrap_or_default(),
+                opened_at: row.get(10)?,
+                closed_at: row.get(11)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Nombre del workspace al que pertenece una sesión — para el encabezado del export.
+pub fn workspace_name(conn: &Connection, workspace_id: &str) -> Option<String> {
+    conn.query_row("SELECT name FROM workspaces WHERE id = ?1", [workspace_id], |r| r.get(0))
+        .optional()
+        .ok()
+        .flatten()
 }
 
 /// Busca si `session_id` ya está abierto en alguna tab viva (ventana `is_open = 1`) de
@@ -1402,7 +1503,7 @@ mod tests {
              CREATE TABLE tabs (id TEXT PRIMARY KEY, window_id TEXT NOT NULL, title TEXT, title_is_custom INTEGER NOT NULL DEFAULT 0, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, tab_order INTEGER NOT NULL DEFAULT 0, session_id TEXT, scrollback TEXT, history_id TEXT, opened_at INTEGER NOT NULL, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
              CREATE TABLE skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, source_path TEXT NOT NULL);
              CREATE TABLE project_skills (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, workspace_id TEXT NOT NULL, scope TEXT NOT NULL, tab_id TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
-             CREATE TABLE session_history (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT, session_id TEXT, skills TEXT NOT NULL DEFAULT '[]', opened_at INTEGER NOT NULL, closed_at INTEGER NOT NULL);
+             CREATE TABLE session_history (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT, session_id TEXT, skills TEXT NOT NULL DEFAULT '[]', sibling_tabs TEXT NOT NULL DEFAULT '[]', opened_at INTEGER NOT NULL, closed_at INTEGER NOT NULL);
              INSERT INTO workspaces VALUES ('ws', 'WS', 0, 0);
              INSERT INTO windows VALUES ('win', 'win', 'ws', 1, 0);",
         ).unwrap();

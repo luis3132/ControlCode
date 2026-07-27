@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Button } from "neogestify-ui-components";
-import { FolderIcon, ArrowRightIcon, ClockIcon } from "neogestify-ui-components";
+import { ClockIcon, FolderIcon, ChevronDownIcon } from "neogestify-ui-components";
 import {
   SessionHistoryEntry,
   SessionSkillStatus,
@@ -13,6 +12,14 @@ import {
 import { useTabsStore } from "../store/tabs";
 import { PageHeader } from "../components/common/PageHeader";
 import { MissingSkillsDialog } from "../components/sessions/MissingSkillsDialog";
+import { SessionRow } from "../components/sessions/SessionRow";
+import {
+  EMPTY_FILTERS,
+  SessionFilterState,
+  SessionFilters,
+  filterSessions,
+  hasActiveFilters,
+} from "../components/sessions/SessionFilters";
 import { flushPendingSave } from "../store/persistTabs";
 import { registerPendingSkillSetup } from "../lib/pendingSkillSetup";
 
@@ -27,34 +34,14 @@ interface PendingResume {
   statuses: SessionSkillStatus[];
 }
 
-function formatDateTime(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
-function formatRelative(unixSeconds: number): string {
-  const diffSeconds = Math.max(0, Math.floor(Date.now() / 1000) - unixSeconds);
-  const units: [number, string][] = [
-    [60, "s"], [60, "m"], [24, "h"], [30, "d"], [12, "mo"], [Infinity, "y"],
-  ];
-  let value = diffSeconds;
-  let unit = "s";
-  for (const [size, label] of units) {
-    if (value < size) { unit = label; break; }
-    value = Math.floor(value / size);
-    unit = label;
-  }
-  return `${value}${unit}`;
-}
-
 export function SessionsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { history, loadHistory, checkSessionSkills, restoreSessionSkills } = useSessionsStore();
   const { workspaceId, addTab } = useTabsStore();
   const [pendingResume, setPendingResume] = useState<PendingResume | null>(null);
+  const [filters, setFilters] = useState<SessionFilterState>(EMPTY_FILTERS);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadHistory(workspaceId);
@@ -63,6 +50,31 @@ export function SessionsPage() {
     const unlisten = listen("cc-workspace-changed", () => loadHistory(workspaceId));
     return () => { unlisten.then((fn) => fn()); };
   }, [workspaceId, loadHistory]);
+
+  const visible = useMemo(() => filterSessions(history, filters), [history, filters]);
+
+  /** Sesiones agrupadas por carpeta, cada grupo ordenado por cierre más reciente. */
+  const groups = useMemo(() => {
+    const byCwd = new Map<string, SessionHistoryEntry[]>();
+    for (const entry of visible) {
+      const list = byCwd.get(entry.cwd);
+      if (list) list.push(entry);
+      else byCwd.set(entry.cwd, [entry]);
+    }
+    return Array.from(byCwd.entries())
+      .map(([cwd, entries]) => ({ cwd, entries }))
+      // El grupo con la actividad más reciente va primero, no el alfabético: al volver a
+      // Sesiones, lo que buscás casi siempre es lo último que cerraste.
+      .sort((a, b) => b.entries[0].closedAt - a.entries[0].closedAt);
+  }, [visible]);
+
+  const toggleGroup = (cwd: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(cwd)) next.delete(cwd);
+      else next.add(cwd);
+      return next;
+    });
 
   /** Abre la tab de verdad y le restaura las skills que la sesión tenía al cerrarse. */
   const openSession = (entry: SessionHistoryEntry) => {
@@ -131,57 +143,70 @@ export function SessionsPage() {
             {t("sessions.empty")}
           </p>
         ) : (
-          <div className="flex flex-col gap-2">
-            {history.map((entry) => (
-              <div
-                key={entry.id}
-                className="flex items-center justify-between gap-3 px-4 py-3
-                  rounded-lg border border-gray-200 dark:border-gray-700
-                  bg-white dark:bg-gray-800/50
-                  hover:border-gray-300 dark:hover:border-gray-600
-                  transition-colors"
-              >
-                <div className="flex flex-col min-w-0 gap-1 flex-1">
-                  <span className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">
-                    {entry.title ?? entry.agentLabel}
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400 shrink-0">
-                      {entry.agentLabel}
-                    </span>
-                  </span>
-                  <span className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500 truncate font-mono">
-                    <FolderIcon className="w-3 h-3 shrink-0" />
-                    {entry.cwd}
-                  </span>
-                  <span className="text-[11px] text-gray-400 dark:text-gray-500">
-                    {t("sessions.opened", { time: formatDateTime(entry.openedAt) })}
-                  </span>
-                  {entry.skills.length > 0 && (
-                    <span className="flex flex-wrap gap-1 mt-0.5">
-                      {entry.skills.map((s) => (
-                        <span key={s.name} className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                          {s.name}
-                        </span>
-                      ))}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-[11px] text-gray-400 dark:text-gray-500">
-                    {t("sessions.closed", { time: formatRelative(entry.closedAt) })}
-                  </span>
-                  <Button
-                    variant="icon"
-                    onClick={() => handleResume(entry)}
-                    title={t("sessions.resume")}
-                  >
-                    <ArrowRightIcon className="w-4 h-4" />
-                  </Button>
-                </div>
+          <>
+            <SessionFilters
+              entries={history}
+              value={filters}
+              onChange={setFilters}
+              resultCount={visible.length}
+            />
+
+            {visible.length === 0 ? (
+              <p className="text-sm italic text-gray-400 dark:text-gray-500">
+                {t("sessions.noMatches")}
+              </p>
+            ) : (
+              <div className="flex flex-col gap-5">
+                {groups.map(({ cwd, entries }) => {
+                  const isCollapsed = collapsed.has(cwd);
+                  return (
+                    <section key={cwd} className="flex flex-col gap-2">
+                      {/* La agrupación por carpeta solo aporta cuando hay más de una:
+                          con una sola, el encabezado repetiría lo que ya dice cada fila. */}
+                      {groups.length > 1 && (
+                        <button
+                          onClick={() => toggleGroup(cwd)}
+                          className="flex items-center gap-1.5 w-fit max-w-full text-xs font-medium
+                            text-gray-500 dark:text-gray-400
+                            hover:text-gray-800 dark:hover:text-gray-100 transition-colors"
+                        >
+                          <ChevronDownIcon
+                            className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200
+                              ${isCollapsed ? "-rotate-90" : ""}`}
+                          />
+                          <FolderIcon className="w-3.5 h-3.5 shrink-0" />
+                          <span className="font-mono truncate">{cwd}</span>
+                          <span className="text-gray-400 dark:text-gray-500 shrink-0">
+                            ({entries.length})
+                          </span>
+                        </button>
+                      )}
+
+                      {!isCollapsed && (
+                        <div className="flex flex-col gap-2">
+                          {entries.map((entry) => (
+                            <SessionRow
+                              key={entry.id}
+                              entry={entry}
+                              workspaceId={workspaceId}
+                              onResume={handleResume}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
 
+        {history.length > 0 && !hasActiveFilters(filters) && (
+          <p className="mt-6 text-[11px] text-gray-400 dark:text-white/40">
+            {t("sessions.workspaceScopeHint")}
+          </p>
+        )}
       </div>
 
       {pendingResume && (

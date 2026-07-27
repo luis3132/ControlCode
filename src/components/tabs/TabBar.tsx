@@ -193,7 +193,7 @@ export function TabBar() {
     <>
       <div
         ref={barRef}
-        className="flex items-stretch h-10 shrink-0 overflow-x-auto
+        className="cc-scroll-x flex items-stretch h-10 shrink-0
           bg-gray-100 dark:bg-gray-900
           border-b border-gray-200 dark:border-white/8"
         onDragOver={(e) => e.preventDefault()}

@@ -31,10 +31,38 @@ html.dark #root {
   color: #f9fafb;
 }
 
-/* Scrollbar styling */
+/* ── Scroll ────────────────────────────────────────────────────────────────
+   Se declaran las DOS sintaxis a propósito:
+
+   - `scrollbar-width`/`scrollbar-color` es la estándar y la única que entiende
+     WebKitGTK (el motor que usa Tauri en Linux) — con solo `::-webkit-scrollbar`,
+     Linux se quedaba con la barra nativa de GTK, que es la ancha que tapaba
+     contenido y no seguía el tema de la app.
+   - `::-webkit-scrollbar` sigue acá porque da control fino (grosor, radio, hover)
+     y es lo que aplica en WKWebView/Chromium (macOS y Windows), donde la
+     estándar todavía no está implementada o ignora el radio.
+
+   Un motor aplica una y descarta la otra; nunca se pisan.
+
+   `scrollbar-gutter: stable` reserva el carril siempre: sin eso, el contenido se
+   corría unos píxeles al aparecer la barra cada vez que una lista crecía. */
+.cc-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+  /* La rueda no se propaga al contenedor de atrás al llegar al final del scroll. */
+  overscroll-behavior: contain;
+}
+
+html.dark .cc-scroll {
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -42,20 +70,46 @@ html.dark #root {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 8px;
+  /* El borde transparente adelgaza el pulgar visualmente sin achicar el área
+     que se puede agarrar con el mouse. */
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 html.dark ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.14);
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.32);
+  background-clip: content-box;
 }
 
 html.dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.26);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Scroll horizontal sin barra visible — la barra de tabs (estilo Chrome) desborda al
+   costado, pero una barra dibujada ahí abajo se comería parte de los 40px de alto y se
+   leería como un artefacto. El scroll con rueda/trackpad/drag sigue funcionando. */
+.cc-scroll-x {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.cc-scroll-x::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 /* xterm overrides */
