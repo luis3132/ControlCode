@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "stage-cli": "node scripts/stage-cli.mjs"
+    "app:build": "NO_STRIP=true tauri build",
+    "stage-cli": "bun scripts/stage-cli.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -17,16 +18,15 @@
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
     "i18next": "^26.3.6",
     "neogestify-ui-components": "^2.4.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-i18next": "^17.0.11",
-    "react-router": "^8.3.0",
     "react-router-dom": "^7.18.1",
     "sweetalert2": "^11.26.25",
     "tailwindcss": "^4.3.3",
-    "xterm": "5.3.0",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

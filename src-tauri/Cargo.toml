@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Control Code — AI coding agent command center"
 authors = ["you"]
 edition = "2021"
+# El crate emite dos binarios (`controlcode` de la app y `ccode` de la CLI), así que
+# cargo/tauri necesitan saber cuál es el principal para empaquetar.
+default-run = "controlcode"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

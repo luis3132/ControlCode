@@ -35,7 +35,7 @@ fn collect_files(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             collect_files(&path, ext, out);
-        } else if path.extension().map_or(false, |e| e == ext) {
+        } else if path.extension().is_some_and(|e| e == ext) {
             out.push(path);
         }
     }
@@ -58,7 +58,7 @@ fn newest_matching(
                 }
             }
             let matches_hint = content_hint
-                .map(|hint| fs::read_to_string(p).map_or(false, |c| c.contains(hint)))
+                .map(|hint| fs::read_to_string(p).is_ok_and(|c| c.contains(hint)))
                 .unwrap_or(false);
             Some((p.clone(), mtime, matches_hint))
         })
@@ -213,11 +213,11 @@ fn codex_title(path: &Path, fallback: &str) -> SessionTitleResult {
             }
         }
 
-        if msg_type == Some("response_item") {
-            if v.get("role").and_then(|r| r.as_str()) == Some("user") {
-                if let Some(text) = v.get("content").and_then(extract_text_block) {
-                    return SessionTitleResult { title: truncate(&text, 60), source: "first_message".into() };
-                }
+        if msg_type == Some("response_item")
+            && v.get("role").and_then(|r| r.as_str()) == Some("user")
+        {
+            if let Some(text) = v.get("content").and_then(extract_text_block) {
+                return SessionTitleResult { title: truncate(&text, 60), source: "first_message".into() };
             }
         }
     }

@@ -411,7 +411,7 @@ pub(crate) fn install_skill_internal(
         .unwrap_or_else(|| "skill".to_string());
     let name = meta.name.clone().unwrap_or(folder_basename);
 
-    let skills_dir = resolve_skills_dir(&db)?;
+    let skills_dir = resolve_skills_dir(db)?;
     let mut slug = slugify(&name);
     let mut dest = skills_dir.join(&slug);
     let mut suffix = 1;

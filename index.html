@@ -5,18 +5,18 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tauri + React + Typescript</title>
+  <title>Control Code</title>
+  <script>
+    // Prevenir flash de contenido sin estilo (FOUC). Va inline y en <head> a propósito:
+    // tiene que correr ANTES de que se pinte nada, así que no puede ser un módulo.
+    // El default es "dark" y se persiste aquí mismo — si difiriera del default que aplica
+    // el bundle al arrancar, la primera carga mostraría el tema equivocado durante un
+    // frame, que es justo lo que este script existe para evitar.
+    const theme = localStorage.getItem('theme') || 'dark';
+    localStorage.setItem('theme', theme);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+  </script>
 </head>
-
-<script>
-  // Prevenir flash de contenido sin estilo (FOUC)
-  const theme = localStorage.getItem('theme') || 'light';
-  if (theme === 'dark' | theme === null) {
-    document.documentElement.classList.add('dark');
-  } else {
-    document.documentElement.classList.remove('dark');
-  }
-</script>
 
 <body>
   <div id="root"></div>
