@@ -38,6 +38,11 @@ pub struct SkillInfo {
     pub license: Option<String>,
     pub homepage: Option<String>,
     pub source_path: String,
+    /// Repo del que salió. `None` = instalada a mano desde un archivo local.
+    pub registry_id: Option<String>,
+    /// Nombre del repo tal como se llamaba al instalar — desnormalizado para que el badge
+    /// siga siendo correcto aunque el repositorio se borre después.
+    pub registry_name: Option<String>,
     pub installed_at: i64,
     pub updated_at: i64,
 }
@@ -256,11 +261,17 @@ fn scan_skill_file(file: &Path) -> Option<(SkillFrontmatter, String)> {
 }
 
 fn slugify(name: &str) -> String {
-    let slug: String = name
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
+    let mut slug = String::with_capacity(name.len());
+    for c in name.to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        // Los separadores consecutivos colapsan en uno solo: sin esto, un nombre de repo
+        // como `autoskills (midudev)` daba `autoskills--midudev`, con el doble guión a la
+        // vista en la ruta de la carpeta.
+        } else if !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
     let slug = slug.trim_matches('-').to_string();
     if slug.is_empty() { "skill".to_string() } else { slug }
 }
@@ -334,15 +345,17 @@ fn row_to_skill_info(row: &rusqlite::Row) -> rusqlite::Result<SkillInfo> {
         source_path: row.get(10)?,
         installed_at: row.get(11)?,
         updated_at: row.get(12)?,
+        registry_id: row.get(13)?,
+        registry_name: row.get(14)?,
     })
 }
 
-const SKILL_COLUMNS: &str = "id, name, description, categories, compatible_agents, compatible_versions, version, author, license, homepage, source_path, installed_at, updated_at";
+const SKILL_COLUMNS: &str = "id, name, description, categories, compatible_agents, compatible_versions, version, author, license, homepage, source_path, installed_at, updated_at, registry_id, registry_name";
 
 /// Mismas columnas y en el mismo orden que `SKILL_COLUMNS` (las lee el mismo
 /// `row_to_skill_info`), pero calificadas con el alias `s` — necesario en las queries que
 /// joinean `skills` con `tabs`/`windows`, donde `id`/`name` serían ambiguos.
-const SKILL_COLUMNS_QUALIFIED: &str = "s.id, s.name, s.description, s.categories, s.compatible_agents, s.compatible_versions, s.version, s.author, s.license, s.homepage, s.source_path, s.installed_at, s.updated_at";
+const SKILL_COLUMNS_QUALIFIED: &str = "s.id, s.name, s.description, s.categories, s.compatible_agents, s.compatible_versions, s.version, s.author, s.license, s.homepage, s.source_path, s.installed_at, s.updated_at, s.registry_id, s.registry_name";
 
 // ── Commands ─────────────────────────────────────────────────────
 
@@ -381,7 +394,55 @@ pub fn install_skill(
     overrides: Option<SkillFrontmatterInput>,
     db: tauri::State<DbConnection>,
 ) -> Result<SkillInfo, String> {
-    install_skill_internal(&source_file, overrides, &db)
+    install_skill_internal(&source_file, overrides, None, &db)
+}
+
+/// Repo del que viene una skill que se está instalando: su id y su nombre visible.
+/// `None` en una instalación manual desde un archivo del disco.
+pub(crate) type SkillOrigin<'a> = Option<(&'a str, &'a str)>;
+
+/// Carpeta donde vive la copia global de una skill, dentro del directorio de skills.
+///
+/// Una por repositorio, más `local` para las instaladas a mano. Dos repos pueden traer
+/// skills con el mismo nombre y funcionalidad distinta (`testing` de uno no es `testing`
+/// del otro), así que mezclarlas en un solo nivel las hacía competir por la misma carpeta.
+fn bucket_for_origin(origin: SkillOrigin) -> String {
+    match origin {
+        Some((_, registry_name)) => slugify(registry_name),
+        None => "local".to_string(),
+    }
+}
+
+/// Nombres de carpeta de skill ya ocupados, mirando TODOS los buckets.
+///
+/// El slug tiene que ser único en todo el store aunque las carpetas estén separadas por
+/// repo, porque es también el nombre del symlink dentro del proyecto: dos skills llamadas
+/// `testing` attacheadas a la misma tab pelearían por `.claude/skills/testing`. Al
+/// desambiguar acá, `slug_from_source_path` sigue siendo una función pura del path y los
+/// tres lugares que derivan el slug (crear, reconciliar, verificar) no pueden discrepar.
+fn taken_slugs(skills_dir: &Path) -> std::collections::HashSet<String> {
+    let mut taken = std::collections::HashSet::new();
+    let Ok(entries) = std::fs::read_dir(skills_dir) else { return taken };
+    for entry in entries.flatten() {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        // Una carpeta con SKILL.md es una skill del layout viejo (plana, sin bucket); si no
+        // lo tiene, es un bucket y las skills están un nivel más adentro.
+        if entry.path().join("SKILL.md").exists() {
+            taken.insert(name);
+            continue;
+        }
+        if let Ok(inner) = std::fs::read_dir(entry.path()) {
+            for skill in inner.flatten() {
+                if skill.path().is_dir() {
+                    taken.insert(skill.file_name().to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    taken
 }
 
 /// Cuerpo real de `install_skill`, separado del comando Tauri para poder reusarlo desde
@@ -390,6 +451,7 @@ pub fn install_skill(
 pub(crate) fn install_skill_internal(
     source_file: &str,
     overrides: Option<SkillFrontmatterInput>,
+    origin: SkillOrigin,
     db: &DbConnection,
 ) -> Result<SkillInfo, String> {
     let (file, source) = resolve_skill_file(source_file)?;
@@ -412,14 +474,21 @@ pub(crate) fn install_skill_internal(
     let name = meta.name.clone().unwrap_or(folder_basename);
 
     let skills_dir = resolve_skills_dir(db)?;
-    let mut slug = slugify(&name);
-    let mut dest = skills_dir.join(&slug);
+    let bucket_dir = skills_dir.join(bucket_for_origin(origin));
+    std::fs::create_dir_all(&bucket_dir).map_err(|e| e.to_string())?;
+
+    // El sufijo solo aparece cuando el nombre ya está tomado por OTRA skill del store —
+    // que es justo el caso en que hace falta, porque las dos competirían por el mismo
+    // symlink dentro del proyecto.
+    let taken = taken_slugs(&skills_dir);
+    let base = slugify(&name);
+    let mut slug = base.clone();
     let mut suffix = 1;
-    while dest.exists() {
+    while taken.contains(&slug) || bucket_dir.join(&slug).exists() {
         suffix += 1;
-        slug = format!("{}-{}", slugify(&name), suffix);
-        dest = skills_dir.join(&slug);
+        slug = format!("{base}-{suffix}");
     }
+    let dest = bucket_dir.join(&slug);
 
     copy_dir_recursive(&source, &dest).map_err(|e| e.to_string())?;
 
@@ -446,14 +515,16 @@ pub(crate) fn install_skill_internal(
         license: meta.license,
         homepage: meta.homepage,
         source_path: dest.to_string_lossy().to_string(),
+        registry_id: origin.map(|(id, _)| id.to_string()),
+        registry_name: origin.map(|(_, name)| name.to_string()),
         installed_at: now,
         updated_at: now,
     };
 
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO skills (id, name, description, version, categories, compatible_agents, compatible_versions, author, license, homepage, source_path, installed_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+        "INSERT INTO skills (id, name, description, version, categories, compatible_agents, compatible_versions, author, license, homepage, source_path, installed_at, updated_at, registry_id, registry_name)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14)",
         rusqlite::params![
             info.id,
             info.name,
@@ -467,6 +538,8 @@ pub(crate) fn install_skill_internal(
             info.homepage,
             info.source_path,
             now,
+            info.registry_id,
+            info.registry_name,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -625,25 +698,85 @@ fn collect_linked_tabs(conn: &rusqlite::Connection, skill_id: &str) -> Result<Ve
     Ok(result)
 }
 
+/// Skills instaladas desde un repositorio concreto. La usa el diálogo de borrar un repo
+/// para poder listarle al usuario, por nombre, qué se va a llevar puesto la operación —
+/// borrar el repo borra sus skills, y eso no puede ser una sorpresa.
+#[tauri::command]
+pub fn registry_skills(
+    registry_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Vec<SkillInfo>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {SKILL_COLUMNS} FROM skills WHERE registry_id = ?1 ORDER BY name COLLATE NOCASE"
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([&registry_id], row_to_skill_info)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
+/// Borra todas las skills instaladas desde un repo. Best-effort por skill: que una falle
+/// (carpeta ya borrada a mano, symlink en conflicto) no debe dejar el resto a medias ni
+/// abortar el borrado del repositorio.
+pub(crate) fn delete_skills_of_registry(
+    registry_id: &str,
+    db: &DbConnection,
+) -> Result<usize, String> {
+    let ids: Vec<String> = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id FROM skills WHERE registry_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([registry_id], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    let mut removed = 0;
+    for id in &ids {
+        if delete_skill_internal(id, db).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 #[tauri::command]
 pub fn delete_skill(skill_id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+    delete_skill_internal(&skill_id, &db)
+}
+
+fn delete_skill_internal(skill_id: &str, db: &DbConnection) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
 
     let source_path: String = conn
-        .query_row("SELECT source_path FROM skills WHERE id = ?1", [&skill_id], |r| r.get(0))
+        .query_row("SELECT source_path FROM skills WHERE id = ?1", [skill_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
 
     // Los symlinks físicos de cada attachment hay que removerlos aparte: el cascade de la
     // FK solo limpia la DB, no el filesystem. Se anotan los directorios afectados ANTES de
     // borrar la fila (después ya no hay `project_skills` desde donde derivarlos) y se
     // reconcilian una vez que la skill dejó de existir.
-    let affected = collect_linked_tabs(&conn, &skill_id)?;
+    let affected = collect_linked_tabs(&conn, skill_id)?;
 
-    conn.execute("DELETE FROM skills WHERE id = ?1", [&skill_id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM skills WHERE id = ?1", [skill_id]).map_err(|e| e.to_string())?;
     reconcile_link_dirs(&conn, &affected);
     drop(conn);
 
     let _ = std::fs::remove_dir_all(&source_path);
+
+    // Si era la última skill de su repo, el bucket queda vacío — se limpia para que el
+    // directorio de skills no se llene de carpetas de repos que ya no tienen nada.
+    // `remove_dir` falla si no está vacío, que es exactamente la condición que queremos.
+    if let Some(bucket) = Path::new(&source_path).parent() {
+        let _ = std::fs::remove_dir(bucket);
+    }
 
     Ok(())
 }
@@ -1293,7 +1426,7 @@ mod tests {
         CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
         CREATE TABLE windows (id TEXT PRIMARY KEY, label TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL, pos_x INTEGER, pos_y INTEGER, width INTEGER, height INTEGER, monitor TEXT, is_open INTEGER NOT NULL DEFAULT 1, last_active INTEGER NOT NULL);
         CREATE TABLE tabs (id TEXT PRIMARY KEY, window_id TEXT NOT NULL, title TEXT, title_is_custom INTEGER NOT NULL DEFAULT 0, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, tab_order INTEGER NOT NULL DEFAULT 0, session_id TEXT, scrollback TEXT, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
-        CREATE TABLE skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, version TEXT NOT NULL DEFAULT '0.1.0', categories TEXT NOT NULL DEFAULT '[]', compatible_agents TEXT NOT NULL DEFAULT '[]', compatible_versions TEXT NOT NULL DEFAULT '{}', author TEXT, license TEXT, homepage TEXT, source_path TEXT NOT NULL UNIQUE, installed_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+        CREATE TABLE skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, version TEXT NOT NULL DEFAULT '0.1.0', categories TEXT NOT NULL DEFAULT '[]', compatible_agents TEXT NOT NULL DEFAULT '[]', compatible_versions TEXT NOT NULL DEFAULT '{}', author TEXT, license TEXT, homepage TEXT, source_path TEXT NOT NULL UNIQUE, installed_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, registry_id TEXT, registry_name TEXT);
         CREATE TABLE project_skills (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, workspace_id TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'workspace', tab_id TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, UNIQUE (skill_id, workspace_id, scope, tab_id));
         CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE custom_agents (id TEXT PRIMARY KEY, label TEXT NOT NULL, command TEXT NOT NULL, resume_args TEXT, skills_dir TEXT, sessions_dir TEXT, session_id_from TEXT NOT NULL DEFAULT 'filename', env_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL);
@@ -1358,6 +1491,110 @@ mod tests {
              ---\n\
              Cuerpo de la skill de prueba.\n",
         ).unwrap();
+    }
+
+    /// Escribe una skill fuente con un nombre puntual, para simular dos repos que traen
+    /// una skill que se llama igual pero hace cosas distintas.
+    fn write_named_skill(dir: &Path, name: &str, body: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: {body}\n---\n{body}\n"),
+        )
+        .unwrap();
+    }
+
+    /// El caso que motivó los buckets por repositorio: dos repos distintos traen una skill
+    /// llamada igual. Las dos tienen que poder convivir instaladas, cada una en la carpeta
+    /// de su repo, y con symlinks que no se pisen dentro del proyecto.
+    #[test]
+    fn same_named_skills_from_two_registries_coexist() {
+        let (db, workspace_id, tab_id, tab_cwd, skills_dir) = setup();
+        let app = tauri::test::mock_app();
+        app.manage(db);
+        let state = app.state::<DbConnection>();
+
+        let src_a = temp_dir("repo-a");
+        let src_b = temp_dir("repo-b");
+        write_named_skill(&src_a, "testing", "la version del repo A");
+        write_named_skill(&src_b, "testing", "la version del repo B");
+
+        let a = install_skill_internal(
+            &src_a.join("SKILL.md").to_string_lossy(),
+            None,
+            Some(("reg-a", "anthropics/skills")),
+            &state,
+        )
+        .expect("instalar desde el repo A");
+        let b = install_skill_internal(
+            &src_b.join("SKILL.md").to_string_lossy(),
+            None,
+            Some(("reg-b", "autoskills (midudev)")),
+            &state,
+        )
+        .expect("instalar desde el repo B");
+
+        // Cada copia global vive bajo la carpeta de SU repo.
+        assert_eq!(
+            Path::new(&a.source_path).parent().unwrap(),
+            skills_dir.join("anthropics-skills")
+        );
+        assert_eq!(
+            Path::new(&b.source_path).parent().unwrap(),
+            skills_dir.join("autoskills-midudev")
+        );
+        assert_eq!(a.registry_name.as_deref(), Some("anthropics/skills"));
+        assert_eq!(b.registry_name.as_deref(), Some("autoskills (midudev)"));
+
+        // Las dos existen en disco y no se pisaron.
+        assert!(Path::new(&a.source_path).join("SKILL.md").exists());
+        assert!(Path::new(&b.source_path).join("SKILL.md").exists());
+        assert_ne!(a.source_path, b.source_path);
+
+        // El slug (= nombre del symlink en el proyecto) se desambigua, porque las dos
+        // pueden terminar attacheadas a la misma tab y competirían por el mismo path.
+        let slug_a = slug_from_source_path(&a.source_path);
+        let slug_b = slug_from_source_path(&b.source_path);
+        assert_eq!(slug_a, "testing");
+        assert_eq!(slug_b, "testing-2");
+
+        // Y attacheadas juntas conviven de verdad, cada symlink a su copia.
+        for skill in [&a, &b] {
+            attach_skill(
+                skill.id.clone(),
+                workspace_id.clone(),
+                "tab".to_string(),
+                Some(tab_id.clone()),
+                state.clone(),
+            )
+            .expect("attach");
+        }
+        let links = links_dir_for(&tab_cwd.to_string_lossy(), "claude-code").unwrap();
+        assert_eq!(std::fs::read_link(links.join(&slug_a)).unwrap(), Path::new(&a.source_path));
+        assert_eq!(std::fs::read_link(links.join(&slug_b)).unwrap(), Path::new(&b.source_path));
+    }
+
+    /// Una skill elegida a mano desde el disco no viene de ningún repo: va al bucket
+    /// `local` y sin badge.
+    #[test]
+    fn manually_installed_skills_land_in_the_local_bucket() {
+        let (db, _workspace_id, _tab_id, _tab_cwd, skills_dir) = setup();
+        let app = tauri::test::mock_app();
+        app.manage(db);
+        let state = app.state::<DbConnection>();
+
+        let source = temp_dir("source-manual");
+        write_source_skill(&source);
+        let info = install_skill(
+            source.join("SKILL.md").to_string_lossy().to_string(),
+            None,
+            state.clone(),
+        )
+        .expect("install_skill");
+
+        assert_eq!(Path::new(&info.source_path).parent().unwrap(), skills_dir.join("local"));
+        assert_eq!(info.registry_id, None);
+        assert_eq!(info.registry_name, None);
     }
 
     #[test]

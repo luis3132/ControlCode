@@ -5,6 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
+import { useTheme } from "neogestify-ui-components";
 import "@xterm/xterm/css/xterm.css";
 
 import { isResumable } from "../lib/agentResume";
@@ -25,6 +26,9 @@ interface TerminalProps {
   /** Scrollback persistido de una sesión anterior (proceso ya muerto, sin PTY vivo
    * al que conectarse): se escribe antes de lanzar el proceso nuevo, a modo de historial. */
   initialScrollback?: string;
+  /** Si esta terminal es la que el usuario está viendo ahora mismo. Al pasar a `true` se
+   * enfoca sola, para poder escribir sin un click extra. */
+  isActive?: boolean;
   onReady?: (id: number) => void;
   onExit?: (code: number) => void;
   onSessionDiscovered?: (sessionId: string) => void;
@@ -45,6 +49,96 @@ const SESSION_DISCOVERY_MAX_ATTEMPTS = 60; // con backoff, cubre ~35 minutos ant
 // un pequeño desfase entre este reloj y el de pty_create.
 const SESSION_DISCOVERY_LOOKBACK_S = 3;
 
+/**
+ * Paletas de la terminal, una por tema. Son GitHub Dark y GitHub Light: el resto de la app
+ * ya venía con la oscura, y usar el par oficial mantiene los 16 colores ANSI coherentes
+ * entre sí en vez de aclarar la oscura a ojo (que deja los colores brillantes ilegibles
+ * sobre blanco — un amarillo #e3b341 sobre fondo claro no se lee).
+ */
+const TERMINAL_THEMES = {
+  dark: {
+    background: "#0d1117",
+    foreground: "#e6edf3",
+    cursor: "#58a6ff",
+    selectionBackground: "#388bfd40",
+    black: "#0d1117",
+    brightBlack: "#6e7681",
+    red: "#ff7b72",
+    brightRed: "#ffa198",
+    green: "#3fb950",
+    brightGreen: "#56d364",
+    yellow: "#d29922",
+    brightYellow: "#e3b341",
+    blue: "#388bfd",
+    brightBlue: "#79c0ff",
+    magenta: "#bc8cff",
+    brightMagenta: "#d2a8ff",
+    cyan: "#39c5cf",
+    brightCyan: "#56d4dd",
+    white: "#b1bac4",
+    brightWhite: "#f0f6fc",
+  },
+  light: {
+    // Gris, no blanco puro. El blanco a pantalla completa es agresivo en una superficie que
+    // se mira durante horas, y deja sin margen los tonos claros. Es exactamente el
+    // `bg-gray-100` que ya usa el panel que la contiene (ver TerminalPanel), así que la
+    // terminal se integra con la app en vez de recortarse como un rectángulo blanco.
+    background: "#f3f4f6",
+    foreground: "#1f2328",
+    cursor: "#0550ae",
+    selectionBackground: "#0969da33",
+    // Cada color cumple contraste sobre el fondo POR SÍ MISMO, conservando su tono. Esto
+    // evita pedirle a xterm que corrija el contraste en caliente: esa corrección, para
+    // llegar al ratio, arrastra el color hacia el negro y le borra el matiz — todo
+    // terminaba viéndose gris.
+    //
+    // Elegidos maximizando SATURACIÓN, no oscuridad. Es la diferencia entre un tema claro
+    // que se ve apagado y uno que se ve vivo: para ganar contraste sobre un fondo claro se
+    // puede bajar la luminosidad (que lava el color) o subir el croma (que lo mantiene). Un
+    // `#00792c` al 100% de saturación y un `#0a7d2e` al 85% contrastan casi igual, pero el
+    // primero se lee como verde de verdad.
+    //
+    // Las variantes `bright` van más OSCURAS que las normales, no más claras: sobre fondo
+    // claro, "más destacado" es más oscuro. Al revés se irían hacia el blanco y volverían
+    // al problema original.
+    black: "#24292e",
+    brightBlack: "#57606a",
+    red: "#d10d1f",
+    brightRed: "#a4071c",
+    green: "#00792c",
+    brightGreen: "#04591f",
+    yellow: "#b45309",
+    brightYellow: "#8a3d00",
+    blue: "#0969da",
+    brightBlue: "#0546b8",
+    magenta: "#7c3aed",
+    brightMagenta: "#5f21c9",
+    cyan: "#0e7490",
+    brightCyan: "#0a5568",
+    // La familia "white" va OSCURA a propósito. En la semántica de terminal, `white` y
+    // `brightWhite` son "el texto normal / el destacado": pensados para fondo negro. Si se
+    // dejan como grises claros (que es lo que trae GitHub Light), sobre fondo blanco
+    // desaparecen — y es justo lo que más usan los agentes para su texto principal.
+    white: "#4a5058",
+    brightWhite: "#24292f",
+  },
+} as const;
+
+/**
+ * Piso de contraste que xterm corrige en caliente, contra el fondo real de cada celda.
+ *
+ * Deliberadamente BAJO (2, no el 4.5 de WCAG AA). Con 4.5, para alcanzar el ratio xterm
+ * arrastra el color hacia el negro y le borra el tono: los rojos, verdes y azules
+ * terminaban viéndose todos gris oscuro. Como la paleta clara de acá ya cumple ~4.5 por su
+ * cuenta, un piso de 2 no llega a activarse nunca para un color normal — solo entra donde
+ * la paleta no puede llegar: el texto atenuado (SGR 2), que xterm dibuja mezclando hacia el
+ * fondo y en tema claro queda casi invisible, y los pares fondo/texto que impone el propio
+ * programa.
+ *
+ * En oscuro queda apagado (1): esa paleta ya se veía bien y no hay nada que corregir.
+ */
+const MIN_CONTRAST = { dark: 1, light: 2 } as const;
+
 export function Terminal({
   tabId,
   command = "bash",
@@ -52,42 +146,30 @@ export function Terminal({
   agentId,
   attachPtyId,
   initialScrollback,
+  isActive = false,
   onReady,
   onExit,
   onSessionDiscovered,
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const ptyIdRef = useRef<number | null>(null);
+  const termRef = useRef<XTerm | null>(null);
   const { t } = useTranslation();
   const [status, setStatus] = useState<"connecting" | "running" | "exited">("connecting");
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+  // El efecto de montaje corre una sola vez (`[]`) y no debe re-crear la terminal al
+  // cambiar el tema — leerlo por ref evita meterlo en las dependencias y matar el PTY.
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
 
   useEffect(() => {
     if (!containerRef.current) return;
 
     // ── 1. Inicializar xterm.js ──────────────────────────────
     const term = new XTerm({
-      theme: {
-        background: "#0d1117",
-        foreground: "#e6edf3",
-        cursor: "#58a6ff",
-        selectionBackground: "#388bfd40",
-        black: "#0d1117",
-        brightBlack: "#6e7681",
-        red: "#ff7b72",
-        brightRed: "#ffa198",
-        green: "#3fb950",
-        brightGreen: "#56d364",
-        yellow: "#d29922",
-        brightYellow: "#e3b341",
-        blue: "#388bfd",
-        brightBlue: "#79c0ff",
-        magenta: "#bc8cff",
-        brightMagenta: "#d2a8ff",
-        cyan: "#39c5cf",
-        brightCyan: "#56d4dd",
-        white: "#b1bac4",
-        brightWhite: "#f0f6fc",
-      },
+      theme: TERMINAL_THEMES[themeRef.current],
+      minimumContrastRatio: MIN_CONTRAST[themeRef.current],
       fontFamily: '"Cascadia Code", "JetBrains Mono", "Fira Code", monospace',
       fontSize: 13,
       lineHeight: 1,
@@ -103,6 +185,7 @@ export function Terminal({
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
     term.open(containerRef.current);
+    termRef.current = term;
 
     // Mide cols/rows reales ANTES de spawnear el proceso (ver pty_create en Rust: el
     // PTY nace con este tamaño, no con uno fijo que se corrige después).
@@ -114,15 +197,41 @@ export function Terminal({
     //   contenedor (el "overflow"/márgenes raros reportados).
     // - Doble rAF: el primero solo garantiza que el layout se pintó una vez; fit() antes
     //   de eso puede medir un contenedor todavía en 0×0 (tab recién creada).
+    // `fit()` divide el alto disponible por el alto de celda *teórico* y redondea hacia
+    // abajo. Pero lo que el motor rasteriza no siempre mide eso: con escalado fraccionario
+    // (Wayland al 125%/150%) cada fila se redondea a píxeles de dispositivo y el error se
+    // acumula, así que las N filas calculadas terminan ocupando unos píxeles MÁS que el
+    // contenedor — y la última queda cortada contra el borde inferior.
+    //
+    // En vez de intentar predecir ese redondeo, se mide lo que realmente quedó pintado y,
+    // si desborda, se saca una fila. El medio píxel de tolerancia evita que el ruido de
+    // subpíxel dispare una corrección donde entra justo.
+    const trimOverflowingRow = () => {
+      const el = containerRef.current;
+      const screen = el?.querySelector<HTMLElement>(".xterm-screen");
+      if (!el || !screen) return;
+      const style = getComputedStyle(el);
+      const available =
+        el.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+      if (screen.getBoundingClientRect().height > available + 0.5 && term.rows > 1) {
+        term.resize(term.cols, term.rows - 1);
+      }
+    };
+
+    const fitAndTrim = () => {
+      try {
+        fitAddon.fit();
+        trimOverflowingRow();
+      } catch {
+        // ignorar si el terminal fue dispose()d
+      }
+    };
+
     const fitOnce = async () => {
       await document.fonts.ready.catch(() => {});
       await new Promise(requestAnimationFrame);
       await new Promise(requestAnimationFrame);
-      try {
-        fitAddon.fit();
-      } catch {
-        // ignorar si el terminal fue dispose()d mientras esperábamos
-      }
+      fitAndTrim();
     };
 
     // ── 2. Crear la sesión PTY en Rust ───────────────────────
@@ -258,20 +367,27 @@ export function Terminal({
     });
 
     // ── 6. Resize automático ─────────────────────────────────
+    // Con debounce: arrastrar el borde de la ventana dispara el observer decenas de veces
+    // por segundo, y cada una hacía un `fit()` (que remide la celda y repinta todo) más un
+    // `pty_resize` por IPC. Ese torrente es lo que se ve como parpadeo/basura mientras se
+    // redimensiona; el tamaño que importa es el final, no los intermedios.
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    const applyFit = () => {
+      const el = containerRef.current;
+      // Un contenedor en 0×0 (la tab todavía no se pintó) haría que fit() calcule filas y
+      // columnas contra una celda sin medir, dejando el PTY con un tamaño absurdo que
+      // recién se corrige al siguiente resize — con el proceso ya dibujando encima.
+      if (!el || el.clientWidth === 0 || el.clientHeight === 0) return;
+      fitAndTrim();
+      if (ptyIdRef.current !== null) {
+        const { cols, rows } = term;
+        invoke("pty_resize", { id: ptyIdRef.current, cols, rows }).catch(console.error);
+      }
+    };
+
     const resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        try {
-          fitAddon.fit();
-        } catch {
-          // ignorar si el terminal fue dispose()d
-        }
-        if (ptyIdRef.current !== null) {
-          const { cols, rows } = term;
-          invoke("pty_resize", { id: ptyIdRef.current, cols, rows }).catch(
-            console.error
-          );
-        }
-      });
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => requestAnimationFrame(applyFit), 80);
     });
 
     resizeObserver.observe(containerRef.current);
@@ -280,6 +396,7 @@ export function Terminal({
     return () => {
       cancelled = true;
       if (discoveryTimer) clearTimeout(discoveryTimer);
+      if (resizeTimer) clearTimeout(resizeTimer);
       resizeObserver.disconnect();
       unlistenData?.();
       unlistenExit?.();
@@ -289,14 +406,45 @@ export function Terminal({
         }
         ptyIdRef.current = null;
       }
+      termRef.current = null;
       term.dispose();
     };
   }, []); // Solo montar/desmontar una vez
 
+  // Cambiar de tema repinta la terminal en caliente. `options.theme` es reasignable, así
+  // que no hace falta recrear nada: el proceso y todo el scrollback siguen intactos, solo
+  // cambian los colores con los que se dibuja.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    term.options.theme = TERMINAL_THEMES[theme];
+    term.options.minimumContrastRatio = MIN_CONTRAST[theme];
+  }, [theme]);
+
+  // Foco automático al pasar a ser la terminal visible: cambiar de tab (o volver a
+  // /workspace) debería dejar el cursor listo para escribir, sin un click extra sobre el
+  // área negra.
+  //
+  // El rAF no es cosmético: cuando esto corre, el panel todavía tiene la `visibility` del
+  // render anterior, y `focus()` sobre un elemento oculto es un no-op silencioso en
+  // WebKitGTK. Esperar al frame siguiente garantiza que ya está visible.
+  useEffect(() => {
+    if (!isActive) return;
+    const frame = requestAnimationFrame(() => termRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [isActive]);
+
   return (
     <div className="relative flex flex-col h-full w-full">
-      {/* Status badge */}
-      <div className="absolute top-2 right-2 z-10 flex items-center gap-2 bg-slate-900 border border-slate-700 px-2 py-1 rounded-lg text-xs font-mono">
+      {/* Status badge. Flota sobre la terminal, así que sigue su paleta y no la de la app:
+          en modo claro un recuadro negro acá se leería como un artefacto pegado encima. */}
+      <div
+        className={`absolute top-2 right-2 z-10 flex items-center gap-2 px-2 py-1 rounded-lg
+          text-xs font-mono border
+          ${isDark
+            ? "bg-slate-900 border-slate-700"
+            : "bg-white/90 border-gray-200 shadow-sm"}`}
+      >
         <span
           className="w-1.5 h-1.5"
           style={{
@@ -309,24 +457,35 @@ export function Terminal({
                 : "#f87171",
           }}
         />
-        <span className="text-white/80">
+        <span className={isDark ? "text-white/80" : "text-gray-600"}>
           {status === "running"
             ? command
             : t(`terminal.status.${status}` as "terminal.status.connecting" | "terminal.status.exited")}
         </span>
       </div>
 
-      {/* xterm container */}
+      {/* Contenedor de xterm.
+          Sin `height: 100%`: con `flex: 1` dentro de un padre `flex-col` ya recibe el alto
+          disponible, y declarar las dos cosas hacía que el alto se resolviera por dos
+          caminos distintos (el algoritmo flex y el porcentaje contra el padre). En el
+          borde inferior eso se veía como filas cortadas o tapadas.
+
+          `background` igual al del tema de xterm: fit() calcula filas enteras, así que casi
+          siempre sobran unos píxeles abajo que no llegan a una fila completa. Antes esa
+          franja mostraba el fondo del panel y se leía como un glitch; ahora es del mismo
+          color que la terminal y desaparece. */}
       <div
         ref={containerRef}
         style={{
           flex: 1,
           width: "100%",
-          height: "100%",
           minHeight: 0,
           overflow: "hidden",
           padding: "8px",
           boxSizing: "border-box",
+          // Mismo fondo que la paleta activa: la franja sobrante de menos de una fila que
+          // queda abajo tiene que ser invisible en los dos temas, no solo en el oscuro.
+          background: TERMINAL_THEMES[theme].background,
         }}
       />
     </div>

@@ -237,6 +237,18 @@ pub fn init_db() -> SqlResult<DbConnection> {
         )?;
     }
 
+    // Repo del que salió cada skill. `registry_name` va desnormalizado a propósito (misma
+    // idea que `agent_label` en `session_history`): el badge tiene que seguir diciendo de
+    // dónde vino aunque después borres ese repositorio de tus fuentes.
+    //
+    // Con ALTER y no recreando la tabla: las skills instaladas viven en disco y sus filas
+    // son lo único que las conecta con sus symlinks. Las que ya estaban quedan en NULL —
+    // se muestran como locales hasta que se reinstalen.
+    if conn.prepare("SELECT registry_id FROM skills LIMIT 1").is_err() {
+        conn.execute("ALTER TABLE skills ADD COLUMN registry_id TEXT", [])?;
+        conn.execute("ALTER TABLE skills ADD COLUMN registry_name TEXT", [])?;
+    }
+
     ensure_default_workspace(&conn)?;
     ensure_default_settings(&conn)?;
     ensure_default_registries(&conn)?;
@@ -631,15 +643,69 @@ pub fn db_save_workspace(
         "INSERT INTO workspaces (id, name, created_at, last_active) VALUES (?1, ?2, ?3, ?3)",
         rusqlite::params![id, name, now],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| {
+        // `workspaces.name` es UNIQUE: sin esto el usuario veía el error crudo de SQLite
+        // ("UNIQUE constraint failed: workspaces.name") en un toast.
+        if e.to_string().contains("UNIQUE") {
+            format!("Ya existe un workspace llamado \"{name}\"")
+        } else {
+            e.to_string()
+        }
+    })?;
 
+    move_open_windows_to_workspace(&conn, &id, &source_workspace_id, now)?;
+
+    Ok(Workspace { id, name, created_at: now, last_active: now })
+}
+
+/// Mueve al workspace `new_id` las ventanas abiertas de `source_id` — y, con ellas, los
+/// attachments de skills que les corresponden.
+///
+/// Mover las ventanas sin mover `project_skills` era un bug silencioso:
+/// `desired_skills_for_link_dir` resuelve qué symlinks van en cada carpeta uniendo
+/// `project_skills.workspace_id = windows.workspace_id`. Si las filas de skills se quedan
+/// apuntando al workspace de origen, ese JOIN deja de matchear, y en la primera
+/// reconciliación (abrir una tab, cerrar una ventana, el health check al abrir el
+/// workspace) los symlinks se borran del proyecto. O sea: guardar un workspace le sacaba
+/// todas sus skills, sin ningún error visible.
+///
+/// Los attachments se mueven, no se copian: el origen típico es el bucket `default`, que
+/// es scratch y se resetea — dejar filas ahí resucitaría esas skills más adelante en tabs
+/// sin ninguna relación con este workspace.
+fn move_open_windows_to_workspace(
+    conn: &Connection,
+    new_id: &str,
+    source_id: &str,
+    now: i64,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE windows SET workspace_id = ?1, last_active = ?2 WHERE workspace_id = ?3 AND is_open = 1",
-        rusqlite::params![id, now, source_workspace_id],
+        rusqlite::params![new_id, now, source_id],
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(Workspace { id, name, created_at: now, last_active: now })
+    conn.execute(
+        "UPDATE project_skills SET workspace_id = ?1
+         WHERE workspace_id = ?2 AND scope = 'workspace'",
+        rusqlite::params![new_id, source_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Las de scope='tab' solo si su tab viajó de verdad: una tab que quedó en una ventana
+    // cerrada (is_open = 0, no incluida en el UPDATE de arriba) sigue perteneciendo al
+    // workspace de origen y su attachment debe quedarse con ella.
+    conn.execute(
+        "UPDATE project_skills SET workspace_id = ?1
+         WHERE workspace_id = ?2 AND scope = 'tab' AND tab_id IN (
+             SELECT t.id FROM tabs t
+             JOIN windows w ON w.id = t.window_id
+             WHERE w.workspace_id = ?1
+         )",
+        rusqlite::params![new_id, source_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -738,7 +804,13 @@ pub fn db_rename_workspace(
             "UPDATE workspaces SET name = ?1 WHERE id = ?2",
             rusqlite::params![name, workspace_id],
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE") {
+                format!("Ya existe un workspace llamado \"{name}\"")
+            } else {
+                e.to_string()
+            }
+        })?;
     if affected == 0 {
         return Err("Workspace no encontrado".to_string());
     }
@@ -1151,6 +1223,17 @@ pub fn db_save_window_state(
     db: tauri::State<DbConnection>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
+    // Un guardado de una ventana que ya no existe nativamente es un guardado zombi: el
+    // JS de una ventana en pleno teardown (o cuyo timer periódico de 20s disparó justo
+    // durante el cierre) puede llegar acá después de que su fila se borró a propósito.
+    // Como el INSERT de abajo recrea la fila con `is_open = 1`, eso resucitaba ventanas
+    // que se acababan de descartar — el caso visible es "Nuevo workspace": se borran las
+    // filas de `default` y un guardado en vuelo devolvía una de ellas a la vida, con sus
+    // tabs, en el workspace supuestamente vacío.
+    if tauri::Manager::get_webview_window(&app, &state.label).is_none() {
+        return Ok(());
+    }
+
     let conn = db.lock().map_err(|e| e.to_string())?;
     let now = now_ts();
 
@@ -1383,9 +1466,10 @@ pub fn db_mark_window_closed(label: String, db: tauri::State<DbConnection>) -> R
 /// caso equivale a "cerrar" el workspace entero, que sí debe quedar restaurable.
 ///
 /// Devuelve `Some(workspace_id)` cuando esta era la última ventana viva de su workspace
-/// (el caso "preservado") — el llamador usa esto para decidir si hay que abrirle una
-/// ventana en blanco de reemplazo (ver `create_blank_window_row`), y `None` si se borró
-/// (todavía quedan otras ventanas del mismo workspace) o si el label no existía.
+/// (el caso "preservado", fila conservada con `is_open = 0`), y `None` si la fila se borró
+/// (todavía quedan otras ventanas del mismo workspace) o si el label no existía. Es
+/// informativo: cerrar una ventana nunca abre otra en su lugar (ver
+/// `close_and_forget_window`).
 pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<Option<String>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
 
@@ -1441,6 +1525,24 @@ pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<O
     }
 }
 
+/// Label nuevo para una ventana nativa, único por construcción.
+///
+/// Antes esto era `format!("cc-window-{millis}")` en cuatro lugares distintos, y el
+/// timestamp en milisegundos NO alcanza: al restaurar un workspace se renombran varias
+/// filas dentro del mismo loop, y dos que caen en el mismo milisegundo producían el mismo
+/// label. Como `windows.label` es UNIQUE y el label de una ventana nativa es único a nivel
+/// de proceso, eso hacía fallar el INSERT/UPDATE o el `build()` de la segunda ventana —
+/// abortando la restauración entera con `?` y dejando al usuario sin el resto de sus
+/// ventanas. El sufijo aleatorio elimina la colisión sin depender del reloj.
+pub fn fresh_window_label() -> String {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let suffix = Uuid::new_v4().simple().to_string();
+    format!("cc-window-{millis}-{}", &suffix[..8])
+}
+
 /// Crea la fila de una ventana en blanco (sin tabs) para un workspace específico y
 /// devuelve el label a usar para la ventana nativa correspondiente. Usado cuando un
 /// workspace se queda en cero ventanas vivas mientras el proceso sigue corriendo (otras
@@ -1449,11 +1551,7 @@ pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<O
 pub fn create_blank_window_row(db: &DbConnection, workspace_id: &str) -> Result<String, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let now = now_ts();
-    let millis = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let label = format!("cc-window-{millis}");
+    let label = fresh_window_label();
     conn.execute(
         "INSERT INTO windows (id, label, workspace_id, pos_x, pos_y, width, height, monitor, is_open, last_active)
          VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 1, ?4)",
@@ -1516,6 +1614,83 @@ mod tests {
              VALUES (?1, 'win', 'Mi sesión', 'claude-code', 'Claude Code', 'claude', '/proj', ?2, ?3, 100, 0, 0)",
             rusqlite::params![id, session_id, history_id],
         ).unwrap();
+    }
+
+    fn attach_skill_row(conn: &Connection, id: &str, ws: &str, scope: &str, tab: Option<&str>) {
+        conn.execute(
+            "INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, enabled, created_at)
+             VALUES (?1, 'skill-1', ?2, ?3, ?4, 1, 0)",
+            rusqlite::params![id, ws, scope, tab],
+        )
+        .unwrap();
+    }
+
+    fn workspace_of_attachment(conn: &Connection, id: &str) -> String {
+        conn.query_row("SELECT workspace_id FROM project_skills WHERE id = ?1", [id], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// El bug: "Guardar workspace" movía las ventanas al workspace nuevo pero dejaba los
+    /// `project_skills` apuntando al de origen. Como los symlinks se derivan del JOIN
+    /// `project_skills.workspace_id = windows.workspace_id`, guardar un workspace le
+    /// borraba en silencio todas sus skills en la siguiente reconciliación.
+    #[test]
+    fn saving_a_workspace_carries_its_skill_attachments_along() {
+        let conn = setup();
+        conn.execute("INSERT INTO workspaces VALUES ('nuevo', 'Nuevo', 0, 0)", []).unwrap();
+        insert_tab(&conn, "tab-1", None, None);
+
+        attach_skill_row(&conn, "ps-ws", "ws", "workspace", None);
+        attach_skill_row(&conn, "ps-tab", "ws", "tab", Some("tab-1"));
+
+        move_open_windows_to_workspace(&conn, "nuevo", "ws", 0).unwrap();
+
+        let moved: String = conn
+            .query_row("SELECT workspace_id FROM windows WHERE id = 'win'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(moved, "nuevo", "la ventana abierta se mueve al workspace nuevo");
+        assert_eq!(workspace_of_attachment(&conn, "ps-ws"), "nuevo");
+        assert_eq!(workspace_of_attachment(&conn, "ps-tab"), "nuevo");
+    }
+
+    /// La contracara: lo que NO se movió no debe arrastrar sus skills. Una ventana cerrada
+    /// se queda en el workspace de origen, así que el attachment de sus tabs también.
+    #[test]
+    fn attachments_of_windows_that_stayed_behind_are_left_alone() {
+        let conn = setup();
+        conn.execute("INSERT INTO workspaces VALUES ('nuevo', 'Nuevo', 0, 0)", []).unwrap();
+        conn.execute("INSERT INTO windows VALUES ('win-cerrada', 'win-cerrada', 'ws', 0, 0)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO tabs (id, window_id, title, agent_id, agent_label, command, cwd, opened_at, created_at, last_active)
+             VALUES ('tab-vieja', 'win-cerrada', 't', 'claude-code', 'Claude Code', 'claude', '/proj', 0, 0, 0)",
+            [],
+        )
+        .unwrap();
+        attach_skill_row(&conn, "ps-vieja", "ws", "tab", Some("tab-vieja"));
+
+        move_open_windows_to_workspace(&conn, "nuevo", "ws", 0).unwrap();
+
+        let stayed: String = conn
+            .query_row("SELECT workspace_id FROM windows WHERE id = 'win-cerrada'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stayed, "ws", "una ventana cerrada no se lleva al workspace nuevo");
+        assert_eq!(
+            workspace_of_attachment(&conn, "ps-vieja"),
+            "ws",
+            "su attachment de scope='tab' se queda con ella"
+        );
+    }
+
+    /// Dos labels generados en el mismo milisegundo tienen que seguir siendo distintos:
+    /// `windows.label` es UNIQUE y el label nativo es único por proceso, así que una
+    /// colisión rompía la restauración de todo un workspace.
+    #[test]
+    fn generated_window_labels_do_not_collide() {
+        let labels: std::collections::HashSet<String> =
+            (0..500).map(|_| fresh_window_label()).collect();
+        assert_eq!(labels.len(), 500);
+        assert!(labels.iter().all(|l| l.starts_with("cc-window-")));
     }
 
     /// El bug reportado: reabrir una sesión desde el historial y volver a cerrarla dejaba

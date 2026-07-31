@@ -237,12 +237,25 @@ pub async fn add_registry(
     refresh_registry_internal(&id, &db, app).await
 }
 
+/// Borra un repositorio Y las skills que se instalaron desde él.
+///
+/// La cascada es deliberada: las copias globales viven bajo la carpeta de su repo, así que
+/// dejar el repo fuera y las skills adentro deja un bucket huérfano que ya no se puede
+/// refrescar ni actualizar. El frontend avisa antes y lista exactamente qué se va a borrar
+/// (ver `registry_skills`) — esto nunca debe correr sin esa confirmación.
+///
+/// Devuelve cuántas skills se borraron, para poder informarlo después de la operación.
 #[tauri::command]
-pub fn remove_registry(id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+pub fn remove_registry(id: String, db: tauri::State<DbConnection>) -> Result<usize, String> {
+    // Primero las skills: cada borrado necesita leer `registry_id`, que desaparece con la
+    // fila del repo. Además retira sus symlinks de los proyectos, que es la parte que la
+    // cascada de la FK no puede hacer sola.
+    let removed = crate::skills::delete_skills_of_registry(&id, &db)?;
+
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM registries WHERE id = ?1", [&id])
         .map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(removed)
 }
 
 #[tauri::command]
@@ -434,20 +447,24 @@ pub async fn install_marketplace_skill(
     skill_id: String,
     db: tauri::State<'_, DbConnection>,
 ) -> Result<SkillInfo, String> {
-    let (source_type, location, entries) = {
+    let (source_type, location, registry_name, entries) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let (source_type, location, cache_json): (String, String, Option<String>) = conn
+        let (source_type, location, registry_name, cache_json): (String, String, String, Option<String>) = conn
             .query_row(
-                "SELECT source_type, location, cache_json FROM registries WHERE id = ?1",
+                "SELECT source_type, location, name, cache_json FROM registries WHERE id = ?1",
                 [&registry_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .map_err(|_| "Registry no encontrado".to_string())?;
         let entries: Vec<MarketplaceSkillEntry> = cache_json
             .and_then(|j| serde_json::from_str(&j).ok())
             .unwrap_or_default();
-        (source_type, location, entries)
+        (source_type, location, registry_name, entries)
     };
+
+    // La copia global va a parar a la carpeta de este repo, y la fila guarda de dónde vino
+    // para poder mostrar el badge en la lista de skills.
+    let origin = Some((registry_id.as_str(), registry_name.as_str()));
 
     let entry = entries
         .into_iter()
@@ -457,9 +474,9 @@ pub async fn install_marketplace_skill(
     match source_type.as_str() {
         "local" => {
             let file = PathBuf::from(&location).join(&entry.folder_path).join("SKILL.md");
-            install_skill_internal(&file.to_string_lossy(), None, &db)
+            install_skill_internal(&file.to_string_lossy(), None, origin, &db)
         }
-        "github" => install_from_github(&location, &entry, &db).await,
+        "github" => install_from_github(&location, &entry, origin, &db).await,
         other => Err(format!("Tipo de registry desconocido: {other}")),
     }
 }
@@ -833,6 +850,7 @@ async fn fetch_github_registry(
 async fn install_from_github(
     location: &str,
     entry: &MarketplaceSkillEntry,
+    origin: crate::skills::SkillOrigin<'_>,
     db: &DbConnection,
 ) -> Result<SkillInfo, String> {
     let (owner, repo, branch_opt, _subpath) = parse_github_location(location)?;
@@ -856,7 +874,7 @@ async fn install_from_github(
         if !skill_md.is_file() {
             return Err("No se encontró SKILL.md tras descargar la carpeta de la skill".to_string());
         }
-        install_skill_internal(&skill_md.to_string_lossy(), None, db)
+        install_skill_internal(&skill_md.to_string_lossy(), None, origin, db)
     }
     .await;
 

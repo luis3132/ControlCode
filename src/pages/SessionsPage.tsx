@@ -12,6 +12,7 @@ import {
 import { useTabsStore } from "../store/tabs";
 import { PageHeader } from "../components/common/PageHeader";
 import { MissingSkillsDialog } from "../components/sessions/MissingSkillsDialog";
+import { ResumeSkillsDialog } from "../components/sessions/ResumeSkillsDialog";
 import { SessionRow } from "../components/sessions/SessionRow";
 import {
   EMPTY_FILTERS,
@@ -40,6 +41,7 @@ export function SessionsPage() {
   const { history, loadHistory, checkSessionSkills, restoreSessionSkills } = useSessionsStore();
   const { workspaceId, addTab } = useTabsStore();
   const [pendingResume, setPendingResume] = useState<PendingResume | null>(null);
+  const [pendingSkillChoice, setPendingSkillChoice] = useState<PendingResume | null>(null);
   const [filters, setFilters] = useState<SessionFilterState>(EMPTY_FILTERS);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -76,8 +78,13 @@ export function SessionsPage() {
       return next;
     });
 
-  /** Abre la tab de verdad y le restaura las skills que la sesión tenía al cerrarse. */
-  const openSession = (entry: SessionHistoryEntry) => {
+  /**
+   * Abre la tab de verdad. Sin `skillIds` restaura las skills que la sesión tenía al
+   * cerrarse (el camino por defecto); con `skillIds` monta exactamente ese set — es lo que
+   * eligió el usuario en `ResumeSkillsDialog`, incluida la lista vacía ("abrir sin skills"),
+   * que por eso se distingue de `undefined` y no con un `.length`.
+   */
+  const openSession = (entry: SessionHistoryEntry, skillIds?: string[]) => {
     const tabId = addTab({
       cwd: entry.cwd,
       agent: { id: entry.agentId, label: entry.agentLabel, command: entry.command, available: true },
@@ -92,9 +99,30 @@ export function SessionsPage() {
     // que arranque el agente, porque varios escanean sus skills solo al boot.
     const setup = (async () => {
       await flushPendingSave();
-      await restoreSessionSkills(entry.id, workspaceId, tabId).catch(console.error);
+      if (skillIds === undefined) {
+        await restoreSessionSkills(entry.id, workspaceId, tabId).catch(console.error);
+        return;
+      }
+      // Mismo scope que usa `restore_session_skills`: la sesión se reabre como una tab
+      // puntual, así que todo entra con scope='tab' aunque en su momento viniera del
+      // workspace. Best-effort por skill, para que un conflicto de symlink en una no deje
+      // la tab sin las demás.
+      for (const skillId of skillIds) {
+        await invoke("attach_skill", {
+          skillId,
+          workspaceId,
+          scope: "tab",
+          tabId,
+        }).catch(console.error);
+      }
     })();
     registerPendingSkillSetup(tabId, setup);
+  };
+
+  /** Reanudar eligiendo antes las skills: se resuelve su estado actual y se abre el diálogo. */
+  const handleResumeWithSkills = async (entry: SessionHistoryEntry) => {
+    const statuses = await checkSessionSkills(entry.id).catch(() => []);
+    setPendingSkillChoice({ entry, statuses });
   };
 
   const handleResume = async (entry: SessionHistoryEntry) => {
@@ -190,6 +218,7 @@ export function SessionsPage() {
                               entry={entry}
                               workspaceId={workspaceId}
                               onResume={handleResume}
+                              onResumeWithSkills={handleResumeWithSkills}
                             />
                           ))}
                         </div>
@@ -208,6 +237,19 @@ export function SessionsPage() {
           </p>
         )}
       </div>
+
+      {pendingSkillChoice && (
+        <ResumeSkillsDialog
+          entry={pendingSkillChoice.entry}
+          statuses={pendingSkillChoice.statuses}
+          onCancel={() => setPendingSkillChoice(null)}
+          onConfirm={(skillIds) => {
+            const { entry } = pendingSkillChoice;
+            setPendingSkillChoice(null);
+            openSession(entry, skillIds);
+          }}
+        />
+      )}
 
       {pendingResume && (
         <MissingSkillsDialog

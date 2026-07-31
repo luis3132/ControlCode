@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Button, AlertaToast } from "neogestify-ui-components";
+import { Button, AlertaToast, AlertaConfirmacion } from "neogestify-ui-components";
 import {
   FolderIcon,
   ArrowRightIcon,
@@ -50,9 +50,11 @@ interface SessionRowProps {
   entry: SessionHistoryEntry;
   workspaceId: string;
   onResume: (entry: SessionHistoryEntry) => void;
+  /** Reabrir eligiendo antes con qué skills montar la TUI. */
+  onResumeWithSkills: (entry: SessionHistoryEntry) => void;
 }
 
-export function SessionRow({ entry, workspaceId, onResume }: SessionRowProps) {
+export function SessionRow({ entry, workspaceId, onResume, onResumeWithSkills }: SessionRowProps) {
   const { t } = useTranslation();
   const { deleteSession, exportSession } = useSessionsStore();
   const [expanded, setExpanded] = useState(false);
@@ -80,7 +82,11 @@ export function SessionRow({ entry, workspaceId, onResume }: SessionRowProps) {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(t("sessions.delete.confirm"))) return;
+    // `window.confirm` nativo desentonaba: en una ventana sin decoración muestra un diálogo
+    // del sistema con el título del origen, ignora el tema de la app y no se parece en nada
+    // al resto de las confirmaciones. La librería ya trae la versión estilada.
+    const answer = await AlertaConfirmacion(t("sessions.delete.action"), t("sessions.delete.confirm"));
+    if (!answer.isConfirmed) return;
     setBusy(true);
     try {
       await deleteSession(entry.id, workspaceId);
@@ -160,6 +166,15 @@ export function SessionRow({ entry, workspaceId, onResume }: SessionRowProps) {
             className="hover:text-red-500! dark:hover:text-red-400!"
           >
             <TrashIcon className="w-4 h-4" />
+          </Button>
+          {/* Reanudar ajustando las skills. Va pegado al de reanudar porque son la misma
+              acción con distinto grado de control, no dos cosas distintas. */}
+          <Button
+            variant="icon"
+            onClick={() => onResumeWithSkills(entry)}
+            title={t("sessions.resumeWithSkills")}
+          >
+            <StackIcon className="w-4 h-4" />
           </Button>
           <Button variant="icon" onClick={() => onResume(entry)} title={t("sessions.resume")}>
             <ArrowRightIcon className="w-4 h-4" />

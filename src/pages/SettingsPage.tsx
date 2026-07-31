@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button } from "neogestify-ui-components";
+import { Button, Select } from "neogestify-ui-components";
 import { TrashIcon, EditIcon, ThemeToggle, FolderIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n/index";
@@ -98,19 +98,16 @@ export function SettingsPage() {
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {t("settings.language")}
                 </span>
-                <select
+                <Select
                   value={i18n.language}
                   onChange={(e) => handleLanguage(e.target.value)}
-                  className="text-sm rounded-lg border px-3 py-1.5
-                    bg-white dark:bg-gray-700
-                    border-gray-200 dark:border-gray-600
-                    text-gray-800 dark:text-gray-100
-                    focus:outline-none focus:ring-2 focus:ring-blue-500
-                    transition-colors cursor-pointer"
-                >
-                  <option value="es">Español</option>
-                  <option value="en">English</option>
-                </select>
+                  variant="outline"
+                  size="sm"
+                  options={[
+                    { value: "es", label: "Español" },
+                    { value: "en", label: "English" },
+                  ]}
+                />
               </div>
             </div>
           </section>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button, Input } from "neogestify-ui-components";
-import { AddIcon, EditIcon, TrashIcon, ChevronDownIcon, CopyIcon, SearchIcon, StackIcon, InfoIcon } from "neogestify-ui-components";
+import { AddIcon, EditIcon, TrashIcon, ChevronDownIcon, CopyIcon, SearchIcon, StackIcon, InfoIcon, CloudIcon, FolderIcon } from "neogestify-ui-components";
 import { useSkillsStore, SkillSummary } from "../store/skills";
 import { useTabsStore } from "../store/tabs";
 import { InstallSkillDialog } from "../components/skills/InstallSkillDialog";
@@ -37,7 +37,9 @@ export function SkillsPage() {
 
   const filtered = skills.filter((s) => {
     if (!query.trim()) return true;
-    const haystack = `${s.name} ${s.description ?? ""} ${s.categories.join(" ")}`.toLowerCase();
+    // El repo entra en la búsqueda: con skills homónimas de repos distintos, filtrar por
+    // "anthropics" es la forma natural de quedarse con la que buscabas.
+    const haystack = `${s.name} ${s.description ?? ""} ${s.categories.join(" ")} ${s.registryName ?? ""}`.toLowerCase();
     return haystack.includes(query.trim().toLowerCase());
   });
 
@@ -146,10 +148,40 @@ export function SkillsPage() {
                       onClick={() => navigate(`/skills/${skill.id}`)}
                       className="flex flex-col min-w-0 text-left flex-1"
                     >
-                      <span className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">
+                      {/* El nombre en su propia línea y los badges en una fila que envuelve
+                          abajo. Antes iban todos como hermanos dentro de un flex con
+                          `truncate`: como `{skill.name}` es un nodo de texto suelto, no podía
+                          encogerse, tomaba su ancho completo y empujaba los badges fuera del
+                          contenedor — que con `overflow:hidden` los recortaba hasta hacerlos
+                          desaparecer. Un nombre largo ahora corta con puntos suspensivos y
+                          los badges quedan siempre visibles. */}
+                      <span className="block text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">
                         {skill.name}
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400 shrink-0">
+                      </span>
+                      <span className="flex flex-wrap items-center gap-1 mt-0.5">
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full shrink-0
+                          bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400">
                           v{skill.version}
+                        </span>
+                        {/* De qué repo salió. Es lo que distingue dos skills con el mismo
+                            nombre traídas de repositorios distintos, así que va acá arriba y
+                            no escondido en el detalle. */}
+                        <span
+                          title={t("skills.list.fromRegistry", {
+                            registry: skill.registryName ?? t("skills.list.localOrigin"),
+                          })}
+                          className={`flex items-center gap-1 min-w-0 max-w-full text-[10px] px-1.5 py-0.5
+                            rounded-full font-normal
+                            ${skill.registryName
+                              ? "bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400"
+                              : "bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400"}`}
+                        >
+                          {skill.registryName
+                            ? <CloudIcon className="w-2.5 h-2.5 shrink-0" />
+                            : <FolderIcon className="w-2.5 h-2.5 shrink-0" />}
+                          <span className="truncate">
+                            {skill.registryName ?? t("skills.list.localOrigin")}
+                          </span>
                         </span>
                       </span>
                       {skill.description && (

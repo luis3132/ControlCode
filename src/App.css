@@ -4,12 +4,29 @@
 
 @variant dark (&:where(.dark, .dark *)) {}
 
+/* ── Tipografía ────────────────────────────────────────────────────────────
+   El stack nombra fuentes que EXISTEN en cada plataforma en vez de confiar en que
+   `system-ui` caiga en algo bien hinteado: en Linux, `system-ui` resuelve a lo que diga
+   fontconfig (en Fedora, Noto Sans variable), que a tamaños de UI se ve más áspero que
+   una fuente pensada para interfaz. Adwaita Sans y Cantarell son las de GNOME y están
+   afinadas justo para eso.
+
+   `-webkit-font-smoothing`/`-moz-osx-font-smoothing` se dejan porque ayudan en macOS,
+   pero OJO: son no-ops en WebKitGTK (Linux) y en WebView2 (Windows). No son el remedio
+   del "serrucho" fuera de macOS.
+
+   Se quitó `text-rendering: optimizeLegibility`: no mejora el antialiasing (solo fuerza
+   ligaduras y kerning) y en varios motores degrada el rasterizado a tamaños chicos, que
+   es exactamente el rango en el que vive esta UI. */
 :root {
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-family: "Inter", "Adwaita Sans", "Cantarell", system-ui, -apple-system,
+    "Segoe UI", "Noto Sans", sans-serif;
   font-synthesis: none;
-  text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Deja que la fuente elija el trazo óptimo para cada tamaño en vez de escalar un
+     único master — con las variables (Noto Sans lo es) evita el trazo fino y quebrado. */
+  font-optical-sizing: auto;
 }
 
 html,
@@ -112,13 +129,18 @@ html.dark ::-webkit-scrollbar-thumb:hover {
   height: 0;
 }
 
-/* xterm overrides */
+/* ── xterm ─────────────────────────────────────────────────────────────────
+   `.xterm { height: 100% }` estaba forzando al elemento a ocupar todo el contenedor, pero
+   xterm se dimensiona solo a `filas × alto-de-celda` — y fit() redondea las filas hacia
+   abajo, así que casi nunca coinciden. Estirar el elemento sobre esa diferencia dejaba el
+   viewport más alto que las filas realmente dibujadas: la última fila quedaba partida o
+   tapada contra el borde inferior. Ahora xterm decide su alto y el sobrante (siempre menos
+   de una fila) es fondo del contenedor, del mismo color.
+
+   El `overflow-y: auto` sí se mantiene: sin él, WebKitGTK deja el viewport sin barra y la
+   rueda no scrollea el historial. */
 .xterm-viewport {
   overflow-y: auto !important;
-}
-
-.xterm {
-  height: 100%;
 }
 
 /* Barra de progreso indeterminada (ver AddRegistryDialog): mientras no se sabe cuántos

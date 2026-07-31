@@ -21,6 +21,11 @@ export interface SkillSummary {
   license: string | null;
   homepage: string | null;
   sourcePath: string;
+  /** Repo del que salió. `null` = instalada a mano desde un archivo local. */
+  registryId: string | null;
+  /** Nombre del repo al momento de instalar — se guarda desnormalizado, así el badge
+   *  sigue diciendo de dónde vino aunque después borres ese repositorio. */
+  registryName: string | null;
   installedAt: number;
   updatedAt: number;
   usedBy: SkillUsageEntry[];

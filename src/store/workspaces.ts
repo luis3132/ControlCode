@@ -61,6 +61,18 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
       sourceWorkspaceId,
     });
     useTabsStore.getState().setWorkspaceId(ws.id);
+
+    // `db_save_workspace` mueve en la DB TODAS las ventanas abiertas del workspace de
+    // origen, no solo esta — pero el store en memoria de esas otras ventanas sigue
+    // diciendo el id viejo. Quedaban creyendo que están en `default` mientras su fila ya
+    // vive en el workspace nuevo: su autosave bumpeaba el `last_active` del workspace
+    // equivocado (y con eso la app podía reabrir el workspace que no era), y "Nuevo
+    // workspace" desde una de ellas apuntaba a un bucket que ya no las contiene.
+    await invoke("broadcast_event", {
+      event: "cc-workspace-reassigned",
+      payload: JSON.stringify({ from: sourceWorkspaceId, to: ws.id }),
+    }).catch(console.error);
+
     await get().loadWorkspaces();
     return ws.id;
   },

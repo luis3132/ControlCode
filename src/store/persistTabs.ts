@@ -143,6 +143,19 @@ export function initTabsPersistence() {
     if (useTabsStore.getState().hydrated) scheduleSave();
   });
 
+  // "Guardar workspace" mueve en la DB todas las ventanas abiertas del workspace de
+  // origen. Esta ventana puede ser una de las movidas sin haber sido la que disparó el
+  // guardado, así que adopta el id nuevo en vez de seguir autosalvando contra el viejo.
+  listen<string>("cc-workspace-reassigned", (event) => {
+    try {
+      const { from, to } = JSON.parse(event.payload) as { from: string; to: string };
+      const store = useTabsStore.getState();
+      if (store.workspaceId === from && from !== to) store.setWorkspaceId(to);
+    } catch {
+      // payload malformado: no hay nada seguro que hacer, se ignora
+    }
+  });
+
   // Refresco periódico del scrollback (aunque no cambie nada en el array de tabs,
   // el contenido de la terminal sí cambia) para no perder mucho si la app se cae.
   setInterval(() => {

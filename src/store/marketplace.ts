@@ -51,7 +51,10 @@ interface MarketplaceState {
    *  con él, y esta promesa recién resuelve cuando el repo terminó de resolverse. */
   addRegistry: (name: string, sourceType: RegistrySourceType, location: string, id?: string) => Promise<void>;
   renameRegistry: (id: string, name: string) => Promise<void>;
-  removeRegistry: (id: string) => Promise<void>;
+  /** Borra el repo Y sus skills instaladas. Devuelve cuántas skills se llevó. */
+  removeRegistry: (id: string) => Promise<number>;
+  /** Skills instaladas desde este repo — para listarlas antes de borrarlo. */
+  registrySkills: (id: string) => Promise<SkillSummary[]>;
   setRegistryEnabled: (id: string, enabled: boolean) => Promise<void>;
   refreshRegistry: (id: string) => Promise<void>;
   refreshAll: () => Promise<void>;
@@ -96,10 +99,13 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   },
 
   removeRegistry: async (id) => {
-    await invoke("remove_registry", { id });
+    const removedSkills = await invoke<number>("remove_registry", { id });
     await get().loadRegistries();
     await get().loadSkills();
+    return removedSkills;
   },
+
+  registrySkills: async (id) => invoke<SkillSummary[]>("registry_skills", { registryId: id }),
 
   setRegistryEnabled: async (id, enabled) => {
     await invoke("set_registry_enabled", { id, enabled });

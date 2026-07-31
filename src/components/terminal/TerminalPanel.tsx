@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { useLocation } from "react-router-dom";
 import { Terminal } from "../Terminal";
 import { useTabsStore } from "../../store/tabs";
 import { buildResumeCommand, isResumable } from "../../lib/agentResume";
@@ -6,6 +7,10 @@ import { buildResumeCommand, isResumable } from "../../lib/agentResume";
 export function TerminalPanel() {
   const { t } = useTranslation();
   const { tabs, activeTabId, setPtyId, setSessionId } = useTabsStore();
+  // El panel sigue montado (para no matar los PTYs) pero oculto fuera de /workspace, así
+  // que "ser la tab activa" no alcanza para enfocar: en Skills o Settings el foco tiene que
+  // quedarse en esa página, no robárselo una terminal invisible.
+  const onWorkspace = useLocation().pathname.startsWith("/workspace");
 
   return (
     // h-full en lugar de flex-1: el padre es position:absolute;inset:0 (no flex),
@@ -35,6 +40,7 @@ export function TerminalPanel() {
               agentId={tab.agentId}
               attachPtyId={tab.ptyId ?? undefined}
               initialScrollback={isResuming ? undefined : tab.scrollback}
+              isActive={tab.id === activeTabId && onWorkspace}
               onReady={(ptyId) => setPtyId(tab.id, ptyId)}
               onSessionDiscovered={(sessionId) => setSessionId(tab.id, sessionId)}
             />

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button, ThemeToggle } from "neogestify-ui-components";
 import {
@@ -65,6 +66,7 @@ export function TopBar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const [showSaveWorkspace, setShowSaveWorkspace] = useState(false);
   const [exitWindowCount, setExitWindowCount] = useState<number | null>(null);
+  const [workspaceWindowCount, setWorkspaceWindowCount] = useState(1);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showResetWarning, setShowResetWarning] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -84,13 +86,32 @@ export function TopBar() {
     return () => { stale = true; };
   }, [workspaceId]);
 
-  const handleCloseClick = async () => {
+  // Cuántas ventanas vivas tiene el workspace de ESTA ventana. Se mantiene al día en
+  // tiempo real: el backend emite `cc-workspace-changed` al crear una ventana y al
+  // destruirla, así que abrir un tear-off o cerrar una ventana hermana actualiza este
+  // número en todas las demás al instante — sin eso, el botón de cerrar seguía ofreciendo
+  // "cerrar todo el workspace" cuando ya quedaba una sola ventana, y al revés.
+  useEffect(() => {
+    let stale = false;
+    const refresh = () =>
+      invoke<number>("live_workspace_window_count", { workspaceId })
+        .then((count) => { if (!stale) setWorkspaceWindowCount(count); })
+        .catch(() => { if (!stale) setWorkspaceWindowCount(1); });
+
+    refresh();
+    const unlisten = listen("cc-workspace-changed", refresh);
+    return () => {
+      stale = true;
+      unlisten.then((off) => off());
+    };
+  }, [workspaceId]);
+
+  const handleCloseClick = () => {
     // Escalado al workspace de ESTA ventana, no a todas las ventanas de la app — si
     // hay otro workspace abierto en paralelo (vía "mantener actuales" al cambiar de
     // workspace), cerrar acá no debe tocarlo.
-    const wsWindows = await invoke<unknown[]>("db_get_workspace_windows", { workspaceId }).catch(() => []);
-    if (wsWindows.length > 1) {
-      setExitWindowCount(wsWindows.length);
+    if (workspaceWindowCount > 1) {
+      setExitWindowCount(workspaceWindowCount);
     } else {
       invoke("close_and_forget_window", { label: getCurrentWindow().label }).catch(console.error);
     }
@@ -291,7 +312,13 @@ export function TopBar() {
             </button>
             <button
               onClick={handleCloseClick}
-              title="Cerrar"
+              // El tooltip delata que el click va a preguntar en vez de cerrar de una,
+              // y refleja en vivo cuántas ventanas tiene el workspace ahora mismo.
+              title={
+                workspaceWindowCount > 1
+                  ? t("workspace.close.choose", { count: workspaceWindowCount })
+                  : t("workspace.close.window")
+              }
               className="flex items-center justify-center w-9 h-11 rounded-tr-none
             text-gray-400 dark:text-gray-500
             hover:bg-red-500 hover:text-white

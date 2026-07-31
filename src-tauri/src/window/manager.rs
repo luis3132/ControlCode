@@ -26,7 +26,10 @@ const MIN_WINDOW_HEIGHT: f64 = 600.0;
 /// Ventanas tear-off sin tabs guardadas se omiten para no resucitar ventanas vacías.
 pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) -> Result<(), String> {
     let db = app.state::<DbConnection>();
-    let live_labels: std::collections::HashSet<String> = app.webview_windows().into_keys().collect();
+    // Mutable: los labels que se generan dentro del loop se van agregando, para que dos
+    // filas restauradas en la misma pasada no puedan pisarse entre sí.
+    let mut live_labels: std::collections::HashSet<String> =
+        app.webview_windows().into_keys().collect();
 
     for w in rows.iter() {
         if reuse_main && w.label == "main" {
@@ -52,13 +55,10 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
 
         let mut label = w.label.clone();
         if live_labels.contains(&label) {
-            let millis = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis();
-            label = format!("cc-window-{millis}");
+            label = database::fresh_window_label();
             database::rename_window_label(&db, &w.id, &label)?;
         }
+        live_labels.insert(label.clone());
 
         let mut builder = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App("/".into()))
             .title(&label)
@@ -78,8 +78,16 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
             builder = builder.position(x as f64, y as f64);
         }
 
-        builder.build().map_err(|e| e.to_string())?;
-        database::mark_window_open(&db, &w.id)?;
+        // Una ventana que no se puede construir no debe costarle al usuario el resto de su
+        // layout: antes el `?` abortaba el loop entero y las filas que faltaban por
+        // procesar no se restauraban ni quedaban marcadas como abiertas.
+        match builder.build() {
+            Ok(_) => database::mark_window_open(&db, &w.id)?,
+            Err(e) => {
+                eprintln!("[restore_windows] no se pudo recrear la ventana '{label}': {e}");
+                live_labels.remove(&label);
+            }
+        }
     }
 
     // Con las ventanas ya marcadas como abiertas, sus tabs vuelven a "reclamar" sus
@@ -114,6 +122,7 @@ fn spawn_blank_window(app: &AppHandle, db: &DbConnection, workspace_id: &str) ->
         .transparent(true)
         .build()
         .map_err(|e| e.to_string())?;
+    let _ = app.emit("cc-workspace-changed", ());
     Ok(())
 }
 
@@ -134,6 +143,29 @@ pub async fn open_workspace(
     close_current: bool,
 ) -> Result<(), String> {
     let db = app.state::<DbConnection>();
+
+    // Si el workspace ya tiene ventanas nativas vivas, abrirlo otra vez crearía un segundo
+    // juego de ventanas para el mismo layout guardado (sus labels colisionan con los vivos,
+    // así que `restore_windows` renombra las filas y construye ventanas nuevas en paralelo
+    // a las que ya estaban). El frontend evita eso llamando antes a `focusIfOpen`, pero esa
+    // guarda vivía SOLO en la UI: `ccode workspace open` entraba directo acá y duplicaba.
+    // Ahora la guarda es estructural — enfocar y salir es lo correcto para cualquier
+    // llamador, y es idempotente para el flujo de la UI (que ya no llega hasta acá).
+    // Se contrasta contra las ventanas NATIVAS, no contra `is_open` a secas: si la app se
+    // cayó, las filas quedan en `is_open = 1` sin ninguna ventana real detrás, y confiar en
+    // la columna haría que "abrir workspace" no hiciera nada visible.
+    let already_live =
+        database::db_get_workspace_windows(workspace_id.clone(), app.state::<DbConnection>())?;
+    let live_window = already_live
+        .iter()
+        .find_map(|row| app.get_webview_window(&row.label));
+    if let Some(win) = live_window {
+        database::touch_workspace_now(&db, &workspace_id)?;
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+        return Ok(());
+    }
+
     database::touch_workspace_now(&db, &workspace_id)?;
     let rows = database::db_get_all_workspace_windows(&workspace_id, &db)?;
 
@@ -207,11 +239,7 @@ pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String
     database::delete_workspace_windows(&db, default_id)?;
     database::touch_workspace_now(&db, default_id)?;
 
-    let millis = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let label = format!("cc-window-{millis}");
+    let label = database::fresh_window_label();
     tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App("/".into()))
         .title(&label)
         .inner_size(900.0, 650.0)
@@ -246,27 +274,49 @@ pub fn confirm_exit_all(app: tauri::AppHandle) {
 /// ventanas vivas la fila se borra de inmediato en vez de solo marcarse `is_open = 0`. Ver
 /// `forget_or_close_single_window` para el detalle de esa decisión.
 ///
-/// Si esta resulta ser la última ventana viva del workspace Y el proceso sigue corriendo
-/// gracias a ventanas de OTROS workspaces, se le abre una ventana en blanco de reemplazo —
-/// si no, el workspace desaparecería silenciosamente de la vista mientras la app sigue
-/// viva. Si en cambio esta era literalmente la última ventana de toda la app, no se crea
-/// nada: cerrarla debe seguir pudiendo salir de la app con normalidad.
+/// Cerrar acá NUNCA abre una ventana de reemplazo. Antes, si esta era la última ventana
+/// viva de su workspace y quedaban ventanas de OTROS workspaces, se abría una en blanco
+/// para que el workspace "no desapareciera de la vista". El efecto real era un bug muy
+/// visible: con dos ventanas en dos workspaces distintos, cerrar una la hacía reaparecer
+/// al instante (vacía) — el usuario no podía cerrarla.
+///
+/// La premisa era equivocada. Cerrar explícitamente la última ventana de un workspace no
+/// pierde nada: la fila queda `is_open = 0` con sus tabs, el workspace sigue listado en
+/// Workspaces y se reabre desde ahí. Que salga de la vista es exactamente lo pedido.
 #[tauri::command]
 pub async fn close_and_forget_window(app: tauri::AppHandle, label: String) -> Result<(), String> {
     let db = app.state::<DbConnection>();
-    let other_windows_remain = app.webview_windows().len() > 1;
-    let preserved_workspace_id = database::forget_or_close_single_window(&db, &label)?;
+    database::forget_or_close_single_window(&db, &label)?;
 
     if let Some(win) = app.get_webview_window(&label) {
         win.close().map_err(|e| e.to_string())?;
     }
 
-    if let (Some(workspace_id), true) = (preserved_workspace_id, other_windows_remain) {
-        spawn_blank_window(&app, &db, &workspace_id)?;
-    }
-
     let _ = app.emit("cc-workspace-changed", ());
     Ok(())
+}
+
+/// Cuántas ventanas NATIVAS vivas tiene un workspace en este instante.
+///
+/// La fuente de verdad son las ventanas reales del proceso, no la columna `is_open`: esa
+/// columna se escribe en el `CloseRequested`, así que va un paso por detrás durante un
+/// cierre, y si la app se cae queda en `1` para ventanas que ya no existen. El botón de
+/// cerrar del TopBar decide con este número si ofrece "cerrar todo el workspace" o cierra
+/// esta ventana directamente, así que tiene que ser exacto.
+///
+/// Se cruzan las filas guardadas del workspace (sin filtrar por `is_open`, justamente para
+/// no heredar su desincronización) con los labels nativos vivos.
+#[tauri::command]
+pub fn live_workspace_window_count(
+    app: tauri::AppHandle,
+    workspace_id: String,
+) -> Result<usize, String> {
+    let db = app.state::<DbConnection>();
+    let rows = database::db_get_all_workspace_windows(&workspace_id, &db)?;
+    Ok(rows
+        .iter()
+        .filter(|r| app.get_webview_window(&r.label).is_some())
+        .count())
 }
 
 /// Trae al frente una ventana nativa ya abierta (des-minimiza + foco). Usado cuando el
@@ -294,6 +344,10 @@ pub async fn open_new_window(app: tauri::AppHandle, label: String) -> Result<(),
         .transparent(true)
         .build()
         .map_err(|e| e.to_string())?;
+    // Las ventanas que ya estaban abiertas tienen que enterarse de que el workspace pasó a
+    // tener una ventana más: es lo que hace que su botón de cerrar empiece a ofrecer
+    // "cerrar todo el workspace" sin esperar a un refresco posterior.
+    let _ = app.emit("cc-workspace-changed", ());
     Ok(())
 }
 

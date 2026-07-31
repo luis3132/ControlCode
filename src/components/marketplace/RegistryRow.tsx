@@ -5,6 +5,7 @@ import { EditIcon, TrashIcon, CloudIcon, FolderIcon, AnimateSpin, IconReset } fr
 import { Switch } from "../common/Switch";
 import { RegistryProgressBar, useRegistryProgress } from "./RegistryProgress";
 import { RegistrySummary, useMarketplaceStore } from "../../store/marketplace";
+import { RemoveRegistryDialog } from "./RemoveRegistryDialog";
 
 function timeAgo(ts: number | null): string {
   if (ts == null) return "";
@@ -21,7 +22,7 @@ interface RegistryRowProps {
 
 export function RegistryRow({ registry: r }: RegistryRowProps) {
   const { t } = useTranslation();
-  const { refreshingId, refreshRegistry, removeRegistry, setRegistryEnabled, renameRegistry } = useMarketplaceStore();
+  const { refreshingId, refreshRegistry, setRegistryEnabled, renameRegistry } = useMarketplaceStore();
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState(r.name);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -39,11 +40,9 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
     setEditing(false);
   };
 
-  const handleRemove = () => {
-    if (window.confirm(t("marketplace.registries.removeConfirm", { name: r.name }))) {
-      removeRegistry(r.id);
-    }
-  };
+  // Borrar un repo se lleva sus skills, así que la confirmación no puede ser un sí/no
+  // genérico: `RemoveRegistryDialog` las lista antes de dejar seguir.
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const SourceIcon = r.sourceType === "github" ? CloudIcon : FolderIcon;
 
@@ -116,7 +115,7 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
           >
             {refreshing ? <AnimateSpin className="w-4 h-4" /> : <IconReset className="w-4 h-4" />}
           </Button>
-          <Button variant="icon" onClick={handleRemove} title={t("marketplace.registries.remove")}
+          <Button variant="icon" onClick={() => setConfirmRemove(true)} title={t("marketplace.registries.remove")}
             className="hover:text-red-500! dark:hover:text-red-400!">
             <TrashIcon className="w-4 h-4" />
           </Button>
@@ -129,6 +128,10 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
         <div className="mt-2 pl-11">
           <RegistryProgressBar progress={progress} compact />
         </div>
+      )}
+
+      {confirmRemove && (
+        <RemoveRegistryDialog registry={r} onClose={() => setConfirmRemove(false)} />
       )}
     </li>
   );

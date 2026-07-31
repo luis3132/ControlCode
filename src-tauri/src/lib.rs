@@ -60,6 +60,7 @@ pub fn run() {
             window::open_workspace,
             window::close_workspace_windows,
             window::focus_window,
+            window::live_workspace_window_count,
             window::close_and_forget_window,
             window::reset_default_workspace,
             window::confirm_exit_all,
@@ -107,6 +108,7 @@ pub fn run() {
             marketplace::refresh_registry,
             marketplace::list_marketplace_skills,
             marketplace::install_marketplace_skill,
+            skills::registry_skills,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { .. } => {
@@ -117,6 +119,15 @@ pub fn run() {
                 // Cualquier cierre de ventana cambia el conteo de ventanas/tabs de algún
                 // workspace — se notifica a TODAS las ventanas (ej. el Home de otra
                 // ventana) para que refresquen la lista en vez de quedar con datos viejos.
+                let _ = window.app_handle().emit("cc-workspace-changed", ());
+            }
+            // `CloseRequested` NO alcanza para el conteo de ventanas vivas: en ese momento
+            // la ventana todavía existe en `webview_windows()`, así que quien recalcule ahí
+            // se cuenta a sí misma y ve una de más. `Destroyed` es el instante en que la
+            // ventana realmente dejó de existir, y es el que hace que el botón de cerrar de
+            // las otras ventanas deje de ofrecer "cerrar todo el workspace" en cuanto queda
+            // una sola.
+            tauri::WindowEvent::Destroyed => {
                 let _ = window.app_handle().emit("cc-workspace-changed", ());
             }
             tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {

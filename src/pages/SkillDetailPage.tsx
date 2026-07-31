@@ -15,6 +15,7 @@ export function SkillDetailPage() {
   const [meta, setMeta] = useState<{
     version: string; categories: string[]; compatibleAgents: string[];
     author: string | null; license: string | null; homepage: string | null;
+    registryName: string | null;
   } | null>(null);
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
@@ -32,6 +33,7 @@ export function SkillDetailPage() {
         author: detail.author,
         license: detail.license,
         homepage: detail.homepage,
+        registryName: detail.registryName,
       });
     }).catch((e) => setError(String(e))).finally(() => setLoading(false));
   }, [id, getSkillDetail]);
@@ -51,6 +53,7 @@ export function SkillDetailPage() {
         author: detail.author,
         license: detail.license,
         homepage: detail.homepage,
+        registryName: detail.registryName,
       });
     } catch (e) {
       setError(String(e));
@@ -76,6 +79,12 @@ export function SkillDetailPage() {
           <div className="flex flex-wrap items-center gap-2 mb-6 text-xs">
             <span className="px-2 py-1 rounded bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 font-mono">
               v{meta.version}
+            </span>
+            <span className={`px-2 py-1 rounded-full
+              ${meta.registryName
+                ? "bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400"
+                : "bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400"}`}>
+              {meta.registryName ?? t("skills.list.localOrigin")}
             </span>
             {meta.categories.map((c) => (
               <span key={c} className="px-2 py-1 rounded-full bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400">

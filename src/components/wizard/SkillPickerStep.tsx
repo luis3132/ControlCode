@@ -4,6 +4,12 @@ import { Input } from "neogestify-ui-components";
 import { SearchIcon } from "neogestify-ui-components";
 import { useSkillsStore } from "../../store/skills";
 
+/** A partir de cuántas skills SIN seleccionar el listado deja de mostrarse entero y pasa a
+ *  revelarse solo por búsqueda. Con un catálogo grande, scrollear un listado eterno para
+ *  encontrar una skill es peor que escribir dos letras — y las ya elegidas siguen a la
+ *  vista igual, que es lo único que hay que poder revisar de un vistazo. */
+const SEARCH_ONLY_THRESHOLD = 10;
+
 interface SkillPickerStepProps {
   agentId: string;
   selected: string[];
@@ -27,11 +33,27 @@ export function SkillPickerStep({ agentId, selected, onChange }: SkillPickerStep
     (s) => s.compatibleAgents.length === 0 || s.compatibleAgents.includes(agentId)
   );
 
-  const filtered = compatible.filter((s) => {
-    if (!query.trim()) return true;
+  const trimmedQuery = query.trim().toLowerCase();
+  const matchesQuery = (s: (typeof compatible)[number]) => {
+    if (!trimmedQuery) return true;
     const haystack = `${s.name} ${s.description ?? ""} ${s.categories.join(" ")}`.toLowerCase();
-    return haystack.includes(query.trim().toLowerCase());
-  });
+    return haystack.includes(trimmedQuery);
+  };
+
+  // Las elegidas van primero: son las que el usuario necesita poder repasar de un vistazo
+  // antes de confirmar, y en un catálogo grande quedaban desparramadas entre el resto.
+  const chosen = compatible.filter((s) => selected.includes(s.id));
+  const rest = compatible.filter((s) => !selected.includes(s.id));
+
+  // Con muchas sin elegir, el resto no se lista hasta que haya búsqueda. Las elegidas se
+  // muestran siempre: esconderlas convertiría el selector en una caja negra.
+  const searchOnly = rest.length > SEARCH_ONLY_THRESHOLD;
+  const hiddenCount = searchOnly && !trimmedQuery ? rest.length : 0;
+
+  const visible = [
+    ...chosen.filter(matchesQuery),
+    ...(hiddenCount > 0 ? [] : rest.filter(matchesQuery)),
+  ];
 
   const toggle = (id: string) => {
     onChange(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]);
@@ -70,12 +92,20 @@ export function SkillPickerStep({ agentId, selected, onChange }: SkillPickerStep
         </p>
       )}
 
+      {/* Sin este aviso, un catálogo grande se vería como "solo tengo estas": hay que
+          decir cuántas quedaron fuera y cómo llegar a ellas. */}
+      {hiddenCount > 0 && (
+        <p className="text-[11px] text-gray-400 dark:text-white/40">
+          {t("wizard.step3.searchToReveal", { count: hiddenCount })}
+        </p>
+      )}
+
       <div className="cc-scroll flex flex-col gap-1 max-h-56 pr-1">
-        {filtered.length === 0 ? (
+        {visible.length === 0 && hiddenCount === 0 ? (
           <p className="text-xs text-gray-400 dark:text-white/30 italic py-2">
             {t("wizard.step3.searchEmpty")}
           </p>
-        ) : filtered.map((skill) => {
+        ) : visible.map((skill) => {
           const checked = selected.includes(skill.id);
           return (
             <label

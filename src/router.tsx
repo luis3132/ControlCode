@@ -7,6 +7,7 @@ import { SkillsPage } from "./pages/SkillsPage";
 import { SkillDetailPage } from "./pages/SkillDetailPage";
 import { SessionsPage } from "./pages/SessionsPage";
 import { MarketplacePage } from "./pages/MarketplacePage";
+import { RegistriesPage } from "./pages/RegistriesPage";
 
 export const router = createHashRouter([
   {
@@ -21,6 +22,7 @@ export const router = createHashRouter([
       { path: "skills/:id", element: <SkillDetailPage /> },
       { path: "sessions", element: <SessionsPage /> },
       { path: "marketplace", element: <MarketplacePage /> },
+      { path: "marketplace/registries", element: <RegistriesPage /> },
     ],
   },
 ]);
