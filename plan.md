@@ -173,9 +173,55 @@ Entregable: el modo orquestador puede operar sobre 5+ tabs sin agotar el context
 
 ---
 
+## FASE 11 — Gestión de MCPs (3-4 semanas)
+
+Objetivo: instalar un MCP una sola vez y asignarlo selectivamente a workspaces/tabs, igual que las skills — pero resolviendo que cada agente configura MCPs de forma distinta.
+
+### Hallazgo que define el diseño
+
+Los agentes se parten en dos familias, y de eso depende cuánto aislamiento se puede dar:
+
+- **Familia A — aceptan la config por invocación** (no hay que tocar ningún archivo del usuario):
+  - Claude Code: `--mcp-config <archivo.json>` (admite varios, se mergean, gana el último) y `--strict-mcp-config`, que ignora todas las demás fuentes (`~/.claude.json`, `.mcp.json`, config gestionada).
+  - Codex: respeta `CODEX_HOME`, así que se le puede apuntar a un directorio generado con su propio `config.toml`.
+- **Familia B — solo leen de una ruta fija** (hay que escribir en el proyecto):
+  - Gemini CLI: `~/.gemini/settings.json` o `.gemini/settings.json`, clave `mcpServers`.
+  - OpenCode: `opencode.json`, clave `mcp`. Además expone `opencode mcp add|list|auth|logout|debug` (verificado contra la v1.18.4), así que la gestión puede delegarse en su propia CLI en vez de escribir el archivo a mano — incluido `auth`, que resuelve el OAuth de los servidores que lo pidan.
+
+Con la familia A se consigue aislamiento **por tab** (dos tabs en la misma carpeta con MCPs distintos). Con la B, el techo es por carpeta, igual que los symlinks de skills.
+
+### Tareas
+
+- Modelo de datos gemelo del de skills: `mcp_servers` (catálogo global) + `project_mcps` (intención de attach con scope `workspace`/`tab`). Reutiliza herencia, "qué proyectos lo usan" y borrado con aviso de impacto.
+- Copias globales en `~/.controlcode/mcp/<repo>/<servidor>/`, mismo layout por repositorio que las skills.
+- Resolución canónica: `project_mcps` → set de MCPs de la tab → adaptador por agente.
+- Adaptadores, en orden de preferencia:
+  1. **Flag por tab** (Claude Code): generar `~/.controlcode/mcp/<tab_id>.json` y lanzar con `--mcp-config <archivo> --strict-mcp-config`.
+  2. **Env por tab** (Codex): generar un `CODEX_HOME` por tab e inyectarlo (`pty_create` ya acepta `env`).
+  3. **Archivo por cwd** (Gemini, OpenCode): mergear en el archivo del proyecto tocando **solo las claves que creó Control Code**, con manifiesto de claves gestionadas y reconciliación. Nunca reescribir el archivo entero.
+- Importador de lo que el usuario ya tiene configurado (`~/.claude.json`, `~/.codex/config.toml`, `~/.gemini/settings.json`): puebla el catálogo sin red y sin adaptadores nuevos.
+- Marketplace de MCPs reutilizando la infraestructura de registries (columna `kind` en `registries`), con el registro oficial `registry.modelcontextprotocol.io` como fuente por defecto — API pública, sin auth, `GET /v0/servers?search=&limit=`.
+- Secretos por referencia (`"GITHUB_TOKEN": "${GITHUB_TOKEN}"`), expandidos al materializar y nunca almacenados. El registro oficial ya marca `isRequired`/`isSecret` por variable, así que el wizard puede generarlas solo. Keyring del SO queda para más adelante.
+- Health check propio: ¿el binario de `command` está en el PATH?, ¿la URL responde?, ¿las variables referenciadas están definidas?, ¿el archivo generado sigue siendo válido?
+- UI espejo de la de skills: página de MCPs, detalle, diálogo de attach y un paso en el wizard de tab nueva.
+
+### Prerequisito
+
+`pty_create` parsea el comando con `split_whitespace()` (`pty_manager.rs`), así que se rompe con `--mcp-config /una/ruta con espacios/x.json`. Hay que reemplazarlo por un parser tipo shell-words **antes** de empezar esta fase.
+
+### Riesgos
+
+- Hay issues abiertos reportando que `--mcp-config` y `--strict-mcp-config` se ignoran en algunas versiones de Claude Code. Verificar contra la versión instalada antes de apoyar la estrategia 1 en producción.
+- La estrategia 3 escribe en archivos que son del usuario: es la única del proyecto que modifica contenido ajeno en vez de solo agregar symlinks. Necesita backup antes de la primera escritura y tests dedicados.
+
+Entregable: se puede instalar un MCP desde el registro oficial, asignarlo a una tab concreta, y que esa tab arranque viendo exactamente esos servidores sin que se filtren a las demás.
+
+---
+
 ## Notas de priorización
 
 - Las fases 0-4 son el núcleo técnico (terminal + persistencia + multi-ventana). Sin esto no hay producto.
 - Las fases 5-7 (skills + marketplace + sessions) son el segundo bloque de valor y pueden desarrollarse en paralelo una vez el núcleo esté estable.
 - Las fases 8-9 (orquestador) son las más experimentales y arriesgadas — considerar lanzarlas como feature opcional/beta, no como parte del MVP inicial.
 - Riesgo técnico más alto: Fase 4 (tear-off de tabs con migración de pty sin interrumpir procesos). Vale la pena un spike dedicado antes de comprometerse con el diseño final.
+- La Fase 11 (MCPs) depende del modelo de datos y del marketplace de las fases 5-6, así que va después de ellas — pero no depende del orquestador. Se puede hacer antes que las fases 8-9 si los MCPs resultan más valiosos que el modo orquestador. De hecho `--strict-mcp-config` aporta directamente a la Fase 9: los MCPs son de lo que más contexto consume, y acotar cuáles ve cada tab es un ahorro medible.

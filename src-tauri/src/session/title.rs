@@ -225,60 +225,119 @@ fn codex_title(path: &Path, fallback: &str) -> SessionTitleResult {
     fallback_result(fallback)
 }
 
-// ── OpenCode: ~/.local/share/opencode/storage/session/<projectID>/<id>.json ──
-// ATENCIÓN: esta ruta y formato (JSON por sesión) nunca se verificaron contra la fuente
-// real de OpenCode — quedaron asumidos por analogía con Claude Code. Una investigación
-// posterior (ver historial) confirmó que OpenCode en realidad persiste sus sesiones en
-// SQLite, no en archivos JSON sueltos — así que todo este bloque probablemente nunca
-// encuentra nada real y siempre degrada a `fallback_result` (no rompe nada, pero el
-// título automático / resume de OpenCode no funciona). Arreglarlo bien requiere la
-// ubicación real del .db y su schema, que no pudimos confirmar. `discover_session_id`
-// para "opencode" queda con este mismo problema.
+// ── OpenCode: vía su propia CLI, no leyendo su almacenamiento ─────────
+//
+// Los otros agentes se resuelven leyendo los archivos de sesión que dejan en disco. Con
+// OpenCode eso no funciona: la implementación anterior asumía
+// `~/.local/share/opencode/storage/session/<projectID>/<id>.json` por analogía con Claude
+// Code, nunca se verificó, y no encontraba nada — el título automático y el resume de
+// OpenCode simplemente no funcionaban.
+//
+// OpenCode expone `session list --format json`, que es contrato público y documentado
+// (opencode.ai/docs/cli), así que se le pregunta a él en vez de espiarle los archivos.
+// Verificado contra la v1.18.4 instalada; cada entrada trae exactamente lo que hace falta:
+//
+//   { "id": "ses_…", "title": "…", "created": 1782913776585,
+//     "updated": …, "projectId": "…", "directory": "/ruta/del/proyecto" }
+//
+// `directory` es lo que permite filtrar por cwd sin tener que resolver el projectId a mano,
+// y los timestamps vienen en MILISEGUNDOS (el resto del módulo trabaja en segundos).
 
-fn opencode_data_dir() -> PathBuf {
-    std::env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".local/share"))
-        .join("opencode")
+/// Ventana de tolerancia al comparar el `created` de una sesión contra el arranque de la
+/// tab: OpenCode sella la sesión cuando el usuario manda el primer mensaje, no cuando
+/// arranca el proceso, pero un reloj con desfase no debería descartar una sesión legítima.
+const OPENCODE_CLOCK_SKEW_S: i64 = 5;
+
+#[derive(serde::Deserialize)]
+struct OpencodeSession {
+    id: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    directory: String,
+    #[serde(default)]
+    created: i64,
 }
 
-fn opencode_project_id_for_cwd(cwd: &str) -> Option<String> {
-    let project_dir = opencode_data_dir().join("storage/project");
-    let mut files = Vec::new();
-    collect_files(&project_dir, "json", &mut files);
-    files.into_iter().find_map(|f| {
-        let content = fs::read_to_string(&f).ok()?;
-        if content.contains(cwd) {
-            f.file_stem().map(|s| s.to_string_lossy().to_string())
-        } else {
-            None
+/// Sesiones de OpenCode para un cwd, de la más reciente a la más vieja.
+///
+/// Se acota con `-n` en vez de traer todo el historial: solo interesan las últimas, y cada
+/// llamada levanta un proceso que abre la base de datos entera de OpenCode (~0.9 s medido
+/// contra la v1.18.4), así que no conviene pedir de más.
+///
+/// `current_dir` no es cosmético: `opencode session list` está acotado por proyecto según
+/// el directorio desde el que corre. Ejecutado desde otro lado devuelve las sesiones de
+/// OTRO proyecto — verificado: desde `/tmp` lista las del proyecto `global`, no las de
+/// este cwd. El filtro por `directory` de abajo es la segunda red.
+///
+/// Cada fallo se reporta por stderr en vez de degradar en silencio: sin eso, "no aparece
+/// la sesión" es indistinguible de "opencode no está en el PATH del proceso de la app",
+/// que es un caso real cuando la app se lanza desde el menú del escritorio y no desde una
+/// terminal (el PATH del launcher no incluye `~/.opencode/bin`).
+fn opencode_sessions(cwd: &str) -> Vec<OpencodeSession> {
+    let output = match std::process::Command::new("opencode")
+        .args(["session", "list", "--format", "json", "-n", "50"])
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("[opencode] no se pudo ejecutar `opencode session list`: {e}");
+            return Vec::new();
         }
-    })
-}
-
-fn opencode_session_file(cwd: &str, after: Option<i64>) -> Option<PathBuf> {
-    let session_root = opencode_data_dir().join("storage/session");
-    let scoped_dir = opencode_project_id_for_cwd(cwd).map(|id| session_root.join(id));
-
-    let mut files = Vec::new();
-    match &scoped_dir {
-        Some(dir) if dir.is_dir() => collect_files(dir, "json", &mut files),
-        _ => collect_files(&session_root, "json", &mut files),
+    };
+    if !output.status.success() {
+        eprintln!(
+            "[opencode] `session list` salió con {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        return Vec::new();
     }
-    newest_matching(&files, after, None)
-}
 
-fn opencode_title(path: &Path, fallback: &str) -> SessionTitleResult {
-    let Ok(content) = fs::read_to_string(path) else { return fallback_result(fallback) };
-    let Ok(v) = serde_json::from_str::<Value>(&content) else { return fallback_result(fallback) };
-    match v.get("title").and_then(|t| t.as_str()) {
-        Some(t) if !t.trim().is_empty() => SessionTitleResult { title: truncate(t, 60), source: "summary".into() },
-        _ => fallback_result(fallback),
+    // El banner informativo de OpenCode va a stderr, así que stdout es JSON puro.
+    let mut sessions: Vec<OpencodeSession> = match serde_json::from_slice(&output.stdout) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[opencode] salida de `session list` ilegible: {e}");
+            return Vec::new();
+        }
+    };
+
+    let total = sessions.len();
+    sessions.retain(|s| Path::new(&s.directory) == Path::new(cwd));
+    if sessions.is_empty() && total > 0 {
+        eprintln!(
+            "[opencode] {total} sesión(es) devueltas pero ninguna con directory == {cwd}"
+        );
     }
+    sessions.sort_by(|a, b| b.created.cmp(&a.created));
+    sessions
 }
 
-fn opencode_session_id_from_path(path: &Path) -> Option<String> {
-    path.file_stem().map(|s| s.to_string_lossy().to_string())
+/// Sesión más reciente del cwd, opcionalmente creada después de `after` (en segundos).
+fn opencode_session(cwd: &str, after: Option<i64>) -> Option<OpencodeSession> {
+    let sessions = opencode_sessions(cwd);
+    let found = sessions.into_iter().find(|s| match after {
+        // `created` viene en MILISEGUNDOS; el resto del módulo trabaja en segundos.
+        Some(t) => s.created / 1000 >= t - OPENCODE_CLOCK_SKEW_S,
+        None => true,
+    });
+    if found.is_none() {
+        if let Some(t) = after {
+            eprintln!("[opencode] ninguna sesión de {cwd} creada después de {t}");
+        }
+    }
+    found
+}
+
+/// OpenCode nombra las sesiones `New session - <ISO>` hasta que el modelo les pone un
+/// título real. Ese placeholder no le dice nada al usuario en la barra de tabs, así que se
+/// trata como "todavía no hay título" y se deja el fallback (el comando se reintenta más
+/// adelante y para entonces suele estar el bueno).
+fn opencode_is_placeholder_title(title: &str) -> bool {
+    title.trim_start().starts_with("New session -")
 }
 
 // ── TUIs personalizadas ───────────────────────────────────────────────
@@ -340,7 +399,9 @@ pub fn session_file_for(
         "claude-code" => claude_session_file(cwd, session_id, None),
         "gemini-cli" => gemini_session_file(cwd, None),
         "codex" => codex_session_file(cwd, None),
-        "opencode" => opencode_session_file(cwd, None),
+        // OpenCode no expone un archivo de sesión legible; su transcripción se pide con
+        // `opencode export <id>` y la maneja `export::opencode_transcript` aparte.
+        "opencode" => None,
         other => {
             let conn = db.lock().ok()?;
             let agent = crate::agents::find(&conn, other)?;
@@ -378,10 +439,7 @@ pub fn discover_session_id(
             let path = codex_session_file(&cwd, Some(started_after))?;
             find_string_field(&path, &["session_id", "id"])
         }
-        "opencode" => {
-            let path = opencode_session_file(&cwd, Some(started_after))?;
-            opencode_session_id_from_path(&path)
-        }
+        "opencode" => opencode_session(&cwd, Some(started_after)).map(|s| s.id),
         // TUI custom: solo si el usuario declaró dónde guarda sus sesiones.
         other => {
             let conn = db.lock().ok()?;
@@ -416,10 +474,20 @@ pub fn get_session_title(
             Some(path) => codex_title(&path, &fallback),
             None => fallback_result(&fallback),
         },
-        "opencode" => match opencode_session_file(&cwd, None) {
-            Some(path) => opencode_title(&path, &fallback),
-            None => fallback_result(&fallback),
-        },
+        // Se busca por id exacto cuando se conoce: "la más reciente del cwd" podría ser la
+        // de otra tab abierta en la misma carpeta y el título quedaría cruzado.
+        "opencode" => {
+            let found = match session_id.as_deref() {
+                Some(id) => opencode_sessions(&cwd).into_iter().find(|s| s.id == id),
+                None => opencode_session(&cwd, None),
+            };
+            match found {
+                Some(s) if !s.title.trim().is_empty() && !opencode_is_placeholder_title(&s.title) => {
+                    SessionTitleResult { title: truncate(&s.title, 60), source: "summary".into() }
+                }
+                _ => fallback_result(&fallback),
+            }
+        }
         // TUI custom: se busca el archivo por su id exacto, nunca "el más reciente" — sin
         // saber cómo esa TUI mapea proyectos a carpetas, "el más reciente" podría ser la
         // sesión de otra tab y el título quedaría cruzado.

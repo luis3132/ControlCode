@@ -312,8 +312,9 @@ Development follows the phased plan in [`plan.md`](./plan.md).
 | 8 · Orchestrator CLI | ✅ Done |
 | 9 · Orchestrator token budget | ⏳ Planned — compressed output summaries, push events, monitored-tab limits |
 | 10 · Quick switcher, snapshots, analytics | ⏳ Planned |
+| 11 · MCP server management | ⏳ Planned — install once, attach per workspace or tab |
 
-Also under consideration: **MCP server management**, applying the same install-once-attach-anywhere model to MCP servers, sourced from the [official MCP registry](https://registry.modelcontextprotocol.io/).
+**Phase 11** brings the install-once-attach-anywhere model to MCP servers, sourced from the [official MCP registry](https://registry.modelcontextprotocol.io/). For agents that accept configuration per invocation — Claude Code via `--mcp-config` / `--strict-mcp-config`, Codex via `CODEX_HOME` — that means genuine per-tab isolation: two tabs on the same folder can see entirely different sets of servers, without touching a single file you own.
 
 ---
 

@@ -99,6 +99,74 @@ fn extract_transcript(path: &Path) -> Vec<Turn> {
     turns
 }
 
+/// Transcripción de una sesión de OpenCode, pedida a su propia CLI.
+///
+/// OpenCode no deja un archivo de sesión legible como el resto de los agentes, así que no
+/// hay nada que pasarle a `extract_transcript`. Lo que sí tiene es `opencode export <id>`,
+/// que escribe la sesión entera como JSON en stdout (el banner informativo va a stderr).
+///
+/// Formato verificado contra la v1.18.4: `{ "info": {...}, "messages": [ { "info": {
+/// "role": … }, "parts": [ { "type": "text", "text": … } ] } ] }`. Solo interesan las
+/// partes de tipo `text`: el resto son pasos internos (`step-start`, `reasoning`, `tool`,
+/// `patch`) que no forman parte de la conversación que el usuario quiere exportar.
+fn opencode_transcript(session_id: &str) -> Vec<Turn> {
+    let Ok(output) = std::process::Command::new("opencode")
+        .args(["export", session_id])
+        .stdin(std::process::Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    parse_opencode_export(&output.stdout)
+}
+
+/// Parseo puro del JSON que emite `opencode export`, separado del proceso para poder
+/// testearlo contra una muestra real sin depender de que OpenCode esté instalado.
+fn parse_opencode_export(json: &[u8]) -> Vec<Turn> {
+    let Ok(root) = serde_json::from_slice::<Value>(json) else { return Vec::new() };
+    let Some(messages) = root.get("messages").and_then(|m| m.as_array()) else {
+        return Vec::new();
+    };
+
+    let mut turns: Vec<Turn> = Vec::new();
+    for message in messages {
+        let Some(role) = dig(message, &["info", "role"]).and_then(|r| r.as_str()) else { continue };
+        if role != "user" && role != "assistant" {
+            continue;
+        }
+        let text = message
+            .get("parts")
+            .and_then(|p| p.as_array())
+            .map(|parts| {
+                parts
+                    .iter()
+                    .filter(|p| p.get("type").and_then(|t| t.as_str()) == Some("text"))
+                    .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                    .filter(|t| !t.trim().is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            })
+            .unwrap_or_default();
+        if text.trim().is_empty() {
+            continue;
+        }
+
+        // Un turno del asistente puede venir partido en varios mensajes (un "step" por
+        // llamada a herramienta); se juntan igual que en `extract_transcript`.
+        match turns.last_mut() {
+            Some(last) if last.role == role => {
+                last.text.push_str("\n\n");
+                last.text.push_str(&text);
+            }
+            _ => turns.push(Turn { role: role.to_string(), text }),
+        }
+    }
+    turns
+}
+
 fn format_ts(unix_seconds: i64) -> String {
     // Sin dependencia de fechas en el backend: se emite ISO-8601 en UTC a mano, que es
     // inequívoco y ordenable. La UI ya muestra la fecha localizada por su cuenta.
@@ -216,14 +284,23 @@ pub fn session_markdown(
 
     // El lock se suelta antes de tocar el filesystem: buscar y leer el archivo de sesión
     // puede recorrer un árbol grande, y no hay motivo para bloquear la DB mientras tanto.
-    let transcript = super::title::session_file_for(
-        &entry.agent_id,
-        &entry.cwd,
-        entry.session_id.as_deref(),
-        &db,
-    )
-    .map(|path| extract_transcript(&path))
-    .unwrap_or_default();
+    //
+    // OpenCode va por otro camino porque no deja un archivo de sesión que se pueda leer: su
+    // transcripción se pide con `opencode export <id>` (ver `opencode_transcript`). Sin
+    // `session_id` no hay nada que exportar — a diferencia del resto, acá no existe un
+    // "archivo más reciente del cwd" al que caer.
+    let transcript = if entry.agent_id == "opencode" {
+        entry.session_id.as_deref().map(opencode_transcript).unwrap_or_default()
+    } else {
+        super::title::session_file_for(
+            &entry.agent_id,
+            &entry.cwd,
+            entry.session_id.as_deref(),
+            &db,
+        )
+        .map(|path| extract_transcript(&path))
+        .unwrap_or_default()
+    };
 
     Ok(render(&entry, workspace.as_deref(), &transcript))
 }
@@ -241,6 +318,47 @@ pub fn export_session_markdown(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Muestra recortada de `opencode export` real (v1.18.4): la conversación vive en
+    /// `messages[].parts[]`, y solo las partes `text` son conversación — `step-start`,
+    /// `reasoning`, `tool` y `patch` son pasos internos que no van al markdown.
+    const OPENCODE_EXPORT: &str = r#"{
+      "info": { "id": "ses_1", "title": "Refactor del parser" },
+      "messages": [
+        { "info": { "role": "user" },
+          "parts": [ { "type": "text", "text": "arregla el parser" },
+                     { "type": "file", "filename": "a.rs" } ] },
+        { "info": { "role": "assistant" },
+          "parts": [ { "type": "step-start" }, { "type": "reasoning", "text": "pensando" },
+                     { "type": "tool", "tool": "edit" }, { "type": "step-finish" } ] },
+        { "info": { "role": "assistant" },
+          "parts": [ { "type": "text", "text": "Listo, cambié el lexer." },
+                     { "type": "patch" } ] }
+      ]
+    }"#;
+
+    #[test]
+    fn opencode_export_keeps_only_the_conversation() {
+        let turns = parse_opencode_export(OPENCODE_EXPORT.as_bytes());
+
+        // El mensaje del medio es puro paso interno (sin ninguna parte `text`) y no genera
+        // un turno vacío; el siguiente del asistente sí, y no se fusiona con nada previo
+        // porque en el medio no quedó ningún turno de assistant.
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].role, "user");
+        assert_eq!(turns[0].text, "arregla el parser");
+        assert_eq!(turns[1].role, "assistant");
+        assert_eq!(turns[1].text, "Listo, cambié el lexer.");
+    }
+
+    #[test]
+    fn opencode_export_survives_garbage() {
+        // Una instalación rota o una versión que cambie el formato devuelve vacío en vez de
+        // reventar: el export igual se genera, solo que sin transcripción.
+        assert!(parse_opencode_export(b"no soy json").is_empty());
+        assert!(parse_opencode_export(b"{}").is_empty());
+        assert!(parse_opencode_export(br#"{"messages":[]}"#).is_empty());
+    }
 
     #[test]
     fn transcript_reads_the_shapes_the_supported_clis_emit() {

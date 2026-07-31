@@ -41,6 +41,8 @@ export function TerminalPanel() {
               attachPtyId={tab.ptyId ?? undefined}
               initialScrollback={isResuming ? undefined : tab.scrollback}
               isActive={tab.id === activeTabId && onWorkspace}
+              openedAt={tab.openedAt}
+              knownSessionId={tab.sessionId}
               onReady={(ptyId) => setPtyId(tab.id, ptyId)}
               onSessionDiscovered={(sessionId) => setSessionId(tab.id, sessionId)}
             />

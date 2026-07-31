@@ -29,6 +29,12 @@ interface TerminalProps {
   /** Si esta terminal es la que el usuario está viendo ahora mismo. Al pasar a `true` se
    * enfoca sola, para poder escribir sin un click extra. */
   isActive?: boolean;
+  /** Momento (epoch en segundos) en que se abrió la tab. Es el piso temporal para buscar
+   * su sesión al RECONECTAR a un PTY ya vivo: ahí el proceso puede llevar horas corriendo,
+   * así que usar "ahora" como piso descartaría la sesión que se está buscando. */
+  openedAt?: number;
+  /** Session id ya conocido de la tab. Si viene, no hace falta salir a descubrirlo. */
+  knownSessionId?: string;
   onReady?: (id: number) => void;
   onExit?: (code: number) => void;
   onSessionDiscovered?: (sessionId: string) => void;
@@ -147,6 +153,8 @@ export function Terminal({
   attachPtyId,
   initialScrollback,
   isActive = false,
+  openedAt,
+  knownSessionId,
   onReady,
   onExit,
   onSessionDiscovered,
@@ -243,6 +251,9 @@ export function Terminal({
 
     const pollSessionId = (resolvedCwd: string, startedAfter: number) => {
       if (!agentId || !isResumable(agentId) || !onSessionDiscovered) return;
+      // Ya se sabe cuál es: no hay nada que descubrir y cada intento cuesta (para OpenCode,
+      // levantar un proceso que abre su base de datos entera).
+      if (knownSessionId) return;
 
       const attempt = async () => {
         if (cancelled) return;
@@ -304,6 +315,16 @@ export function Terminal({
           if (buffered) term.write(buffered);
           setStatus("running");
           onReady?.(attachPtyId);
+
+          // Reconectar NO cancela el descubrimiento. Antes esta rama devolvía sin llamar a
+          // `pollSessionId`, así que una tab arrastrada a otra ventana (o mergeada) dejaba
+          // de buscar su sesión para siempre: si todavía no se había resuelto en la ventana
+          // de origen, el session id se perdía y con él el "reabrir esta conversación".
+          // El piso temporal es cuándo se abrió la tab, no ahora: el proceso puede llevar
+          // horas vivo y su sesión ser mucho más vieja que esta reconexión.
+          const attachCwd: string = cwd ?? (await invoke<string>("get_home_dir"));
+          pollSessionId(attachCwd, openedAt ?? Math.floor(Date.now() / 1000));
+
           await attachListeners(attachPtyId);
           // La ventana a la que se reconecta puede tener un tamaño distinto al de la
           // ventana donde el PTY nació (tear-off, merge entre ventanas) — sincronizarlo.
