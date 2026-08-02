@@ -12,6 +12,7 @@ use serde_json::{json, Map, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::process::ExitCode;
+use std::time::Duration;
 
 const EXIT_OK: u8 = 0;
 const EXIT_COMMAND_FAILED: u8 = 1;
@@ -29,9 +30,16 @@ TABS
   tab create --cwd <ruta> --agent <id>        Abre una tab nueva
               [--window <label>] [--skills a,b]
   tab close --tab <id>                        Cierra una tab
-  tab output --tab <id> [--lines 200]         Últimas líneas de su terminal
+  tab output --tab <id> [--lines 40]          Lo NUEVO desde la lectura anterior,
+             [--full] [--raw]                 comprimido (errores, warnings, cola)
   tab send --tab <id> --text \"...\"            Escribe en su terminal (+ Enter)
            [--no-enter]
+
+OBSERVAR TABS (modo push — evita el polling)
+  watch add --tab <id> [--idle 20]            Empieza a observar una tab
+  watch remove --tab <id>                     Deja de observarla
+  watch list                                  Tabs observadas y el límite vigente
+  watch wait [--timeout 300] [--max 20]       Espera a que alguna tenga novedades
 
 VENTANAS
   window list                                 Ventanas abiertas
@@ -156,9 +164,25 @@ fn value_for(key: &str, raw: &str) -> Value {
                 .map(|s| Value::String(s.to_string()))
                 .collect(),
         ),
-        "lines" => raw.parse::<u64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.into())),
+        // Un número mal escrito se manda tal cual como string: el backend lo rechaza con
+        // un mensaje que nombra el flag, mejor que un "0" silencioso acá.
+        "lines" | "timeout" | "max" | "idle" => {
+            raw.parse::<u64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.into()))
+        }
         _ => Value::String(raw.to_string()),
     }
+}
+
+/// Cuánto esperar la respuesta de la app. Casi todos los comandos responden al instante;
+/// `watch wait` bloquea a propósito hasta su timeout, así que la CLI tiene que esperar más
+/// que él o cortaría justo la llamada cuya gracia es quedarse esperando.
+fn read_timeout_for(command: &str, args: &Value) -> Duration {
+    const DEFAULT: u64 = 30;
+    if command != "watch.wait" {
+        return Duration::from_secs(DEFAULT);
+    }
+    let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(300);
+    Duration::from_secs(requested + 15)
 }
 
 fn to_camel_case(flag: &str) -> String {
@@ -209,7 +233,7 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
         ),
         code: EXIT_NO_APP,
     })?;
-    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(30)));
+    let _ = stream.set_read_timeout(Some(read_timeout_for(command, &args)));
 
     let request = Request { token: handshake.token, command: command.to_string(), args };
     let payload = serde_json::to_string(&request).map_err(|e| CliError {
@@ -271,6 +295,29 @@ mod tests {
         let v = flags(&["--skills", "a, b ,c", "--lines", "50"]);
         assert_eq!(v["skills"], serde_json::json!(["a", "b", "c"]));
         assert_eq!(v["lines"], serde_json::json!(50));
+    }
+
+    /// `watch wait` bloquea hasta 300s por defecto. Con el timeout fijo de 30s de antes,
+    /// la CLI cortaba la conexión mucho antes de que la app tuviera algo que contar y el
+    /// modo push no habría funcionado nunca.
+    #[test]
+    fn watch_wait_gets_a_read_timeout_longer_than_its_own_wait() {
+        let quick = read_timeout_for("tab.list", &json!({}));
+        assert_eq!(quick, Duration::from_secs(30));
+
+        let default_wait = read_timeout_for("watch.wait", &json!({}));
+        assert!(default_wait > Duration::from_secs(300));
+
+        let custom = read_timeout_for("watch.wait", &json!({ "timeout": 900 }));
+        assert!(custom > Duration::from_secs(900));
+    }
+
+    #[test]
+    fn numeric_flags_of_the_watch_commands_are_parsed_as_numbers() {
+        let v = flags(&["--timeout", "600", "--max", "5", "--idle", "45"]);
+        assert_eq!(v["timeout"], json!(600));
+        assert_eq!(v["max"], json!(5));
+        assert_eq!(v["idle"], json!(45));
     }
 
     #[test]

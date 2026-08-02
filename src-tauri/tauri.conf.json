@@ -35,9 +35,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [
-      "binaries/*"
-    ],
+    "resources": {
+      "binaries/*": "binaries/",
+      "../skills/controlcode-orchestrator": "skills/controlcode-orchestrator/"
+    },
     "linux": {
       "deb": {
         "files": {

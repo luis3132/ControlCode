@@ -1,3 +1,6 @@
+mod bundled;
+pub use bundled::ensure_bundled_skills;
+
 use crate::database::DbConnection;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -1422,7 +1425,7 @@ mod tests {
     use rusqlite::Connection;
     use tauri::Manager;
 
-    const TEST_SCHEMA: &str = "
+    pub(crate) const TEST_SCHEMA: &str = "
         CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
         CREATE TABLE windows (id TEXT PRIMARY KEY, label TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL, pos_x INTEGER, pos_y INTEGER, width INTEGER, height INTEGER, monitor TEXT, is_open INTEGER NOT NULL DEFAULT 1, last_active INTEGER NOT NULL);
         CREATE TABLE tabs (id TEXT PRIMARY KEY, window_id TEXT NOT NULL, title TEXT, title_is_custom INTEGER NOT NULL DEFAULT 0, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, tab_order INTEGER NOT NULL DEFAULT 0, session_id TEXT, scrollback TEXT, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);

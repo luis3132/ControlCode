@@ -26,7 +26,18 @@ fn role_of(v: &Value) -> Option<String> {
             return Some(found.to_string());
         }
     }
-    None
+
+    // Gemini CLI no guarda un `role`: marca cada línea con `type: "user" | "gemini"`. Sin
+    // esta traducción sus sesiones no producían NINGÚN turno y el export salía vacío.
+    //
+    // Va último a propósito: Claude Code también usa `type: "user"`, pero ahí el rol real
+    // está en `message.role` y ya se resolvió arriba. El resto de los `type` del ecosistema
+    // (`summary`, `response_item`, `session_meta`, `event_msg`) no caen en este match.
+    match v.get("type").and_then(|t| t.as_str()) {
+        Some("user") => Some("user".to_string()),
+        Some("gemini") => Some("assistant".to_string()),
+        _ => None,
+    }
 }
 
 /// Camina una ruta de claves anidadas. Devuelve `None` si la ruta no existe — sin
@@ -46,15 +57,22 @@ fn text_of_content(content: &Value) -> Option<String> {
         let trimmed = s.trim();
         return (!trimmed.is_empty()).then(|| trimmed.to_string());
     }
-    let blocks = content.as_array()?;
+    // Un bloque suelto (no una lista) también es válido: Gemini modela el contenido como
+    // `Part | Part[] | string`.
+    let single = std::slice::from_ref(content);
+    let blocks = content.as_array().map(Vec::as_slice).unwrap_or(single);
+
     let joined: Vec<String> = blocks
         .iter()
         .filter_map(|b| {
-            let kind = b.get("type").and_then(|t| t.as_str())?;
-            if kind == "text" || kind == "input_text" || kind == "output_text" {
-                b.get("text").and_then(|t| t.as_str()).map(|s| s.trim().to_string())
-            } else {
-                None
+            match b.get("type").and_then(|t| t.as_str()) {
+                Some("text") | Some("input_text") | Some("output_text") => {
+                    b.get("text").and_then(|t| t.as_str()).map(|s| s.trim().to_string())
+                }
+                // Tipado como otra cosa (tool_use, thought…): no es conversación.
+                Some(_) => None,
+                // Sin `type` es un Part de Gemini: el texto está en `text`.
+                None => b.get("text").and_then(|t| t.as_str()).map(|s| s.trim().to_string()),
             }
         })
         .filter(|s| !s.is_empty())
@@ -71,6 +89,18 @@ fn content_of(v: &Value) -> Option<String> {
     None
 }
 
+/// Contexto que el CLI se inyecta a sí mismo haciéndose pasar por el usuario.
+///
+/// Codex abre toda sesión con un `<environment_context>` (cwd, OS, política de sandbox) y,
+/// si hay AGENTS.md, un `<user_instructions>`. Van con `role: "user"`, así que sin filtrarlos
+/// el export empieza con dos bloques de XML que la persona nunca escribió.
+fn is_injected_context(text: &str) -> bool {
+    let t = text.trim_start();
+    t.starts_with("<environment_context>")
+        || t.starts_with("<user_instructions>")
+        || t.starts_with("<environment_details>")
+}
+
 /// Lee un archivo de sesión JSONL y devuelve los turnos de usuario y asistente en orden.
 /// Las líneas que no son mensajes (metadata, tool calls, deltas de streaming sin texto)
 /// se saltean solas al no tener rol + contenido textual.
@@ -85,6 +115,9 @@ fn extract_transcript(path: &Path) -> Vec<Turn> {
             continue;
         }
         let Some(text) = content_of(&v) else { continue };
+        if is_injected_context(&text) {
+            continue;
+        }
 
         // Los CLIs que emiten el mensaje en trozos (streaming) generan varias líneas con
         // el mismo rol; se concatenan en un solo turno en vez de repetir el encabezado.
@@ -389,6 +422,77 @@ mod tests {
         assert_eq!(turns[0].text, "hola");
         assert_eq!(turns[1].role, "assistant");
         assert_eq!(turns[1].text, "respuesta\n\ncontinuada");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Gemini no escribe `role` en ningún lado: marca cada línea con `type: "user"|"gemini"`
+    /// y guarda el texto en `Part`s sin `type`. Con las dos cosas sin contemplar, el export
+    /// de una sesión de Gemini salía COMPLETAMENTE vacío.
+    #[test]
+    fn transcript_reads_gemini_sessions() {
+        let dir = std::env::temp_dir().join(format!("cc-export-gem-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session-a.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                // Cabecera: sin rol ni contenido, se saltea sola.
+                r#"{"sessionId":"ses-a","projectHash":"h","kind":"main"}"#, "\n",
+                r#"{"id":"m1","type":"user","content":[{"text":"arreglá el login"}]}"#, "\n",
+                // `gemini` es el rol del asistente, y un Part suelto (no lista) también vale.
+                r#"{"id":"m2","type":"gemini","content":{"text":"Listo, cambié el guard."}}"#, "\n",
+                // Un Part que no es texto (function call) no aporta turno.
+                r#"{"id":"m3","type":"gemini","content":[{"functionCall":{"name":"edit"}}]}"#, "\n",
+            ),
+        )
+        .unwrap();
+
+        let turns = extract_transcript(&path);
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].role, "user");
+        assert_eq!(turns[0].text, "arreglá el login");
+        assert_eq!(turns[1].role, "assistant");
+        assert_eq!(turns[1].text, "Listo, cambié el guard.");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Claude Code también usa `type: "user"`, pero su rol real está en `message.role`. La
+    /// traducción de Gemini va última justamente para no pisarlo.
+    #[test]
+    fn gemini_role_mapping_does_not_hijack_other_agents() {
+        let claude = serde_json::json!({
+            "type": "user", "message": { "role": "user", "content": "hola" }
+        });
+        assert_eq!(role_of(&claude).as_deref(), Some("user"));
+
+        let codex = serde_json::json!({ "type": "response_item", "payload": { "role": "assistant" } });
+        assert_eq!(role_of(&codex).as_deref(), Some("assistant"));
+
+        let meta = serde_json::json!({ "type": "session_meta", "payload": { "id": "x" } });
+        assert_eq!(role_of(&meta), None);
+    }
+
+    /// Codex se inyecta contexto propio como si fuera el usuario; no es conversación.
+    #[test]
+    fn transcript_drops_the_context_codex_injects_as_the_user() {
+        let dir = std::env::temp_dir().join(format!("cc-export-cdx-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rollout.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"<environment_context>\ncwd: /proj\n</environment_context>"}]}}"#, "\n",
+                r#"{"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"<user_instructions>usá tabs</user_instructions>"}]}}"#, "\n",
+                r#"{"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"arreglá el parser"}]}}"#, "\n",
+            ),
+        )
+        .unwrap();
+
+        let turns = extract_transcript(&path);
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].text, "arreglá el parser");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

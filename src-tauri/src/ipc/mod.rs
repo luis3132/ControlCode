@@ -93,15 +93,26 @@ fn handle_connection(stream: TcpStream, app: &AppHandle, expected_token: &str) {
         return;
     }
 
+    let mut command = String::new();
     let response = match serde_json::from_str::<Request>(&line) {
         Err(e) => Response::err(format!("Request inválida: {e}")),
         Ok(req) if req.token != expected_token => {
             Response::err("Token inválido — volvé a leer ~/.controlcode/ipc.json")
         }
-        Ok(req) => commands::dispatch(app, &req.command, &req.args),
+        Ok(req) => {
+            command = req.command.clone();
+            commands::dispatch(app, &req.command, &req.args)
+        }
     };
 
     if let Ok(json) = serde_json::to_string(&response) {
+        // Fase 9: se contabiliza lo que la CLI se lleva de verdad — el JSON ya serializado,
+        // no una estimación de antes de armarlo. Es el número que ve el usuario en el
+        // indicador de la UI. Las requests rechazadas (token inválido) no cuentan: no
+        // salieron de ningún orquestador nuestro.
+        if !command.is_empty() {
+            crate::orchestrator::record_response(app, &command, &json);
+        }
         let _ = writeln!(writer, "{json}");
         let _ = writer.flush();
     }

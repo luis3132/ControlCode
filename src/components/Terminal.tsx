@@ -42,12 +42,11 @@ interface TerminalProps {
 
 // El agente puede tardar en escribir su primer log (p. ej. hasta el primer mensaje
 // del usuario), así que no basta con probar solo los primeros segundos tras lanzarla.
-// Pero cada intento para gemini-cli/codex escanea y LEE EL CONTENIDO de todos los
-// archivos de sesión del sistema (de cualquier proyecto, no solo este cwd) cuyo mtime
-// sea posterior al arranque de la tab — repetir eso cada 3s indefinidamente durante
-// toda la vida de una tab que jamás llega a resolverse (agente sin sesión, cwd sin
-// permisos, etc.) es I/O desperdiciado sin límite. Se usa backoff hasta un techo y un
-// número acotado de intentos en vez de un intervalo fijo infinito.
+// Pero cada intento sale a disco: codex/gemini-cli/kimi-code leen la metadata de las
+// sesiones candidatas y opencode levanta un proceso (~0.9s). Repetir eso cada 3s
+// indefinidamente durante toda la vida de una tab que jamás llega a resolverse (agente
+// sin sesión, cwd sin permisos, etc.) es I/O desperdiciado sin límite. Se usa backoff
+// hasta un techo y un número acotado de intentos en vez de un intervalo fijo infinito.
 const SESSION_DISCOVERY_INITIAL_MS = 3000;
 const SESSION_DISCOVERY_MAX_INTERVAL_MS = 30_000;
 const SESSION_DISCOVERY_MAX_ATTEMPTS = 60; // con backoff, cubre ~35 minutos antes de rendirse

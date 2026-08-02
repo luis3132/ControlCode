@@ -2,6 +2,7 @@ mod agents;
 mod database;
 pub mod ipc;
 mod marketplace;
+mod orchestrator;
 mod session;
 mod skills;
 mod terminal;
@@ -109,6 +110,9 @@ pub fn run() {
             marketplace::list_marketplace_skills,
             marketplace::install_marketplace_skill,
             skills::registry_skills,
+            // Modo orquestador (Fase 9): consumo estimado y tabs observadas
+            orchestrator::orchestrator_stats,
+            orchestrator::orchestrator_reset_usage,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { .. } => {
@@ -142,6 +146,12 @@ pub fn run() {
             // Si nunca se creó/abrió un workspace nombrado, ese "más reciente" es
             // simplemente `default`, así que el comportamiento típico es el mismo.
             let db = app.state::<DbConnection>();
+
+            // La skill de orquestación viaja con la app: se instala (o se actualiza) sola
+            // antes de que haya ventanas, así la lista de skills ya la muestra al abrir.
+            // Nunca falla el arranque — ver `skills::bundled`.
+            skills::ensure_bundled_skills(app.handle(), &db);
+
             let active_id = database::db_get_last_active_workspace_id(&db)?;
             let windows = database::db_get_all_workspace_windows(&active_id, &db)?;
             window::restore_windows(app.handle(), windows, true)?;

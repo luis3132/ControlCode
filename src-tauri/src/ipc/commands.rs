@@ -23,6 +23,10 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "tab.send" => tab_send(app, args),
         "tab.create" => bridge_call(app, "tab.create", args),
         "tab.close" => bridge_call(app, "tab.close", args),
+        "watch.add" => watch_add(app, args),
+        "watch.remove" => watch_remove(app, args),
+        "watch.list" => watch_list(app),
+        "watch.wait" => watch_wait(args),
         "window.list" => window_list(app),
         "window.create" => window_create(app),
         "workspace.list" => workspace_list(app),
@@ -102,26 +106,142 @@ fn pty_id_for_tab(app: &AppHandle, tab_id: &str) -> Result<u32, String> {
         .ok_or_else(|| format!("La tab {tab_id} no tiene un proceso corriendo"))
 }
 
-/// Salida de una tab. `lines` acota cuántas líneas del final se devuelven — la Fase 9 va
-/// a agregar el resumen comprimido; por ahora el recorte por líneas ya evita el caso
-/// patológico de devolver un scrollback de miles de líneas a un modelo.
+/// Cuántas líneas de cola devuelve `tab output` por defecto. Antes eran 200 líneas crudas;
+/// con la salida ya comprimida, 40 líneas útiles dicen más y cuestan una fracción.
+const DEFAULT_TAIL_LINES: usize = 40;
+
+/// Salida de una tab, comprimida para que la lea un modelo (Fase 9).
+///
+/// Dos cosas la diferencian de devolver el scrollback:
+///
+/// 1. **Solo lo nuevo.** Cada llamada arranca donde terminó la anterior. Releer una tab
+///    que no escribió nada devuelve vacío en vez de reenviar las mismas 200 líneas — que
+///    era la forma más fácil de agotar el contexto sin enterarse.
+/// 2. **Señales, no transcripción.** Errores y warnings se extraen del texto COMPLETO
+///    (aunque hayan quedado fuera de la cola) y el resto se colapsa (ver `orchestrator::digest`).
+///
+/// Escotillas: `--full` ignora el cursor y digiere todo el scrollback vivo; `--raw`
+/// devuelve las últimas `--lines` líneas sin comprimir, para cuando el modelo necesita ver
+/// el texto exacto.
 fn tab_output(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    use crate::orchestrator::digest;
+
     let tab_id = arg_str(args, "tab")?;
     let pty_id = pty_id_for_tab(app, &tab_id)?;
 
-    let scrollback = crate::terminal::scrollback_of(pty_id)
+    let (scrollback, total_bytes) = crate::terminal::scrollback_of(pty_id)
         .ok_or_else(|| format!("La tab {tab_id} no tiene salida disponible"))?;
 
-    let limit = arg_u64_opt(args, "lines").unwrap_or(200) as usize;
-    let all: Vec<&str> = scrollback.lines().collect();
-    let start = all.len().saturating_sub(limit);
-    let truncated = start > 0;
+    let full = args.get("full").and_then(|v| v.as_bool()).unwrap_or(false);
+    let raw_mode = args.get("raw").and_then(|v| v.as_bool()).unwrap_or(false);
+    let tail_lines = arg_u64_opt(args, "lines").unwrap_or(DEFAULT_TAIL_LINES as u64) as usize;
+
+    if raw_mode {
+        // El crudo no mueve el cursor: es una inspección puntual, no "leer lo nuevo".
+        let all: Vec<&str> = scrollback.lines().collect();
+        let start = all.len().saturating_sub(tail_lines);
+        return Ok(json!({
+            "tabId": tab_id,
+            "mode": "raw",
+            "lines": all[start..],
+            "truncated": start > 0,
+            "totalLines": all.len(),
+        }));
+    }
+
+    let (text, scope, lost) = if full {
+        // `--full` deja igual el cursor puesto al día, para que la siguiente llamada
+        // vuelva a devolver solo lo nuevo.
+        let out = crate::orchestrator::new_output_for(&tab_id, &scrollback, total_bytes);
+        (scrollback.clone(), "full", out.lost)
+    } else {
+        let out = crate::orchestrator::new_output_for(&tab_id, &scrollback, total_bytes);
+        let scope = if out.first_read { "full" } else { "new" };
+        (out.text, scope, out.lost)
+    };
+
+    let d = digest::digest(&text, tail_lines);
 
     Ok(json!({
         "tabId": tab_id,
-        "lines": all[start..],
-        "truncated": truncated,
-        "totalLines": all.len(),
+        "mode": "digest",
+        // `new` = solo lo que llegó desde la lectura anterior; `full` = todo el scrollback
+        // vivo (primera lectura de esta tab, o `--full`).
+        "scope": scope,
+        "errors": d.errors,
+        "warnings": d.warnings,
+        "tail": d.tail,
+        // `true` si parte de la salida se perdió: el proceso escribió más de lo que cabe
+        // en el scrollback y lo más viejo ya no existe.
+        "lost": lost,
+        "truncated": d.kept_lines > d.tail.len(),
+        "summary": {
+            "rawLines": d.raw_lines,
+            "keptLines": d.kept_lines,
+            "estimatedTokens": digest::estimate_tokens(&d.tail.concat()),
+        },
+    }))
+}
+
+// ── Modo push (watch) ────────────────────────────────────────────
+
+fn watch_limit(app: &AppHandle) -> Result<usize, String> {
+    let db = db(app)?;
+    Ok(crate::orchestrator::watch_limit(&db))
+}
+
+fn watch_add(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let tab_id = arg_str(args, "tab")?;
+    let pty_id = pty_id_for_tab(app, &tab_id)?;
+    let idle = arg_u64_opt(args, "idle").unwrap_or(crate::orchestrator::watch::DEFAULT_IDLE_SECS);
+    let limit = watch_limit(app)?;
+
+    crate::orchestrator::watch::add(pty_id, &tab_id, idle, limit)?;
+    crate::orchestrator::emit_stats(app);
+
+    Ok(json!({ "tabId": tab_id, "watching": true, "idleSecs": idle, "limit": limit }))
+}
+
+fn watch_remove(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let tab_id = arg_str(args, "tab")?;
+    let removed = crate::orchestrator::watch::remove_tab(&tab_id);
+    if !removed {
+        return Err(format!("La tab {tab_id} no estaba siendo observada"));
+    }
+    crate::orchestrator::forget_cursor(&tab_id);
+    crate::orchestrator::emit_stats(app);
+    Ok(json!({ "tabId": tab_id, "watching": false }))
+}
+
+fn watch_list(app: &AppHandle) -> Result<Value, String> {
+    Ok(json!({
+        "watched": crate::orchestrator::watch::list(),
+        "limit": watch_limit(app)?,
+    }))
+}
+
+/// Bloquea hasta que alguna tab observada tenga algo que contar. Es lo que reemplaza al
+/// polling: la llamada duerme en el backend (que no gasta contexto) en vez de que el
+/// modelo relea tabs cada N segundos (que sí gasta).
+fn watch_wait(args: &Value) -> Result<Value, String> {
+    /// Tope duro para no dejar una conexión colgada indefinidamente si el llamador pide
+    /// un timeout absurdo.
+    const MAX_TIMEOUT_SECS: u64 = 3600;
+
+    if crate::orchestrator::watch::count() == 0 {
+        return Err(
+            "No hay ninguna tab observada. Agregá una con 'ccode watch add --tab <id>'".to_string(),
+        );
+    }
+
+    let timeout = arg_u64_opt(args, "timeout").unwrap_or(300).min(MAX_TIMEOUT_SECS);
+    let max = arg_u64_opt(args, "max").unwrap_or(20) as usize;
+
+    let events = crate::orchestrator::watch::wait(std::time::Duration::from_secs(timeout), max);
+    Ok(json!({
+        "events": events,
+        // Sin esto, "no pasó nada" y "se venció el timeout" se ven igual desde la CLI.
+        "timedOut": events.is_empty(),
     }))
 }
 

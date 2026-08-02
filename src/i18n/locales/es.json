@@ -176,6 +176,19 @@
   "settings.tuis.envHint": "Se inyectan al lanzar el proceso",
   "settings.tuis.envAdd": "+ Agregar variable",
 
+  "settings.orchestrator": "Modo orquestador",
+  "settings.orchestrator.desc": "Cuando un agente externo maneja la app con la CLI, cada tab que observa le manda eventos y le consume contexto. Este tope es lo que evita que se le llene.",
+  "settings.orchestrator.watchLimit": "Tabs observadas a la vez",
+  "settings.orchestrator.watchLimitHint": "Máximo de tabs que un orquestador puede seguir con «ccode watch add» al mismo tiempo.",
+  "settings.orchestrator.watchLimitWarning": "Con más de 5 tabs observadas, los eventos por sí solos pueden llenar el contexto del modelo antes de que termine la tarea.",
+  "settings.orchestrator.default": "(recomendado)",
+
+  "orchestrator.tooltip.requests": "Modo orquestador · {{requests}} comandos de la CLI",
+  "orchestrator.tooltip.tokens": "~{{tokens}} tokens estimados entregados",
+  "orchestrator.tooltip.watched": "Tabs observadas: {{watched}} de {{limit}}",
+  "orchestrator.tooltip.last": "Último comando: {{command}}",
+  "orchestrator.tooltip.reset": "Click para poner el contador en cero",
+
   "settings.tuis.cap.resume": "reanuda sesiones",
   "settings.tuis.cap.skills": "skills",
   "settings.tuis.cap.sessions": "historial",

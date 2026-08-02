@@ -20,6 +20,7 @@ import { useWorkspacesStore } from "../../store/workspaces";
 import { SaveWorkspaceDialog } from "../workspace/SaveWorkspaceDialog";
 import { ResetDefaultDialog } from "../workspace/ResetDefaultDialog";
 import { ExitConfirmDialog } from "../app/ExitConfirmDialog";
+import { OrchestratorIndicator } from "./OrchestratorIndicator";
 
 const NAV_ITEMS = [
   { id: "home", Icon: HomeIcon, labelKey: "sidebar.home", path: "/" },
@@ -254,6 +255,8 @@ export function TopBar() {
         <div className="flex items-center justify-end gap-1 pr-1">
           {/* Save workspace + Settings + ThemeToggle (tema al final) */}
           <div className="flex items-center gap-1 pr-2" data-tauri-drag-region="false">
+            {/* Solo se dibuja si la CLI está siendo usada (Fase 9). */}
+            <OrchestratorIndicator />
             {hasTabs && workspaceId === DEFAULT_WORKSPACE_ID && (
               <Button
                 variant="icon"

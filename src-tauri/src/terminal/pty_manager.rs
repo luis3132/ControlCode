@@ -11,8 +11,18 @@ struct PtySession {
     killer: Box<dyn portable_pty::Child + Send>,
 }
 
+/// Scrollback de un PTY. `total_bytes` cuenta TODO lo que el proceso escribió alguna vez,
+/// incluido lo que ya se recortó de `data`: es lo que permite al orquestador saber cuánta
+/// salida nueva hubo desde su última lectura sin depender de offsets dentro de un buffer
+/// que se mueve (ver `orchestrator::new_output_for`).
+#[derive(Default)]
+struct PtyBuffer {
+    data: Vec<u8>,
+    total_bytes: u64,
+}
+
 type PtyRegistry = Arc<Mutex<HashMap<u32, PtySession>>>;
-type PtyBuffers = Arc<Mutex<HashMap<u32, Vec<u8>>>>;
+type PtyBuffers = Arc<Mutex<HashMap<u32, PtyBuffer>>>;
 
 /// Tope del buffer de scrollback que se conserva por PTY, para poder reproducirlo
 /// cuando una tab se mueve a otra ventana sin matar el proceso.
@@ -41,7 +51,7 @@ fn registry() -> MutexGuard<'static, HashMap<u32, PtySession>> {
     PTY_REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn buffers() -> MutexGuard<'static, HashMap<u32, Vec<u8>>> {
+fn buffers() -> MutexGuard<'static, HashMap<u32, PtyBuffer>> {
     PTY_BUFFERS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -58,10 +68,11 @@ pub struct PtyExitPayload {
 fn append_to_buffer(id: u32, chunk: &[u8]) {
     let mut buffers = buffers();
     let buf = buffers.entry(id).or_default();
-    buf.extend_from_slice(chunk);
-    if buf.len() > MAX_BUFFER_BYTES + TRIM_MARGIN_BYTES {
-        let excess = buf.len() - MAX_BUFFER_BYTES;
-        buf.drain(0..excess);
+    buf.data.extend_from_slice(chunk);
+    buf.total_bytes += chunk.len() as u64;
+    if buf.data.len() > MAX_BUFFER_BYTES + TRIM_MARGIN_BYTES {
+        let excess = buf.data.len() - MAX_BUFFER_BYTES;
+        buf.data.drain(0..excess);
     }
 }
 
@@ -128,7 +139,7 @@ pub async fn pty_create(
     };
 
     registry().insert(id, PtySession { master: pair.master, writer, killer: child });
-    buffers().insert(id, Vec::new());
+    buffers().insert(id, PtyBuffer::default());
 
     let app_clone = app.clone();
     let event_name = format!("pty-data-{id}");
@@ -145,6 +156,9 @@ pub async fn pty_create(
                 Ok(0) => break,
                 Ok(n) => {
                     append_to_buffer(id, &buf[..n]);
+                    // Modo push del orquestador (Fase 9): si nadie observa esta tab, esto
+                    // es una lectura atómica y vuelve.
+                    crate::orchestrator::watch::observe(id, &buf[..n]);
                     let data = String::from_utf8_lossy(&buf[..n]).to_string();
                     app_clone.emit(&event_name, PtyDataPayload { data }).ok();
                 }
@@ -158,6 +172,7 @@ pub async fn pty_create(
             .remove(&id)
             .and_then(|mut session| session.killer.wait().ok())
             .map_or(0, |status| status.exit_code() as i32);
+        crate::orchestrator::watch::note_exit(id, code);
         app_clone.emit(&exit_event, PtyExitPayload { code }).ok();
         buffers().remove(&id);
     });
@@ -175,15 +190,21 @@ pub fn pty_attach(id: u32) -> Result<String, String> {
     let buffers = buffers();
     Ok(buffers
         .get(&id)
-        .map(|b| String::from_utf8_lossy(b).into_owned())
+        .map(|b| String::from_utf8_lossy(&b.data).into_owned())
         .unwrap_or_default())
 }
 
 /// Scrollback acumulado de un PTY vivo, sin exigir que el llamador sea el frontend.
 /// Lo usa el servidor IPC (`tab output` de la CLI); a diferencia de `pty_attach`, esto
 /// no implica "conectarse" a la sesión, solo mirarla.
-pub fn scrollback_of(id: u32) -> Option<String> {
-    buffers().get(&id).map(|b| String::from_utf8_lossy(b).into_owned())
+///
+/// Devuelve además el total de bytes que el proceso escribió desde que arrancó, que
+/// **no** es el largo del buffer: el buffer se recorta al llegar al tope. El orquestador
+/// usa ese total como cursor para pedir solo lo nuevo.
+pub fn scrollback_of(id: u32) -> Option<(String, u64)> {
+    buffers()
+        .get(&id)
+        .map(|b| (String::from_utf8_lossy(&b.data).into_owned(), b.total_bytes))
 }
 
 /// Escribe al PTY desde código Rust (servidor IPC). `pty_write` es la versión `async`

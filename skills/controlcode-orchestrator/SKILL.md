@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents in specific folders, read what they printed, type into them, and manage windows, workspaces and skills. Use when the user asks to set up a workspace, spin up agents across a monorepo, check on what a tab is doing, or send input to a running agent.
-version: 1.0.0
+version: 1.1.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -60,16 +60,80 @@ ccode tab create --cwd /repo --agent bash
 ## Reading what an agent is doing
 
 ```bash
-ccode tab output --tab <tabId> --lines 50
+ccode tab output --tab <tabId>
 ```
 
-Returns the last N lines (default 200) plus `truncated` and `totalLines` so you know if
-there's more above.
+You get a **digest**, not a transcript:
 
-**Keep `--lines` small.** These are terminal transcripts from interactive TUIs: they carry
-redrawn frames, spinners and ANSI escapes, so they are far more tokens than they look.
-Start at 30–50 and only ask for more if you actually needed it. Reading four tabs at 500
-lines each will bury your own context.
+```json
+{ "tabId": "...", "mode": "digest", "scope": "new",
+  "errors": ["error[E0433]: failed to resolve: use of undeclared crate `serde_jsn` (×2)"],
+  "warnings": [], "tail": ["...last 40 useful lines..."],
+  "lost": false, "truncated": false,
+  "summary": { "rawLines": 812, "keptLines": 37, "estimatedTokens": 190 } }
+```
+
+Three things to know, because they change how you should call it:
+
+1. **Each call returns only what's new** since your previous call for that tab (`scope`
+   tells you: `new` or `full` for a first read). Calling twice in a row when nothing
+   happened returns an empty digest — cheap. There is no reason to "re-read to be sure".
+2. **`errors` and `warnings` come from the whole output**, not just the tail. A failure
+   from a thousand lines back still shows up after being cut from `tail`.
+3. **Spinners, progress bars, redraw frames and ANSI colour are already gone.** `rawLines`
+   vs `keptLines` shows how much was noise.
+
+Escape hatches, for when the digest isn't enough:
+
+```bash
+ccode tab output --tab <tabId> --full          # whole live scrollback, still compressed
+ccode tab output --tab <tabId> --raw --lines 80  # exact text, uncompressed, doesn't move the cursor
+```
+
+Reach for `--raw` when you need the literal bytes (a diff, a table, an exact path) and for
+nothing else — it's the expensive one.
+
+`lost: true` means the process wrote more than the scrollback holds and the oldest part is
+gone for good. Say so rather than pretending you read everything.
+
+## Waiting for an agent instead of polling
+
+Agents take minutes. **Don't loop on `tab output`** — ask the app to tell you when
+something happens:
+
+```bash
+ccode watch add --tab <tabId>                  # start watching (default: idle after 20s of silence)
+ccode watch add --tab <tabId> --idle 60        # a slower agent
+ccode watch wait --timeout 300                 # blocks until something happens
+```
+
+`watch wait` returns as soon as any watched tab has news, and each event is consumed once:
+
+```json
+{ "events": [ { "tabId": "t1", "kind": "idle", "at": 1770000000 },
+              { "tabId": "t2", "kind": "error", "at": 1770000004,
+                "lines": ["ERROR: connection refused"] } ],
+  "timedOut": false }
+```
+
+- `idle` — the tab stopped writing, so it finished or it's waiting for input. **This is
+  your cue to read it.**
+- `error` — an error line appeared. Bursts collapse into one event.
+- `exit` — the process ended (`exitCode` included); the tab stops being watched.
+
+`timedOut: true` with no events means nothing happened in that window — call `wait` again,
+or give up and tell the user. The typical loop is: `watch add` each tab you care about →
+`watch wait` → `tab output` only on the tab the event named → repeat.
+
+```bash
+ccode watch list                               # what you're watching, and the limit
+ccode watch remove --tab <tabId>               # stop when you're done with it
+```
+
+**There is a limit** (3 tabs by default) and `watch add` fails once you hit it. That's
+deliberate: past a handful of tabs, the events alone fill your context. Drop a tab you no
+longer need instead of asking the user to raise the limit — and if you genuinely need
+more, the setting lives in Settings → Orchestrator mode.
 
 ## Typing into an agent
 
@@ -114,9 +178,10 @@ a name.
 
 1. **Look before you build.** `workspace status` first, always.
 2. **Report tab ids back to the user.** They're how anything gets referenced later.
-3. **Don't poll.** Agents take minutes. Read output when there's a reason to, not on a loop.
-4. **Watch how many tabs you're tracking.** Beyond three, output alone will dominate your
-   context. Narrow to the ones that matter.
+3. **Never poll.** `watch add` + `watch wait` is the way to wait. A loop of `tab output`
+   burns your context to learn nothing.
+4. **Watch how many tabs you're tracking.** The limit is 3 for a reason. Release tabs you
+   finished with; narrow to the ones that matter.
 5. **A tab you didn't open belongs to the user.** Don't close it or type into it unasked.
 6. **On exit code 1, read `.error` and relay it.** The messages name the actual problem
    (unknown agent, no such tab, workspace not found); retrying blindly won't fix them.
@@ -135,3 +200,18 @@ ccode workspace status                                        # confirm and coll
 ```
 
 Then report back the three tab ids and what each one is running.
+
+And if the user then asks you to give each agent a task and report how it went:
+
+```bash
+ccode tab send --tab t1 --text "run the API test suite"
+ccode tab send --tab t2 --text "run the web build"
+ccode watch add --tab t1
+ccode watch add --tab t2
+ccode watch wait --timeout 600            # blocks; returns when one of them has news
+ccode tab output --tab t1                 # only the tab the event named
+ccode watch remove --tab t1               # done with it — frees a slot
+```
+
+Note what you did *not* do: read both tabs on a timer, or re-read a tab that hadn't
+changed.
