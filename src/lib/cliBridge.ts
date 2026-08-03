@@ -29,15 +29,31 @@ function str(args: Record<string, unknown>, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * Forma canónica para comparar nombres de agente: sin mayúsculas ni separadores.
+ *
+ * Desde una terminal nadie recuerda si es `claude-code`, `claudecode` o "Claude Code", y
+ * fallar por un guión es la clase de fricción que hace que un agente abandone el comando.
+ * Así `claudecode`, `Claude Code` y `claude-code` son todos el mismo.
+ */
+function canonical(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 /** Resuelve el agente pedido contra los detectados + las TUIs custom del usuario. */
-function resolveAgent(agentId: string) {
+function resolveAgent(requested: string) {
   const { detectedAgents } = useTabsStore.getState();
   const { customAgents } = useSettingsStore.getState();
+  const wanted = canonical(requested);
 
-  const detected = detectedAgents.find((a) => a.id === agentId);
+  const detected = detectedAgents.find(
+    (a) => canonical(a.id) === wanted || canonical(a.label) === wanted
+  );
   if (detected) return detected;
 
-  const custom = customAgents.find((a) => a.id === agentId || a.label === agentId);
+  const custom = customAgents.find(
+    (a) => canonical(a.id) === wanted || canonical(a.label) === wanted
+  );
   if (custom) {
     return { id: custom.id, label: custom.label, command: custom.command, available: true };
   }
@@ -52,7 +68,11 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
 
   const agent = resolveAgent(agentId);
   if (!agent) {
-    const known = useTabsStore.getState().detectedAgents.map((a) => a.id).join(", ");
+    // Se listan también las custom: son justo las que nadie puede adivinar.
+    const known = [
+      ...useTabsStore.getState().detectedAgents.map((a) => a.id),
+      ...useSettingsStore.getState().customAgents.map((a) => a.id),
+    ].join(", ");
     throw new Error(`Agente desconocido '${agentId}'. Disponibles: ${known}`);
   }
 

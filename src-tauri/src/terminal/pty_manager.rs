@@ -201,6 +201,15 @@ pub fn pty_attach(id: u32) -> Result<String, String> {
 /// Devuelve además el total de bytes que el proceso escribió desde que arrancó, que
 /// **no** es el largo del buffer: el buffer se recorta al llegar al tope. El orquestador
 /// usa ese total como cursor para pedir solo lo nuevo.
+/// Solo el total de bytes escritos, sin copiar el scrollback.
+///
+/// Lo usa la espera de "¿la TUI ya arrancó?" del `--initprompt`, que consulta cada 100ms:
+/// con `scrollback_of` cada consulta clonaría megabytes para mirar un contador.
+/// `None` = ese PTY ya no existe.
+pub fn output_total(id: u32) -> Option<u64> {
+    buffers().get(&id).map(|b| b.total_bytes)
+}
+
 pub fn scrollback_of(id: u32) -> Option<(String, u64)> {
     buffers()
         .get(&id)

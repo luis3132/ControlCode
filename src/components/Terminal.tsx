@@ -9,6 +9,7 @@ import { useTheme } from "neogestify-ui-components";
 import "@xterm/xterm/css/xterm.css";
 
 import { isResumable } from "../lib/agentResume";
+import { registerCapabilityResponders } from "../lib/terminalCapabilities";
 import { consumePtyTransferring } from "../lib/ptyTransfer";
 import { awaitSkillSetup } from "../lib/pendingSkillSetup";
 import { useSettingsStore } from "../store/settings";
@@ -193,6 +194,20 @@ export function Terminal({
     term.loadAddon(webLinksAddon);
     term.open(containerRef.current);
     termRef.current = term;
+
+    // Las TUIs modernas preguntan qué sabe hacer la terminal y ESPERAN respuesta antes de
+    // dibujar. xterm.js no contesta varias de esas consultas, y sin respuesta OpenCode se
+    // queda mudo tras pasar a la pantalla alternativa — una terminal negra. Se registra
+    // antes de lanzar el proceso para no perder la primera tanda, que llega enseguida.
+    const disposeCapabilities = registerCapabilityResponders(
+      term,
+      (data) => {
+        if (ptyIdRef.current !== null) {
+          invoke("pty_write", { id: ptyIdRef.current, data }).catch(console.error);
+        }
+      },
+      TERMINAL_THEMES[themeRef.current]
+    );
 
     // Mide cols/rows reales ANTES de spawnear el proceso (ver pty_create en Rust: el
     // PTY nace con este tamaño, no con uno fijo que se corrige después).
@@ -418,6 +433,7 @@ export function Terminal({
       if (discoveryTimer) clearTimeout(discoveryTimer);
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeObserver.disconnect();
+      disposeCapabilities();
       unlistenData?.();
       unlistenExit?.();
       if (ptyIdRef.current !== null) {

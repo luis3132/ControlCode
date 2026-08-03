@@ -1,0 +1,91 @@
+# Build completo de los tres sistemas.
+#
+# `bun run app:build --release` empaqueta todo lo que la máquina donde corre pueda
+# producir, pero ninguna máquina puede producir los tres: el bundle de macOS necesita el
+# SDK de Apple y `codesign`, que no existen fuera de macOS. La única forma de tener los
+# tres instaladores de una misma versión es compilar cada uno en su sistema — que es lo
+# que hace esta matriz.
+#
+# Cada runner corre exactamente el mismo comando que se corre a mano, así que no hay un
+# "camino de CI" distinto del local que pueda divergir sin que nadie se entere.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # Para probar el build completo sin publicar nada.
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      # Que falle macOS no debería cancelar un Windows que ya iba por la mitad.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            name: linux
+            # 22.04 y no 24.04: el AppImage enlaza contra la glibc del runner, así que
+            # compilar en la más vieja soportada es lo que lo hace correr en más distros.
+          - os: windows-latest
+            name: windows
+          - os: macos-latest
+            name: macos
+            # Runner ARM. `universal-apple-darwin` cubre Intel y Apple Silicon en un
+            # bundle, pero necesita los dos targets instalados (ver abajo).
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.name == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      # Dependencias de sistema de Tauri en Linux (webkit2gtk y compañía) más las que
+      # necesita el bundler de AppImage.
+      - name: Dependencias de Linux
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            build-essential curl wget file libssl-dev libxdo-dev libayatana-appindicator3-dev
+
+      - name: Cache de cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ matrix.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ${{ matrix.os }}-cargo-
+
+      - run: bun install --frozen-lockfile
+
+      - name: Tests
+        run: |
+          bunx tsc --noEmit
+          cd src-tauri && cargo test
+
+      # El mismo comando que se corre a mano. En cada runner empaqueta lo suyo y saltea
+      # el resto, informándolo.
+      - name: Build
+        run: bun run app:build --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: controlcode-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            src-tauri/target/*/release/bundle/deb/*.deb
+            src-tauri/target/*/release/bundle/rpm/*.rpm
+            src-tauri/target/*/release/bundle/appimage/*.AppImage
+            src-tauri/target/*/release/bundle/nsis/*.exe
+            src-tauri/target/*/release/bundle/msi/*.msi
+            src-tauri/target/*/release/bundle/dmg/*.dmg

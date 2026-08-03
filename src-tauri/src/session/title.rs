@@ -826,14 +826,36 @@ pub fn session_file_for(
 /// Busca el archivo/registro de sesión más reciente para `cwd` (creado después de
 /// `started_after`) y devuelve el session_id real que el agente le asignó, para poder
 /// reanudarlo más adelante con la flag de resume de cada CLI.
+///
+/// **Corre en `spawn_blocking` y no directo.** Un `#[tauri::command]` declarado como `fn`
+/// (sin `async`) lo ejecuta Tauri **en el hilo principal**, que es el del bucle de eventos
+/// de la ventana. Y este trabajo no es instantáneo: para OpenCode levanta un proceso
+/// (`opencode session list`, ~0.65s medidos) y para el resto lee metadata de disco. Como
+/// el frontend lo llama cada pocos segundos por cada tab, el hilo principal quedaba
+/// congelado en ráfagas justo mientras la terminal intentaba pintar sus primeros bytes —
+/// se veía como una terminal negra que nunca arranca. Es el mismo problema que ya tenía
+/// `agents::detect_agents`, resuelto igual.
 #[tauri::command]
-pub fn discover_session_id(
+pub async fn discover_session_id(
     agent_id: String,
     cwd: String,
     started_after: i64,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
+) -> Result<Option<String>, String> {
+    let db = (*db).clone();
+    tokio::task::spawn_blocking(move || discover_session_id_sync(&agent_id, &cwd, started_after, &db))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn discover_session_id_sync(
+    agent_id: &str,
+    cwd: &str,
+    started_after: i64,
+    db: &crate::database::DbConnection,
 ) -> Option<String> {
-    match agent_id.as_str() {
+    let cwd = cwd.to_string();
+    match agent_id {
         "claude-code" => {
             let path = claude_session_file(&cwd, None, Some(started_after))?;
             path.file_stem().map(|s| s.to_string_lossy().to_string())
@@ -872,15 +894,34 @@ pub fn discover_session_id(
 
 /// Genera un título legible para la tab a partir de la sesión real del agente.
 /// Si el agente no es soportado o no se encuentra la sesión, devuelve `fallback`.
+///
+/// En `spawn_blocking` por el mismo motivo que `discover_session_id`: lee sesiones de
+/// disco y, para OpenCode, levanta un proceso.
 #[tauri::command]
-pub fn get_session_title(
+pub async fn get_session_title(
     agent_id: String,
     cwd: String,
     session_id: Option<String>,
     fallback: String,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
+) -> Result<SessionTitleResult, String> {
+    let db = (*db).clone();
+    tokio::task::spawn_blocking(move || {
+        get_session_title_sync(&agent_id, &cwd, session_id, fallback, &db)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+fn get_session_title_sync(
+    agent_id: &str,
+    cwd: &str,
+    session_id: Option<String>,
+    fallback: String,
+    db: &crate::database::DbConnection,
 ) -> SessionTitleResult {
-    match agent_id.as_str() {
+    let cwd = cwd.to_string();
+    match agent_id {
         "claude-code" => match claude_session_file(&cwd, session_id.as_deref(), None) {
             Some(path) => claude_title(&path, &fallback),
             None => fallback_result(&fallback),

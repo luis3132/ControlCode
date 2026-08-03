@@ -36,7 +36,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "binaries/*": "binaries/",
+      "binaries/ccode*": "binaries/",
       "../skills/controlcode-orchestrator": "skills/controlcode-orchestrator/"
     },
     "linux": {

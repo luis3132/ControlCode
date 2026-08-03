@@ -23,21 +23,28 @@ const USAGE: &str = "\
 ccode — controla la app Control Code desde la terminal
 
 USO
-  ccode <grupo> <acción> [--flag valor ...]
+  ccode <grupo> <acción> [valor] [--flag valor ...]
+
+  El primer valor puede ir suelto, sin su flag:
+    ccode skill install git-helper       =  ccode skill install --skill git-helper
+    ccode tab send <id> \"corré los tests\" =  ccode tab send --tab <id> --text \"...\"
 
 TABS
   tab list                                    Tabs abiertas ahora
-  tab create --cwd <ruta> --agent <id>        Abre una tab nueva
-              [--window <label>] [--skills a,b]
-  tab close --tab <id>                        Cierra una tab
-  tab output --tab <id> [--lines 40]          Lo NUEVO desde la lectura anterior,
+  tab create <ruta> --agent <id>              Abre una tab nueva
+             [--skills a,b]                   · skills a adjuntar, por nombre
+             [--initprompt \"...\"]             · prompt inicial, enviado con Enter
+             [--window <label>]                 cuando la TUI terminó de arrancar
+  tab close <id>                              Cierra una tab
+  tab output <id> [--lines 40]                Lo NUEVO desde la lectura anterior,
              [--full] [--raw]                 comprimido (errores, warnings, cola)
-  tab send --tab <id> --text \"...\"            Escribe en su terminal (+ Enter)
-           [--no-enter]
+  tab send <id> \"...\" [--no-enter]            Escribe en su terminal (+ Enter) —
+                                              así se sigue la conversación con
+                                              una tab que ya está abierta
 
 OBSERVAR TABS (modo push — evita el polling)
-  watch add --tab <id> [--idle 20]            Empieza a observar una tab
-  watch remove --tab <id>                     Deja de observarla
+  watch add <id> [--idle 20]                  Empieza a observar una tab
+  watch remove <id>                           Deja de observarla
   watch list                                  Tabs observadas y el límite vigente
   watch wait [--timeout 300] [--max 20]       Espera a que alguna tenga novedades
 
@@ -47,17 +54,20 @@ VENTANAS
 
 WORKSPACES
   workspace list                              Workspaces guardados
-  workspace open --workspace <id|nombre>      Abre uno
+  workspace open <id|nombre>                  Abre uno
                  [--close-current]
   workspace status                            Qué hay abierto ahora
 
-SKILLS
-  skill list                                  Instaladas + disponibles en repos
-  skill install --skill <nombre|id>           Instala desde los repos habilitados
+AGENTES Y SKILLS
+  agents                                      Qué poner en --agent (incluye las custom)
+  skills                                      Qué poner en --skills (instaladas)
+  skill install <nombre>                      Instala desde los repos habilitados
 
 OTROS
   app status                                  Versión y estado de la app
   --json-args '{...}'                         Pasa argumentos crudos en JSON
+
+`agents` y `skills` son atajos de `agent list` y `skill list`.
 
 La salida siempre es una línea JSON en stdout.
 Códigos de salida: 0 ok · 1 el comando falló · 2 uso incorrecto · 3 la app no corre
@@ -75,13 +85,20 @@ fn main() -> ExitCode {
         return ExitCode::from(EXIT_OK);
     }
 
-    if args.len() < 2 {
-        eprintln!("Falta la acción para '{}'. Probá: ccode --help", args[0]);
-        return ExitCode::from(EXIT_USAGE);
-    }
+    // `ccode skills` / `ccode agents`: listar es lo único que se hace con ellos, y exigir
+    // `skill list` para eso era ceremonia sin ganancia.
+    let (command, flag_args) = match shortcut(&args[0]) {
+        Some(cmd) => (cmd.to_string(), &args[1..]),
+        None => {
+            if args.len() < 2 {
+                eprintln!("Falta la acción para '{}'. Probá: ccode --help", args[0]);
+                return ExitCode::from(EXIT_USAGE);
+            }
+            (format!("{}.{}", args[0], args[1]), &args[2..])
+        }
+    };
 
-    let command = format!("{}.{}", args[0], args[1]);
-    let parsed = match parse_flags(&args[2..]) {
+    let parsed = match parse_flags(flag_args, positionals(&command)) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("{e}");
@@ -111,12 +128,59 @@ struct CliError {
     code: u8,
 }
 
+/// Grupos que se escriben solos porque tienen una sola acción útil.
+fn shortcut(word: &str) -> Option<&'static str> {
+    match word {
+        "agents" => Some("agent.list"),
+        "skills" => Some("skill.list"),
+        _ => None,
+    }
+}
+
+/// Argumentos que se pueden escribir sueltos, en orden, sin su flag.
+///
+/// `ccode skill install git-helper` en vez de `--skill git-helper`. Solo se declara acá lo
+/// que tiene un argumento obvio y único: si hubiera dudas sobre a qué flag corresponde un
+/// valor suelto, es mejor exigir el flag que adivinar mal.
+fn positionals(command: &str) -> &'static [&'static str] {
+    match command {
+        "skill.install" => &["skill"],
+        // El texto va segundo: `ccode tab send <id> "corré los tests"`.
+        "tab.send" => &["tab", "text"],
+        "tab.output" | "tab.close" | "watch.add" | "watch.remove" => &["tab"],
+        "tab.create" => &["cwd"],
+        "workspace.open" => &["workspace"],
+        _ => &[],
+    }
+}
+
 /// `--flag valor` y `--flag` (booleano). Las claves se pasan a camelCase para que el
 /// backend reciba los mismos nombres que usa el resto de la app (`--close-current` →
 /// `closeCurrent`). `--skills a,b` se parte en array, que es lo que espera el frontend.
-fn parse_flags(args: &[String]) -> Result<Value, String> {
+fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
     let mut map = Map::new();
     let mut i = 0;
+
+    // Valores sueltos al principio: `ccode skill install git-helper`. Solo al principio —
+    // después de que aparece el primer `--flag`, una palabra suelta es casi siempre un
+    // error de tipeo, y tragársela en silencio sería peor que rechazarla.
+    let mut next = 0;
+    while i < args.len() && !args[i].starts_with("--") {
+        let Some(key) = positionals.get(next) else {
+            return Err(format!(
+                "Argumento inesperado '{}'. Este comando {}",
+                args[i],
+                if positionals.is_empty() {
+                    "solo toma flags (empiezan con --)".to_string()
+                } else {
+                    format!("toma como máximo {} valor(es) suelto(s): {}", positionals.len(), positionals.join(", "))
+                }
+            ));
+        };
+        map.insert(key.to_string(), value_for(key, &args[i]));
+        next += 1;
+        i += 1;
+    }
 
     while i < args.len() {
         let raw = &args[i];
@@ -173,16 +237,28 @@ fn value_for(key: &str, raw: &str) -> Value {
     }
 }
 
-/// Cuánto esperar la respuesta de la app. Casi todos los comandos responden al instante;
-/// `watch wait` bloquea a propósito hasta su timeout, así que la CLI tiene que esperar más
-/// que él o cortaría justo la llamada cuya gracia es quedarse esperando.
+/// Cuánto esperar la respuesta de la app.
+///
+/// Casi todos los comandos responden al instante. Dos no:
+/// - `watch wait` bloquea a propósito hasta su timeout, así que la CLI tiene que esperar
+///   más que él o cortaría justo la llamada cuya gracia es quedarse esperando.
+/// - `tab create --initprompt` espera a que la TUI termine de arrancar antes de escribirle,
+///   y eso puede llevarse varias decenas de segundos con un agente lento.
 fn read_timeout_for(command: &str, args: &Value) -> Duration {
     const DEFAULT: u64 = 30;
-    if command != "watch.wait" {
-        return Duration::from_secs(DEFAULT);
+    match command {
+        "watch.wait" => {
+            let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(300);
+            Duration::from_secs(requested + 15)
+        }
+        // Los topes del backend suman ~40s (15 para que aparezca el PTY + 25 de arranque).
+        "tab.create" if has_init_prompt(args) => Duration::from_secs(75),
+        _ => Duration::from_secs(DEFAULT),
     }
-    let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(300);
-    Duration::from_secs(requested + 15)
+}
+
+fn has_init_prompt(args: &Value) -> bool {
+    ["initPrompt", "initprompt"].iter().any(|k| args.get(k).and_then(Value::as_str).is_some())
 }
 
 fn to_camel_case(flag: &str) -> String {
@@ -267,7 +343,54 @@ mod tests {
     use super::*;
 
     fn flags(args: &[&str]) -> Value {
-        parse_flags(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap()
+        parse_flags(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &[]).unwrap()
+    }
+
+    fn parse(command: &str, args: &[&str]) -> Result<Value, String> {
+        parse_flags(
+            &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            positionals(command),
+        )
+    }
+
+    /// Escribir `--skill` para pasar el único argumento que el comando tiene era ruido.
+    #[test]
+    fn the_first_loose_value_fills_the_commands_main_flag() {
+        assert_eq!(parse("skill.install", &["git-helper"]).unwrap()["skill"], "git-helper");
+        assert_eq!(parse("tab.output", &["t1"]).unwrap()["tab"], "t1");
+        assert_eq!(parse("workspace.open", &["cliente"]).unwrap()["workspace"], "cliente");
+        assert_eq!(parse("tab.create", &["/repo/api"]).unwrap()["cwd"], "/repo/api");
+    }
+
+    /// El caso de seguir la conversación con una tab abierta: id y texto, sin flags.
+    #[test]
+    fn tab_send_takes_the_tab_and_the_text_loose() {
+        let v = parse("tab.send", &["t1", "corré los tests"]).unwrap();
+        assert_eq!(v["tab"], "t1");
+        assert_eq!(v["text"], "corré los tests");
+
+        // Y se puede seguir mezclando con flags.
+        let v = parse("tab.send", &["t1", "escape", "--no-enter"]).unwrap();
+        assert_eq!(v["text"], "escape");
+        assert_eq!(v["noEnter"], Value::Bool(true));
+    }
+
+    /// La forma con flags explícitos tiene que seguir funcionando: es la que ya está
+    /// escrita en scripts y en la skill instalada de la gente.
+    #[test]
+    fn the_explicit_flag_form_still_works() {
+        let v = parse("skill.install", &["--skill", "git-helper"]).unwrap();
+        assert_eq!(v["skill"], "git-helper");
+    }
+
+    /// Un valor suelto de más no se traga en silencio: casi siempre es un flag mal escrito.
+    #[test]
+    fn extra_loose_values_are_rejected() {
+        let err = parse("skill.install", &["a", "b"]).unwrap_err();
+        assert!(err.contains("b"), "el error tiene que nombrar el argumento sobrante: {err}");
+
+        let err = parse("tab.list", &["algo"]).unwrap_err();
+        assert!(err.contains("solo toma flags"));
     }
 
     #[test]
@@ -312,6 +435,42 @@ mod tests {
         assert!(custom > Duration::from_secs(900));
     }
 
+    /// `ccode skills` y `ccode agents` no llevan acción; el resto sigue exigiéndola.
+    #[test]
+    fn single_word_groups_map_to_their_list_action() {
+        assert_eq!(shortcut("skills"), Some("skill.list"));
+        assert_eq!(shortcut("agents"), Some("agent.list"));
+        assert_eq!(shortcut("tab"), None);
+        assert_eq!(shortcut("skill"), None, "'skill install' necesita su acción");
+    }
+
+    /// Crear una tab con prompt inicial espera a que arranque la TUI. Con el timeout de
+    /// 30s la CLI cortaba antes de que el backend terminara, y el usuario veía un fallo
+    /// pese a que la tab quedaba creada y el prompt se mandaba igual.
+    #[test]
+    fn creating_a_tab_with_an_init_prompt_waits_longer() {
+        assert_eq!(read_timeout_for("tab.create", &json!({ "cwd": "/x" })), Duration::from_secs(30));
+
+        for key in ["initPrompt", "initprompt"] {
+            let args = json!({ "cwd": "/x", key: "hola" });
+            assert!(
+                read_timeout_for("tab.create", &args) > Duration::from_secs(40),
+                "{key} tiene que ampliar la espera"
+            );
+        }
+    }
+
+    /// El prompt casi siempre trae espacios y acentos; tiene que llegar íntegro y como un
+    /// solo argumento.
+    #[test]
+    fn an_init_prompt_survives_the_flag_parser_intact() {
+        let v = flags(&["--initprompt", "corré los tests y resumí los fallos"]);
+        assert_eq!(v["initprompt"], "corré los tests y resumí los fallos");
+
+        let v = flags(&["--init-prompt", "otro"]);
+        assert_eq!(v["initPrompt"], "otro", "la variante con guión llega en camelCase");
+    }
+
     #[test]
     fn numeric_flags_of_the_watch_commands_are_parsed_as_numbers() {
         let v = flags(&["--timeout", "600", "--max", "5", "--idle", "45"]);
@@ -330,7 +489,9 @@ mod tests {
     #[test]
     fn a_bare_word_is_a_usage_error_not_a_silent_drop() {
         let args: Vec<String> = vec!["oops".into()];
-        assert!(parse_flags(&args).is_err());
+        assert!(parse_flags(&args, &[]).is_err());
+        // Y después de un flag tampoco, aunque el comando acepte valores sueltos.
+        assert!(parse("tab.send", &["t1", "hola", "oops"]).is_err());
     }
 
     /// Un valor que arranca con `--` se lee como el flag siguiente, no como valor. Es la
