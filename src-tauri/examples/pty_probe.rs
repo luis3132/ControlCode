@@ -42,7 +42,10 @@ fn main() {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect();
-    let mut writer = pty.master.take_writer().expect("writer");
+    let writer = std::sync::Arc::new(std::sync::Mutex::new(
+        pty.master.take_writer().expect("writer"),
+    ));
+    let writer_replies = writer.clone();
 
     let start = Instant::now();
     let (tx, rx) = std::sync::mpsc::channel();
@@ -56,8 +59,10 @@ fn main() {
                     let reply = build_reply(&buf[..n], &answers);
                     if !reply.is_empty() {
                         use std::io::Write;
-                        let _ = writer.write_all(reply.as_bytes());
-                        let _ = writer.flush();
+                        if let Ok(mut w) = writer_replies.lock() {
+                            let _ = w.write_all(reply.as_bytes());
+                            let _ = w.flush();
+                        }
                     }
                     if tx.send((start.elapsed(), buf[..n].to_vec())).is_err() {
                         break;
@@ -66,6 +71,30 @@ fn main() {
             }
         }
     });
+
+    // Reproduce lo que hace `submit_prompt`: texto y Enter en escrituras separadas, o
+    // pegados si PTY_PROBE_GLUED=1 (la forma vieja, para comparar).
+    if let Ok(text) = std::env::var("PTY_PROBE_SEND") {
+        let glued = std::env::var("PTY_PROBE_GLUED").is_ok();
+        let w2 = writer.clone();
+        std::thread::spawn(move || {
+            use std::io::Write;
+            std::thread::sleep(Duration::from_secs(6)); // que la TUI termine de arrancar
+            let write = |bytes: &[u8]| {
+                if let Ok(mut w) = w2.lock() {
+                    let _ = w.write_all(bytes);
+                    let _ = w.flush();
+                }
+            };
+            if glued {
+                write(format!("{text}\r").as_bytes());
+            } else {
+                write(text.as_bytes());
+                std::thread::sleep(Duration::from_millis(600));
+                write(b"\r");
+            }
+        });
+    }
 
     let deadline = Duration::from_secs(secs);
     let mut total = 0usize;

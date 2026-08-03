@@ -163,7 +163,7 @@ fn tab_create(app: &AppHandle, args: &Value) -> Result<Value, String> {
 
     let pty_id = wait_for_pty(app, &tab_id, window.as_deref())?;
     let ready = wait_until_ready(pty_id);
-    crate::terminal::write_to_pty(pty_id, &format!("{prompt}\r"))?;
+    submit_prompt(pty_id, &prompt)?;
 
     let mut out = created;
     out["promptSent"] = json!(true);
@@ -231,28 +231,32 @@ fn match_skill_ids(
         .collect()
 }
 
-/// Espera a que la TUI termine de arrancar: primero a que escriba algo, después a que se
-/// quede quieta un momento.
+/// Espera a que la TUI deje de escribir por `quiet`, hasta un máximo de `max`.
 ///
-/// No hay forma portable de preguntarle a un proceso "¿ya estás listo para recibir
-/// input?", y una espera fija o se queda corta con un agente lento o desperdicia segundos
-/// con uno rápido. El silencio tras el primer output es la mejor señal disponible: es la
-/// misma idea que el evento `idle` del modo push.
+/// No hay forma portable de preguntarle a un proceso "¿ya estás listo?", y una espera fija
+/// o se queda corta con un agente lento o desperdicia segundos con uno rápido. El silencio
+/// es la mejor señal disponible: es la misma idea que el evento `idle` del modo push.
 ///
-/// Devuelve `false` si se agotó el tiempo sin llegar a ese silencio.
-fn wait_until_ready(pty_id: u32) -> bool {
-    const QUIET: std::time::Duration = std::time::Duration::from_millis(700);
-    const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(25);
+/// `require_output` distingue los dos usos: al arrancar, "todavía no escribió nada" NO es
+/// silencio, es que no arrancó; después de escribirle un prompt, una TUI que no repinta
+/// nada sí cuenta como quieta.
+///
+/// Devuelve `false` si se agotó el tiempo (o si el proceso murió).
+fn wait_until_quiet(
+    pty_id: u32,
+    quiet: std::time::Duration,
+    max: std::time::Duration,
+    require_output: bool,
+) -> bool {
     const POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
-    let deadline = std::time::Instant::now() + MAX_WAIT;
-    let mut last_total = 0u64;
+    let deadline = std::time::Instant::now() + max;
+    let mut last_total = crate::terminal::output_total(pty_id).unwrap_or(0);
     let mut quiet_since: Option<std::time::Instant> = None;
 
     while std::time::Instant::now() < deadline {
         std::thread::sleep(POLL);
         let Some(total) = crate::terminal::output_total(pty_id) else {
-            // El proceso murió antes de arrancar; no tiene sentido seguir esperando.
             return false;
         };
 
@@ -261,17 +265,46 @@ fn wait_until_ready(pty_id: u32) -> bool {
             quiet_since = None;
             continue;
         }
-        // Todavía no escribió NADA: eso no es "quieto", es "no arrancó".
-        if total == 0 {
+        if require_output && total == 0 {
             continue;
         }
         match quiet_since {
-            Some(since) if since.elapsed() >= QUIET => return true,
+            Some(since) if since.elapsed() >= quiet => return true,
             Some(_) => {}
             None => quiet_since = Some(std::time::Instant::now()),
         }
     }
     false
+}
+
+/// Espera a que la TUI termine de arrancar.
+fn wait_until_ready(pty_id: u32) -> bool {
+    wait_until_quiet(
+        pty_id,
+        std::time::Duration::from_millis(700),
+        std::time::Duration::from_secs(25),
+        true,
+    )
+}
+
+/// Escribe un prompt en una TUI y lo confirma con Enter.
+///
+/// **El Enter va en una escritura aparte, y después de que la TUI se aquietó.** Mandarlo
+/// pegado al texto (`"{prompt}\r"`, que es lo que se hacía antes) no envía nada: los
+/// agentes con caja de texto multilínea reciben todo en el mismo chunk del PTY y tratan
+/// ese CR como un salto de línea DENTRO del prompt, no como "enviar". El prompt queda
+/// escrito y ahí se queda.
+///
+/// Separarlo reproduce lo que hace una persona: escribir, ver el texto aparecer, y recién
+/// entonces apretar Enter. El silencio entre medio es lo que garantiza que llegue en una
+/// lectura distinta, incluso si la TUI tarda en repintar.
+fn submit_prompt(pty_id: u32, text: &str) -> Result<(), String> {
+    const ECHO_QUIET: std::time::Duration = std::time::Duration::from_millis(250);
+    const ECHO_MAX: std::time::Duration = std::time::Duration::from_secs(5);
+
+    crate::terminal::write_to_pty(pty_id, text)?;
+    wait_until_quiet(pty_id, ECHO_QUIET, ECHO_MAX, false);
+    crate::terminal::write_to_pty(pty_id, "\r")
 }
 
 // ── Agentes ──────────────────────────────────────────────────────
@@ -467,14 +500,15 @@ fn tab_send(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let pty_id = pty_id_for_tab(app, &tab_id, arg_str_opt(args, "window").as_deref())?;
 
     // Por defecto se manda Enter al final: "send" en una TUI interactiva casi siempre
-    // significa "escribí esto y confirmá". `--no-enter` sirve para mandar teclas sueltas.
-    let data = if args.get("noEnter").and_then(|v| v.as_bool()).unwrap_or(false) {
-        text
+    // significa "escribí esto y confirmá". `--no-enter` sirve para mandar teclas sueltas
+    // (Escape, Ctrl-C) o para dejar el prompt escrito sin enviarlo, y ahí el texto va
+    // crudo: separar el Enter no aplica porque no hay Enter.
+    if args.get("noEnter").and_then(|v| v.as_bool()).unwrap_or(false) {
+        crate::terminal::write_to_pty(pty_id, &text)?;
     } else {
-        format!("{text}\r")
-    };
+        submit_prompt(pty_id, &text)?;
+    }
 
-    crate::terminal::write_to_pty(pty_id, &data)?;
     Ok(json!({ "tabId": tab_id, "sent": true }))
 }
 
