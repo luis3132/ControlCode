@@ -131,7 +131,7 @@ export function SettingsPage() {
               <span className="text-xs font-mono text-gray-600 dark:text-gray-300 truncate flex-1">
                 {skillsDir || "…"}
               </span>
-              <Button variant="outline" onClick={handleChangeSkillsDir} className="!text-sm shrink-0">
+              <Button variant="outline" onClick={handleChangeSkillsDir} className="text-sm! shrink-0">
                 {t("settings.skillsDir.change")}
               </Button>
             </div>
