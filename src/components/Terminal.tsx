@@ -15,6 +15,7 @@ import { keepScrollbarVisible } from "../lib/terminalScrollbar";
 import { consumePtyTransferring } from "../lib/ptyTransfer";
 import { awaitSkillSetup } from "../lib/pendingSkillSetup";
 import { useSettingsStore } from "../store/settings";
+import type { PrelaunchStep } from "../store/prelaunch";
 import { useTerminalPrefsStore } from "../store/terminalPrefs";
 
 interface TerminalProps {
@@ -45,6 +46,9 @@ interface TerminalProps {
    *  justo antes de spawnear: si se resolvieran arriba, un render que llegue tarde lanzaría
    *  el proceso con la cuenta del sistema y ya no habría vuelta atrás. */
   accountId?: string;
+  /** Comandos a ejecutar antes del agente, sin resolver todavía (ver el store `prelaunch`).
+   *  Se resuelven acá adentro, justo antes de spawnear, por el mismo motivo que la cuenta. */
+  prelaunch?: PrelaunchStep[];
   onReady?: (id: number) => void;
   onExit?: (code: number) => void;
   onSessionDiscovered?: (sessionId: string) => void;
@@ -189,6 +193,7 @@ export function Terminal({
   knownSessionId,
   env,
   accountId,
+  prelaunch,
   onReady,
   onExit,
   onSessionDiscovered,
@@ -434,6 +439,21 @@ export function Terminal({
           }
         }
 
+        // La cadena se resuelve tan tarde como la cuenta, y por lo mismo: un preset pudo
+        // editarse o borrarse desde que la tab se guardó. Un preset que ya no existe
+        // ABORTA el lanzamiento — arrancar sin el paso pedido dejaría al agente corriendo
+        // en el entorno equivocado, que es exactamente lo que la feature evita.
+        let resolvedPrelaunch: string[] = [];
+        if (prelaunch && prelaunch.length > 0) {
+          try {
+            resolvedPrelaunch = await invoke<string[]>("resolve_prelaunch", { steps: prelaunch });
+          } catch (e) {
+            term.write(`\r\n\x1b[31m${t("terminal.prelaunchError", { error: e })}\x1b[0m\r\n`);
+            setStatus("exited");
+            return;
+          }
+        }
+
         const ptyId = await invoke<number>("pty_create", {
           command,
           cwd: resolvedCwd,
@@ -450,6 +470,7 @@ export function Terminal({
             accountEnv,
             env
           ),
+          prelaunch: resolvedPrelaunch,
         });
         ptyIdRef.current = ptyId;
         setStatus("running");

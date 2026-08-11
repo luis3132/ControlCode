@@ -39,6 +39,7 @@ export function TerminalPanel() {
               cwd={tab.cwd}
               agentId={tab.agentId}
               accountId={tab.accountId}
+              prelaunch={tab.prelaunch}
               attachPtyId={tab.ptyId ?? undefined}
               initialScrollback={isResuming ? undefined : tab.scrollback}
               isActive={tab.id === activeTabId && onWorkspace}

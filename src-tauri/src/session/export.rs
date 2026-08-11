@@ -531,6 +531,7 @@ mod tests {
             title: Some("Mi sesión".into()),
             session_id: None,
             account_id: None,
+            prelaunch: Vec::new(),
             skills: vec![ArchivedSkill {
                 id: "s1".into(),
                 name: "git-helper".into(),

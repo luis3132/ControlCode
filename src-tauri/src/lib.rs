@@ -4,6 +4,7 @@ mod database;
 pub mod ipc;
 mod marketplace;
 mod orchestrator;
+mod prelaunch;
 mod session;
 mod skills;
 mod terminal;
@@ -74,6 +75,11 @@ pub fn run() {
             accounts::create_agent_account,
             accounts::delete_agent_account,
             accounts::agent_account_env,
+            // Comandos previos al lanzamiento del agente (entornos aislados)
+            prelaunch::list_prelaunch_presets,
+            prelaunch::save_prelaunch_preset,
+            prelaunch::delete_prelaunch_preset,
+            prelaunch::resolve_prelaunch,
             // Settings genéricos (key-value)
             database::db_get_setting,
             database::db_set_setting,

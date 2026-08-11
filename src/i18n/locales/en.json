@@ -1,7 +1,6 @@
 {
   "app.title": "Control Code",
   "app.subtitle": "Command center for AI coding agents",
-
   "btn.home": "Home",
   "btn.browse": "Browse",
   "btn.add": "Add",
@@ -10,7 +9,6 @@
   "btn.back": "← Back",
   "btn.open": "Open",
   "btn.save": "Save",
-
   "home.step1": "1 · Project folder",
   "home.step2": "2 · Agent / TUI",
   "home.step3": "3 · Skills (optional)",
@@ -19,11 +17,9 @@
   "home.pathPlaceholder": "/path/to/project",
   "home.dialogTitle": "Select project",
   "home.error.noFolder": "Select a folder first",
-
   "home.recent.title": "Workspaces",
   "home.recent.empty": "No saved workspaces yet",
   "home.recent.lastActive": "Opened {{time}}",
-
   "workspace.list.summary": "{{windows}} windows ({{tabs}} tabs)",
   "workspace.save.title": "Save as workspace...",
   "workspace.save.placeholder": "Workspace name (e.g. cliente)",
@@ -32,21 +28,17 @@
   "workspace.open.body": "Do you want to close the windows you have open now, or keep them open alongside this workspace?",
   "workspace.open.keepCurrent": "Keep current open",
   "workspace.open.closeCurrent": "Close current",
-
   "workspace.resetDefault.title": "Discard current workspace?",
   "workspace.resetDefault.body": "You have unsaved tabs in the current workspace. Creating a new one will close and discard them — save it first if you want to keep them.",
   "workspace.resetDefault.confirm": "Discard and create new",
-
   "workspace.closeAll.title": "Close this workspace's windows?",
   "workspace.closeAll.body": "This workspace has {{count}} windows open. Do you want to close all of them, or only this one?",
   "workspace.close.window": "Close window",
   "workspace.close.choose": "Close window ({{count}} open in this workspace)",
-
   "topbar.saveWorkspace": "Save workspace",
   "topbar.menu.home": "Home",
   "topbar.menu.newWindow": "New window",
   "topbar.menu.newWorkspace": "New workspace",
-
   "sessions.title": "Sessions",
   "sessions.subtitle": "Chats you previously opened in this workspace",
   "sessions.empty": "No closed sessions in this workspace yet",
@@ -61,7 +53,6 @@
   "sessions.resumeSkills.diff": "{{added}} added · {{removed}} removed, compared to what the session had.",
   "sessions.opened": "Opened {{time}}",
   "sessions.closed": "Closed {{time}} ago",
-
   "sessions.noMatches": "No session matches the filters",
   "sessions.workspaceScopeHint": "Only sessions from this workspace are shown.",
   "sessions.account.gone": "Account deleted",
@@ -84,7 +75,6 @@
   "sessions.export.done": "Session exported",
   "sessions.delete.action": "Remove from history",
   "sessions.delete.confirm": "Remove this session from the history? The agent's session file on your disk is left untouched.",
-
   "sessions.missingSkills.title": "This session is missing skills",
   "sessions.missingSkills.body": "\"{{session}}\" had skills that are no longer installed ({{count}}). If you open it as is, the agent won't have them.",
   "sessions.missingSkills.allRestored": "All the skills \"{{session}}\" had are back. You can open it.",
@@ -96,18 +86,15 @@
   "sessions.missingSkills.installAll": "Install available ones",
   "sessions.missingSkills.continueAnyway": "Open anyway",
   "sessions.missingSkills.open": "Open session",
-
   "workspace.manage.link": "Manage",
   "workspace.manage.title": "Manage workspaces",
   "workspace.manage.subtitle": "Rename, delete or open your saved window/tab layouts",
   "workspace.manage.rename": "Rename",
   "workspace.manage.delete": "Delete",
-
   "app.exit.title": "Close the app?",
   "app.exit.body": "You have {{count}} windows open. Do you want to close all of them, or only this one?",
   "app.exit.closeCurrent": "Close this window only",
   "app.exit.closeAll": "Close all",
-
   "sidebar.expand": "Expand",
   "sidebar.collapse": "Collapse",
   "sidebar.home": "Home",
@@ -115,15 +102,12 @@
   "sidebar.skills": "Skills",
   "sidebar.marketplace": "Marketplace",
   "sidebar.settings": "Settings",
-
   "tabs.new": "New terminal",
-
   "terminal.empty": "Open a project from Home to get started",
   "terminal.status.connecting": "connecting",
   "terminal.status.exited": "exited",
   "terminal.exitCode": "[Process exited with code {{code}}]",
   "terminal.ptyError": "[Failed to start PTY: {{error}}]",
-
   "wizard.step1.title": "Select folder",
   "wizard.step2.title": "Select agent",
   "wizard.step1.helper": "Where is the project?",
@@ -142,7 +126,6 @@
   "wizard.step3.searchEmpty": "No skill matches your search",
   "wizard.step3.searchToReveal": "{{count}} more installed — search to find them",
   "wizard.step3.selectedCount": "{{count}} skill(s) selected",
-
   "settings.nav": "Sections",
   "settings.terminal": "Terminal",
   "settings.terminal.desc": "How terminal history looks and how you move through it.",
@@ -150,7 +133,6 @@
   "settings.terminal.marks.desc": "Draws a faint line every time you send something, so one turn is visibly separated from the next when scrolling back through a long conversation.",
   "settings.terminal.marks.limits": "It keys off the Enter key, which is all the terminal can see: an Enter inside a multi-line message marks too. It does not apply to full-screen TUIs (OpenCode), where there is no scrollback to anchor the mark to.",
   "settings.terminal.marks.applies": "Applies to terminals you open from now on; already-open ones are unchanged.",
-
   "settings.title": "Settings",
   "settings.subtitle": "Customize your Control Code environment",
   "settings.appearance": "Appearance",
@@ -168,7 +150,6 @@
   "settings.tuis.commandPlaceholder": "e.g. aider",
   "settings.tuis.commandHint": "Can include fixed flags: aider --no-auto-commits",
   "settings.tuis.error": "Name and command are required",
-
   "settings.tuis.advanced": "App integration (optional)",
   "settings.tuis.advancedDesc": "None of this is required. Each field you fill in unlocks one more feature: resuming sessions, managing its skills, or showing its history.",
   "settings.tuis.resumeArgs": "Resume arguments",
@@ -184,36 +165,30 @@
   "settings.tuis.env": "Environment variables",
   "settings.tuis.envHint": "Injected when launching the process",
   "settings.tuis.envAdd": "+ Add variable",
-
   "settings.orchestrator": "Orchestrator mode",
   "settings.orchestrator.desc": "When an external agent drives the app through the CLI, every tab it watches sends it events and spends its context. This cap is what keeps it from filling up.",
   "settings.orchestrator.watchLimit": "Tabs watched at once",
   "settings.orchestrator.watchLimitHint": "Most tabs an orchestrator can follow with «ccode watch add» simultaneously.",
   "settings.orchestrator.watchLimitWarning": "Past 5 watched tabs, the events alone can fill the model's context before it finishes the task.",
   "settings.orchestrator.default": "(recommended)",
-
   "orchestrator.tooltip.requests": "Orchestrator mode · {{requests}} CLI commands",
   "orchestrator.tooltip.tokens": "~{{tokens}} estimated tokens handed over",
   "orchestrator.tooltip.watched": "Watched tabs: {{watched}} of {{limit}}",
   "orchestrator.tooltip.last": "Last command: {{command}}",
   "orchestrator.tooltip.reset": "Click to reset the counter",
-
   "settings.tuis.cap.resume": "resumes sessions",
   "settings.tuis.cap.skills": "skills",
   "settings.tuis.cap.sessions": "history",
   "settings.tuis.cap.env": "env",
-
   "settings.skillsDir": "Skills directory",
   "settings.skillsDir.desc": "Where installed skills are stored globally. Changing it only affects future installs.",
   "settings.skillsDir.change": "Change",
-
   "accounts.pick": "Which account",
   "accounts.system": "Main account",
   "accounts.system.hint": "Your usual one",
   "accounts.ready": "Ready to use",
   "accounts.needsLogin": "Needs sign-in",
   "terminal.accountMissing": "This tab's account could not be used ({{error}}). Nothing was launched, to avoid starting with the wrong account.",
-
   "settings.accounts": "TUI accounts",
   "settings.accounts.desc": "Several accounts for the same TUI, each with its own login. Every account is a separate profile folder — your system one is left untouched.",
   "settings.accounts.add": "Add account",
@@ -245,7 +220,6 @@
   "settings.accounts.delete.body": "You can remove it from the app and keep its files, or also delete the folder holding its login:",
   "settings.accounts.delete.keepFiles": "Remove, keep files",
   "settings.accounts.delete.withFiles": "Delete everything",
-
   "settings.cli": "CLI (ccode)",
   "settings.cli.desc": "Install the ccode command to drive the app from your terminal (or from another agent). No administrator permissions needed.",
   "settings.cli.installed": "Installed",
@@ -258,7 +232,6 @@
   "settings.cli.copyNote": "On Windows the executable is copied, so reinstall the CLI after updating the app.",
   "settings.cli.noBinary": "No ccode binary found next to the app. If you're running in development, build it with: cargo build --bin ccode",
   "settings.cli.usage": "Try it with: ccode app status · ccode --help",
-
   "skills.manage.title": "Skills",
   "skills.manage.subtitle": "Install skills once and attach them to any project without duplicating files",
   "skills.install.btn": "Install skill",
@@ -308,7 +281,6 @@
   "skills.health.staleTarget": "points somewhere else",
   "skills.health.repair": "Repair",
   "skills.health.remove": "Remove",
-
   "marketplace.title": "Marketplace",
   "marketplace.subtitle": "Discover and install skills from public repos or local folders",
   "marketplace.addRegistry": "Add repository",
@@ -356,11 +328,26 @@
   "marketplace.add.localPlaceholder": "Or paste the folder path",
   "marketplace.add.adding": "Adding…",
   "marketplace.add.error.required": "Fill in the name and location",
-
   "marketplace.add.phase.connecting": "Connecting to the repository…",
   "marketplace.add.phase.listing": "Reading its contents…",
   "marketplace.add.phase.scanning": "Looking for skills…",
   "marketplace.add.phase.saving": "Saving…",
   "marketplace.add.phase.done": "Done",
-  "marketplace.add.phase.error": "Could not resolve the repository"
+  "marketplace.add.phase.error": "Could not resolve the repository",
+  "settings.prelaunch": "Pre-launch",
+  "settings.prelaunch.desc": "Commands that run before an agent starts, to put it in the right environment.",
+  "settings.prelaunch.hint": "These are just saved here. Which ones to use, and in what order, is chosen per tab under Advanced options.",
+  "prelaunch.namePlaceholder": "Name, e.g. conda environment",
+  "prelaunch.commandPlaceholder": "Command, e.g. conda activate ml",
+  "prelaunch.addCommand": "Add command",
+  "prelaunch.saved": "Saved",
+  "prelaunch.preview": "Will run",
+  "prelaunch.missingPreset": "This saved command no longer exists",
+  "prelaunch.moveUp": "Move up",
+  "prelaunch.moveDown": "Move down",
+  "prelaunch.chainDesc": "They run in order before the agent. If one fails, the agent won't start.",
+  "prelaunch.stepCount_one": "{{count}} command",
+  "prelaunch.stepCount_other": "{{count}} commands",
+  "wizard.advanced": "Advanced options",
+  "terminal.prelaunchError": "Couldn't prepare this tab's environment ({{error}}). Nothing was launched, to avoid starting in the wrong environment."
 }

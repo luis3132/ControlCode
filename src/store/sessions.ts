@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { PrelaunchStep } from "./prelaunch";
 import { invoke } from "@tauri-apps/api/core";
 
 /** Skill tal como estaba activa en la tab al cerrarla (se congela en el historial). */
@@ -45,6 +46,8 @@ export interface SessionHistoryEntry {
   siblingTabs: SiblingTab[];
   /** Cuenta de la TUI con la que corría; `null` = la principal (la del sistema). */
   accountId: string | null;
+  /** Cadena de pre-lanzamiento con la que se abrió (ver el store `prelaunch`). */
+  prelaunch: PrelaunchStep[];
   openedAt: number;
   closedAt: number;
 }

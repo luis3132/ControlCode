@@ -16,6 +16,8 @@ import { flushPendingSave } from "../store/persistTabs";
 import { registerPendingSkillSetup } from "../lib/pendingSkillSetup";
 import { agentIcon } from "../lib/agentIcons";
 import { AccountPickerStep } from "../components/wizard/AccountPickerStep";
+import { AdvancedOptions } from "../components/wizard/AdvancedOptions";
+import type { PrelaunchStep } from "../store/prelaunch";
 
 export function HomePage() {
   const { t } = useTranslation();
@@ -28,6 +30,7 @@ export function HomePage() {
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   /** `undefined` = la cuenta del sistema (ver AccountPickerStep). */
   const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>();
+  const [prelaunch, setPrelaunch] = useState<PrelaunchStep[]>([]);
   const [pathError, setPathError] = useState("");
   const [openTarget, setOpenTarget] = useState<WorkspaceSummary | null>(null);
 
@@ -78,6 +81,7 @@ export function HomePage() {
       cwd: selectedCwd.trim(),
       agent: selectedAgent,
       accountId: selectedAccountId,
+      prelaunch,
     });
     navigate("/workspace");
 
@@ -220,6 +224,15 @@ export function HomePage() {
               agentId={selectedAgent.id}
               value={selectedAccountId}
               onChange={setSelectedAccountId}
+            />
+          )}
+
+          {/* Comandos previos al lanzamiento — plegado, ver AdvancedOptions */}
+          {selectedAgent && (
+            <AdvancedOptions
+              agentCommand={selectedAgent.command}
+              prelaunch={prelaunch}
+              onPrelaunchChange={setPrelaunch}
             />
           )}
 

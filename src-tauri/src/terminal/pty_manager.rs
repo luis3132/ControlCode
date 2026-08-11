@@ -82,6 +82,76 @@ fn append_to_buffer(id: u32, chunk: &[u8]) {
     }
 }
 
+/// Arma el script que ejecuta la cadena de pre-lanzamiento y termina en el agente.
+///
+/// El `exec` final es lo que hace que esto sea barato en unix: no lanza un hijo, sino que
+/// REEMPLAZA la imagen del shell conservando su pid, sus descriptores y el entorno que los
+/// pasos anteriores acaban de preparar. Así el pid que queda en el registry sigue siendo
+/// el del agente, y `pty_kill`/`pty_resize` apuntan al proceso correcto.
+///
+/// El `&&` (y no `;`) es deliberado: si un paso falla, el agente NO arranca. Arrancar
+/// fuera del entorno pedido es peor que no arrancar, y el error del shell queda escrito en
+/// la terminal para que se vea qué pasó.
+#[cfg(unix)]
+fn launch_script(command: &str, prelaunch: &[String]) -> String {
+    format!("{} && exec {command}", prelaunch.join(" && "))
+}
+
+/// Windows no tiene `exec`: no hay forma de reemplazar la imagen de un proceso conservando
+/// su pid. El agente queda sí o sí como hijo del `cmd` que lo lanza, y por eso matar la
+/// tab tiene que llevarse al árbol entero — de eso se encarga el Job Object de
+/// `containment`, sin el cual esta feature dejaría procesos huérfanos en cada cierre.
+#[cfg(windows)]
+fn launch_script(command: &str, prelaunch: &[String]) -> String {
+    format!("{} && {command}", prelaunch.join(" && "))
+}
+
+/// Arma el proceso a lanzar.
+///
+/// Sin pre-comandos devuelve exactamente lo de siempre: el binario con sus argumentos,
+/// sin ningún intermediario. Con pre-comandos hay que delegar en un shell, porque
+/// `conda activate` y compañía son funciones de shell y no programas: ejecutadas en un
+/// proceso aparte, su efecto muere con él (ver el módulo `prelaunch`).
+fn build_launch(command: &str, prelaunch: &[String]) -> CommandBuilder {
+    if prelaunch.is_empty() {
+        let mut parts = command.split_whitespace();
+        let program = parts.next().unwrap_or(command);
+        let mut cmd = CommandBuilder::new(program);
+        for arg in parts {
+            cmd.arg(arg);
+        }
+        return cmd;
+    }
+
+    shell_running(launch_script(command, prelaunch))
+}
+
+/// El shell que ejecuta el script.
+///
+/// `$SHELL` y no `bash` fijo: quien usa zsh o fish tiene su configuración ahí, y es de
+/// donde salen las funciones que estos pasos suelen invocar.
+///
+/// `-l` (login) hace que se lean los perfiles del sistema y del usuario. Importa porque una
+/// app lanzada desde el menú del escritorio no hereda el PATH de tu shell: sin esto, un
+/// `nvm use` no tendría ni nvm que invocar.
+#[cfg(unix)]
+fn shell_running(script: String) -> CommandBuilder {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
+    let mut cmd = CommandBuilder::new(shell);
+    cmd.arg("-l");
+    cmd.arg("-c");
+    cmd.arg(script);
+    cmd
+}
+
+#[cfg(windows)]
+fn shell_running(script: String) -> CommandBuilder {
+    let mut cmd = CommandBuilder::new("cmd");
+    cmd.arg("/C");
+    cmd.arg(script);
+    cmd
+}
+
 /// Crea un PTY, lanza el proceso dentro, y emite eventos `pty-data-{id}` al frontend.
 ///
 /// `cols`/`rows` los manda el frontend ya medidos contra el tamaño real del contenedor
@@ -101,6 +171,9 @@ pub async fn pty_create(
     // está lanzando (ver `agents::CustomAgent::env`). Se aplican DESPUÉS de las de la app,
     // así una TUI puede pisar `TERM`/`COLORTERM` si de verdad lo necesita.
     env: Option<std::collections::HashMap<String, String>>,
+    // `prelaunch`: comandos a ejecutar antes del agente, ya resueltos y en orden (ver el
+    // módulo `prelaunch`). Vacío = se lanza igual que siempre, sin ningún intermediario.
+    prelaunch: Option<Vec<String>>,
     app: AppHandle,
 ) -> Result<u32, String> {
     let pty_system = native_pty_system();
@@ -110,12 +183,7 @@ pub async fn pty_create(
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-    let mut parts = command.split_whitespace();
-    let program = parts.next().unwrap_or(&command);
-    let mut cmd = CommandBuilder::new(program);
-    for arg in parts {
-        cmd.arg(arg);
-    }
+    let mut cmd = build_launch(&command, &prelaunch.unwrap_or_default());
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
@@ -289,4 +357,76 @@ pub fn kill_all_sessions() {
         let _ = session.killer.wait();
     }
     buffers().clear();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::launch_script;
+
+    #[test]
+    fn un_solo_paso_precede_al_agente() {
+        let script = launch_script("claude", &["conda activate ml".into()]);
+        assert!(script.starts_with("conda activate ml && "), "{script}");
+        assert!(script.ends_with("claude"), "{script}");
+    }
+
+    #[test]
+    fn los_pasos_conservan_el_orden() {
+        // El orden es semántico: `nvm use` tiene que correr antes de nada que dependa de
+        // npm, y el venv antes de un export que use una ruta suya.
+        let script = launch_script(
+            "codex",
+            &["nvm use 18".into(), "source .venv/bin/activate".into()],
+        );
+        let nvm = script.find("nvm use 18").unwrap();
+        let venv = script.find("source .venv").unwrap();
+        let agente = script.find("codex").unwrap();
+        assert!(nvm < venv && venv < agente, "{script}");
+    }
+
+    #[test]
+    fn los_pasos_se_encadenan_con_and_para_que_un_fallo_no_lance_el_agente() {
+        let script = launch_script("claude", &["a".into(), "b".into()]);
+        assert_eq!(script.matches("&&").count(), 2, "{script}");
+        assert!(!script.contains(';'), "un `;` dejaría arrancar el agente igual: {script}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn en_unix_el_agente_reemplaza_al_shell() {
+        // Sin `exec` el shell quedaría de padre y `pty_kill` apuntaría a él en vez de al
+        // agente.
+        assert!(launch_script("claude", &["x".into()]).contains("&& exec claude"));
+    }
+
+    #[test]
+    fn el_comando_de_reanudacion_llega_entero() {
+        // El `--resume <id>` lo arma el frontend antes de llegar acá; el envoltorio no
+        // puede partirlo.
+        let script = launch_script("claude --resume abc-123", &["nvm use".into()]);
+        assert!(script.ends_with("claude --resume abc-123"), "{script}");
+    }
+
+    /// Sin pre-comandos el spawn tiene que quedar IDÉNTICO al de siempre: nada de shells
+    /// de por medio. Es la garantía de que esta feature no puede romper a quien no la usa.
+    #[test]
+    fn sin_pasos_se_lanza_el_binario_directo_sin_shell() {
+        let cmd = super::build_launch("claude --resume abc", &[]);
+        let argv: Vec<String> =
+            cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(argv, vec!["claude", "--resume", "abc"]);
+    }
+
+    /// Con pre-comandos, el comando entero viaja como UN argumento del shell. Eso también
+    /// hace que el `split_whitespace` de arriba no llegue a partirlo.
+    #[test]
+    fn con_pasos_el_comando_viaja_entero_como_argumento_del_shell() {
+        let cmd = super::build_launch("claude --resume abc", &["nvm use".into()]);
+        let argv: Vec<String> =
+            cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let script = argv.last().expect("el script va último");
+        assert!(script.contains("nvm use"), "{script}");
+        assert!(script.ends_with("claude --resume abc"), "{script}");
+        assert!(argv.len() >= 2, "tendría que haber flags de shell antes del script: {argv:?}");
+    }
 }

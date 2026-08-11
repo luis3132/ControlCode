@@ -1,7 +1,6 @@
 {
   "app.title": "Control Code",
   "app.subtitle": "Command center para AI coding agents",
-
   "btn.home": "Home",
   "btn.browse": "Explorar",
   "btn.add": "Agregar",
@@ -10,7 +9,6 @@
   "btn.back": "← Atrás",
   "btn.open": "Abrir",
   "btn.save": "Guardar",
-
   "home.step1": "1 · Carpeta del proyecto",
   "home.step2": "2 · Agente / TUI",
   "home.step3": "3 · Skills (opcional)",
@@ -19,11 +17,9 @@
   "home.pathPlaceholder": "/ruta/al/proyecto",
   "home.dialogTitle": "Seleccionar proyecto",
   "home.error.noFolder": "Selecciona una carpeta",
-
   "home.recent.title": "Workspaces",
   "home.recent.empty": "Todavía no hay workspaces guardados",
   "home.recent.lastActive": "Abierto {{time}}",
-
   "workspace.list.summary": "{{windows}} ventanas ({{tabs}} tabs)",
   "workspace.save.title": "Guardar como workspace...",
   "workspace.save.placeholder": "Nombre del workspace (ej: cliente)",
@@ -32,21 +28,17 @@
   "workspace.open.body": "¿Quieres cerrar las ventanas que tienes abiertas ahora, o mantenerlas abiertas junto a este workspace?",
   "workspace.open.keepCurrent": "Mantener actuales",
   "workspace.open.closeCurrent": "Cerrar actuales",
-
   "workspace.resetDefault.title": "¿Descartar el workspace actual?",
   "workspace.resetDefault.body": "Tienes tabs sin guardar en el workspace actual. Crear uno nuevo las va a cerrar y descartar — guárdalo primero si quieres conservarlas.",
   "workspace.resetDefault.confirm": "Descartar y crear nuevo",
-
   "workspace.closeAll.title": "¿Cerrar las ventanas de este workspace?",
   "workspace.closeAll.body": "Este workspace tiene {{count}} ventanas abiertas. ¿Quieres cerrarlas todas, o solo esta?",
   "workspace.close.window": "Cerrar ventana",
   "workspace.close.choose": "Cerrar ventana ({{count}} abiertas en este workspace)",
-
   "topbar.saveWorkspace": "Guardar workspace",
   "topbar.menu.home": "Inicio",
   "topbar.menu.newWindow": "Nueva ventana",
   "topbar.menu.newWorkspace": "Nuevo workspace",
-
   "sessions.title": "Sesiones",
   "sessions.subtitle": "Chats que abriste anteriormente en este workspace",
   "sessions.empty": "Todavía no hay sesiones cerradas en este workspace",
@@ -61,7 +53,6 @@
   "sessions.resumeSkills.diff": "{{added}} agregadas · {{removed}} quitadas, respecto a lo que tenía la sesión.",
   "sessions.opened": "Abierta el {{time}}",
   "sessions.closed": "Cerrada hace {{time}}",
-
   "sessions.noMatches": "Ninguna sesión coincide con los filtros",
   "sessions.workspaceScopeHint": "Solo se muestran las sesiones de este workspace.",
   "sessions.account.gone": "Cuenta eliminada",
@@ -84,7 +75,6 @@
   "sessions.export.done": "Sesión exportada",
   "sessions.delete.action": "Quitar del historial",
   "sessions.delete.confirm": "¿Quitar esta sesión del historial? El archivo de sesión del agente en tu disco no se toca.",
-
   "sessions.missingSkills.title": "Faltan skills de esta sesión",
   "sessions.missingSkills.body": "\"{{session}}\" tenía skills que ya no están instaladas ({{count}}). Si la abrís así, el agente no va a contar con ellas.",
   "sessions.missingSkills.allRestored": "Ya están todas las skills que tenía \"{{session}}\". Podés abrirla.",
@@ -96,18 +86,15 @@
   "sessions.missingSkills.installAll": "Instalar las disponibles",
   "sessions.missingSkills.continueAnyway": "Abrir igual",
   "sessions.missingSkills.open": "Abrir sesión",
-
   "workspace.manage.link": "Gestionar",
   "workspace.manage.title": "Gestionar workspaces",
   "workspace.manage.subtitle": "Renombra, elimina o abre tus disposiciones guardadas de ventanas/tabs",
   "workspace.manage.rename": "Renombrar",
   "workspace.manage.delete": "Eliminar",
-
   "app.exit.title": "¿Cerrar la app?",
   "app.exit.body": "Hay {{count}} ventanas abiertas. ¿Quieres cerrarlas todas, o solo esta?",
   "app.exit.closeCurrent": "Cerrar solo esta ventana",
   "app.exit.closeAll": "Cerrar todo",
-
   "sidebar.expand": "Expandir",
   "sidebar.collapse": "Colapsar",
   "sidebar.home": "Home",
@@ -115,15 +102,12 @@
   "sidebar.skills": "Skills",
   "sidebar.marketplace": "Marketplace",
   "sidebar.settings": "Configuración",
-
   "tabs.new": "Nueva terminal",
-
   "terminal.empty": "Abre un proyecto desde Home para empezar",
   "terminal.status.connecting": "conectando",
   "terminal.status.exited": "terminado",
   "terminal.exitCode": "[Proceso terminado con código {{code}}]",
   "terminal.ptyError": "[Error al iniciar PTY: {{error}}]",
-
   "wizard.step1.title": "Seleccionar carpeta",
   "wizard.step2.title": "Seleccionar agente",
   "wizard.step1.helper": "¿Dónde está el proyecto?",
@@ -142,7 +126,6 @@
   "wizard.step3.searchEmpty": "Ninguna skill coincide con la búsqueda",
   "wizard.step3.searchToReveal": "{{count}} más instaladas — buscá para encontrarlas",
   "wizard.step3.selectedCount": "{{count}} skill(s) seleccionada(s)",
-
   "settings.nav": "Secciones",
   "settings.terminal": "Terminal",
   "settings.terminal.desc": "Cómo se ve y se navega el historial de las terminales.",
@@ -150,7 +133,6 @@
   "settings.terminal.marks.desc": "Dibuja una línea tenue cada vez que enviás algo, para separar de un vistazo una intervención de la siguiente al recorrer una conversación larga.",
   "settings.terminal.marks.limits": "Se guía por la tecla Enter, que es lo único que la terminal puede ver: un Enter dentro de un mensaje de varias líneas también marca. No aplica a las TUIs que se dibujan en pantalla completa (OpenCode), porque ahí no hay historial al que anclar la marca.",
   "settings.terminal.marks.applies": "Se aplica a las terminales que abras a partir de ahora; las que ya están abiertas no cambian.",
-
   "settings.title": "Configuración",
   "settings.subtitle": "Personaliza tu entorno de Control Code",
   "settings.appearance": "Apariencia",
@@ -168,7 +150,6 @@
   "settings.tuis.commandPlaceholder": "Ej: aider",
   "settings.tuis.commandHint": "Puede incluir flags fijas: aider --no-auto-commits",
   "settings.tuis.error": "El nombre y el comando son obligatorios",
-
   "settings.tuis.advanced": "Integración con la app (opcional)",
   "settings.tuis.advancedDesc": "Nada de esto es obligatorio. Cada campo que completes habilita una función más: reanudar sesiones, gestionarle skills o mostrar su historial.",
   "settings.tuis.resumeArgs": "Argumentos de reanudación",
@@ -184,36 +165,30 @@
   "settings.tuis.env": "Variables de entorno",
   "settings.tuis.envHint": "Se inyectan al lanzar el proceso",
   "settings.tuis.envAdd": "+ Agregar variable",
-
   "settings.orchestrator": "Modo orquestador",
   "settings.orchestrator.desc": "Cuando un agente externo maneja la app con la CLI, cada tab que observa le manda eventos y le consume contexto. Este tope es lo que evita que se le llene.",
   "settings.orchestrator.watchLimit": "Tabs observadas a la vez",
   "settings.orchestrator.watchLimitHint": "Máximo de tabs que un orquestador puede seguir con «ccode watch add» al mismo tiempo.",
   "settings.orchestrator.watchLimitWarning": "Con más de 5 tabs observadas, los eventos por sí solos pueden llenar el contexto del modelo antes de que termine la tarea.",
   "settings.orchestrator.default": "(recomendado)",
-
   "orchestrator.tooltip.requests": "Modo orquestador · {{requests}} comandos de la CLI",
   "orchestrator.tooltip.tokens": "~{{tokens}} tokens estimados entregados",
   "orchestrator.tooltip.watched": "Tabs observadas: {{watched}} de {{limit}}",
   "orchestrator.tooltip.last": "Último comando: {{command}}",
   "orchestrator.tooltip.reset": "Click para poner el contador en cero",
-
   "settings.tuis.cap.resume": "reanuda sesiones",
   "settings.tuis.cap.skills": "skills",
   "settings.tuis.cap.sessions": "historial",
   "settings.tuis.cap.env": "env",
-
   "settings.skillsDir": "Directorio de skills",
   "settings.skillsDir.desc": "Dónde se guardan las skills instaladas globalmente. Cambiarlo solo afecta instalaciones futuras.",
   "settings.skillsDir.change": "Cambiar",
-
   "accounts.pick": "Con qué cuenta",
   "accounts.system": "Cuenta principal",
   "accounts.system.hint": "La de siempre",
   "accounts.ready": "Lista para usar",
   "accounts.needsLogin": "Falta loguearse",
   "terminal.accountMissing": "No se pudo usar la cuenta de esta tab ({{error}}). No se lanzó nada para no arrancar con la cuenta equivocada.",
-
   "settings.accounts": "Cuentas de las TUIs",
   "settings.accounts.desc": "Varias cuentas de la misma TUI, cada una con su propio login. Cada cuenta es una carpeta de perfil aparte: la de tu sistema no se toca.",
   "settings.accounts.add": "Agregar cuenta",
@@ -245,7 +220,6 @@
   "settings.accounts.delete.body": "Podés quitarla de la app y dejar sus archivos, o borrar también la carpeta con su login:",
   "settings.accounts.delete.keepFiles": "Quitar y conservar archivos",
   "settings.accounts.delete.withFiles": "Borrar todo",
-
   "settings.cli": "CLI (ccode)",
   "settings.cli.desc": "Instala el comando ccode para controlar la app desde la terminal (o desde otro agente). No pide permisos de administrador.",
   "settings.cli.installed": "Instalada",
@@ -258,7 +232,6 @@
   "settings.cli.copyNote": "En Windows se copia el ejecutable, así que hay que reinstalar la CLI después de actualizar la app.",
   "settings.cli.noBinary": "No se encontró el binario ccode junto a la app. Si estás en desarrollo, compilalo con: cargo build --bin ccode",
   "settings.cli.usage": "Probalo con: ccode app status · ccode --help",
-
   "skills.manage.title": "Skills",
   "skills.manage.subtitle": "Instala skills una sola vez y asígnalas a cualquier proyecto sin duplicar archivos",
   "skills.install.btn": "Instalar skill",
@@ -308,7 +281,6 @@
   "skills.health.staleTarget": "apunta a otro lado",
   "skills.health.repair": "Reparar",
   "skills.health.remove": "Quitar",
-
   "marketplace.title": "Marketplace",
   "marketplace.subtitle": "Descubrí e instalá skills desde repositorios públicos o carpetas locales",
   "marketplace.addRegistry": "Agregar repositorio",
@@ -356,11 +328,26 @@
   "marketplace.add.localPlaceholder": "O pegá la ruta de la carpeta",
   "marketplace.add.adding": "Agregando…",
   "marketplace.add.error.required": "Completá el nombre y la ubicación",
-
   "marketplace.add.phase.connecting": "Conectando con el repositorio…",
   "marketplace.add.phase.listing": "Leyendo su contenido…",
   "marketplace.add.phase.scanning": "Buscando skills…",
   "marketplace.add.phase.saving": "Guardando…",
   "marketplace.add.phase.done": "Listo",
-  "marketplace.add.phase.error": "No se pudo resolver el repositorio"
+  "marketplace.add.phase.error": "No se pudo resolver el repositorio",
+  "settings.prelaunch": "Pre-lanzamiento",
+  "settings.prelaunch.desc": "Comandos que se ejecutan antes de arrancar un agente, para dejarlo en el entorno correcto.",
+  "settings.prelaunch.hint": "Acá solo se guardan. Cuáles usar, y en qué orden, se elige al abrir cada tab en Opciones avanzadas.",
+  "prelaunch.namePlaceholder": "Nombre, ej. entorno conda",
+  "prelaunch.commandPlaceholder": "Comando, ej. conda activate ml",
+  "prelaunch.addCommand": "Agregar comando",
+  "prelaunch.saved": "Guardados",
+  "prelaunch.preview": "Se va a ejecutar",
+  "prelaunch.missingPreset": "Este comando guardado ya no existe",
+  "prelaunch.moveUp": "Subir",
+  "prelaunch.moveDown": "Bajar",
+  "prelaunch.chainDesc": "Se ejecutan en orden antes del agente. Si uno falla, el agente no arranca.",
+  "prelaunch.stepCount_one": "{{count}} comando",
+  "prelaunch.stepCount_other": "{{count}} comandos",
+  "wizard.advanced": "Opciones avanzadas",
+  "terminal.prelaunchError": "No se pudo preparar el entorno de esta tab ({{error}}). No se lanzó nada para no arrancar en el entorno equivocado."
 }

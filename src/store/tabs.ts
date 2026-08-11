@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { PrelaunchStep } from "./prelaunch";
 
 export const DEFAULT_WORKSPACE_ID = "default";
 
@@ -32,6 +33,9 @@ export interface Tab {
    *  Se guarda el id y no las variables ya resueltas: si la cuenta se renombra o se muda
    *  de carpeta, la tab restaurada sigue apuntando a la cuenta correcta. */
   accountId?: string;
+  /** Comandos que corren antes del agente (ver el store `prelaunch`). Se guardan las
+   *  referencias a los presets y no su texto, así editar uno alcanza a las tabs guardadas. */
+  prelaunch?: PrelaunchStep[];
   /** Unix seconds — cuándo se abrió esta tab por primera vez (no se toca en autosaves). */
   openedAt: number;
 }
@@ -54,6 +58,7 @@ interface TabsState {
     sessionId?: string;
     historyId?: string;
     accountId?: string;
+    prelaunch?: PrelaunchStep[];
   }) => string;
   closeTab: (id: string) => void;
   activateTab: (id: string) => void;
@@ -82,7 +87,7 @@ export const useTabsStore = create<TabsState>((set) => ({
   workspaceId: DEFAULT_WORKSPACE_ID,
   hydrated: false,
 
-  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId, historyId, accountId }) => {
+  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId, historyId, accountId, prelaunch }) => {
     const id = crypto.randomUUID();
     const computedTitle =
       title ??
@@ -102,6 +107,7 @@ export const useTabsStore = create<TabsState>((set) => ({
           sessionId,
           historyId,
           accountId,
+          prelaunch,
           openedAt: Math.floor(Date.now() / 1000),
         },
       ],

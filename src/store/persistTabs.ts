@@ -82,6 +82,7 @@ async function saveNow(opts: { refreshScrollback: boolean } = { refreshScrollbac
       sessionId: t.sessionId ?? null,
       historyId: t.historyId ?? null,
       accountId: t.accountId ?? null,
+      prelaunch: t.prelaunch ?? [],
       scrollback: await resolveScrollback(t.ptyId),
       openedAt: t.openedAt,
     }))

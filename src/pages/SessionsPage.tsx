@@ -102,6 +102,9 @@ export function SessionsPage() {
       // principal y el resume no encontraba nada: el transcript vive dentro de la carpeta
       // de la cuenta, no en el home.
       accountId: entry.accountId ?? undefined,
+      // Y con los mismos comandos previos: reabrir una sesión tiene que reproducir el
+      // entorno en el que se estaba trabajando, no uno pelado.
+      prelaunch: entry.prelaunch,
     });
     navigate("/workspace");
 

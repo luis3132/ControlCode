@@ -257,8 +257,8 @@ export function TabBar() {
       <NewTabWizard
         isOpen={wizardOpen}
         onClose={() => setWizardOpen(false)}
-        onConfirm={({ cwd, agent, skillIds, accountId }) => {
-          const tabId = addTab({ cwd, agent, accountId });
+        onConfirm={({ cwd, agent, skillIds, accountId, prelaunch }) => {
+          const tabId = addTab({ cwd, agent, accountId, prelaunch });
           navigate("/workspace");
 
           // Los symlinks de las skills elegidas tienen que existir en el cwd ANTES de

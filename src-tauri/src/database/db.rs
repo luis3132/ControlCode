@@ -115,6 +115,10 @@ pub fn init_db() -> SqlResult<DbConnection> {
              -- cuenta se renombra o se muda de carpeta, la tab restaurada sigue apuntando
              -- a la cuenta correcta en vez de a una ruta que quedó vieja.
              account_id      TEXT,
+             -- Cadena de comandos a ejecutar antes del agente, como JSON. Guarda
+             -- referencias a `prelaunch_presets` (no su texto), por el mismo motivo que
+             -- `account_id` guarda el id y no las variables ya resueltas.
+             prelaunch       TEXT NOT NULL DEFAULT '[]',
              opened_at       INTEGER NOT NULL,
              created_at      INTEGER NOT NULL,
              last_active     INTEGER NOT NULL
@@ -229,6 +233,9 @@ pub fn init_db() -> SqlResult<DbConnection> {
              -- arrancaba con la principal, y el resume no encontraba su transcript —
              -- que vive dentro de la carpeta de la cuenta, no en el home.
              account_id   TEXT,
+             -- Ver `tabs.prelaunch`: reabrir una sesión desde el historial tiene que
+             -- reproducir el mismo entorno con el que se abrió la primera vez.
+             prelaunch    TEXT NOT NULL DEFAULT '[]',
              opened_at    INTEGER NOT NULL,
              closed_at    INTEGER NOT NULL
          );
@@ -250,6 +257,16 @@ pub fn init_db() -> SqlResult<DbConnection> {
              dir        TEXT NOT NULL,
              created_at INTEGER NOT NULL,
              UNIQUE (agent_id, name)
+         );
+
+         -- Comandos de pre-lanzamiento guardados ('entorno conda' → 'conda activate ml').
+         -- Son globales y no por agente: un `conda activate` sirve igual para cualquier
+         -- TUI. El nombre es único porque es lo que `ccode --pre-preset` recibe.
+         CREATE TABLE IF NOT EXISTS prelaunch_presets (
+             id         TEXT PRIMARY KEY,
+             name       TEXT NOT NULL UNIQUE,
+             command    TEXT NOT NULL,
+             created_at INTEGER NOT NULL
          );",
     )?;
 
@@ -263,6 +280,20 @@ pub fn init_db() -> SqlResult<DbConnection> {
     }
     if conn.prepare("SELECT account_id FROM session_history LIMIT 1").is_err() {
         conn.execute("ALTER TABLE session_history ADD COLUMN account_id TEXT", [])?;
+    }
+    // Cadena de pre-lanzamiento de la tab, como JSON (ver `prelaunch::steps_to_json`). Se
+    // guardan referencias a los presets y no su texto ya resuelto: editar un preset
+    // después alcanza a las tabs guardadas, en vez de dejarlas con una copia vieja.
+    // Va con DEFAULT '[]' y NOT NULL para que leerla nunca tenga que distinguir vacío de
+    // nulo.
+    if conn.prepare("SELECT prelaunch FROM tabs LIMIT 1").is_err() {
+        conn.execute("ALTER TABLE tabs ADD COLUMN prelaunch TEXT NOT NULL DEFAULT '[]'", [])?;
+    }
+    if conn.prepare("SELECT prelaunch FROM session_history LIMIT 1").is_err() {
+        conn.execute(
+            "ALTER TABLE session_history ADD COLUMN prelaunch TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )?;
     }
     if conn.prepare("SELECT sibling_tabs FROM session_history LIMIT 1").is_err() {
         conn.execute(
@@ -447,6 +478,9 @@ pub struct TabRow {
     pub history_id: Option<String>,
     /// Cuenta de la TUI con la que corre esta tab; `None` = la del sistema.
     pub account_id: Option<String>,
+    /// Cadena de comandos a ejecutar antes del agente (ver el módulo `prelaunch`).
+    #[serde(default)]
+    pub prelaunch: Vec<crate::prelaunch::PrelaunchStep>,
     pub opened_at: i64,
     pub created_at: i64,
     pub last_active: i64,
@@ -467,6 +501,8 @@ pub struct TabStatePayload {
     pub scrollback: Option<String>,
     pub history_id: Option<String>,
     pub account_id: Option<String>,
+    #[serde(default)]
+    pub prelaunch: Vec<crate::prelaunch::PrelaunchStep>,
     pub opened_at: i64,
 }
 
@@ -519,9 +555,10 @@ fn row_to_tab(row: &rusqlite::Row) -> rusqlite::Result<TabRow> {
         scrollback: row.get(10)?,
         history_id: row.get(11)?,
         account_id: row.get(12)?,
-        opened_at: row.get(13)?,
-        created_at: row.get(14)?,
-        last_active: row.get(15)?,
+        prelaunch: crate::prelaunch::steps_from_json(&row.get::<_, String>(13)?),
+        opened_at: row.get(14)?,
+        created_at: row.get(15)?,
+        last_active: row.get(16)?,
     })
 }
 
@@ -953,11 +990,11 @@ fn reconcile_session_id(
 fn archive_tab_row(conn: &Connection, tab_id: &str, workspace_id: &str) -> Result<(), String> {
     #[allow(clippy::type_complexity)]
     #[allow(clippy::type_complexity)]
-    let row: Option<(String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, i64, bool)> = conn
+    let row: Option<(String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, String, i64, bool)> = conn
         .query_row(
-            "SELECT agent_id, agent_label, command, cwd, title, session_id, history_id, account_id, opened_at, title_is_custom FROM tabs WHERE id = ?1",
+            "SELECT agent_id, agent_label, command, cwd, title, session_id, history_id, account_id, prelaunch, opened_at, title_is_custom FROM tabs WHERE id = ?1",
             [tab_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get::<_, i64>(9)? != 0)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get::<_, i64>(10)? != 0)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
@@ -971,6 +1008,7 @@ fn archive_tab_row(conn: &Connection, tab_id: &str, workspace_id: &str) -> Resul
         session_id,
         history_id,
         account_id,
+        prelaunch,
         opened_at,
         title_is_custom,
     )) = row
@@ -1103,16 +1141,16 @@ fn archive_tab_row(conn: &Connection, tab_id: &str, workspace_id: &str) -> Resul
         // `session_id` sí se escribe: una sesión que se archivó sin id y lo resolvió al
         // reabrirse tiene que quedar identificada de acá en adelante.
         conn.execute(
-            "UPDATE session_history SET agent_id=?1, agent_label=?2, command=?3, cwd=?4, title=?5, session_id=COALESCE(?6, session_id), skills=?7, sibling_tabs=?8, account_id=?9, closed_at=?10 WHERE id=?11",
-            rusqlite::params![agent_id, agent_label, command, cwd, title, session_id, skills_json, siblings_json, account_id, now, hid],
+            "UPDATE session_history SET agent_id=?1, agent_label=?2, command=?3, cwd=?4, title=?5, session_id=COALESCE(?6, session_id), skills=?7, sibling_tabs=?8, account_id=?9, prelaunch=?10, closed_at=?11 WHERE id=?12",
+            rusqlite::params![agent_id, agent_label, command, cwd, title, session_id, skills_json, siblings_json, account_id, prelaunch, now, hid],
         )
         .map_err(|e| e.to_string())?;
         return Ok(());
     }
 
     conn.execute(
-        "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, opened_at, closed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, prelaunch, opened_at, closed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         rusqlite::params![
             Uuid::new_v4().to_string(),
             workspace_id,
@@ -1125,6 +1163,7 @@ fn archive_tab_row(conn: &Connection, tab_id: &str, workspace_id: &str) -> Resul
             skills_json,
             siblings_json,
             account_id,
+            prelaunch,
             opened_at,
             now
         ],
@@ -1150,6 +1189,9 @@ pub struct SessionHistoryEntry {
     pub sibling_tabs: Vec<SiblingTab>,
     /// Cuenta de la TUI con la que corría; `None` = la del sistema.
     pub account_id: Option<String>,
+    /// Cadena de pre-lanzamiento con la que se abrió, para poder reproducirla al reabrir.
+    #[serde(default)]
+    pub prelaunch: Vec<crate::prelaunch::PrelaunchStep>,
     pub opened_at: i64,
     pub closed_at: i64,
 }
@@ -1253,7 +1295,7 @@ pub fn db_list_session_history(
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, opened_at, closed_at
+            "SELECT id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, prelaunch, opened_at, closed_at
              FROM session_history WHERE workspace_id = ?1 ORDER BY closed_at DESC",
         )
         .map_err(|e| e.to_string())?;
@@ -1277,8 +1319,9 @@ pub fn db_list_session_history(
                 skills,
                 sibling_tabs,
                 account_id: row.get(10)?,
-                opened_at: row.get(11)?,
-                closed_at: row.get(12)?,
+                prelaunch: crate::prelaunch::steps_from_json(&row.get::<_, String>(11)?),
+                opened_at: row.get(12)?,
+                closed_at: row.get(13)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -1316,7 +1359,7 @@ pub fn session_history_entry(
     history_id: &str,
 ) -> Result<Option<SessionHistoryEntry>, String> {
     conn.query_row(
-        "SELECT id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, opened_at, closed_at
+        "SELECT id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, prelaunch, opened_at, closed_at
          FROM session_history WHERE id = ?1",
         [history_id],
         |row| {
@@ -1334,8 +1377,9 @@ pub fn session_history_entry(
                 skills: parse_archived_skills(&skills_json),
                 sibling_tabs: serde_json::from_str(&siblings_json).unwrap_or_default(),
                 account_id: row.get(10)?,
-                opened_at: row.get(11)?,
-                closed_at: row.get(12)?,
+                prelaunch: crate::prelaunch::steps_from_json(&row.get::<_, String>(11)?),
+                opened_at: row.get(12)?,
+                closed_at: row.get(13)?,
             })
         },
     )
@@ -1487,8 +1531,8 @@ fn db_save_window_state_sync(
     // es estable y el attachment sobrevive hasta que la tab se cierra de verdad (arriba).
     for t in &state.tabs {
         conn.execute(
-            "INSERT INTO tabs (id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, account_id, opened_at, created_at, last_active)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+            "INSERT INTO tabs (id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, account_id, prelaunch, opened_at, created_at, last_active)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
              ON CONFLICT(id) DO UPDATE SET
                window_id = excluded.window_id,
                title = excluded.title,
@@ -1502,6 +1546,7 @@ fn db_save_window_state_sync(
                scrollback = excluded.scrollback,
                history_id = excluded.history_id,
                account_id = excluded.account_id,
+               prelaunch = excluded.prelaunch,
                last_active = excluded.last_active",
             rusqlite::params![
                 t.id,
@@ -1517,6 +1562,7 @@ fn db_save_window_state_sync(
                 t.scrollback,
                 t.history_id,
                 t.account_id,
+                crate::prelaunch::steps_to_json(&t.prelaunch),
                 t.opened_at,
                 now
             ],
@@ -1555,7 +1601,7 @@ pub fn db_load_window_state(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, account_id, opened_at, created_at, last_active
+            "SELECT id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, account_id, prelaunch, opened_at, created_at, last_active
              FROM tabs WHERE window_id = ?1 ORDER BY tab_order ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -1777,10 +1823,10 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
              CREATE TABLE windows (id TEXT PRIMARY KEY, label TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL, is_open INTEGER NOT NULL DEFAULT 1, last_active INTEGER NOT NULL);
-             CREATE TABLE tabs (id TEXT PRIMARY KEY, window_id TEXT NOT NULL, title TEXT, title_is_custom INTEGER NOT NULL DEFAULT 0, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, tab_order INTEGER NOT NULL DEFAULT 0, session_id TEXT, scrollback TEXT, history_id TEXT, account_id TEXT, opened_at INTEGER NOT NULL, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
+             CREATE TABLE tabs (id TEXT PRIMARY KEY, window_id TEXT NOT NULL, title TEXT, title_is_custom INTEGER NOT NULL DEFAULT 0, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, tab_order INTEGER NOT NULL DEFAULT 0, session_id TEXT, scrollback TEXT, history_id TEXT, account_id TEXT, prelaunch TEXT NOT NULL DEFAULT '[]', opened_at INTEGER NOT NULL, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
              CREATE TABLE skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, source_path TEXT NOT NULL);
              CREATE TABLE project_skills (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, workspace_id TEXT NOT NULL, scope TEXT NOT NULL, tab_id TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
-             CREATE TABLE session_history (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT, session_id TEXT, skills TEXT NOT NULL DEFAULT '[]', sibling_tabs TEXT NOT NULL DEFAULT '[]', account_id TEXT, opened_at INTEGER NOT NULL, closed_at INTEGER NOT NULL);
+             CREATE TABLE session_history (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT, session_id TEXT, skills TEXT NOT NULL DEFAULT '[]', sibling_tabs TEXT NOT NULL DEFAULT '[]', account_id TEXT, prelaunch TEXT NOT NULL DEFAULT '[]', opened_at INTEGER NOT NULL, closed_at INTEGER NOT NULL);
              CREATE TABLE agent_accounts (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, name TEXT NOT NULL, dir TEXT NOT NULL, created_at INTEGER NOT NULL);
              INSERT INTO workspaces VALUES ('ws', 'WS', 0, 0);
              INSERT INTO windows VALUES ('win', 'win', 'ws', 1, 0);",

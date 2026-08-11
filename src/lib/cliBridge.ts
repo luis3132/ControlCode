@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabsStore } from "../store/tabs";
+import type { PrelaunchStep } from "../store/prelaunch";
 import { useSettingsStore } from "../store/settings";
 import { flushPendingSave } from "../store/persistTabs";
 import { registerPendingSkillSetup } from "./pendingSkillSetup";
@@ -79,7 +80,10 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
   // El backend ya tradujo `--account <nombre>` a un id y falló si no existía (ver
   // `resolve_account_id`), así que acá solo se pasa. Ausente = la cuenta principal.
   const accountId = str(args, "accountId");
-  const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId });
+  // Ídem con `--pre`/`--pre-preset`: el backend ya resolvió los nombres de preset a ids y
+  // falló si alguno no existía (ver `resolve_prelaunch_steps`).
+  const prelaunch = Array.isArray(args.prelaunch) ? (args.prelaunch as PrelaunchStep[]) : [];
+  const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch });
 
   // Mismo gate que el wizard del "+": las skills tienen que estar en disco antes de que
   // el proceso arranque. Se espera acá (y no solo se registra) para que la CLI no

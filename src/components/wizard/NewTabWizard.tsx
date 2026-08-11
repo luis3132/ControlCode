@@ -5,6 +5,8 @@ import { FolderPickerStep } from "./FolderPickerStep";
 import { AgentPickerStep } from "./AgentPickerStep";
 import { SkillPickerStep } from "./SkillPickerStep";
 import { AccountPickerStep } from "./AccountPickerStep";
+import { AdvancedOptions } from "./AdvancedOptions";
+import type { PrelaunchStep } from "../../store/prelaunch";
 import { AgentInfo, useTabsStore } from "../../store/tabs";
 import { useSettingsStore } from "../../store/settings";
 
@@ -19,6 +21,8 @@ interface NewTabWizardProps {
     skillIds: string[];
     /** `undefined` = la cuenta del sistema. */
     accountId?: string;
+    /** Comandos que corren antes del agente. Vacío = ninguno. */
+    prelaunch: PrelaunchStep[];
   }) => void;
 }
 
@@ -31,6 +35,7 @@ export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) 
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>();
+  const [prelaunch, setPrelaunch] = useState<PrelaunchStep[]>([]);
 
   const allAgents: AgentInfo[] = [
     ...detectedAgents,
@@ -49,6 +54,7 @@ export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) 
     setSelectedAgent(null);
     setSelectedSkillIds([]);
     setSelectedAccountId(undefined);
+    setPrelaunch([]);
   };
 
   const handleClose = () => {
@@ -63,6 +69,7 @@ export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) 
       agent: selectedAgent,
       skillIds: selectedSkillIds,
       accountId: selectedAccountId,
+      prelaunch,
     });
     reset();
     onClose();
@@ -134,6 +141,13 @@ export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) 
               agentId={selectedAgent.id}
               value={selectedAccountId}
               onChange={setSelectedAccountId}
+            />
+          )}
+          {selectedAgent && (
+            <AdvancedOptions
+              agentCommand={selectedAgent.command}
+              prelaunch={prelaunch}
+              onPrelaunchChange={setPrelaunch}
             />
           )}
         </div>

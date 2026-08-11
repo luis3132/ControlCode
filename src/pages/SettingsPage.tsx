@@ -10,6 +10,7 @@ import { CustomAgentForm } from "../components/settings/CustomAgentForm";
 import { CliInstallSection } from "../components/settings/CliInstallSection";
 import { OrchestratorSection } from "../components/settings/OrchestratorSection";
 import { AccountsSection } from "../components/settings/AccountsSection";
+import { PrelaunchSection } from "../components/settings/PrelaunchSection";
 import { TerminalSection } from "../components/settings/TerminalSection";
 import { SettingsNav, type SettingsSectionRef } from "../components/settings/SettingsNav";
 
@@ -73,6 +74,7 @@ export function SettingsPage() {
       { id: "skills-dir", label: t("settings.skillsDir") },
       { id: "tuis", label: t("settings.tuis") },
       { id: "accounts", label: t("settings.accounts") },
+      { id: "prelaunch", label: t("settings.prelaunch") },
       { id: "cli", label: t("settings.cli") },
       { id: "orchestrator", label: t("settings.orchestrator") },
     ],
@@ -245,6 +247,10 @@ export function SettingsPage() {
 
             <Section id="accounts">
               <AccountsSection />
+            </Section>
+
+            <Section id="prelaunch">
+              <PrelaunchSection />
             </Section>
 
             <Section id="cli">

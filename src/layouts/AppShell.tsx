@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AgentInfo, Tab, useTabsStore } from "../store/tabs";
+import type { PrelaunchStep } from "../store/prelaunch";
 import { initTabsPersistence } from "../store/persistTabs";
 import { TopBar } from "../components/topbar/TopBar";
 import { TabBar } from "../components/tabs/TabBar";
@@ -26,6 +27,7 @@ interface RestoredTabRow {
   scrollback: string | null;
   historyId: string | null;
   accountId: string | null;
+  prelaunch: PrelaunchStep[] | null;
   openedAt: number;
 }
 
@@ -48,6 +50,7 @@ function toFrontendTab(row: RestoredTabRow): Tab {
     scrollback: row.scrollback ?? undefined,
     historyId: row.historyId ?? undefined,
     accountId: row.accountId ?? undefined,
+    prelaunch: row.prelaunch ?? undefined,
     openedAt: row.openedAt,
   };
 }

@@ -34,6 +34,8 @@ TABS
   tab create <ruta> --agent <id>              Abre una tab nueva
              [--skills a,b]                   · skills a adjuntar, por nombre
              [--account <nombre>]             · cuenta de esa TUI (ver `accounts`)
+             [--pre \"<comando>\"]              · comando a ejecutar ANTES del agente
+             [--pre-preset <nombre>]          · ídem, guardado (ver `prelaunch`)
              [--initprompt \"...\"]             · prompt inicial, enviado con Enter
              [--window <label>]                 cuando la TUI terminó de arrancar
   tab close <id>                              Cierra una tab
@@ -62,6 +64,7 @@ WORKSPACES
 AGENTES, CUENTAS Y SKILLS
   agents                                      Qué poner en --agent (incluye las custom)
   accounts                                    Qué poner en --account, por TUI
+  prelaunch                                   Qué poner en --pre-preset
   skills                                      Qué poner en --skills (instaladas)
   skill install <nombre>                      Instala desde los repos habilitados
 
@@ -71,6 +74,9 @@ OTROS
 
 `agents`, `accounts` y `skills` son atajos de `agent list`, `account list` y `skill list`.
 Sin --account, la tab usa la cuenta principal (la de siempre).
+--pre y --pre-preset se pueden repetir y se ejecutan EN EL ORDEN ESCRITO, mezclados entre
+sí; si uno falla, el agente no arranca. Ej.:
+  ccode tab create --cwd . --agent claude-code --pre-preset \"entorno conda\" --pre \"nvm use\"
 
 La salida siempre es una línea JSON en stdout.
 Códigos de salida: 0 ok · 1 el comando falló · 2 uso incorrecto · 3 la app no corre
@@ -136,6 +142,7 @@ fn shortcut(word: &str) -> Option<&'static str> {
     match word {
         "agents" => Some("agent.list"),
         "accounts" => Some("account.list"),
+        "prelaunch" => Some("prelaunch.list"),
         "skills" => Some("skill.list"),
         _ => None,
     }
@@ -201,6 +208,33 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
                 map.extend(obj);
             } else {
                 return Err("--json-args tiene que ser un objeto JSON".to_string());
+            }
+            i += 2;
+            continue;
+        }
+
+        // `--pre` y `--pre-preset` son repetibles y comparten UNA lista, porque el orden
+        // entre ellos es semántico: `--pre-preset conda --pre "nvm use"` no es lo mismo que
+        // al revés. Acumularlos en arrays separados perdería justamente eso.
+        if key == "pre" || key == "pre-preset" {
+            let value = args
+                .get(i + 1)
+                .filter(|v| !v.starts_with("--"))
+                .ok_or_else(|| format!("--{key} necesita un valor"))?;
+            let step = if key == "pre" {
+                json!({ "command": value })
+            } else {
+                json!({ "presetName": value })
+            };
+            match map.entry("prelaunch".to_string()) {
+                serde_json::map::Entry::Occupied(mut e) => {
+                    if let Some(list) = e.get_mut().as_array_mut() {
+                        list.push(step);
+                    }
+                }
+                serde_json::map::Entry::Vacant(e) => {
+                    e.insert(Value::Array(vec![step]));
+                }
             }
             i += 2;
             continue;
@@ -348,6 +382,41 @@ mod tests {
 
     fn flags(args: &[&str]) -> Value {
         parse_flags(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &[]).unwrap()
+    }
+
+    /// `--pre` y `--pre-preset` son lo único repetible de la CLI, y su orden es
+    /// semántico: `nvm use` antes que algo que dependa de npm. Si el parser los pisara
+    /// (que es lo que hace con cualquier otro flag repetido) la cadena quedaría en un solo
+    /// paso, sin aviso.
+    #[test]
+    fn los_pre_comandos_se_acumulan_en_una_sola_lista_ordenada() {
+        let v = flags(&[
+            "--pre-preset", "entorno conda",
+            "--pre", "nvm use",
+            "--pre-preset", "node del proyecto",
+        ]);
+        assert_eq!(
+            v["prelaunch"],
+            serde_json::json!([
+                { "presetName": "entorno conda" },
+                { "command": "nvm use" },
+                { "presetName": "node del proyecto" },
+            ])
+        );
+    }
+
+    #[test]
+    fn un_pre_sin_valor_es_error_de_uso_y_no_un_booleano() {
+        // Sin este guardia, `--pre --agent claude` tomaría `--pre` como bandera y perdería
+        // el comando en silencio.
+        let args: Vec<String> = vec!["--pre".into(), "--agent".into(), "claude".into()];
+        assert!(parse_flags(&args, &[]).is_err());
+    }
+
+    #[test]
+    fn sin_pre_no_aparece_la_clave() {
+        // La rama de pre-lanzamiento no tiene que tocar nada para quien no la usa.
+        assert!(flags(&["--agent", "claude-code"]).get("prelaunch").is_none());
     }
 
     fn parse(command: &str, args: &[&str]) -> Result<Value, String> {

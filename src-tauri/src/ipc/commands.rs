@@ -25,6 +25,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "tab.close" => bridge_call(app, "tab.close", args),
         "agent.list" => agent_list(app),
         "account.list" => account_list(app),
+        "prelaunch.list" => prelaunch_list(app),
         "watch.add" => watch_add(app, args),
         "watch.remove" => watch_remove(app, args),
         "watch.list" => watch_list(app),
@@ -158,6 +159,12 @@ fn tab_create(app: &AppHandle, args: &Value) -> Result<Value, String> {
     if let Some(name) = arg_str_opt(args, "account") {
         let agent = arg_str_opt(args, "agent").unwrap_or_default();
         forwarded["accountId"] = json!(resolve_account_id(app, &agent, &name)?);
+    }
+    // `--pre "..."` / `--pre-preset nombre` → la cadena ya con ids. Mismo criterio que con
+    // las cuentas: un preset inexistente falla acá y no lanza la tab, porque arrancar sin
+    // el entorno que se pidió es peor que no arrancar.
+    if let Some(steps) = args.get("prelaunch").and_then(|v| v.as_array()) {
+        forwarded["prelaunch"] = json!(resolve_prelaunch_steps(app, steps)?);
     }
 
     let created = bridge_call(app, "tab.create", &forwarded)?;
@@ -382,6 +389,77 @@ fn match_account_id(
             names.join(", ")
         ))
     }
+}
+
+/// Comandos de pre-lanzamiento guardados: qué se puede poner en `--pre-preset`.
+fn prelaunch_list(app: &AppHandle) -> Result<Value, String> {
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, command FROM prelaunch_presets ORDER BY name")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(json!({
+                "id": r.get::<_, String>(0)?,
+                "name": r.get::<_, String>(1)?,
+                "command": r.get::<_, String>(2)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+    let presets: Vec<Value> = rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+    Ok(json!({ "presets": presets }))
+}
+
+/// Convierte los pasos que mandó la CLI (`{"command":…}` / `{"presetName":…}`) en los que
+/// entiende el frontend (`{"command":…}` / `{"presetId":…}`), conservando el orden.
+fn resolve_prelaunch_steps(app: &AppHandle, steps: &[Value]) -> Result<Vec<Value>, String> {
+    let presets = prelaunch_presets(app)?;
+    steps
+        .iter()
+        .map(|step| {
+            if let Some(cmd) = step.get("command").and_then(|v| v.as_str()) {
+                return Ok(json!({ "command": cmd }));
+            }
+            let name = step
+                .get("presetName")
+                .and_then(|v| v.as_str())
+                .ok_or("Paso de pre-lanzamiento sin comando ni nombre de preset")?;
+            Ok(json!({ "presetId": match_preset_id(&presets, name)? }))
+        })
+        .collect()
+}
+
+/// `(id, nombre)` de los comandos guardados.
+fn prelaunch_presets(app: &AppHandle) -> Result<Vec<(String, String)>, String> {
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, name FROM prelaunch_presets ORDER BY name")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+/// Nombre de preset → id. Separado de la lectura para poder probarlo.
+fn match_preset_id(presets: &[(String, String)], name: &str) -> Result<String, String> {
+    let needle = name.trim().to_lowercase();
+    if let Some((id, _)) = presets.iter().find(|(_, n)| n.to_lowercase() == needle) {
+        return Ok(id.clone());
+    }
+    if presets.is_empty() {
+        return Err(format!(
+            "No hay ningún comando de pre-lanzamiento guardado llamado '{name}'. \
+             Se crean en Configuración → Pre-lanzamiento."
+        ));
+    }
+    let names: Vec<&str> = presets.iter().map(|(_, n)| n.as_str()).collect();
+    Err(format!(
+        "No existe un comando de pre-lanzamiento llamado '{name}'. Hay: {}",
+        names.join(", ")
+    ))
 }
 
 /// Cuentas creadas, agrupadas por TUI. La cuenta principal no se lista: no es una cuenta
@@ -787,6 +865,36 @@ fn app_status(app: &AppHandle) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
+    use super::match_preset_id;
+
+    fn presets() -> Vec<(String, String)> {
+        vec![
+            ("p1".into(), "entorno conda".into()),
+            ("p2".into(), "node del proyecto".into()),
+        ]
+    }
+
+    #[test]
+    fn el_nombre_del_preset_no_distingue_mayusculas() {
+        assert_eq!(match_preset_id(&presets(), "Entorno Conda").unwrap(), "p1");
+        assert_eq!(match_preset_id(&presets(), "  entorno conda  ").unwrap(), "p1");
+    }
+
+    /// El error tiene que decir qué SÍ existe: quien escribió mal un nombre no debería
+    /// tener que ir a la UI a mirarlo.
+    #[test]
+    fn un_preset_inexistente_lista_los_que_hay() {
+        let err = match_preset_id(&presets(), "conda").unwrap_err();
+        assert!(err.contains("entorno conda"), "{err}");
+        assert!(err.contains("node del proyecto"), "{err}");
+    }
+
+    #[test]
+    fn sin_presets_guardados_el_error_dice_donde_crearlos() {
+        let err = match_preset_id(&[], "conda").unwrap_err();
+        assert!(err.contains("Configuración"), "{err}");
+    }
+
 
     /// Cuentas de prueba: `(id, agente, nombre)`, como salen de `agent_accounts`.
     fn accounts() -> Vec<(String, String, String)> {
