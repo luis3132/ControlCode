@@ -59,5 +59,23 @@ symlink = "0.1"
 # instalado en la máquina del usuario para poder compilar/correr.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
+# Señales POSIX: matar el GRUPO de procesos de una tab y no solo a su líder, para que no
+# queden huérfanos los procesos que el agente haya lanzado (ver terminal::pty_manager).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Job Objects: el equivalente en Windows del cgroup que se usa en Linux para que la
+# descendencia de una tab muera con ella (ver terminal::containment).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    # `CreateJobObjectW` recibe un `SECURITY_ATTRIBUTES` y
+    # `JOBOBJECT_EXTENDED_LIMIT_INFORMATION` vive bajo Threading: sin estos dos features
+    # los símbolos existen pero quedan compilados fuera.
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

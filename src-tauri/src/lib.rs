@@ -178,6 +178,11 @@ pub fn run() {
                 // Sin esto quedaría un handshake apuntando a un puerto muerto, y la CLI
                 // reportaría "no se pudo conectar" en vez de "la app no está corriendo".
                 ipc::cleanup();
+                // Sin esto, cerrar la app deja corriendo lo que hayan lanzado los agentes
+                // (servidores de desarrollo, watchers). El registry de PTYs es un
+                // `lazy_static` y Rust no corre destructores de estáticos al salir, así
+                // que el `Drop` que limpia cada grupo hay que dispararlo a mano.
+                terminal::kill_all_sessions();
             }
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 let window_count = app_handle.webview_windows().len();

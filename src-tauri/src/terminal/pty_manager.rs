@@ -1,3 +1,4 @@
+use super::containment::ProcessGroup;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -9,6 +10,11 @@ struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn portable_pty::Child + Send>,
+    /// Contenedor de ciclo de vida de la tab. Matar `killer` alcanza solo al proceso que
+    /// lanzamos; esto se lleva además a toda su descendencia (ver `containment`).
+    /// Su `Drop` mata el grupo, así que cubre tanto el cierre explícito como la muerte
+    /// natural del proceso — los dos caminos por los que una sesión sale del registry.
+    group: ProcessGroup,
 }
 
 /// Scrollback de un PTY. `total_bytes` cuenta TODO lo que el proceso escribió alguna vez,
@@ -117,10 +123,20 @@ pub async fn pty_create(
         cmd.env(k, v);
     }
 
+    let id = {
+        let mut counter = PTY_COUNTER.lock().unwrap_or_else(|e| e.into_inner());
+        *counter += 1;
+        *counter
+    };
+
+    // El grupo se crea ANTES del spawn para que ya exista cuando el proceso empiece a
+    // tener descendencia propia.
+    let mut group = ProcessGroup::new(id);
     let child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn '{command}': {e}"))?;
+    group.adopt(&*child);
 
     let writer = pair
         .master
@@ -132,13 +148,7 @@ pub async fn pty_create(
         .try_clone_reader()
         .map_err(|e| format!("Failed to get PTY reader: {e}"))?;
 
-    let id = {
-        let mut counter = PTY_COUNTER.lock().unwrap_or_else(|e| e.into_inner());
-        *counter += 1;
-        *counter
-    };
-
-    registry().insert(id, PtySession { master: pair.master, writer, killer: child });
+    registry().insert(id, PtySession { master: pair.master, writer, killer: child, group });
     buffers().insert(id, PtyBuffer::default());
 
     let app_clone = app.clone();
@@ -249,6 +259,10 @@ pub async fn pty_resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
 #[tauri::command]
 pub async fn pty_kill(id: u32) -> Result<(), String> {
     if let Some(mut session) = registry().remove(&id) {
+        // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
+        // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los
+        // hijos y se pierde el vínculo). Con cgroups o Job Objects el orden da igual.
+        session.group.kill_all();
         session.killer.kill().map_err(|e| format!("Kill error: {e}"))?;
         // Se reclama el status para que el hijo no quede zombie: `kill` solo manda la
         // señal, no espera a que el proceso muera de verdad.
@@ -256,4 +270,23 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
     }
     buffers().remove(&id);
     Ok(())
+}
+
+/// Mata todas las sesiones vivas y su descendencia. Se llama al salir de la app.
+///
+/// Hace falta explícitamente porque el registry es un `lazy_static`: Rust no corre
+/// destructores de estáticos al terminar el proceso, así que sin esto el `Drop` de
+/// `ProcessGroup` nunca se ejecutaría por esta vía.
+///
+/// En Windows hay además una segunda red que NO depende de que esto llegue a correr: el
+/// job tiene `KILL_ON_JOB_CLOSE`, así que un cierre forzado desde el Administrador de
+/// tareas igual se lleva todo cuando el kernel cierra los handles del proceso muerto.
+pub fn kill_all_sessions() {
+    let sessions: Vec<PtySession> = registry().drain().map(|(_, s)| s).collect();
+    for mut session in sessions {
+        session.group.kill_all();
+        let _ = session.killer.kill();
+        let _ = session.killer.wait();
+    }
+    buffers().clear();
 }
