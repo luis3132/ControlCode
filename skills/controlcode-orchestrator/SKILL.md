@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents in specific folders, read what they printed, type into them, and manage windows, workspaces and skills. Use when the user asks to set up a workspace, spin up agents across a monorepo, check on what a tab is doing, or send input to a running agent.
-version: 1.2.0
+version: 1.3.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -42,12 +42,13 @@ Returns every open window and every running tab, with each tab's `id`, `cwd`, `a
 and `title`. **Read this before creating anything**: the tab you need may already exist,
 and opening duplicates in the same folder is the most common way to make a mess here.
 
-## What you can put in --agent and --skills
+## What you can put in --agent, --account and --skills
 
 Don't guess these — ask:
 
 ```bash
 ccode agents      # every agent id you can pass to --agent
+ccode accounts    # every account name you can pass to --account
 ccode skills      # every skill name you can pass to --skills
 ```
 
@@ -64,6 +65,10 @@ forgiving: `claudecode`, `claude-code` and `Claude Code` all work.
 ccode skill install git-helper
 ```
 
+`accounts` lists the extra accounts the user created for a TUI, as `{id, agent, name}`.
+The **main account is not listed** — it isn't something the app manages, it's simply what
+you get when you omit `--account`.
+
 ## Opening tabs
 
 ```bash
@@ -75,6 +80,22 @@ Skills are attached before the agent boots, so they're available from its first 
 which is why they can't be added to a tab that's already running.
 
 Add `--window <label>` to target a specific window; without it, tabs go to the first one.
+
+### Running a tab under a different account
+
+A TUI can hold several accounts (separate logins, separate rate limits). Pass the name
+exactly as `ccode accounts` reports it:
+
+```bash
+ccode tab create --cwd /repo/api --agent claude-code --account trabajo
+```
+
+Account names are scoped to their TUI: `trabajo` for `claude-code` and `trabajo` for
+`opencode` are different accounts, and asking for one that belongs to another TUI is an
+error rather than a silent fallback. Omit the flag and the tab runs on the main account.
+
+The account is fixed when the tab opens — a TUI reads its configuration at startup, so
+there is no way to switch it afterwards. For another account, open another tab.
 
 ### Starting an agent already working
 
@@ -241,8 +262,9 @@ repository from the Marketplace first — say so rather than guessing at a name.
 
 ## Working rules
 
-1. **Look before you build.** `workspace status` first, always. `ccode agents` and
-   `ccode skills` before passing `--agent` or `--skills` you haven't confirmed.
+1. **Look before you build.** `workspace status` first, always. Then `ccode agents`,
+   `ccode accounts` and `ccode skills` before passing an `--agent`, `--account` or
+   `--skills` you haven't confirmed.
 2. **Report tab ids back to the user.** They're how anything gets referenced later.
 3. **Never poll.** `watch add` + `watch wait` is the way to wait. A loop of `tab output`
    burns your context to learn nothing.

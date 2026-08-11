@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Modal, AddIcon, TrashIcon, InfoIcon } from "neogestify-ui-components";
+import {
+  Avatar, Badge, Button, Modal, Tooltip, AddIcon, TrashIcon, InfoIcon,
+} from "neogestify-ui-components";
 import { useAccountsStore, type AgentAccount } from "../../store/accounts";
 import { AddAccountDialog } from "./AddAccountDialog";
 import { LoginTerminal } from "./LoginTerminal";
@@ -25,15 +27,16 @@ function AccountRow({
       hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
 
       <div className="flex items-center gap-3 min-w-0">
-        {/* Inicial en vez de un icono: en una lista de cuentas de la MISMA TUI, repetir su
-            logo en cada fila no distingue nada. La inicial sí. */}
-        <span className={`shrink-0 flex items-center justify-center w-9 h-9 rounded-lg
-          text-sm font-semibold uppercase
-          ${account.loggedIn
-            ? "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-300"
-            : "bg-gray-200/70 text-gray-400 dark:bg-white/6 dark:text-gray-500"}`}>
-          {account.name.slice(0, 1)}
-        </span>
+        {/* Iniciales en vez del logo de la TUI: en una lista de cuentas del MISMO agente,
+            repetir su logo en cada fila no distingue nada. El nombre sí — y de paso el
+            Avatar deriva de él un color estable por cuenta. El punto de estado dice si
+            tiene sesión iniciada. */}
+        <Avatar
+          name={account.name}
+          size="sm"
+          shape="square"
+          status={account.loggedIn ? "online" : "offline"}
+        />
 
         <div className="flex flex-col gap-0.5 min-w-0">
           <div className="flex items-center gap-2 min-w-0">
@@ -41,24 +44,22 @@ function AccountRow({
               {account.name}
             </span>
             {!account.loggedIn && (
-              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded
-                bg-amber-500/10 text-amber-600 dark:bg-amber-400/15 dark:text-amber-300">
+              <Badge variant="warning" size="sm" className="shrink-0">
                 {t("settings.accounts.notLoggedIn")}
-              </span>
+              </Badge>
             )}
           </div>
           {/* Cuando la TUI expone el mail se muestra: es lo que de verdad distingue una
               cuenta de otra — el nombre simbólico lo eligió el usuario y puede mentir.
-              La ruta del perfil va en el `title`: hace falta para depurar, pero mostrarla
+              La ruta del perfil va en el tooltip: hace falta para depurar, pero mostrarla
               en cada fila llenaba la lista de texto que nadie lee. */}
-          <span
-            className="text-xs text-gray-500 dark:text-gray-400 truncate"
-            title={`${account.envVar}=${account.dir}`}
-          >
-            {account.label ?? (account.loggedIn
-              ? t("settings.accounts.loggedIn")
-              : t("settings.accounts.pendingLogin"))}
-          </span>
+          <Tooltip content={`${account.envVar}=${account.dir}`} placement="bottom">
+            <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
+              {account.label ?? (account.loggedIn
+                ? t("settings.accounts.loggedIn")
+                : t("settings.accounts.pendingLogin"))}
+            </span>
+          </Tooltip>
         </div>
       </div>
 
@@ -183,10 +184,9 @@ export function AccountsSection() {
                   text-gray-400 dark:text-gray-500">
                   {t("settings.accounts.of", { agent: selected.label })}
                 </span>
-                <code className="text-[10px] font-mono px-1.5 py-0.5 rounded
-                  bg-blue-500/10 text-blue-600 dark:bg-blue-400/15 dark:text-blue-300">
+                <Badge variant="info" size="sm" className="font-mono">
                   {selected.envVar}
-                </code>
+                </Badge>
               </div>
 
               {rows.length === 0 ? (

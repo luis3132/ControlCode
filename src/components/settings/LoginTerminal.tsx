@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Loading } from "neogestify-ui-components";
 import { Terminal } from "../Terminal";
 import { useAccountsStore, type AgentAccount } from "../../store/accounts";
 
@@ -41,7 +42,7 @@ export function LoginTerminal({ account }: LoginTerminalProps) {
     return (
       <div className="h-96 flex items-center justify-center rounded-lg
         border border-gray-200 dark:border-gray-700">
-        <span className="text-xs text-gray-400">{t("terminal.status.connecting")}</span>
+        <Loading variant="dots" size="small" color="gray" label={t("terminal.status.connecting")} />
       </div>
     );
   }

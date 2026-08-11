@@ -76,7 +76,10 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
     throw new Error(`Agente desconocido '${agentId}'. Disponibles: ${known}`);
   }
 
-  const tabId = useTabsStore.getState().addTab({ cwd, agent });
+  // El backend ya tradujo `--account <nombre>` a un id y falló si no existía (ver
+  // `resolve_account_id`), así que acá solo se pasa. Ausente = la cuenta principal.
+  const accountId = str(args, "accountId");
+  const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId });
 
   // Mismo gate que el wizard del "+": las skills tienen que estar en disco antes de que
   // el proceso arranque. Se espera acá (y no solo se registra) para que la CLI no
@@ -93,7 +96,9 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
   registerPendingSkillSetup(tabId, setup);
   await setup;
 
-  return { tabId, cwd, agentId: agent.id, agentLabel: agent.label };
+  // `accountId` viaja de vuelta para que el orquestador pueda comprobar con qué cuenta
+  // quedó la tab sin tener que consultarlo aparte.
+  return { tabId, cwd, agentId: agent.id, agentLabel: agent.label, accountId: accountId ?? null };
 }
 
 function handleCloseTab(args: Record<string, unknown>): unknown {

@@ -143,6 +143,14 @@
   "wizard.step3.searchToReveal": "{{count}} más instaladas — buscá para encontrarlas",
   "wizard.step3.selectedCount": "{{count}} skill(s) seleccionada(s)",
 
+  "settings.nav": "Secciones",
+  "settings.terminal": "Terminal",
+  "settings.terminal.desc": "Cómo se ve y se navega el historial de las terminales.",
+  "settings.terminal.marks": "Líneas de corte",
+  "settings.terminal.marks.desc": "Dibuja una línea tenue cada vez que enviás algo, para separar de un vistazo una intervención de la siguiente al recorrer una conversación larga.",
+  "settings.terminal.marks.limits": "Se guía por la tecla Enter, que es lo único que la terminal puede ver: un Enter dentro de un mensaje de varias líneas también marca. No aplica a las TUIs que se dibujan en pantalla completa (OpenCode), porque ahí no hay historial al que anclar la marca.",
+  "settings.terminal.marks.applies": "Se aplica a las terminales que abras a partir de ahora; las que ya están abiertas no cambian.",
+
   "settings.title": "Configuración",
   "settings.subtitle": "Personaliza tu entorno de Control Code",
   "settings.appearance": "Apariencia",

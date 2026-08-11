@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Button, AlertaToast, AlertaConfirmacion } from "neogestify-ui-components";
+import { Badge, Button, Tooltip, AlertaToast, AlertaConfirmacion } from "neogestify-ui-components";
 import {
   FolderIcon,
   ArrowRightIcon,
@@ -119,22 +119,22 @@ export function SessionRow({ entry, workspaceId, onResume, onResumeWithSkills }:
           <span className="flex items-center gap-2 text-sm font-semibold
             text-gray-800 dark:text-gray-100 truncate">
             {entry.title ?? entry.agentLabel}
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0
-              bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400">
+            <Badge variant="neutral" size="sm" className="shrink-0">
               {entry.agentLabel}
-            </span>
+            </Badge>
             {/* Solo si NO es la cuenta principal: marcar lo habitual sería ruido en todas
                 las filas de todos los que nunca crearon una cuenta. */}
             {entry.accountId && accountsLoaded && (
-              <span
-                title={account?.label ?? undefined}
-                className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 font-medium
-                  ${account
-                    ? "bg-violet-500/10 text-violet-600 dark:bg-violet-400/15 dark:text-violet-300"
-                    : "bg-amber-500/10 text-amber-600 dark:bg-amber-400/15 dark:text-amber-300"}`}
-              >
-                {account ? account.name : t("sessions.account.gone")}
-              </span>
+              <Tooltip content={account?.label ?? ""} placement="bottom">
+                <Badge
+                  variant={account ? "accent" : "warning"}
+                  size="sm"
+                  dot
+                  className="shrink-0"
+                >
+                  {account ? account.name : t("sessions.account.gone")}
+                </Badge>
+              </Tooltip>
             )}
           </span>
           <span className="flex items-center gap-1 text-xs truncate font-mono
@@ -151,14 +151,13 @@ export function SessionRow({ entry, workspaceId, onResume, onResumeWithSkills }:
           {entry.skills.length > 0 && (
             <span className="flex flex-wrap gap-1 mt-0.5">
               {entry.skills.map((s) => (
-                <span
+                <Tooltip
                   key={s.name}
-                  title={t("sessions.skillScope", { scope: s.scope })}
-                  className="text-[10px] px-1.5 py-0.5 rounded-full
-                    bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400"
+                  content={t("sessions.skillScope", { scope: s.scope })}
+                  placement="bottom"
                 >
-                  {s.name}
-                </span>
+                  <Badge variant="info" size="sm" pill>{s.name}</Badge>
+                </Tooltip>
               ))}
             </span>
           )}

@@ -143,6 +143,14 @@
   "wizard.step3.searchToReveal": "{{count}} more installed — search to find them",
   "wizard.step3.selectedCount": "{{count}} skill(s) selected",
 
+  "settings.nav": "Sections",
+  "settings.terminal": "Terminal",
+  "settings.terminal.desc": "How terminal history looks and how you move through it.",
+  "settings.terminal.marks": "Cut lines",
+  "settings.terminal.marks.desc": "Draws a faint line every time you send something, so one turn is visibly separated from the next when scrolling back through a long conversation.",
+  "settings.terminal.marks.limits": "It keys off the Enter key, which is all the terminal can see: an Enter inside a multi-line message marks too. It does not apply to full-screen TUIs (OpenCode), where there is no scrollback to anchor the mark to.",
+  "settings.terminal.marks.applies": "Applies to terminals you open from now on; already-open ones are unchanged.",
+
   "settings.title": "Settings",
   "settings.subtitle": "Customize your Control Code environment",
   "settings.appearance": "Appearance",

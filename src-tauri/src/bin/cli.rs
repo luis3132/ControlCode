@@ -33,6 +33,7 @@ TABS
   tab list                                    Tabs abiertas ahora
   tab create <ruta> --agent <id>              Abre una tab nueva
              [--skills a,b]                   · skills a adjuntar, por nombre
+             [--account <nombre>]             · cuenta de esa TUI (ver `accounts`)
              [--initprompt \"...\"]             · prompt inicial, enviado con Enter
              [--window <label>]                 cuando la TUI terminó de arrancar
   tab close <id>                              Cierra una tab
@@ -58,8 +59,9 @@ WORKSPACES
                  [--close-current]
   workspace status                            Qué hay abierto ahora
 
-AGENTES Y SKILLS
+AGENTES, CUENTAS Y SKILLS
   agents                                      Qué poner en --agent (incluye las custom)
+  accounts                                    Qué poner en --account, por TUI
   skills                                      Qué poner en --skills (instaladas)
   skill install <nombre>                      Instala desde los repos habilitados
 
@@ -67,7 +69,8 @@ OTROS
   app status                                  Versión y estado de la app
   --json-args '{...}'                         Pasa argumentos crudos en JSON
 
-`agents` y `skills` son atajos de `agent list` y `skill list`.
+`agents`, `accounts` y `skills` son atajos de `agent list`, `account list` y `skill list`.
+Sin --account, la tab usa la cuenta principal (la de siempre).
 
 La salida siempre es una línea JSON en stdout.
 Códigos de salida: 0 ok · 1 el comando falló · 2 uso incorrecto · 3 la app no corre
@@ -132,6 +135,7 @@ struct CliError {
 fn shortcut(word: &str) -> Option<&'static str> {
     match word {
         "agents" => Some("agent.list"),
+        "accounts" => Some("account.list"),
         "skills" => Some("skill.list"),
         _ => None,
     }

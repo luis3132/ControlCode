@@ -10,9 +10,12 @@ import "@xterm/xterm/css/xterm.css";
 
 import { isResumable } from "../lib/agentResume";
 import { registerCapabilityResponders } from "../lib/terminalCapabilities";
+import { installInputMarks } from "../lib/terminalMarks";
+import { keepScrollbarVisible } from "../lib/terminalScrollbar";
 import { consumePtyTransferring } from "../lib/ptyTransfer";
 import { awaitSkillSetup } from "../lib/pendingSkillSetup";
 import { useSettingsStore } from "../store/settings";
+import { useTerminalPrefsStore } from "../store/terminalPrefs";
 
 interface TerminalProps {
   /** Id de la tab en el store — solo se usa para esperar (si aplica) a que sus symlinks
@@ -89,6 +92,12 @@ const TERMINAL_THEMES = {
     brightCyan: "#56d4dd",
     white: "#b1bac4",
     brightWhite: "#f0f6fc",
+    // La barra de scroll de xterm por defecto es el color del texto al 20% — sobre este
+    // fondo, indistinguible. Estos valores la hacen visible sin que compita con el
+    // contenido, y suben al agarrarla para dar respuesta al arrastre.
+    scrollbarSliderBackground: "rgba(230, 237, 243, 0.30)",
+    scrollbarSliderHoverBackground: "rgba(230, 237, 243, 0.45)",
+    scrollbarSliderActiveBackground: "rgba(230, 237, 243, 0.60)",
   },
   light: {
     // Gris, no blanco puro. El blanco a pantalla completa es agresivo en una superficie que
@@ -133,6 +142,9 @@ const TERMINAL_THEMES = {
     // desaparecen — y es justo lo que más usan los agentes para su texto principal.
     white: "#4a5058",
     brightWhite: "#24292f",
+    scrollbarSliderBackground: "rgba(31, 35, 40, 0.28)",
+    scrollbarSliderHoverBackground: "rgba(31, 35, 40, 0.42)",
+    scrollbarSliderActiveBackground: "rgba(31, 35, 40, 0.55)",
   },
 } as const;
 
@@ -150,6 +162,10 @@ const TERMINAL_THEMES = {
  * En oscuro queda apagado (1): esa paleta ya se veía bien y no hay nada que corregir.
  */
 const MIN_CONTRAST = { dark: 1, light: 2 } as const;
+
+/** Color de las líneas de corte (ver `terminalMarks`). Tenue a propósito: separa sin
+ *  competir con el contenido, que es lo que se está leyendo. */
+const MARK_LINE = { dark: "rgba(88, 166, 255, 0.35)", light: "rgba(9, 105, 218, 0.28)" } as const;
 
 /** Une los mapas de entorno, o `null` si no hay ninguno — que es lo que espera `pty_create`
  *  para "no agregues nada". Un `{}` funcionaría igual, pero `null` deja el intent explícito
@@ -226,6 +242,16 @@ export function Terminal({
       },
       TERMINAL_THEMES[themeRef.current]
     );
+
+    // La barra de scroll de xterm se esconde sola; se la deja fija cuando hay historial
+    // que recorrer (ver terminalScrollbar.ts).
+    const disposeScrollbar = keepScrollbarVisible(term, containerRef.current);
+
+    // Marcas de corte en cada envío del usuario. Se lee la preferencia acá, al montar:
+    // cambiarla no reconfigura las terminales que ya están abiertas (ver TerminalSection).
+    const disposeMarks = useTerminalPrefsStore.getState().inputMarks
+      ? installInputMarks(term, { line: MARK_LINE[themeRef.current] })
+      : () => {};
 
     // Mide cols/rows reales ANTES de spawnear el proceso (ver pty_create en Rust: el
     // PTY nace con este tamaño, no con uno fijo que se corrige después).
@@ -478,6 +504,8 @@ export function Terminal({
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeObserver.disconnect();
       disposeCapabilities();
+      disposeMarks();
+      disposeScrollbar();
       unlistenData?.();
       unlistenExit?.();
       if (ptyIdRef.current !== null) {

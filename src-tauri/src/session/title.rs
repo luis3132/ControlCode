@@ -162,17 +162,45 @@ fn extract_text_block(content: &Value) -> Option<String> {
 
 // ── Claude Code: ~/.claude/projects/<cwd con '/' -> '-'>/<uuid>.jsonl ────
 
+/// Nombre de carpeta que Claude Code le da a un proyecto.
+///
+/// **Reemplaza TODO lo que no sea alfanumérico por `-`, no solo las barras.** Derivado
+/// contra las carpetas reales de una instalación con proyectos de nombres variados: la
+/// regla acierta 8 de 8, mientras que reemplazar solo `/` fallaba en los 3 proyectos cuya
+/// ruta tiene un espacio.
+///
+/// Ese era un bug silencioso y caro: para cualquier proyecto en una ruta con espacios (o
+/// puntos, o cualquier otro carácter especial) se buscaba en una carpeta que no existe, así
+/// que la sesión nunca se descubría. Esas tabs quedaban sin id de sesión —sin título real,
+/// sin reanudar al reabrirlas y sin poder actualizar su entrada del historial— y desde
+/// afuera se veía como "la app no guarda las sesiones".
+fn claude_project_slug(cwd: &str) -> String {
+    cwd.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
 /// `profile` es el directorio de la cuenta con la que corre la tab (`CLAUDE_CONFIG_DIR`).
 /// Con una cuenta alternativa, TODO lo de Claude Code vive ahí adentro — incluidos los
 /// transcripts — así que buscar en `~/.claude` daría siempre "sin sesión": ni título ni
 /// resume. `None` = la cuenta del sistema.
 fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
-    let slug = cwd.replace('/', "-");
     let root = match profile {
         Some(dir) => dir.to_path_buf(),
         None => dirs::home_dir().unwrap_or_default().join(".claude"),
     };
-    root.join("projects").join(slug)
+    let projects = root.join("projects");
+    let dir = projects.join(claude_project_slug(cwd));
+    if dir.exists() {
+        return dir;
+    }
+    // Respaldo para instalaciones viejas de Claude Code, que sí usaban solo las barras.
+    // Solo se toma si existe de verdad, así que no puede tapar a la regla buena.
+    let legacy = projects.join(cwd.replace('/', "-"));
+    if legacy.exists() {
+        return legacy;
+    }
+    dir
 }
 
 fn claude_session_file(
@@ -872,24 +900,30 @@ pub async fn discover_session_id(
     let db = (*db).clone();
     tokio::task::spawn_blocking(move || {
         let profile = account_id.and_then(|id| crate::accounts::dir_for(&db, &id));
+        let custom = db.lock().ok().and_then(|conn| crate::agents::find(&conn, &agent_id));
         discover_session_id_sync(
             &agent_id,
             &cwd,
             started_after,
             profile.as_deref().map(Path::new),
-            &db,
+            custom.as_ref(),
         )
     })
     .await
     .map_err(|e| e.to_string())
 }
 
-fn discover_session_id_sync(
+/// `custom` es la TUI personalizada ya resuelta, o `None` para las de fábrica.
+///
+/// Se recibe resuelta en vez de un `DbConnection` porque hay un llamador que YA tiene la
+/// conexión tomada (`archive_tab_row`): volver a pedir el lock desde adentro contra un
+/// `Mutex` no reentrante sería un deadlock, no un error.
+pub(crate) fn discover_session_id_sync(
     agent_id: &str,
     cwd: &str,
     started_after: i64,
     profile: Option<&Path>,
-    db: &crate::database::DbConnection,
+    custom: Option<&crate::agents::CustomAgent>,
 ) -> Option<String> {
     let cwd = cwd.to_string();
     match agent_id {
@@ -919,12 +953,10 @@ fn discover_session_id_sync(
             kimi_session_id(&dir)
         }
         // TUI custom: solo si el usuario declaró dónde guarda sus sesiones.
-        other => {
-            let conn = db.lock().ok()?;
-            let agent = crate::agents::find(&conn, other)?;
-            drop(conn);
-            let path = custom_session_file(&agent, Some(started_after))?;
-            custom_session_id(&agent, &path)
+        _ => {
+            let agent = custom?;
+            let path = custom_session_file(agent, Some(started_after))?;
+            custom_session_id(agent, &path)
         }
     }
 }
@@ -946,26 +978,29 @@ pub async fn get_session_title(
     let db = (*db).clone();
     tokio::task::spawn_blocking(move || {
         let profile = account_id.and_then(|id| crate::accounts::dir_for(&db, &id));
+        let custom = db.lock().ok().and_then(|conn| crate::agents::find(&conn, &agent_id));
         get_session_title_sync(
             &agent_id,
             &cwd,
             session_id,
             fallback,
             profile.as_deref().map(Path::new),
-            &db,
+            custom.as_ref(),
         )
     })
     .await
     .map_err(|e| e.to_string())
 }
 
-fn get_session_title_sync(
+/// `custom` viene resuelta por el llamador, por el mismo motivo que en
+/// `discover_session_id_sync`: hay quien llama con la conexión ya tomada.
+pub(crate) fn get_session_title_sync(
     agent_id: &str,
     cwd: &str,
     session_id: Option<String>,
     fallback: String,
     profile: Option<&Path>,
-    db: &crate::database::DbConnection,
+    custom: Option<&crate::agents::CustomAgent>,
 ) -> SessionTitleResult {
     let cwd = cwd.to_string();
     match agent_id {
@@ -1020,14 +1055,10 @@ fn get_session_title_sync(
         // TUI custom: se busca el archivo por su id exacto, nunca "el más reciente" — sin
         // saber cómo esa TUI mapea proyectos a carpetas, "el más reciente" podría ser la
         // sesión de otra tab y el título quedaría cruzado.
-        other => {
+        _ => {
             let Some(id) = session_id else { return fallback_result(&fallback) };
-            let Ok(conn) = db.lock() else { return fallback_result(&fallback) };
-            let Some(agent) = crate::agents::find(&conn, other) else {
-                return fallback_result(&fallback);
-            };
-            drop(conn);
-            match custom_session_file_by_id(&agent, &id) {
+            let Some(agent) = custom else { return fallback_result(&fallback) };
+            match custom_session_file_by_id(agent, &id) {
                 Some(path) => custom_title(&path, &fallback),
                 None => fallback_result(&fallback),
             }
@@ -1053,6 +1084,29 @@ mod tests {
     fn claude_without_account_uses_the_system_profile() {
         let dir = claude_project_dir("/home/u/proj", None);
         assert!(dir.ends_with(".claude/projects/-home-u-proj"), "{dir:?}");
+    }
+
+    /// El bug que dejaba sin sesión a proyectos enteros: la ruta con un espacio se traducía
+    /// a una carpeta inexistente, así que no se descubría nada. Verificado contra las
+    /// carpetas reales de una instalación de Claude Code.
+    #[test]
+    fn the_project_slug_replaces_everything_that_is_not_alphanumeric() {
+        assert_eq!(
+            claude_project_slug("/home/luis/Documents/proyecto wallet/pruebas/wallet"),
+            "-home-luis-Documents-proyecto-wallet-pruebas-wallet"
+        );
+        assert_eq!(
+            claude_project_slug("/home/u/mi_proyecto.v2"),
+            "-home-u-mi-proyecto-v2"
+        );
+    }
+
+    /// Las rutas sin caracteres raros dan lo mismo con la regla vieja y con la nueva — por
+    /// eso el bug pasó desapercibido tanto tiempo.
+    #[test]
+    fn plain_paths_are_unaffected_by_the_slug_rule() {
+        let cwd = "/home/luis/Documents/XD/ControlCode";
+        assert_eq!(claude_project_slug(cwd), cwd.replace('/', "-"));
     }
 
     /// Ninguno de los dos CLIs está instalado en la máquina de desarrollo, así que estos

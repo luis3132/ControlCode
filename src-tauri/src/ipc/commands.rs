@@ -24,6 +24,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "tab.create" => tab_create(app, args),
         "tab.close" => bridge_call(app, "tab.close", args),
         "agent.list" => agent_list(app),
+        "account.list" => account_list(app),
         "watch.add" => watch_add(app, args),
         "watch.remove" => watch_remove(app, args),
         "watch.list" => watch_list(app),
@@ -150,6 +151,13 @@ fn tab_create(app: &AppHandle, args: &Value) -> Result<Value, String> {
     if let Some(requested) = skill_names(args) {
         let ids = resolve_skill_ids(app, &requested)?;
         forwarded["skills"] = json!(ids);
+    }
+    // `--account trabajo` → el id de esa cuenta. Se resuelve acá, contra la base, para
+    // poder FALLAR con un motivo: una cuenta inexistente que se ignore en silencio abre la
+    // tab con la cuenta equivocada, que es el peor resultado posible — parece que funcionó.
+    if let Some(name) = arg_str_opt(args, "account") {
+        let agent = arg_str_opt(args, "agent").unwrap_or_default();
+        forwarded["accountId"] = json!(resolve_account_id(app, &agent, &name)?);
     }
 
     let created = bridge_call(app, "tab.create", &forwarded)?;
@@ -311,6 +319,81 @@ fn submit_prompt(pty_id: u32, text: &str) -> Result<(), String> {
 
 /// Qué se puede pasar en `--agent`: los detectados en el PATH más las TUIs que el usuario
 /// registró a mano. Sin esto, el id correcto había que adivinarlo.
+/// Cuentas de una TUI, tal como las guarda `accounts`.
+fn accounts_of(app: &AppHandle) -> Result<Vec<(String, String, String)>, String> {
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, agent_id, name FROM agent_accounts ORDER BY agent_id, name")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Nombre de cuenta → id, comprobando que sea de ESE agente.
+///
+/// Que sea del agente correcto no es un detalle: los perfiles no son intercambiables (cada
+/// TUI usa su propia variable de entorno), así que abrir Claude con la cuenta de OpenCode
+/// no daría un error visible — daría una tab que ignora la cuenta en silencio.
+fn resolve_account_id(app: &AppHandle, agent_id: &str, name: &str) -> Result<String, String> {
+    match_account_id(&accounts_of(app)?, agent_id, name)
+}
+
+/// El emparejamiento en sí, sobre las cuentas ya leídas. Separado para poder probarlo.
+fn match_account_id(
+    accounts: &[(String, String, String)],
+    agent_id: &str,
+    name: &str,
+) -> Result<String, String> {
+    let needle = name.to_lowercase();
+    let of_agent: Vec<&(String, String, String)> =
+        accounts.iter().filter(|(_, a, _)| a == agent_id).collect();
+
+    if let Some((id, _, _)) = of_agent
+        .iter()
+        .find(|(id, _, n)| n.to_lowercase() == needle || id.to_lowercase() == needle)
+    {
+        return Ok(id.clone());
+    }
+
+    // Una cuenta que existe pero es de otra TUI es el error más fácil de cometer, así que
+    // se distingue de "no existe" en vez de dar el mismo mensaje genérico.
+    if let Some((_, otro, _)) = accounts
+        .iter()
+        .find(|(_, _, n)| n.to_lowercase() == needle)
+    {
+        return Err(format!(
+            "La cuenta '{name}' es de '{otro}', no de '{agent_id}'"
+        ));
+    }
+
+    let names: Vec<&str> = of_agent.iter().map(|(_, _, n)| n.as_str()).collect();
+    if names.is_empty() {
+        Err(format!(
+            "'{agent_id}' no tiene ninguna cuenta creada. Se crean desde Configuración › Cuentas; 'ccode accounts' las lista"
+        ))
+    } else {
+        Err(format!(
+            "'{agent_id}' no tiene ninguna cuenta llamada '{name}'. Tiene: {}",
+            names.join(", ")
+        ))
+    }
+}
+
+/// Cuentas creadas, agrupadas por TUI. La cuenta principal no se lista: no es una cuenta
+/// gestionada por la app, es "no pasar `--account`".
+fn account_list(app: &AppHandle) -> Result<Value, String> {
+    let accounts: Vec<Value> = accounts_of(app)?
+        .into_iter()
+        .map(|(id, agent_id, name)| json!({ "id": id, "agent": agent_id, "name": name }))
+        .collect();
+    Ok(json!({ "accounts": accounts }))
+}
+
 fn agent_list(app: &AppHandle) -> Result<Value, String> {
     let detected = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -704,6 +787,51 @@ fn app_status(app: &AppHandle) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// Cuentas de prueba: `(id, agente, nombre)`, como salen de `agent_accounts`.
+    fn accounts() -> Vec<(String, String, String)> {
+        vec![
+            ("a1".into(), "claude-code".into(), "trabajo".into()),
+            ("a2".into(), "claude-code".into(), "personal".into()),
+            ("a3".into(), "opencode".into(), "trabajo".into()),
+        ]
+    }
+
+    #[test]
+    fn an_account_resolves_by_name_within_its_own_agent() {
+        assert_eq!(match_account_id(&accounts(), "claude-code", "trabajo").unwrap(), "a1");
+        // Mismo nombre, otra TUI: son cuentas distintas.
+        assert_eq!(match_account_id(&accounts(), "opencode", "trabajo").unwrap(), "a3");
+    }
+
+    #[test]
+    fn an_account_also_resolves_by_id_and_ignoring_case() {
+        assert_eq!(match_account_id(&accounts(), "claude-code", "A1").unwrap(), "a1");
+        assert_eq!(match_account_id(&accounts(), "claude-code", "Personal").unwrap(), "a2");
+    }
+
+    /// El error más fácil de cometer, y el que en silencio abriría la tab con la cuenta
+    /// del sistema: pedir una cuenta que existe pero es de otra TUI.
+    #[test]
+    fn an_account_of_another_agent_is_rejected_by_name() {
+        let err = match_account_id(&accounts(), "opencode", "personal").unwrap_err();
+        assert!(err.contains("es de 'claude-code'"), "{err}");
+    }
+
+    #[test]
+    fn an_unknown_account_lists_the_ones_that_exist() {
+        let err = match_account_id(&accounts(), "claude-code", "qa").unwrap_err();
+        assert!(err.contains("trabajo") && err.contains("personal"), "{err}");
+    }
+
+    /// Con un nombre que no existe en ninguna TUI se explica dónde se crean. Ojo: para un
+    /// nombre que SÍ existe en otra TUI gana el mensaje de arriba, que dice más.
+    #[test]
+    fn an_agent_without_accounts_says_where_to_create_them() {
+        let err = match_account_id(&accounts(), "codex", "qa").unwrap_err();
+        assert!(err.contains("no tiene ninguna cuenta creada"), "{err}");
+    }
+
     use super::*;
 
     fn installed() -> Vec<(String, String)> {

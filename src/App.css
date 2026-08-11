@@ -143,6 +143,31 @@ html.dark ::-webkit-scrollbar-thumb:hover {
   overflow-y: auto !important;
 }
 
+/* Barra de scroll de la terminal.
+
+   xterm 6 NO usa la barra nativa: dibuja la suya (la de VS Code) en modo `Auto`, que solo
+   aparece al pasar el puntero o mientras se scrollea. Por eso styling de
+   `::-webkit-scrollbar` sobre `.xterm-viewport` no tiene ningún efecto — el elemento real
+   es `.xterm-scrollable-element > .scrollbar`.
+
+   La clase `cc-term-scrollable` la pone `terminalScrollbar.ts` solo cuando de verdad hay
+   historial fuera de pantalla. Ver ahí por qué la condición no puede resolverse en CSS. */
+.cc-term-scrollable .xterm-scrollable-element > .scrollbar.invisible {
+  opacity: 1;
+  /* `.invisible` también apaga los eventos: sin esto se vería pero no se podría arrastrar,
+     que es justo lo que se quería facilitar. */
+  pointer-events: auto;
+}
+
+/* El riel, apenas insinuado: da una referencia de dónde agarrar sin dibujar una franja. */
+.cc-term-scrollable .xterm-scrollable-element > .scrollbar {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+html:not(.dark) .cc-term-scrollable .xterm-scrollable-element > .scrollbar {
+  background: rgba(0, 0, 0, 0.04);
+}
+
 /* Barra de progreso indeterminada (ver AddRegistryDialog): mientras no se sabe cuántos
    archivos hay que mirar, el segmento recorre la barra para indicar actividad en vez de
    mostrar un porcentaje inventado. */

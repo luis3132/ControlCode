@@ -891,20 +891,134 @@ pub fn db_delete_workspace(
 /// `session_id` no es nulo y ya existe una entrada con ese mismo id (la misma
 /// conversación real del agente, cerrada/reabierta varias veces), actualiza esa fila en
 /// vez de duplicarla — el historial muestra "sesiones", no un log de cada cierre.
+/// Margen hacia atrás al re-descubrir la sesión: los mtime tienen resolución de 1s y el
+/// reloj del archivado no es el mismo instante que el de `pty_create` (mismo motivo que
+/// `SESSION_DISCOVERY_LOOKBACK_S` en el frontend).
+const REDISCOVERY_LOOKBACK_S: i64 = 3;
+
+/// Qué sesión estuvo usando REALMENTE esta tab, mirando el disco en el momento de cerrarla.
+///
+/// Devuelve el id que corresponde archivar: el re-descubierto si hay uno mejor, o el que ya
+/// tenía la tab. Nunca devuelve `None` habiendo un id previo — no encontrar nada significa
+/// "no sé", no "no tenía sesión".
+fn reconcile_session_id(
+    conn: &Connection,
+    tab_id: &str,
+    agent_id: &str,
+    cwd: &str,
+    current: Option<String>,
+    account_id: Option<&str>,
+    opened_at: i64,
+) -> Option<String> {
+    let profile = account_id.and_then(|id| crate::accounts::dir_for_conn(conn, id));
+    let custom = crate::agents::find(conn, agent_id);
+
+    let found = crate::session::discover_session_id_sync(
+        agent_id,
+        cwd,
+        opened_at - REDISCOVERY_LOOKBACK_S,
+        profile.as_deref().map(std::path::Path::new),
+        custom.as_ref(),
+    );
+
+    // Traza deliberada: este camino solo se puede observar con una TUI real retomando una
+    // conversación real, algo que no se puede reproducir en un test. Sale por stderr, así
+    // que en `tauri dev` aparece en la terminal desde donde se levantó la app.
+    eprintln!(
+        "[sesión] al cerrar {tab_id}: agente={agent_id} guardada={current:?} encontrada={found:?}"
+    );
+
+    let Some(found) = found else { return current };
+    if Some(&found) == current.as_ref() {
+        return current;
+    }
+
+    // Con dos tabs del mismo agente en la misma carpeta, "el archivo más nuevo" puede ser
+    // el de la OTRA tab. Robarle su sesión sería peor que no reconciliar: quedarían dos
+    // entradas del historial apuntando a la misma conversación.
+    let taken: Result<i64, _> = conn.query_row(
+        "SELECT COUNT(*) FROM tabs WHERE id != ?1 AND session_id = ?2",
+        rusqlite::params![tab_id, found],
+        |r| r.get(0),
+    );
+    if taken.unwrap_or(0) > 0 {
+        eprintln!("[sesión] {found} ya es de otra tab abierta — se conserva {current:?}");
+        return current;
+    }
+
+    eprintln!("[sesión] la tab había cambiado de conversación: {current:?} → {found}");
+    Some(found)
+}
+
 fn archive_tab_row(conn: &Connection, tab_id: &str, workspace_id: &str) -> Result<(), String> {
     #[allow(clippy::type_complexity)]
-    let row: Option<(String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, i64)> = conn
+    #[allow(clippy::type_complexity)]
+    let row: Option<(String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, i64, bool)> = conn
         .query_row(
-            "SELECT agent_id, agent_label, command, cwd, title, session_id, history_id, account_id, opened_at FROM tabs WHERE id = ?1",
+            "SELECT agent_id, agent_label, command, cwd, title, session_id, history_id, account_id, opened_at, title_is_custom FROM tabs WHERE id = ?1",
             [tab_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get::<_, i64>(9)? != 0)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let Some((agent_id, agent_label, command, cwd, title, session_id, history_id, account_id, opened_at)) =
-        row
+    let Some((
+        agent_id,
+        agent_label,
+        command,
+        cwd,
+        title,
+        session_id,
+        history_id,
+        account_id,
+        opened_at,
+        title_is_custom,
+    )) = row
     else { return Ok(()) };
+
+    // El id de sesión que trae la tab es el que se descubrió al ARRANCAR. Si el usuario
+    // retomó otra conversación desde adentro de la TUI (`/resume` de Claude y equivalentes),
+    // la tab estuvo trabajando sobre una sesión distinta, y archivar con el id viejo crea
+    // una entrada nueva en vez de actualizar la conversación que de verdad se continuó.
+    //
+    // Acá es el único punto por el que pasan TODOS los cierres (cerrar la tab, cerrar la
+    // ventana, salir de la app), así que reconciliar acá lo cubre todo de una vez.
+    let session_id = reconcile_session_id(
+        conn, tab_id, &agent_id, &cwd, session_id, account_id.as_deref(), opened_at,
+    );
+
+    // El título se resuelve ACÁ, contra la sesión real, y no se confía en el que traía la
+    // tab. Dos motivos, los dos verificados sobre un historial de verdad:
+    //
+    // - Si la sesión resultó ser otra, el título de la tab es el de la conversación
+    //   equivocada — y como el archivado ACTUALIZA la entrada existente, escribirlo le
+    //   pisaría el título bueno a la conversación que se retomó.
+    // - El refresco de título del frontend solo corre al cerrar la tab a mano; una tab que
+    //   se va con la ventana o con la app se archivaba con el título de relleno
+    //   ("Claude Code — carpeta"). En una base real eso era el 100% de las entradas.
+    //
+    // Un título puesto a mano por el usuario manda siempre y no se toca.
+    let title = if !title_is_custom {
+        let profile = account_id
+            .as_deref()
+            .and_then(|id| crate::accounts::dir_for_conn(conn, id));
+        let custom = crate::agents::find(conn, &agent_id);
+        Some(
+            crate::session::get_session_title_sync(
+                &agent_id,
+                &cwd,
+                session_id.clone(),
+                title.clone().unwrap_or_default(),
+                profile.as_deref().map(std::path::Path::new),
+                custom.as_ref(),
+            )
+            .title,
+        )
+        .filter(|t| !t.is_empty())
+        .or(title)
+    } else {
+        title
+    };
 
     // Skills activas para esta tab al momento de archivar: por-tab (scope='tab') o
     // por-workspace (scope='workspace'). Se "congelan" acá porque `project_skills.tab_id`
@@ -1261,11 +1375,30 @@ pub fn find_open_tab_for_session(
 
 // ── Commands: windows + tabs (estado de sesión) ──────────────────
 
+/// Guarda el estado de la ventana (posición, tamaño, tabs) y archiva las tabs que
+/// desaparecieron del payload.
+///
+/// En `spawn_blocking` porque el archivado re-descubre la sesión real de cada tab que se
+/// cierra (ver `reconcile_session_id`), y para OpenCode eso levanta un proceso (~0.9s
+/// medidos). Corriendo síncrono, cerrar una tab —o salir con varias abiertas— congelaba la
+/// interfaz ese tiempo. Es el mismo tratamiento que ya tienen `discover_session_id` y
+/// `detect_agents`, por el mismo motivo.
 #[tauri::command]
-pub fn db_save_window_state(
+pub async fn db_save_window_state(
     state: WindowStatePayload,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
     app: tauri::AppHandle,
+) -> Result<(), String> {
+    let db = (*db).clone();
+    tokio::task::spawn_blocking(move || db_save_window_state_sync(state, &db, &app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn db_save_window_state_sync(
+    state: WindowStatePayload,
+    db: &DbConnection,
+    app: &tauri::AppHandle,
 ) -> Result<(), String> {
     // Un guardado de una ventana que ya no existe nativamente es un guardado zombi: el
     // JS de una ventana en pleno teardown (o cuyo timer periódico de 20s disparó justo
@@ -1274,7 +1407,7 @@ pub fn db_save_window_state(
     // que se acababan de descartar — el caso visible es "Nuevo workspace": se borran las
     // filas de `default` y un guardado en vuelo devolvía una de ellas a la vida, con sus
     // tabs, en el workspace supuestamente vacío.
-    if tauri::Manager::get_webview_window(&app, &state.label).is_none() {
+    if tauri::Manager::get_webview_window(app, &state.label).is_none() {
         return Ok(());
     }
 
@@ -1648,6 +1781,7 @@ mod tests {
              CREATE TABLE skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, source_path TEXT NOT NULL);
              CREATE TABLE project_skills (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, workspace_id TEXT NOT NULL, scope TEXT NOT NULL, tab_id TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
              CREATE TABLE session_history (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT, session_id TEXT, skills TEXT NOT NULL DEFAULT '[]', sibling_tabs TEXT NOT NULL DEFAULT '[]', account_id TEXT, opened_at INTEGER NOT NULL, closed_at INTEGER NOT NULL);
+             CREATE TABLE agent_accounts (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, name TEXT NOT NULL, dir TEXT NOT NULL, created_at INTEGER NOT NULL);
              INSERT INTO workspaces VALUES ('ws', 'WS', 0, 0);
              INSERT INTO windows VALUES ('win', 'win', 'ws', 1, 0);",
         ).unwrap();
@@ -1660,6 +1794,135 @@ mod tests {
              VALUES (?1, 'win', 'Mi sesión', 'claude-code', 'Claude Code', 'claude', '/proj', ?2, ?3, 100, 0, 0)",
             rusqlite::params![id, session_id, history_id],
         ).unwrap();
+    }
+
+    /// Carpeta temporal propia del test, que se borra sola.
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let p = std::env::temp_dir().join(format!("cc-db-{}", Uuid::new_v4()));
+            std::fs::create_dir_all(&p).unwrap();
+            TempDir(p)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Tab que corre con una cuenta propia. La cuenta es lo que deja apuntar el
+    /// descubrimiento a una carpeta de prueba en vez del `~/.claude` real de la máquina.
+    fn insert_tab_with_account(
+        conn: &Connection,
+        id: &str,
+        session_id: Option<&str>,
+        account_dir: &std::path::Path,
+    ) {
+        conn.execute(
+            "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at)
+             VALUES ('acc', 'claude-code', 'trabajo', ?1, 0)
+             ON CONFLICT(id) DO NOTHING",
+            [account_dir.to_string_lossy()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tabs (id, window_id, title, agent_id, agent_label, command, cwd, session_id, account_id, opened_at, created_at, last_active)
+             VALUES (?1, 'win', 'Mi sesión', 'claude-code', 'Claude Code', 'claude', '/proj', ?2, 'acc', 100, 0, 0)",
+            rusqlite::params![id, session_id],
+        )
+        .unwrap();
+    }
+
+    /// Deja en el perfil un transcript de Claude Code para ese cwd, como si la TUI acabara
+    /// de escribirlo.
+    fn write_transcript(profile: &std::path::Path, cwd: &str, session_id: &str) {
+        let dir = profile.join("projects").join(cwd.replace('/', "-"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("{session_id}.jsonl")), "{}\n").unwrap();
+    }
+
+    /// Igual, pero con la línea `summary` de la que Claude Code saca el título.
+    fn write_transcript_titled(
+        profile: &std::path::Path,
+        cwd: &str,
+        session_id: &str,
+        summary: &str,
+    ) {
+        let dir = profile.join("projects").join(cwd.replace('/', "-"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{session_id}.jsonl")),
+            format!("{{\"type\":\"summary\",\"summary\":\"{summary}\"}}\n"),
+        )
+        .unwrap();
+    }
+
+    fn archived_title(conn: &Connection) -> Option<String> {
+        conn.query_row("SELECT title FROM session_history", [], |r| r.get(0)).unwrap()
+    }
+
+    fn archived_session_id(conn: &Connection) -> Option<String> {
+        conn.query_row("SELECT session_id FROM session_history", [], |r| r.get(0)).unwrap()
+    }
+
+    /// El bug reportado: retomar una conversación DESDE ADENTRO de la TUI (`/resume`) dejaba
+    /// la tab con el id que se descubrió al arrancar, así que al cerrar se archivaba una
+    /// sesión nueva y la conversación continuada quedaba sin actualizar.
+    #[test]
+    fn archiving_follows_a_session_resumed_inside_the_tui() {
+        let conn = setup();
+        let profile = TempDir::new();
+        write_transcript(&profile.0, "/proj", "la-retomada");
+        insert_tab_with_account(&conn, "tab-1", Some("la-de-arranque"), &profile.0);
+
+        archive_tab_row(&conn, "tab-1", "ws").unwrap();
+
+        assert_eq!(archived_session_id(&conn).as_deref(), Some("la-retomada"));
+    }
+
+    /// Al cambiar de sesión, el título de la tab es el de la conversación abandonada.
+    /// Escribirlo pisaría el título bueno de la conversación que se retomó.
+    #[test]
+    fn archiving_recomputes_the_title_when_the_session_changed() {
+        let conn = setup();
+        let profile = TempDir::new();
+        write_transcript_titled(&profile.0, "/proj", "la-retomada", "Charla retomada");
+        insert_tab_with_account(&conn, "tab-1", Some("la-de-arranque"), &profile.0);
+
+        archive_tab_row(&conn, "tab-1", "ws").unwrap();
+
+        assert_eq!(archived_title(&conn).as_deref(), Some("Charla retomada"));
+    }
+
+    /// Con dos tabs del mismo agente en la misma carpeta, el archivo más nuevo puede ser el
+    /// de la OTRA tab. Robárselo dejaría dos entradas del historial sobre la misma
+    /// conversación, que es peor que no reconciliar.
+    #[test]
+    fn reconciliation_does_not_steal_a_session_owned_by_another_tab() {
+        let conn = setup();
+        let profile = TempDir::new();
+        write_transcript(&profile.0, "/proj", "de-la-otra-tab");
+        insert_tab_with_account(&conn, "tab-1", Some("la-mia"), &profile.0);
+        insert_tab_with_account(&conn, "tab-2", Some("de-la-otra-tab"), &profile.0);
+
+        archive_tab_row(&conn, "tab-1", "ws").unwrap();
+
+        assert_eq!(archived_session_id(&conn).as_deref(), Some("la-mia"));
+    }
+
+    /// No encontrar nada significa "no sé", no "no tenía sesión": el id previo se conserva.
+    #[test]
+    fn reconciliation_keeps_the_previous_id_when_nothing_is_found() {
+        let conn = setup();
+        let profile = TempDir::new();
+        insert_tab_with_account(&conn, "tab-1", Some("la-unica"), &profile.0);
+
+        archive_tab_row(&conn, "tab-1", "ws").unwrap();
+
+        assert_eq!(archived_session_id(&conn).as_deref(), Some("la-unica"));
     }
 
     fn attach_skill_row(conn: &Connection, id: &str, ws: &str, scope: &str, tab: Option<&str>) {

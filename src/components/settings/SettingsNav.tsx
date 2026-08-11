@@ -7,10 +7,11 @@ export interface SettingsSectionRef {
 
 interface SettingsNavProps {
   sections: SettingsSectionRef[];
+  title: string;
 }
 
 /**
- * Índice de las secciones de Configuración, fijo a la derecha.
+ * Índice de las secciones de Configuración, fijo a la izquierda.
  *
  * La página creció hasta no entrar en una pantalla, y sin índice la única forma de saber
  * qué hay es scrollear hasta el final. Un índice resuelve las dos cosas de una: muestra el
@@ -19,7 +20,7 @@ interface SettingsNavProps {
  * Se marca la sección visible en vez de solo listar: sin eso, después de scrollear un rato
  * el índice no dice dónde estás, que es la mitad de para qué sirve.
  */
-export function SettingsNav({ sections }: SettingsNavProps) {
+export function SettingsNav({ sections, title }: SettingsNavProps) {
   const [active, setActive] = useState(sections[0]?.id ?? "");
 
   useEffect(() => {
@@ -50,7 +51,7 @@ export function SettingsNav({ sections }: SettingsNavProps) {
       <div className="sticky top-10 flex flex-col gap-1">
         <span className="text-[11px] font-semibold uppercase tracking-widest
           text-gray-400 dark:text-gray-500 px-3 pb-1">
-          {sections.length}
+          {title}
         </span>
 
         {sections.map((section) => {

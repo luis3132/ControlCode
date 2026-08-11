@@ -387,6 +387,12 @@ pub fn env_for_account(db: &DbConnection, account_id: &str) -> Option<HashMap<St
 /// transcripts de una tab con cuenta alternativa en la carpeta del sistema.
 pub fn dir_for(db: &DbConnection, account_id: &str) -> Option<String> {
     let conn = db.lock().ok()?;
+    dir_for_conn(&conn, account_id)
+}
+
+/// Igual que `dir_for`, sobre una conexión ya tomada — para quien está adentro del lock y
+/// volver a pedirlo sería un deadlock.
+pub fn dir_for_conn(conn: &rusqlite::Connection, account_id: &str) -> Option<String> {
     conn.query_row(
         "SELECT dir FROM agent_accounts WHERE id = ?1",
         [account_id],
