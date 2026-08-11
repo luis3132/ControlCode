@@ -67,7 +67,11 @@ libc = "0.2"
 # Job Objects: el equivalente en Windows del cgroup que se usa en Linux para que la
 # descendencia de una tab muera con ella (ver terminal::containment).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = [
+# La versión NO es arbitraria: tiene que ser la misma que ya domina el árbol (la traen
+# tauri y sus dependencias). Con una 0.59 conviven dos generaciones de `windows-targets`,
+# una con import libs y otra con `raw-dylib`, y el binario resultante compila pero no
+# carga: STATUS_ENTRYPOINT_NOT_FOUND al arrancar, antes de ejecutar nada.
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     # `CreateJobObjectW` recibe un `SECURITY_ATTRIBUTES` y
     # `JOBOBJECT_EXTENDED_LIMIT_INFORMATION` vive bajo Threading: sin estos dos features
