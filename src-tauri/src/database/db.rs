@@ -1395,26 +1395,51 @@ pub fn workspace_name(conn: &Connection, workspace_id: &str) -> Option<String> {
         .flatten()
 }
 
-/// Busca si `session_id` ya está abierto en alguna tab viva (ventana `is_open = 1`) de
-/// ESE workspace — usado por "Reabrir" en Sesiones: si la conversación ya está abierta en
-/// algún lado, hay que enfocar esa tab en vez de abrir un duplicado.
+/// Busca si esta conversación ya está abierta en alguna tab viva (ventana `is_open = 1`)
+/// de ESE workspace — usado por "Reabrir" en Sesiones: si ya está abierta en algún lado,
+/// hay que enfocar esa tab en vez de abrir un duplicado.
+///
+/// Se busca por DOS caminos, y hacen falta los dos:
+///
+/// - `session_id` es el identificador real de la conversación, pero **puede ser NULL**: hay
+///   sesiones que nunca llegan a resolverlo (la TUI no escribió su transcript todavía, o no
+///   expone uno). Con solo este criterio, esas sesiones se duplicaban en cada reapertura.
+/// - `history_id` es la entrada del historial de la que salió la tab. Una tab reabierta
+///   desde Sesiones lo lleva puesto, así que identifica el caso que importa acá incluso sin
+///   id de sesión.
 #[tauri::command]
 pub fn find_open_tab_for_session(
-    session_id: String,
+    session_id: Option<String>,
+    history_id: Option<String>,
     workspace_id: String,
     db: tauri::State<DbConnection>,
 ) -> Result<Option<OpenTabLocation>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
+    open_tab_for_session(&conn, session_id.as_deref(), history_id.as_deref(), &workspace_id)
+        .map_err(|e| e.to_string())
+}
+
+/// La búsqueda en sí, separada del comando para poder probarla.
+fn open_tab_for_session(
+    conn: &Connection,
+    session_id: Option<&str>,
+    history_id: Option<&str>,
+    workspace_id: &str,
+) -> rusqlite::Result<Option<OpenTabLocation>> {
+    if session_id.is_none() && history_id.is_none() {
+        return Ok(None);
+    }
     conn.query_row(
         "SELECT w.label, t.id FROM tabs t
          JOIN windows w ON w.id = t.window_id
-         WHERE t.session_id = ?1 AND w.workspace_id = ?2 AND w.is_open = 1
+         WHERE w.workspace_id = ?3 AND w.is_open = 1
+           AND ((?1 IS NOT NULL AND t.session_id = ?1)
+             OR (?2 IS NOT NULL AND t.history_id = ?2))
          LIMIT 1",
-        rusqlite::params![session_id, workspace_id],
+        rusqlite::params![session_id, history_id, workspace_id],
         |row| Ok(OpenTabLocation { window_label: row.get(0)?, tab_id: row.get(1)? }),
     )
     .optional()
-    .map_err(|e| e.to_string())
 }
 
 // ── Commands: windows + tabs (estado de sesión) ──────────────────
@@ -1832,6 +1857,49 @@ mod tests {
              INSERT INTO windows VALUES ('win', 'win', 'ws', 1, 0);",
         ).unwrap();
         conn
+    }
+
+    /// Reanudar tiene que ENFOCAR la tab existente, no abrir otra. Antes esto solo
+    /// funcionaba si la sesión tenía id resuelto, y las que nunca lo resolvieron se
+    /// duplicaban en cada reapertura.
+    #[test]
+    fn una_sesion_ya_abierta_se_encuentra_por_su_id() {
+        let conn = setup();
+        insert_tab(&conn, "t1", Some("sess-1"), None);
+        let found = open_tab_for_session(&conn, Some("sess-1"), Some("h1"), "ws").unwrap();
+        assert_eq!(found.unwrap().tab_id, "t1");
+    }
+
+    #[test]
+    fn una_sesion_sin_id_resuelto_se_encuentra_por_su_entrada_del_historial() {
+        let conn = setup();
+        insert_tab(&conn, "t1", None, Some("h1"));
+        let found = open_tab_for_session(&conn, None, Some("h1"), "ws").unwrap();
+        assert_eq!(found.unwrap().tab_id, "t1");
+    }
+
+    #[test]
+    fn una_sesion_que_no_esta_abierta_no_devuelve_nada() {
+        let conn = setup();
+        insert_tab(&conn, "t1", Some("otra"), Some("otra-h"));
+        assert!(open_tab_for_session(&conn, Some("sess-1"), Some("h1"), "ws").unwrap().is_none());
+    }
+
+    /// Sin este corte, `t.session_id = NULL` no matchea nunca pero la rama de historial
+    /// podría colar cualquier tab si se pasaran los dos en NULL.
+    #[test]
+    fn sin_ningun_identificador_no_se_busca() {
+        let conn = setup();
+        insert_tab(&conn, "t1", None, None);
+        assert!(open_tab_for_session(&conn, None, None, "ws").unwrap().is_none());
+    }
+
+    #[test]
+    fn no_se_enfoca_una_tab_de_una_ventana_cerrada() {
+        let conn = setup();
+        insert_tab(&conn, "t1", Some("sess-1"), None);
+        conn.execute("UPDATE windows SET is_open = 0", []).unwrap();
+        assert!(open_tab_for_session(&conn, Some("sess-1"), None, "ws").unwrap().is_none());
     }
 
     fn insert_tab(conn: &Connection, id: &str, session_id: Option<&str>, history_id: Option<&str>) {

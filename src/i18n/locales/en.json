@@ -43,9 +43,9 @@
   "sessions.subtitle": "Chats you previously opened in this workspace",
   "sessions.empty": "No closed sessions in this workspace yet",
   "sessions.resume": "Reopen",
-  "sessions.resumeWithSkills": "Reopen choosing skills",
+  "sessions.resumeWithSkills": "Reopen choosing skills and environment",
   "sessions.resumeSkills.title": "Skills for this session",
-  "sessions.resumeSkills.body": "Pick which skills to attach before \"{{session}}\" starts. Agents scan their skills folder only at startup, so this can't be changed once it's running.",
+  "sessions.resumeSkills.body": "Adjust what \"{{session}}\" starts with before launching it. Neither skills nor the environment can be changed once the agent is running.",
   "sessions.resumeSkills.open": "Reopen with these",
   "sessions.resumeSkills.missingTitle": "No longer installed",
   "sessions.resumeSkills.missingHint": "The session had these, but they aren't installed anymore. Install them from the Marketplace to use them here.",
@@ -349,5 +349,6 @@
   "prelaunch.stepCount_one": "{{count}} command",
   "prelaunch.stepCount_other": "{{count}} commands",
   "wizard.advanced": "Advanced options",
-  "terminal.prelaunchError": "Couldn't prepare this tab's environment ({{error}}). Nothing was launched, to avoid starting in the wrong environment."
+  "terminal.prelaunchError": "Couldn't prepare this tab's environment ({{error}}). Nothing was launched, to avoid starting in the wrong environment.",
+  "sessions.resumeOptions.title": "This session's options"
 }

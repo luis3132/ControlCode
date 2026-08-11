@@ -3,36 +3,50 @@ import { useTranslation } from "react-i18next";
 import { Button, Modal, InfoIcon } from "neogestify-ui-components";
 import { SessionHistoryEntry, SessionSkillStatus } from "../../store/sessions";
 import { SkillPickerStep } from "../wizard/SkillPickerStep";
+import { PrelaunchChain } from "../prelaunch/PrelaunchChain";
+import type { PrelaunchStep } from "../../store/prelaunch";
 
-interface ResumeSkillsDialogProps {
+export interface ResumeChoice {
+  /** Skills con las que montar la tab (ids ya instalados). */
+  skillIds: string[];
+  /** Comandos a ejecutar antes del agente. */
+  prelaunch: PrelaunchStep[];
+}
+
+interface ResumeOptionsDialogProps {
   entry: SessionHistoryEntry;
   /** Estado actual de las skills que la sesión tenía archivadas. */
   statuses: SessionSkillStatus[];
   onCancel: () => void;
-  /** Reabre la sesión con exactamente estas skills (ids ya instalados). */
-  onConfirm: (skillIds: string[]) => void;
+  onConfirm: (choice: ResumeChoice) => void;
 }
 
 /**
- * Elegir con qué skills reabrir una sesión, antes de montar la TUI.
+ * Elegir con qué reabrir una sesión, antes de montar la TUI.
  *
  * Reabrir tal cual (el botón normal de reanudar) restaura lo que la sesión tenía. Pero esa
  * config es la de cuando se cerró, y muchas veces uno vuelve a una sesión justamente para
- * atacarla distinto: sumarle una skill que instaló después, o sacarle una que le está
- * metiendo ruido al contexto. Después de lanzado el agente ya no sirve — varios escanean
- * su carpeta de skills solo al boot — así que la decisión tiene que tomarse acá.
+ * atacarla distinto: sumarle una skill que instaló después, sacarle una que le está
+ * metiendo ruido al contexto, o entrar en otro entorno porque el proyecto se mudó de
+ * intérprete.
  *
- * Arranca con lo que la sesión tenía (menos lo que ya no está instalado) para que el caso
- * "quiero un ajuste chico" no obligue a re-tildar todo desde cero.
+ * Las dos cosas comparten la misma restricción, y por eso viven en el mismo diálogo:
+ * **después de lanzado el agente ya no sirven**. Varias TUIs escanean su carpeta de skills
+ * solo al boot, y el entorno se hereda en el momento del spawn y no se puede cambiar en
+ * caliente. Si no se decide acá, no se decide.
+ *
+ * Arranca con lo que la sesión tenía (menos las skills que ya no estén instaladas) para que
+ * el caso "quiero un ajuste chico" no obligue a rearmar todo desde cero.
  */
-export function ResumeSkillsDialog({
+export function ResumeOptionsDialog({
   entry,
   statuses,
   onCancel,
   onConfirm,
-}: ResumeSkillsDialogProps) {
+}: ResumeOptionsDialogProps) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<string[]>([]);
+  const [prelaunch, setPrelaunch] = useState<PrelaunchStep[]>(entry.prelaunch);
 
   // Preselección: las archivadas que siguen instaladas. `installedSkillId` ya resuelve el
   // caso de una skill reinstalada con otro id pero el mismo nombre.
@@ -56,7 +70,7 @@ export function ResumeSkillsDialog({
 
   return (
     <Modal
-      title={t("sessions.resumeSkills.title")}
+      title={t("sessions.resumeOptions.title")}
       onClose={onCancel}
       size="md"
       footer={
@@ -64,7 +78,10 @@ export function ResumeSkillsDialog({
           <Button variant="outline" onClick={onCancel}>
             {t("btn.cancel")}
           </Button>
-          <Button variant="primary" onClick={() => onConfirm(selected)}>
+          <Button
+            variant="primary"
+            onClick={() => onConfirm({ skillIds: selected, prelaunch })}
+          >
             {t("sessions.resumeSkills.open")}
           </Button>
         </>
@@ -112,6 +129,25 @@ export function ResumeSkillsDialog({
             ? t("sessions.resumeSkills.diff", { added, removed })
             : t("sessions.resumeSkills.unchanged")}
         </p>
+
+        {/* Los comandos previos van al final y con separador: son opcionales y la mayoría
+            de las sesiones no los usa, pero cuando los usa hay que poder corregirlos —
+            un preset renombrado o un entorno que ya no existe se arregla acá y no
+            reabriendo a ciegas para que falle. */}
+        <div className="flex flex-col gap-2 pt-3 border-t border-gray-200 dark:border-gray-700">
+          <span className="text-[11px] font-semibold uppercase tracking-widest
+            text-gray-400 dark:text-gray-500">
+            {t("wizard.advanced")}
+          </span>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {t("prelaunch.chainDesc")}
+          </p>
+          <PrelaunchChain
+            value={prelaunch}
+            onChange={setPrelaunch}
+            agentCommand={entry.command}
+          />
+        </div>
       </div>
     </Modal>
   );

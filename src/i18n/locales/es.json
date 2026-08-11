@@ -43,9 +43,9 @@
   "sessions.subtitle": "Chats que abriste anteriormente en este workspace",
   "sessions.empty": "Todavía no hay sesiones cerradas en este workspace",
   "sessions.resume": "Reabrir",
-  "sessions.resumeWithSkills": "Reabrir eligiendo skills",
+  "sessions.resumeWithSkills": "Reabrir eligiendo skills y entorno",
   "sessions.resumeSkills.title": "Skills de esta sesión",
-  "sessions.resumeSkills.body": "Elegí qué skills adjuntar antes de que arranque \"{{session}}\". Los agentes escanean su carpeta de skills solo al inicio, así que esto no se puede cambiar una vez corriendo.",
+  "sessions.resumeSkills.body": "Ajustá con qué arranca \"{{session}}\" antes de lanzarla. Ni las skills ni el entorno se pueden cambiar con el agente ya corriendo.",
   "sessions.resumeSkills.open": "Reabrir con estas",
   "sessions.resumeSkills.missingTitle": "Ya no instaladas",
   "sessions.resumeSkills.missingHint": "La sesión las tenía, pero ya no están instaladas. Instalalas desde el Marketplace para poder usarlas acá.",
@@ -349,5 +349,6 @@
   "prelaunch.stepCount_one": "{{count}} comando",
   "prelaunch.stepCount_other": "{{count}} comandos",
   "wizard.advanced": "Opciones avanzadas",
-  "terminal.prelaunchError": "No se pudo preparar el entorno de esta tab ({{error}}). No se lanzó nada para no arrancar en el entorno equivocado."
+  "terminal.prelaunchError": "No se pudo preparar el entorno de esta tab ({{error}}). No se lanzó nada para no arrancar en el entorno equivocado.",
+  "sessions.resumeOptions.title": "Opciones de esta sesión"
 }

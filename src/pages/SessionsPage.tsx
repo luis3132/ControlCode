@@ -13,7 +13,8 @@ import { useTabsStore } from "../store/tabs";
 import { useAccountsStore } from "../store/accounts";
 import { PageHeader } from "../components/common/PageHeader";
 import { MissingSkillsDialog } from "../components/sessions/MissingSkillsDialog";
-import { ResumeSkillsDialog } from "../components/sessions/ResumeSkillsDialog";
+import { ResumeOptionsDialog } from "../components/sessions/ResumeOptionsDialog";
+import type { PrelaunchStep } from "../store/prelaunch";
 import { SessionRow } from "../components/sessions/SessionRow";
 import {
   EMPTY_FILTERS,
@@ -85,12 +86,43 @@ export function SessionsPage() {
     });
 
   /**
+   * Si esta conversación ya está abierta en este workspace, la enfoca y devuelve `true`.
+   *
+   * Vive acá y no en cada handler a propósito: antes solo lo consultaba el botón de
+   * reanudar directo, así que reanudar desde cualquiera de los diálogos abría un duplicado
+   * de una sesión que ya estaba en pantalla.
+   */
+  const focusIfAlreadyOpen = async (entry: SessionHistoryEntry): Promise<boolean> => {
+    const location = await invoke<OpenTabLocation | null>("find_open_tab_for_session", {
+      sessionId: entry.sessionId,
+      historyId: entry.id,
+      workspaceId,
+    }).catch(() => null);
+    if (!location) return false;
+
+    await invoke("focus_window", { label: location.windowLabel }).catch(console.error);
+    await invoke("broadcast_event", {
+      event: "cc-focus-tab",
+      payload: JSON.stringify({ targetLabel: location.windowLabel, tabId: location.tabId }),
+    }).catch(console.error);
+    return true;
+  };
+
+  /**
    * Abre la tab de verdad. Sin `skillIds` restaura las skills que la sesión tenía al
    * cerrarse (el camino por defecto); con `skillIds` monta exactamente ese set — es lo que
-   * eligió el usuario en `ResumeSkillsDialog`, incluida la lista vacía ("abrir sin skills"),
-   * que por eso se distingue de `undefined` y no con un `.length`.
+   * eligió el usuario en `ResumeOptionsDialog`, incluida la lista vacía ("abrir sin
+   * skills"), que por eso se distingue de `undefined` y no con un `.length`.
+   *
+   * `prelaunch` sigue la misma regla: `undefined` = la cadena con la que la sesión corría.
    */
-  const openSession = (entry: SessionHistoryEntry, skillIds?: string[]) => {
+  const openSession = async (
+    entry: SessionHistoryEntry,
+    skillIds?: string[],
+    prelaunch?: PrelaunchStep[]
+  ) => {
+    if (await focusIfAlreadyOpen(entry)) return;
+
     const tabId = addTab({
       cwd: entry.cwd,
       agent: { id: entry.agentId, label: entry.agentLabel, command: entry.command, available: true },
@@ -103,8 +135,10 @@ export function SessionsPage() {
       // de la cuenta, no en el home.
       accountId: entry.accountId ?? undefined,
       // Y con los mismos comandos previos: reabrir una sesión tiene que reproducir el
-      // entorno en el que se estaba trabajando, no uno pelado.
-      prelaunch: entry.prelaunch,
+      // entorno en el que se estaba trabajando, no uno pelado. Salvo que se hayan editado
+      // en el diálogo de opciones, que es la única oportunidad de cambiarlos (el entorno
+      // se hereda al spawnear y no se puede tocar con el agente ya corriendo).
+      prelaunch: prelaunch ?? entry.prelaunch,
     });
     navigate("/workspace");
 
@@ -134,28 +168,15 @@ export function SessionsPage() {
 
   /** Reanudar eligiendo antes las skills: se resuelve su estado actual y se abre el diálogo. */
   const handleResumeWithSkills = async (entry: SessionHistoryEntry) => {
+    if (await focusIfAlreadyOpen(entry)) return;
     const statuses = await checkSessionSkills(entry.id).catch(() => []);
     setPendingSkillChoice({ entry, statuses });
   };
 
   const handleResume = async (entry: SessionHistoryEntry) => {
-    // Si esta conversación ya está abierta en alguna ventana viva de este workspace,
-    // enfocar esa tab en vez de abrir un duplicado.
-    if (entry.sessionId) {
-      const location = await invoke<OpenTabLocation | null>("find_open_tab_for_session", {
-        sessionId: entry.sessionId,
-        workspaceId,
-      }).catch(() => null);
-
-      if (location) {
-        await invoke("focus_window", { label: location.windowLabel }).catch(console.error);
-        await invoke("broadcast_event", {
-          event: "cc-focus-tab",
-          payload: JSON.stringify({ targetLabel: location.windowLabel, tabId: location.tabId }),
-        }).catch(console.error);
-        return;
-      }
-    }
+    // Antes de cualquier diálogo: si ya está abierta, esto es un "llevame ahí" y no una
+    // reapertura — no tiene sentido preguntar por skills que ya están montadas.
+    if (await focusIfAlreadyOpen(entry)) return;
 
     // Si alguna de las skills que tenía esta sesión ya no está instalada, se avisa ANTES
     // de abrirla: reabrirla sin ellas es una sesión distinta a la que se cerró, y el
@@ -166,7 +187,7 @@ export function SessionsPage() {
       return;
     }
 
-    openSession(entry);
+    await openSession(entry);
   };
 
   return (
@@ -252,14 +273,14 @@ export function SessionsPage() {
       </div>
 
       {pendingSkillChoice && (
-        <ResumeSkillsDialog
+        <ResumeOptionsDialog
           entry={pendingSkillChoice.entry}
           statuses={pendingSkillChoice.statuses}
           onCancel={() => setPendingSkillChoice(null)}
-          onConfirm={(skillIds) => {
+          onConfirm={({ skillIds, prelaunch }) => {
             const { entry } = pendingSkillChoice;
             setPendingSkillChoice(null);
-            openSession(entry, skillIds);
+            openSession(entry, skillIds, prelaunch).catch(console.error);
           }}
         />
       )}
@@ -275,7 +296,7 @@ export function SessionsPage() {
             // `restore_session_skills` vuelve a resolver el estado de cada skill en el
             // momento de abrir, así que lo que se haya reinstalado en el diálogo entra
             // solo, sin tener que propagar nada desde acá.
-            openSession(entry);
+            openSession(entry).catch(console.error);
           }}
         />
       )}
