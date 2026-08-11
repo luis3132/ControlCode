@@ -4,11 +4,19 @@
 //! desarrollo— y después mata exactamente como lo hace `pty_kill` (pty_manager.rs:252),
 //! para ver si el nieto queda huérfano.
 //!
-//!   cargo run --example orphan_probe            # semántica actual: SIGHUP al líder
-//!   cargo run --example orphan_probe -- killpg  # la propuesta: SIGHUP a todo el grupo
+//!   cargo run --example orphan_probe              # cómo mataba ANTES: solo al hijo directo
+//!   cargo run --example orphan_probe -- killpg    # SIGHUP a todo el grupo (unix; se midió
+//!                                                 # insuficiente, queda como evidencia)
+//!   cargo run --example orphan_probe -- contained # el arreglo real: `ProcessGroup`
 //!
-//! En Windows no aplica el modo `killpg`: ahí el equivalente es un Job Object, y este
-//! probe solo mide si `TerminateProcess` sobre el hijo directo deja vivo al nieto.
+//! El módulo de contención se incluye por `#[path]` en vez de por `controlcode_lib` a
+//! propósito: así este probe no enlaza la lib. En Windows el binario de tests de la lib no
+//! llega ni a cargar (STATUS_ENTRYPOINT_NOT_FOUND, por algo ajeno a esto), y sin este
+//! rodeo no habría forma de verificar el arreglo en esa plataforma.
+#[path = "../src/terminal/containment.rs"]
+mod containment;
+
+use containment::ProcessGroup;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::Read;
 use std::time::{Duration, Instant};
@@ -33,8 +41,15 @@ fn main() {
     let mut cmd = agente_cmd();
     cmd.env("TERM", "xterm-256color");
 
+    // En modo `contained` se replica el orden de `pty_create`: el grupo existe antes del
+    // spawn y adopta al proceso apenas nace.
+    let mut group = (mode == "contained").then(|| ProcessGroup::new(0));
+
     let mut child = pty.slave.spawn_command(cmd).expect("spawn");
     let agente = child.process_id().expect("pid del hijo directo");
+    if let Some(g) = &mut group {
+        g.adopt(&*child);
+    }
     println!("agente (hijo directo del PTY) = {agente}");
 
     // Leer hasta que el "agente" reporte el pid del nieto.
@@ -66,6 +81,12 @@ fn main() {
     // ── Lo que hace pty_kill hoy ────────────────────────────────────────────────────
     println!("\nmodo: {mode}");
     match mode.as_str() {
+        // Mismo orden que `pty_kill`: primero el grupo (el respaldo por ppid necesita al
+        // padre vivo), después el hijo directo.
+        "contained" => {
+            group.as_mut().expect("grupo").kill_all();
+            let _ = child.kill();
+        }
         "killpg" => matar_grupo(agente),
         _ => {
             // portable-pty manda SIGHUP SOLO a este pid (lib.rs:315).
