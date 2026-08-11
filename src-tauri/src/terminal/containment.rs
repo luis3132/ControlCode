@@ -486,4 +486,93 @@ mod imp {
         }
         g.job = std::ptr::null_mut();
     }
+
+    #[cfg(test)]
+    pub fn usa_job(g: &Group) -> bool {
+        !g.job.is_null()
+    }
+}
+
+/// Regresión del caso que `examples/orphan_probe.rs` midió fugando en Windows: un hijo
+/// **normal** del agente (ni siquiera hace falta que se desprenda de nada) sobrevive al
+/// cierre de la tab, porque `TerminateProcess` no toca a los descendientes y allá no
+/// existe la red del kernel que en unix tapa este caso.
+#[cfg(all(test, windows))]
+mod tests_e2e {
+    use super::{imp, ProcessGroup};
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+
+    fn vivo(pid: u32) -> bool {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn matar_una_tab_se_lleva_al_proceso_que_lanzo_el_agente() {
+        let pty = native_pty_system()
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .expect("openpty");
+
+        // PowerShell hace de agente: lanza un proceso aparte y reporta su pid.
+        let mut cmd = CommandBuilder::new("powershell");
+        cmd.arg("-NoProfile");
+        cmd.arg("-Command");
+        cmd.arg(
+            "$p = Start-Process -PassThru -WindowStyle Hidden ping \
+             -ArgumentList '-n','60','127.0.0.1'; \
+             Write-Output \"NIETO=$($p.Id)\"; Start-Sleep 60",
+        );
+
+        let mut group = ProcessGroup::new(9_003);
+        let child = pty.slave.spawn_command(cmd).expect("spawn");
+        group.adopt(&*child);
+        assert!(imp::usa_job(&group.imp), "no se pudo crear el Job Object");
+
+        let mut reader = pty.master.try_clone_reader().expect("reader");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 1024];
+            let mut acc = String::new();
+            while let Ok(n) = reader.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                acc.push_str(&String::from_utf8_lossy(&buf[..n]));
+                if let Some(rest) = acc.split("NIETO=").nth(1) {
+                    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                    // Se espera a ver un separador para no leer un pid cortado a la mitad
+                    // por el chunk.
+                    if digits.len() < rest.len() {
+                        if let Ok(pid) = digits.parse::<u32>() {
+                            let _ = tx.send(pid);
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        let nieto = rx.recv_timeout(Duration::from_secs(30)).expect("pid del nieto");
+        assert!(vivo(nieto), "el nieto tendría que estar vivo antes de matar el grupo");
+
+        group.kill_all();
+        drop(pty);
+
+        let limite = Instant::now() + Duration::from_secs(5);
+        while vivo(nieto) && Instant::now() < limite {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        let sobrevivio = vivo(nieto);
+        if sobrevivio {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/PID", &nieto.to_string()])
+                .output();
+        }
+        assert!(!sobrevivio, "el nieto {nieto} quedó huérfano tras matar el grupo");
+    }
 }
