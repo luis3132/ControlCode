@@ -162,13 +162,26 @@ fn extract_text_block(content: &Value) -> Option<String> {
 
 // ── Claude Code: ~/.claude/projects/<cwd con '/' -> '-'>/<uuid>.jsonl ────
 
-fn claude_project_dir(cwd: &str) -> PathBuf {
+/// `profile` es el directorio de la cuenta con la que corre la tab (`CLAUDE_CONFIG_DIR`).
+/// Con una cuenta alternativa, TODO lo de Claude Code vive ahí adentro — incluidos los
+/// transcripts — así que buscar en `~/.claude` daría siempre "sin sesión": ni título ni
+/// resume. `None` = la cuenta del sistema.
+fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
     let slug = cwd.replace('/', "-");
-    dirs::home_dir().unwrap_or_default().join(".claude/projects").join(slug)
+    let root = match profile {
+        Some(dir) => dir.to_path_buf(),
+        None => dirs::home_dir().unwrap_or_default().join(".claude"),
+    };
+    root.join("projects").join(slug)
 }
 
-fn claude_session_file(cwd: &str, session_id: Option<&str>, after: Option<i64>) -> Option<PathBuf> {
-    let dir = claude_project_dir(cwd);
+fn claude_session_file(
+    cwd: &str,
+    session_id: Option<&str>,
+    after: Option<i64>,
+    profile: Option<&Path>,
+) -> Option<PathBuf> {
+    let dir = claude_project_dir(cwd, profile);
     if let Some(id) = session_id {
         let direct = dir.join(format!("{id}.jsonl"));
         if direct.exists() {
@@ -367,7 +380,10 @@ fn gemini_title(path: &Path, fallback: &str) -> SessionTitleResult {
 // session id de OTRO proyecto y reanudar la conversación equivocada. Comparar `payload.cwd`
 // como ruta, y no como substring, elimina las dos cosas.
 
-fn codex_root() -> PathBuf {
+fn codex_root(profile: Option<&Path>) -> PathBuf {
+    if let Some(dir) = profile {
+        return dir.join("sessions");
+    }
     // Codex respeta CODEX_HOME para reubicar toda su configuración y su historial; si no
     // está definida cae en ~/.codex.
     let home = std::env::var_os("CODEX_HOME")
@@ -401,21 +417,21 @@ fn codex_rollouts_in(root: &Path) -> Vec<PathBuf> {
     files
 }
 
-fn codex_rollouts() -> Vec<PathBuf> {
-    codex_rollouts_in(&codex_root())
+fn codex_rollouts(profile: Option<&Path>) -> Vec<PathBuf> {
+    codex_rollouts_in(&codex_root(profile))
 }
 
 /// Rollout de la sesión con ESTE id exacto. Se prefiere a "el más nuevo del cwd" cuando el
 /// id se conoce: con dos tabs de Codex abiertas en la misma carpeta, "el más nuevo" es el de
 /// la otra tab y los títulos quedarían cruzados.
-fn codex_session_file_by_id(session_id: &str) -> Option<PathBuf> {
-    codex_rollouts()
+fn codex_session_file_by_id(session_id: &str, profile: Option<&Path>) -> Option<PathBuf> {
+    codex_rollouts(profile)
         .into_iter()
         .find(|p| codex_meta(p).and_then(|m| m.id).as_deref() == Some(session_id))
 }
 
-fn codex_session_file(cwd: &str, after: Option<i64>) -> Option<PathBuf> {
-    codex_session_file_in(&codex_root(), cwd, after)
+fn codex_session_file(cwd: &str, after: Option<i64>, profile: Option<&Path>) -> Option<PathBuf> {
+    codex_session_file_in(&codex_root(profile), cwd, after)
 }
 
 fn codex_session_file_in(root: &Path, cwd: &str, after: Option<i64>) -> Option<PathBuf> {
@@ -544,12 +560,18 @@ struct OpencodeSession {
 /// la sesión" es indistinguible de "opencode no está en el PATH del proceso de la app",
 /// que es un caso real cuando la app se lanza desde el menú del escritorio y no desde una
 /// terminal (el PATH del launcher no incluye `~/.opencode/bin`).
-fn opencode_sessions(cwd: &str) -> Vec<OpencodeSession> {
-    let output = match std::process::Command::new("opencode")
+fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<OpencodeSession> {
+    let mut command = std::process::Command::new("opencode");
+    command
         .args(["session", "list", "--format", "json", "-n", "50"])
         .current_dir(cwd)
-        .stdin(std::process::Stdio::null())
-        .output()
+        .stdin(std::process::Stdio::null());
+    // Misma variable con la que se lanzó la tab (ver `accounts`): sin esto, `session list`
+    // listaría las sesiones de la cuenta del sistema y el título saldría cruzado.
+    if let Some(dir) = profile {
+        command.env("XDG_DATA_HOME", dir);
+    }
+    let output = match command.output()
     {
         Ok(o) => o,
         Err(e) => {
@@ -587,8 +609,8 @@ fn opencode_sessions(cwd: &str) -> Vec<OpencodeSession> {
 }
 
 /// Sesión más reciente del cwd, opcionalmente creada después de `after` (en segundos).
-fn opencode_session(cwd: &str, after: Option<i64>) -> Option<OpencodeSession> {
-    let sessions = opencode_sessions(cwd);
+fn opencode_session(cwd: &str, after: Option<i64>, profile: Option<&Path>) -> Option<OpencodeSession> {
+    let sessions = opencode_sessions(cwd, profile);
     let found = sessions.into_iter().find(|s| match after {
         // `created` viene en MILISEGUNDOS; el resto del módulo trabaja en segundos.
         Some(t) => s.created / 1000 >= t - OPENCODE_CLOCK_SKEW_S,
@@ -788,15 +810,17 @@ pub fn session_file_for(
     agent_id: &str,
     cwd: &str,
     session_id: Option<&str>,
+    // Directorio de la cuenta con la que corrió la sesión; `None` = la del sistema.
+    profile: Option<&Path>,
     db: &tauri::State<crate::database::DbConnection>,
 ) -> Option<PathBuf> {
     match agent_id {
-        "claude-code" => claude_session_file(cwd, session_id, None),
+        "claude-code" => claude_session_file(cwd, session_id, None, profile),
         "gemini-cli" => match session_id {
             Some(id) => gemini_session_file_by_id(&gemini_home(), cwd, id),
             None => gemini_session_file(cwd, None),
         },
-        "codex" => codex_session_file(cwd, None),
+        "codex" => codex_session_file(cwd, None, profile),
         // OpenCode no expone un archivo de sesión legible; su transcripción se pide con
         // `opencode export <id>` y la maneja `export::opencode_transcript` aparte.
         "opencode" => None,
@@ -840,24 +864,37 @@ pub async fn discover_session_id(
     agent_id: String,
     cwd: String,
     started_after: i64,
+    // Cuenta con la que corre la tab, si no es la del sistema. Se recibe el id y no la
+    // ruta: la cuenta puede haberse mudado desde que la tab se guardó.
+    account_id: Option<String>,
     db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Option<String>, String> {
     let db = (*db).clone();
-    tokio::task::spawn_blocking(move || discover_session_id_sync(&agent_id, &cwd, started_after, &db))
-        .await
-        .map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || {
+        let profile = account_id.and_then(|id| crate::accounts::dir_for(&db, &id));
+        discover_session_id_sync(
+            &agent_id,
+            &cwd,
+            started_after,
+            profile.as_deref().map(Path::new),
+            &db,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 fn discover_session_id_sync(
     agent_id: &str,
     cwd: &str,
     started_after: i64,
+    profile: Option<&Path>,
     db: &crate::database::DbConnection,
 ) -> Option<String> {
     let cwd = cwd.to_string();
     match agent_id {
         "claude-code" => {
-            let path = claude_session_file(&cwd, None, Some(started_after))?;
+            let path = claude_session_file(&cwd, None, Some(started_after), profile)?;
             path.file_stem().map(|s| s.to_string_lossy().to_string())
         }
         "gemini-cli" => {
@@ -869,14 +906,14 @@ fn discover_session_id_sync(
                 .or_else(|| find_string_field(&path, &["sessionId", "session_id"]))
         }
         "codex" => {
-            let path = codex_session_file(&cwd, Some(started_after))?;
+            let path = codex_session_file(&cwd, Some(started_after), profile)?;
             // La cabecera `session_meta` trae el id; `find_string_field` queda como respaldo
             // por si una versión emite el rollout sin cabecera reconocible.
             codex_meta(&path)
                 .and_then(|m| m.id)
                 .or_else(|| find_string_field(&path, &["session_id", "id"]))
         }
-        "opencode" => opencode_session(&cwd, Some(started_after)).map(|s| s.id),
+        "opencode" => opencode_session(&cwd, Some(started_after), profile).map(|s| s.id),
         "kimi-code" => {
             let dir = kimi_session_dir(Some(&cwd), Some(started_after))?;
             kimi_session_id(&dir)
@@ -903,11 +940,20 @@ pub async fn get_session_title(
     cwd: String,
     session_id: Option<String>,
     fallback: String,
+    account_id: Option<String>,
     db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<SessionTitleResult, String> {
     let db = (*db).clone();
     tokio::task::spawn_blocking(move || {
-        get_session_title_sync(&agent_id, &cwd, session_id, fallback, &db)
+        let profile = account_id.and_then(|id| crate::accounts::dir_for(&db, &id));
+        get_session_title_sync(
+            &agent_id,
+            &cwd,
+            session_id,
+            fallback,
+            profile.as_deref().map(Path::new),
+            &db,
+        )
     })
     .await
     .map_err(|e| e.to_string())
@@ -918,11 +964,12 @@ fn get_session_title_sync(
     cwd: &str,
     session_id: Option<String>,
     fallback: String,
+    profile: Option<&Path>,
     db: &crate::database::DbConnection,
 ) -> SessionTitleResult {
     let cwd = cwd.to_string();
     match agent_id {
-        "claude-code" => match claude_session_file(&cwd, session_id.as_deref(), None) {
+        "claude-code" => match claude_session_file(&cwd, session_id.as_deref(), None, profile) {
             Some(path) => claude_title(&path, &fallback),
             None => fallback_result(&fallback),
         },
@@ -938,8 +985,8 @@ fn get_session_title_sync(
         }
         "codex" => {
             let found = match session_id.as_deref() {
-                Some(id) => codex_session_file_by_id(id),
-                None => codex_session_file(&cwd, None),
+                Some(id) => codex_session_file_by_id(id, profile),
+                None => codex_session_file(&cwd, None, profile),
             };
             match found {
                 Some(path) => codex_title(&path, &fallback),
@@ -960,8 +1007,8 @@ fn get_session_title_sync(
         // de otra tab abierta en la misma carpeta y el título quedaría cruzado.
         "opencode" => {
             let found = match session_id.as_deref() {
-                Some(id) => opencode_sessions(&cwd).into_iter().find(|s| s.id == id),
-                None => opencode_session(&cwd, None),
+                Some(id) => opencode_sessions(&cwd, profile).into_iter().find(|s| s.id == id),
+                None => opencode_session(&cwd, None, profile),
             };
             match found {
                 Some(s) if !s.title.trim().is_empty() && !opencode_is_placeholder_title(&s.title) => {
@@ -991,6 +1038,22 @@ fn get_session_title_sync(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Con una cuenta alternativa, los transcripts NO están en `~/.claude`: viven dentro
+    /// del directorio de la cuenta (verificado: un `CLAUDE_CONFIG_DIR` nuevo se inicializa
+    /// autocontenido). Buscar en el home daría "sin sesión" para toda tab con cuenta
+    /// propia — ni título ni reanudación.
+    #[test]
+    fn claude_looks_for_transcripts_inside_the_account_profile() {
+        let dir = claude_project_dir("/home/u/proj", Some(Path::new("/perfiles/trabajo")));
+        assert_eq!(dir, PathBuf::from("/perfiles/trabajo/projects/-home-u-proj"));
+    }
+
+    #[test]
+    fn claude_without_account_uses_the_system_profile() {
+        let dir = claude_project_dir("/home/u/proj", None);
+        assert!(dir.ends_with(".claude/projects/-home-u-proj"), "{dir:?}");
+    }
 
     /// Ninguno de los dos CLIs está instalado en la máquina de desarrollo, así que estos
     /// tests son la única verificación posible: reproducen en disco el layout documentado

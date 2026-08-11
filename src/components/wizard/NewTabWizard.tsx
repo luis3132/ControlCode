@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { FolderPickerStep } from "./FolderPickerStep";
 import { AgentPickerStep } from "./AgentPickerStep";
 import { SkillPickerStep } from "./SkillPickerStep";
+import { AccountPickerStep } from "./AccountPickerStep";
 import { AgentInfo, useTabsStore } from "../../store/tabs";
 import { useSettingsStore } from "../../store/settings";
 
@@ -12,7 +13,13 @@ type Step = "folder" | "agent" | "skills";
 interface NewTabWizardProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (params: { cwd: string; agent: AgentInfo; skillIds: string[] }) => void;
+  onConfirm: (params: {
+    cwd: string;
+    agent: AgentInfo;
+    skillIds: string[];
+    /** `undefined` = la cuenta del sistema. */
+    accountId?: string;
+  }) => void;
 }
 
 export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) {
@@ -23,6 +30,7 @@ export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) 
   const [selectedCwd, setSelectedCwd] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>();
 
   const allAgents: AgentInfo[] = [
     ...detectedAgents,
@@ -40,6 +48,7 @@ export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) 
     setSelectedCwd("");
     setSelectedAgent(null);
     setSelectedSkillIds([]);
+    setSelectedAccountId(undefined);
   };
 
   const handleClose = () => {
@@ -49,7 +58,12 @@ export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) 
 
   const handleConfirm = () => {
     if (!selectedCwd || !selectedAgent) return;
-    onConfirm({ cwd: selectedCwd, agent: selectedAgent, skillIds: selectedSkillIds });
+    onConfirm({
+      cwd: selectedCwd,
+      agent: selectedAgent,
+      skillIds: selectedSkillIds,
+      accountId: selectedAccountId,
+    });
     reset();
     onClose();
   };
@@ -103,11 +117,26 @@ export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) 
       {step === "folder" ? (
         <FolderPickerStep initialPath={selectedCwd} onPathChange={setSelectedCwd} />
       ) : step === "agent" ? (
-        <AgentPickerStep
-          agents={allAgents}
-          selected={selectedAgent?.id ?? null}
-          onSelect={setSelectedAgent}
-        />
+        <div className="flex flex-col gap-5">
+          <AgentPickerStep
+            agents={allAgents}
+            selected={selectedAgent?.id ?? null}
+            onSelect={(agent) => {
+              setSelectedAgent(agent);
+              // Las cuentas son por TUI: la elegida para otra no aplica acá.
+              setSelectedAccountId(undefined);
+            }}
+          />
+          {/* Solo aparece si esta TUI tiene más de una cuenta (ver AccountPickerStep), así
+              que el wizard sigue siendo de tres pasos para quien no usa cuentas. */}
+          {selectedAgent && (
+            <AccountPickerStep
+              agentId={selectedAgent.id}
+              value={selectedAccountId}
+              onChange={setSelectedAccountId}
+            />
+          )}
+        </div>
       ) : (
         <SkillPickerStep
           agentId={selectedAgent?.id ?? ""}

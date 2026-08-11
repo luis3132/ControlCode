@@ -38,6 +38,7 @@ export function TerminalPanel() {
               command={buildResumeCommand(tab.agentId, tab.command, tab.sessionId)}
               cwd={tab.cwd}
               agentId={tab.agentId}
+              accountId={tab.accountId}
               attachPtyId={tab.ptyId ?? undefined}
               initialScrollback={isResuming ? undefined : tab.scrollback}
               isActive={tab.id === activeTabId && onWorkspace}

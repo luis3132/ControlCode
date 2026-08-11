@@ -28,6 +28,10 @@ export interface Tab {
    *  Es lo que hace que al volver a cerrarla se ACTUALICE esa entrada del historial en
    *  vez de crear una nueva. */
   historyId?: string;
+  /** Cuenta (perfil) de la TUI con la que corre esta tab. Ausente = la del sistema.
+   *  Se guarda el id y no las variables ya resueltas: si la cuenta se renombra o se muda
+   *  de carpeta, la tab restaurada sigue apuntando a la cuenta correcta. */
+  accountId?: string;
   /** Unix seconds — cuándo se abrió esta tab por primera vez (no se toca en autosaves). */
   openedAt: number;
 }
@@ -49,6 +53,7 @@ interface TabsState {
     ptyId?: number | null;
     sessionId?: string;
     historyId?: string;
+    accountId?: string;
   }) => string;
   closeTab: (id: string) => void;
   activateTab: (id: string) => void;
@@ -77,7 +82,7 @@ export const useTabsStore = create<TabsState>((set) => ({
   workspaceId: DEFAULT_WORKSPACE_ID,
   hydrated: false,
 
-  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId, historyId }) => {
+  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId, historyId, accountId }) => {
     const id = crypto.randomUUID();
     const computedTitle =
       title ??
@@ -96,6 +101,7 @@ export const useTabsStore = create<TabsState>((set) => ({
           ptyId: ptyId ?? null,
           sessionId,
           historyId,
+          accountId,
           openedAt: Math.floor(Date.now() / 1000),
         },
       ],

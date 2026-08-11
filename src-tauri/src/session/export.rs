@@ -142,12 +142,15 @@ fn extract_transcript(path: &Path) -> Vec<Turn> {
 /// "role": … }, "parts": [ { "type": "text", "text": … } ] } ] }`. Solo interesan las
 /// partes de tipo `text`: el resto son pasos internos (`step-start`, `reasoning`, `tool`,
 /// `patch`) que no forman parte de la conversación que el usuario quiere exportar.
-fn opencode_transcript(session_id: &str) -> Vec<Turn> {
-    let Ok(output) = std::process::Command::new("opencode")
-        .args(["export", session_id])
-        .stdin(std::process::Stdio::null())
-        .output()
-    else {
+fn opencode_transcript(session_id: &str, profile: Option<&str>) -> Vec<Turn> {
+    let mut command = std::process::Command::new("opencode");
+    command.args(["export", session_id]).stdin(std::process::Stdio::null());
+    // Misma variable con la que se lanzó la tab (ver `accounts`): la sesión de una cuenta
+    // alternativa no existe para la instalación del sistema.
+    if let Some(dir) = profile {
+        command.env("XDG_DATA_HOME", dir);
+    }
+    let Ok(output) = command.output() else {
         return Vec::new();
     };
     if !output.status.success() {
@@ -322,13 +325,25 @@ pub fn session_markdown(
     // transcripción se pide con `opencode export <id>` (ver `opencode_transcript`). Sin
     // `session_id` no hay nada que exportar — a diferencia del resto, acá no existe un
     // "archivo más reciente del cwd" al que caer.
+    // Si la sesión corrió con una cuenta alternativa, su transcript vive dentro de la
+    // carpeta de esa cuenta (ver `accounts`) — buscarlo en la del sistema no encontraría
+    // nada y el export saldría sin conversación.
+    let profile = entry
+        .account_id
+        .as_deref()
+        .and_then(|id| crate::accounts::dir_for(&db, id));
     let transcript = if entry.agent_id == "opencode" {
-        entry.session_id.as_deref().map(opencode_transcript).unwrap_or_default()
+        entry
+            .session_id
+            .as_deref()
+            .map(|id| opencode_transcript(id, profile.as_deref()))
+            .unwrap_or_default()
     } else {
         super::title::session_file_for(
             &entry.agent_id,
             &entry.cwd,
             entry.session_id.as_deref(),
+            profile.as_deref().map(std::path::Path::new),
             &db,
         )
         .map(|path| extract_transcript(&path))
@@ -515,6 +530,7 @@ mod tests {
             cwd: "/proj".into(),
             title: Some("Mi sesión".into()),
             session_id: None,
+            account_id: None,
             skills: vec![ArchivedSkill {
                 id: "s1".into(),
                 name: "git-helper".into(),

@@ -43,6 +43,8 @@ export interface SessionHistoryEntry {
   sessionId: string | null;
   skills: ArchivedSkill[];
   siblingTabs: SiblingTab[];
+  /** Cuenta de la TUI con la que corría; `null` = la principal (la del sistema). */
+  accountId: string | null;
   openedAt: number;
   closedAt: number;
 }

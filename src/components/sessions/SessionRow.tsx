@@ -11,6 +11,7 @@ import {
   StackIcon,
 } from "neogestify-ui-components";
 import { SessionHistoryEntry, useSessionsStore } from "../../store/sessions";
+import { useAccountsStore } from "../../store/accounts";
 import { agentIcon } from "../../lib/agentIcons";
 
 function formatDateTime(unixSeconds: number): string {
@@ -61,6 +62,13 @@ export function SessionRow({ entry, workspaceId, onResume, onResumeWithSkills }:
   const [busy, setBusy] = useState(false);
 
   const AgentIcon = agentIcon(entry.agentId, entry.command);
+  // Con qué cuenta corría. Importa mostrarlo: dos sesiones del mismo agente en la misma
+  // carpeta pueden ser de cuentas distintas, y al reabrirla vuelve a la suya — si eso no se
+  // ve, el resultado parece arbitrario. `undefined` = la cuenta ya no existe.
+  const accountsLoaded = useAccountsStore((s) => s.loaded);
+  const account = useAccountsStore((s) =>
+    entry.accountId ? s.accounts.find((a) => a.id === entry.accountId) : undefined
+  );
   const hasDetail = entry.skills.length > 0 || entry.siblingTabs.length > 0;
 
   const handleExport = async () => {
@@ -115,6 +123,19 @@ export function SessionRow({ entry, workspaceId, onResume, onResumeWithSkills }:
               bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400">
               {entry.agentLabel}
             </span>
+            {/* Solo si NO es la cuenta principal: marcar lo habitual sería ruido en todas
+                las filas de todos los que nunca crearon una cuenta. */}
+            {entry.accountId && accountsLoaded && (
+              <span
+                title={account?.label ?? undefined}
+                className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 font-medium
+                  ${account
+                    ? "bg-violet-500/10 text-violet-600 dark:bg-violet-400/15 dark:text-violet-300"
+                    : "bg-amber-500/10 text-amber-600 dark:bg-amber-400/15 dark:text-amber-300"}`}
+              >
+                {account ? account.name : t("sessions.account.gone")}
+              </span>
+            )}
           </span>
           <span className="flex items-center gap-1 text-xs truncate font-mono
             text-gray-400 dark:text-gray-500">

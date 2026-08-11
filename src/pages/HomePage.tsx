@@ -15,6 +15,7 @@ import { SkillPickerStep } from "../components/wizard/SkillPickerStep";
 import { flushPendingSave } from "../store/persistTabs";
 import { registerPendingSkillSetup } from "../lib/pendingSkillSetup";
 import { agentIcon } from "../lib/agentIcons";
+import { AccountPickerStep } from "../components/wizard/AccountPickerStep";
 
 export function HomePage() {
   const { t } = useTranslation();
@@ -25,6 +26,8 @@ export function HomePage() {
   const [selectedCwd, setSelectedCwd] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  /** `undefined` = la cuenta del sistema (ver AccountPickerStep). */
+  const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>();
   const [pathError, setPathError] = useState("");
   const [openTarget, setOpenTarget] = useState<WorkspaceSummary | null>(null);
 
@@ -71,7 +74,11 @@ export function HomePage() {
   const handleOpen = () => {
     if (!selectedCwd.trim()) { setPathError(t("home.error.noFolder")); return; }
     if (!selectedAgent) return;
-    const tabId = addTab({ cwd: selectedCwd.trim(), agent: selectedAgent });
+    const tabId = addTab({
+      cwd: selectedCwd.trim(),
+      agent: selectedAgent,
+      accountId: selectedAccountId,
+    });
     navigate("/workspace");
 
     // Mismo gate que el wizard del "+" (ver TabBar.tsx): los symlinks de las skills
@@ -159,7 +166,12 @@ export function HomePage() {
                   return (
                     <button
                       key={agent.id}
-                      onClick={() => { setSelectedAgent(agent); setSelectedSkillIds([]); }}
+                      onClick={() => {
+                        setSelectedAgent(agent);
+                        setSelectedSkillIds([]);
+                        // Las cuentas son por TUI: la elegida para otra no aplica acá.
+                        setSelectedAccountId(undefined);
+                      }}
                       className={`
                         group flex items-center gap-3 px-4 py-3 rounded-xl border text-left
                         transition-all duration-200
@@ -201,6 +213,15 @@ export function HomePage() {
               </div>
             )}
           </div>
+
+          {/* Cuenta — solo aparece si esta TUI tiene más de una (ver AccountPickerStep) */}
+          {selectedAgent && (
+            <AccountPickerStep
+              agentId={selectedAgent.id}
+              value={selectedAccountId}
+              onChange={setSelectedAccountId}
+            />
+          )}
 
           {/* Skills */}
           {selectedAgent && (

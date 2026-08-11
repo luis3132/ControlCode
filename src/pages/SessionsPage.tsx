@@ -10,6 +10,7 @@ import {
   useSessionsStore,
 } from "../store/sessions";
 import { useTabsStore } from "../store/tabs";
+import { useAccountsStore } from "../store/accounts";
 import { PageHeader } from "../components/common/PageHeader";
 import { MissingSkillsDialog } from "../components/sessions/MissingSkillsDialog";
 import { ResumeSkillsDialog } from "../components/sessions/ResumeSkillsDialog";
@@ -40,10 +41,15 @@ export function SessionsPage() {
   const navigate = useNavigate();
   const { history, loadHistory, checkSessionSkills, restoreSessionSkills } = useSessionsStore();
   const { workspaceId, addTab } = useTabsStore();
+  // Para poder nombrar la cuenta de cada sesión (ver SessionRow): la lista guarda el id,
+  // no el nombre, así que sin esto las filas no tendrían con qué resolverlo.
+  const loadAccounts = useAccountsStore((s) => s.load);
   const [pendingResume, setPendingResume] = useState<PendingResume | null>(null);
   const [pendingSkillChoice, setPendingSkillChoice] = useState<PendingResume | null>(null);
   const [filters, setFilters] = useState<SessionFilterState>(EMPTY_FILTERS);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  useEffect(() => { loadAccounts().catch(console.error); }, [loadAccounts]);
 
   useEffect(() => {
     loadHistory(workspaceId);
@@ -92,6 +98,10 @@ export function SessionsPage() {
       // Vincula la tab con la entrada del historial de la que salió: al cerrarla se
       // actualiza ESA entrada en vez de agregar otra copia de la misma sesión.
       historyId: entry.id,
+      // Con la MISMA cuenta con la que corría. Sin esto la tab arrancaba con la cuenta
+      // principal y el resume no encontraba nada: el transcript vive dentro de la carpeta
+      // de la cuenta, no en el home.
+      accountId: entry.accountId ?? undefined,
     });
     navigate("/workspace");
 

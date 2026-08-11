@@ -9,6 +9,7 @@ import { useSkillsStore } from "../store/skills";
 import { CustomAgentForm } from "../components/settings/CustomAgentForm";
 import { CliInstallSection } from "../components/settings/CliInstallSection";
 import { OrchestratorSection } from "../components/settings/OrchestratorSection";
+import { AccountsSection } from "../components/settings/AccountsSection";
 
 /** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
  *  formulario solo para saber si reanuda sesiones o si le gestionamos skills. */
@@ -205,6 +206,8 @@ export function SettingsPage() {
 
             <CustomAgentForm onSubmit={saveCustomAgent} />
           </section>
+
+          <AccountsSection />
 
           <CliInstallSection />
 

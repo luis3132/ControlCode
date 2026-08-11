@@ -1,3 +1,4 @@
+mod accounts;
 mod agents;
 mod database;
 pub mod ipc;
@@ -67,6 +68,12 @@ pub fn run() {
             window::confirm_exit_all,
             // Detección de agentes
             agents::detect_agents,
+            // Cuentas múltiples por TUI
+            accounts::account_capable_agents,
+            accounts::list_agent_accounts,
+            accounts::create_agent_account,
+            accounts::delete_agent_account,
+            accounts::agent_account_env,
             // Settings genéricos (key-value)
             database::db_get_setting,
             database::db_set_setting,

@@ -27,12 +27,31 @@ const AGENTS: &[AgentCandidate] = &[
     AgentCandidate { id: "kimi-code",   label: "Kimi Code",   command: "kimi",    version_flag: "--version" },
 ];
 
-fn probe_agent(candidate: &AgentCandidate) -> AgentInfo {
-    let in_path = Command::new("which")
-        .arg(candidate.command)
+/// Etiqueta legible de una TUI de fábrica, por id.
+pub fn agent_label(id: &str) -> Option<&'static str> {
+    AGENTS.iter().find(|a| a.id == id).map(|a| a.label)
+}
+
+/// Comando de invocación de una TUI de fábrica, por id.
+pub fn agent_command(id: &str) -> Option<&'static str> {
+    AGENTS.iter().find(|a| a.id == id).map(|a| a.command)
+}
+
+/// ¿Está este comando en el PATH?
+///
+/// `which` no existe en Windows — ahí el equivalente es `where`. Con `which` a secas, en
+/// Windows fallaba el spawn y TODAS las TUIs se reportaban como no instaladas.
+pub fn command_exists(command: &str) -> bool {
+    let probe = if cfg!(windows) { "where" } else { "which" };
+    Command::new(probe)
+        .arg(command)
         .output()
         .map(|o| o.status.success())
-        .unwrap_or(false);
+        .unwrap_or(false)
+}
+
+fn probe_agent(candidate: &AgentCandidate) -> AgentInfo {
+    let in_path = command_exists(candidate.command);
 
     let version = if in_path {
         Command::new(candidate.command)

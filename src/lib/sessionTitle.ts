@@ -15,6 +15,7 @@ export async function refreshSessionTitle(tab: Tab): Promise<string> {
       cwd: tab.cwd,
       sessionId: tab.sessionId ?? null,
       fallback: tab.title,
+      accountId: tab.accountId ?? null,
     });
     return result.title;
   } catch {

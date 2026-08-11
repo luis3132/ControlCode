@@ -25,6 +25,7 @@ interface RestoredTabRow {
   sessionId: string | null;
   scrollback: string | null;
   historyId: string | null;
+  accountId: string | null;
   openedAt: number;
 }
 
@@ -46,6 +47,7 @@ function toFrontendTab(row: RestoredTabRow): Tab {
     sessionId: row.sessionId ?? undefined,
     scrollback: row.scrollback ?? undefined,
     historyId: row.historyId ?? undefined,
+    accountId: row.accountId ?? undefined,
     openedAt: row.openedAt,
   };
 }
@@ -120,13 +122,14 @@ export function AppShell() {
     if (!raw) return;
     localStorage.removeItem("cc-detach");
     try {
-      const { cwd, command, agentId, agentLabel, title, sessionId, ptyId } = JSON.parse(raw);
+      const { cwd, command, agentId, agentLabel, title, sessionId, ptyId, accountId } = JSON.parse(raw);
       addTab({
         cwd,
         agent: { id: agentId, label: agentLabel ?? title, command, available: true },
         title,
         sessionId: sessionId ?? undefined,
         ptyId: ptyId ?? null,
+        accountId: accountId ?? undefined,
       });
       navigate("/workspace");
     } catch { /* ignore malformed data */ }
@@ -146,6 +149,7 @@ export function AppShell() {
           title: data.title,
           sessionId: data.sessionId ?? undefined,
           ptyId: data.ptyId ?? null,
+          accountId: data.accountId ?? undefined,
         });
         navigate("/workspace");
       } catch { /* ignore */ }

@@ -105,7 +105,7 @@ export function TabBar() {
             targetLabel: mergeTarget,
             cwd: tab.cwd, command: tab.command, agentId: tab.agentId,
             agentLabel: tab.agentLabel, title: tab.title, sessionId: tab.sessionId,
-            ptyId: tab.ptyId,
+            ptyId: tab.ptyId, accountId: tab.accountId,
           }),
         });
       } else {
@@ -115,7 +115,7 @@ export function TabBar() {
         localStorage.setItem("cc-detach", JSON.stringify({
           cwd: tab.cwd, command: tab.command, agentId: tab.agentId,
           agentLabel: tab.agentLabel, title: tab.title, sessionId: tab.sessionId,
-          ptyId: tab.ptyId,
+          ptyId: tab.ptyId, accountId: tab.accountId,
         }));
         localStorage.setItem("cc-new-window-workspace", workspaceId);
         await invoke("open_new_window", { label: `cc-window-${Date.now()}` });
@@ -172,6 +172,7 @@ export function TabBar() {
           title: tab.title,
           sessionId: tab.sessionId,
           ptyId: tab.ptyId,
+          accountId: tab.accountId,
         }),
       });
     } catch (err) {
@@ -256,8 +257,8 @@ export function TabBar() {
       <NewTabWizard
         isOpen={wizardOpen}
         onClose={() => setWizardOpen(false)}
-        onConfirm={({ cwd, agent, skillIds }) => {
-          const tabId = addTab({ cwd, agent });
+        onConfirm={({ cwd, agent, skillIds, accountId }) => {
+          const tabId = addTab({ cwd, agent, accountId });
           navigate("/workspace");
 
           // Los symlinks de las skills elegidas tienen que existir en el cwd ANTES de

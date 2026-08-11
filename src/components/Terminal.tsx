@@ -36,6 +36,12 @@ interface TerminalProps {
   openedAt?: number;
   /** Session id ya conocido de la tab. Si viene, no hace falta salir a descubrirlo. */
   knownSessionId?: string;
+  /** Variables de entorno extra para ESTE proceso, además de las que declare la TUI custom. */
+  env?: Record<string, string> | null;
+  /** Cuenta (perfil) de la TUI con la que correr. Sus variables se resuelven acá adentro,
+   *  justo antes de spawnear: si se resolvieran arriba, un render que llegue tarde lanzaría
+   *  el proceso con la cuenta del sistema y ya no habría vuelta atrás. */
+  accountId?: string;
   onReady?: (id: number) => void;
   onExit?: (code: number) => void;
   onSessionDiscovered?: (sessionId: string) => void;
@@ -145,6 +151,16 @@ const TERMINAL_THEMES = {
  */
 const MIN_CONTRAST = { dark: 1, light: 2 } as const;
 
+/** Une los mapas de entorno, o `null` si no hay ninguno — que es lo que espera `pty_create`
+ *  para "no agregues nada". Un `{}` funcionaría igual, pero `null` deja el intent explícito
+ *  en el lado de Rust, donde el parámetro es `Option`. */
+function mergeEnv(
+  ...maps: Array<Record<string, string> | null | undefined>
+): Record<string, string> | null {
+  const merged = Object.assign({}, ...maps.filter(Boolean)) as Record<string, string>;
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
 export function Terminal({
   tabId,
   command = "bash",
@@ -155,6 +171,8 @@ export function Terminal({
   isActive = false,
   openedAt,
   knownSessionId,
+  env,
+  accountId,
   onReady,
   onExit,
   onSessionDiscovered,
@@ -277,6 +295,10 @@ export function Terminal({
             agentId,
             cwd: resolvedCwd,
             startedAfter,
+            // Con una cuenta alternativa los transcripts viven en SU carpeta, no en la del
+            // sistema: sin esto no se encontraría ninguna sesión y la tab se quedaría para
+            // siempre sin título ni posibilidad de reanudar.
+            accountId: accountId ?? null,
           });
           if (found) {
             onSessionDiscovered(found);
@@ -371,15 +393,37 @@ export function Terminal({
         const resolvedCwd: string = cwd ?? await invoke<string>("get_home_dir");
         const startedAfter = Math.floor(Date.now() / 1000) - SESSION_DISCOVERY_LOOKBACK_S;
 
+        // Si esta tab corre con una cuenta alternativa, sus variables se piden ahora: la
+        // cuenta pudo renombrarse o mudarse desde que la tab se guardó, y lo que importa es
+        // dónde vive AHORA. Si la cuenta ya no existe, se avisa y no se lanza nada — correr
+        // igual usaría la cuenta del sistema en silencio, que es lo contrario de lo pedido.
+        let accountEnv: Record<string, string> | null = null;
+        if (accountId) {
+          try {
+            accountEnv = await invoke<Record<string, string>>("agent_account_env", { accountId });
+          } catch (e) {
+            term.write(`\r\n\x1b[31m${t("terminal.accountMissing", { error: e })}\x1b[0m\r\n`);
+            setStatus("exited");
+            return;
+          }
+        }
+
         const ptyId = await invoke<number>("pty_create", {
           command,
           cwd: resolvedCwd,
           cols: term.cols,
           rows: term.rows,
-          // Variables extra declaradas por la TUI custom, si esta tab corre una.
-          env: agentId
-            ? useSettingsStore.getState().customAgents.find((a) => a.id === agentId)?.env ?? null
-            : null,
+          // Variables extra declaradas por la TUI custom, si esta tab corre una, más las
+          // que traiga esta terminal en particular (una cuenta alternativa apunta acá la
+          // variable de perfil de la TUI). Las de la terminal van últimas: son la decisión
+          // más específica, tomada para este proceso y no para la TUI en general.
+          env: mergeEnv(
+            agentId
+              ? useSettingsStore.getState().customAgents.find((a) => a.id === agentId)?.env
+              : undefined,
+            accountEnv,
+            env
+          ),
         });
         ptyIdRef.current = ptyId;
         setStatus("running");
