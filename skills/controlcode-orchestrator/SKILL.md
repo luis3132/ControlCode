@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents in specific folders, read what they printed, type into them, and manage windows, workspaces and skills. Use when the user asks to set up a workspace, spin up agents across a monorepo, check on what a tab is doing, or send input to a running agent.
-version: 1.3.0
+version: 1.4.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -42,7 +42,7 @@ Returns every open window and every running tab, with each tab's `id`, `cwd`, `a
 and `title`. **Read this before creating anything**: the tab you need may already exist,
 and opening duplicates in the same folder is the most common way to make a mess here.
 
-## What you can put in --agent, --account and --skills
+## What you can put in --agent, --account, --skills and --pre-preset
 
 Don't guess these — ask:
 
@@ -50,6 +50,7 @@ Don't guess these — ask:
 ccode agents      # every agent id you can pass to --agent
 ccode accounts    # every account name you can pass to --account
 ccode skills      # every skill name you can pass to --skills
+ccode prelaunch   # every saved command you can pass to --pre
 ```
 
 `agents` lists the built-in TUIs (`claude-code`, `gemini-cli`, `codex`, `opencode`,
@@ -68,6 +69,10 @@ ccode skill install git-helper
 `accounts` lists the extra accounts the user created for a TUI, as `{id, agent, name}`.
 The **main account is not listed** — it isn't something the app manages, it's simply what
 you get when you omit `--account`.
+
+`prelaunch` returns the commands the user saved to prepare an environment, as
+`{id, name, command}`. An empty list means the user never set any up; it is not an error,
+it just means there is nothing to reuse. `ccode prelaunch list` is the same command.
 
 ## Opening tabs
 
@@ -96,6 +101,37 @@ error rather than a silent fallback. Omit the flag and the tab runs on the main 
 
 The account is fixed when the tab opens — a TUI reads its configuration at startup, so
 there is no way to switch it afterwards. For another account, open another tab.
+
+### Starting a tab inside a prepared environment
+
+Some projects only work from inside a specific environment: a conda env, a virtualenv, a
+pinned Node version, a dev container. If the agent starts outside it, it won't fail in an
+obvious way — it will fail in a *confusing* one. `pytest` reports `ModuleNotFoundError`
+and the agent starts "fixing" a dependency that is actually installed.
+
+```bash
+ccode tab create --cwd /repo/ml --agent claude-code --pre "conda activate ml"
+ccode tab create --cwd /repo/api --agent codex --pre "conda environment" --pre "nvm use"
+```
+
+`--pre` repeats with **no limit**, and each value can be either the **name of a saved
+command** (as `ccode prelaunch` reports it) or a **literal command**. If the text matches a
+saved name it wins; otherwise it runs as written. The order is semantic, not cosmetic:
+`nvm use 18` has to run before anything that depends on npm.
+
+`--pre-preset <name>` is the explicit form: it *requires* a saved command and errors if
+there is none. Use it only when a saved command happens to be named like something you
+would otherwise want to run literally.
+
+If a step fails, the agent does not start — the tab shows the shell error instead. That is
+deliberate: starting outside the requested environment is worse than not starting.
+
+Like skills and accounts, this is fixed at open time. The environment is inherited when the
+process is spawned, so it cannot be changed on a running tab.
+
+**Prefer a saved command when one already covers what you need** — it is what the user
+curated, and it keeps working if they later edit it. Write a literal command for something
+specific to the task at hand.
 
 ### Starting an agent already working
 

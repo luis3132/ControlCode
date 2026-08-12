@@ -34,8 +34,8 @@ TABS
   tab create <ruta> --agent <id>              Abre una tab nueva
              [--skills a,b]                   · skills a adjuntar, por nombre
              [--account <nombre>]             · cuenta de esa TUI (ver `accounts`)
-             [--pre \"<comando>\"]              · comando a ejecutar ANTES del agente
-             [--pre-preset <nombre>]          · ídem, guardado (ver `prelaunch`)
+             [--pre <comando|guardado>]       · a ejecutar ANTES del agente; repetible
+             [--pre-preset <nombre>]          · fuerza que sea un guardado, no un comando
              [--initprompt \"...\"]             · prompt inicial, enviado con Enter
              [--window <label>]                 cuando la TUI terminó de arrancar
   tab close <id>                              Cierra una tab
@@ -64,7 +64,7 @@ WORKSPACES
 AGENTES, CUENTAS Y SKILLS
   agents                                      Qué poner en --agent (incluye las custom)
   accounts                                    Qué poner en --account, por TUI
-  prelaunch                                   Qué poner en --pre-preset
+  prelaunch [list]                            Qué poner en --pre
   skills                                      Qué poner en --skills (instaladas)
   skill install <nombre>                      Instala desde los repos habilitados
 
@@ -74,9 +74,9 @@ OTROS
 
 `agents`, `accounts` y `skills` son atajos de `agent list`, `account list` y `skill list`.
 Sin --account, la tab usa la cuenta principal (la de siempre).
---pre y --pre-preset se pueden repetir y se ejecutan EN EL ORDEN ESCRITO, mezclados entre
-sí; si uno falla, el agente no arranca. Ej.:
-  ccode tab create --cwd . --agent claude-code --pre-preset \"entorno conda\" --pre \"nvm use\"
+--pre se repite sin límite y sus valores corren EN EL ORDEN ESCRITO; si uno falla, el
+agente no arranca. Cada valor puede ser el nombre de un guardado o un comando literal:
+  ccode tab create --cwd . --agent claude-code --pre \"entorno conda\" --pre \"nvm use\"
 
 La salida siempre es una línea JSON en stdout.
 Códigos de salida: 0 ok · 1 el comando falló · 2 uso incorrecto · 3 la app no corre
@@ -97,7 +97,18 @@ fn main() -> ExitCode {
     // `ccode skills` / `ccode agents`: listar es lo único que se hace con ellos, y exigir
     // `skill list` para eso era ceremonia sin ganancia.
     let (command, flag_args) = match shortcut(&args[0]) {
-        Some(cmd) => (cmd.to_string(), &args[1..]),
+        Some(cmd) => {
+            // `ccode prelaunch` y `ccode prelaunch list` son lo mismo. Escribir la accion
+            // igual es lo natural para quien viene de `ccode account list`, y sin esto
+            // fallaba con "argumento inesperado 'list'" — un error sin sentido para algo
+            // que es exactamente lo que el atajo hace.
+            let action = cmd.split('.').nth(1).unwrap_or("");
+            let rest = match args.get(1) {
+                Some(next) if next == action => &args[2..],
+                _ => &args[1..],
+            };
+            (cmd.to_string(), rest)
+        }
         None => {
             if args.len() < 2 {
                 eprintln!("Falta la acción para '{}'. Probá: ccode --help", args[0]);
@@ -213,16 +224,22 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
             continue;
         }
 
-        // `--pre` y `--pre-preset` son repetibles y comparten UNA lista, porque el orden
-        // entre ellos es semántico: `--pre-preset conda --pre "nvm use"` no es lo mismo que
-        // al revés. Acumularlos en arrays separados perdería justamente eso.
+        // `--pre` y `--pre-preset` son repetibles, sin tope, y comparten UNA lista: el
+        // orden entre ellos es semántico (`nvm use` antes de lo que dependa de npm), así
+        // que acumularlos en arrays separados perdería justamente eso.
+        //
+        // `--pre` acepta las dos cosas — el nombre de un guardado o un comando escrito a
+        // mano — y se resuelve del lado de la app, que es donde están los guardados: si el
+        // texto coincide con el nombre de uno, se usa ese; si no, se ejecuta tal cual.
+        // `--pre-preset` es la forma explícita, para cuando un guardado se llama igual que
+        // un comando que querés correr literal.
         if key == "pre" || key == "pre-preset" {
             let value = args
                 .get(i + 1)
                 .filter(|v| !v.starts_with("--"))
                 .ok_or_else(|| format!("--{key} necesita un valor"))?;
             let step = if key == "pre" {
-                json!({ "command": value })
+                json!({ "pre": value })
             } else {
                 json!({ "presetName": value })
             };
@@ -399,10 +416,37 @@ mod tests {
             v["prelaunch"],
             serde_json::json!([
                 { "presetName": "entorno conda" },
-                { "command": "nvm use" },
+                { "pre": "nvm use" },
                 { "presetName": "node del proyecto" },
             ])
         );
+    }
+
+    /// `--pre` manda el texto sin decidir: si es el nombre de un guardado o un comando
+    /// literal lo resuelve la app, que es donde está la base.
+    #[test]
+    fn pre_manda_el_texto_sin_interpretarlo() {
+        let v = flags(&["--pre", "entorno conda", "--pre", "nvm use"]);
+        assert_eq!(
+            v["prelaunch"],
+            serde_json::json!([{ "pre": "entorno conda" }, { "pre": "nvm use" }])
+        );
+    }
+
+    #[test]
+    fn pre_preset_marca_el_paso_como_guardado_obligatorio() {
+        let v = flags(&["--pre-preset", "entorno conda"]);
+        assert_eq!(v["prelaunch"], serde_json::json!([{ "presetName": "entorno conda" }]));
+    }
+
+    #[test]
+    fn no_hay_tope_de_pasos() {
+        let mut args: Vec<&str> = Vec::new();
+        for _ in 0..12 {
+            args.push("--pre");
+            args.push("x");
+        }
+        assert_eq!(flags(&args)["prelaunch"].as_array().unwrap().len(), 12);
     }
 
     #[test]

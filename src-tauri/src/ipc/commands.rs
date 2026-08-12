@@ -411,8 +411,17 @@ fn prelaunch_list(app: &AppHandle) -> Result<Value, String> {
     Ok(json!({ "presets": presets }))
 }
 
-/// Convierte los pasos que mandó la CLI (`{"command":…}` / `{"presetName":…}`) en los que
-/// entiende el frontend (`{"command":…}` / `{"presetId":…}`), conservando el orden.
+/// Convierte los pasos que mandó la CLI en los que entiende el frontend
+/// (`{"command":…}` / `{"presetId":…}`), conservando el orden.
+///
+/// Tres formas de entrada, y cada una existe por algo:
+///
+/// - `{"pre":…}` — lo que manda `--pre`. **Ambiguo a propósito**: el usuario escribe una
+///   sola cosa y acá se decide si era el nombre de un guardado o un comando literal. La
+///   resolución vive de este lado porque es donde está la base.
+/// - `{"presetName":…}` — `--pre-preset`. Exige que exista; sirve cuando un guardado se
+///   llama igual que un comando que querés correr tal cual.
+/// - `{"command":…}` — literal siempre. Es lo que llega por `--json-args`.
 fn resolve_prelaunch_steps(app: &AppHandle, steps: &[Value]) -> Result<Vec<Value>, String> {
     let presets = prelaunch_presets(app)?;
     steps
@@ -421,10 +430,18 @@ fn resolve_prelaunch_steps(app: &AppHandle, steps: &[Value]) -> Result<Vec<Value
             if let Some(cmd) = step.get("command").and_then(|v| v.as_str()) {
                 return Ok(json!({ "command": cmd }));
             }
+            if let Some(text) = step.get("pre").and_then(|v| v.as_str()) {
+                // Un guardado con ese nombre gana sobre el literal: si el usuario se tomó
+                // el trabajo de guardarlo, escribirlo es pedirlo.
+                return Ok(match match_preset_id(&presets, text) {
+                    Ok(id) => json!({ "presetId": id }),
+                    Err(_) => json!({ "command": text }),
+                });
+            }
             let name = step
                 .get("presetName")
                 .and_then(|v| v.as_str())
-                .ok_or("Paso de pre-lanzamiento sin comando ni nombre de preset")?;
+                .ok_or("Paso de pre-lanzamiento sin comando ni nombre de guardado")?;
             Ok(json!({ "presetId": match_preset_id(&presets, name)? }))
         })
         .collect()
@@ -887,6 +904,19 @@ mod tests {
         let err = match_preset_id(&presets(), "conda").unwrap_err();
         assert!(err.contains("entorno conda"), "{err}");
         assert!(err.contains("node del proyecto"), "{err}");
+    }
+
+    /// El texto de `--pre` se resuelve contra los guardados y, si no coincide con ninguno,
+    /// se ejecuta tal cual. Es lo que deja pasar las dos cosas por un solo flag.
+    #[test]
+    fn pre_usa_el_guardado_si_el_nombre_coincide() {
+        assert_eq!(match_preset_id(&presets(), "entorno conda").unwrap(), "p1");
+    }
+
+    #[test]
+    fn pre_cae_a_comando_literal_si_no_hay_guardado_con_ese_nombre() {
+        // No es un error: `--pre "nvm use"` sin nada guardado tiene que correr `nvm use`.
+        assert!(match_preset_id(&presets(), "nvm use").is_err());
     }
 
     #[test]
