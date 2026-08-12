@@ -18,13 +18,16 @@
 //! }
 //! ```
 //!
-//! Fuentes soportadas en esta fase: `local` (carpeta en disco) y `github` (repo público,
-//! vía la API de GitHub — sin autenticación, sujeto a su rate limit anónimo). "URL con
+//! Fuentes soportadas: `local` (carpeta en disco), `github` (repo público, vía la API de
+//! GitHub — sin autenticación, sujeto a su rate limit anónimo) y `skillssh` (el directorio
+//! abierto de <https://skills.sh>, a través de su CLI oficial — ver `skillssh`). "URL con
 //! manifest JSON" genérica y "git genérico" (clonar cualquier remoto) quedan pendientes
 //! del plan original: requieren descubrir el listado de archivos de un servidor HTTP
 //! arbitrario (no hay una API estándar para eso) y traer un cliente git embebido
 //! respectivamente — ninguna de las dos es segura de improvisar sin poder probarla
 //! contra una fuente real.
+
+pub mod skillssh;
 
 use crate::database::DbConnection;
 use crate::skills::{install_skill_internal, scan_frontmatter_for_marketplace, SkillInfo};
@@ -73,6 +76,11 @@ pub struct MarketplaceSkillEntry {
     pub folder_path: String,
     #[serde(default)]
     pub files: Vec<String>,
+    /// Instalaciones acumuladas, ya formateadas (`"3.3K"`). Solo lo informa `skillssh`; en
+    /// las demás fuentes queda en `None` y la UI no muestra el dato. Va con `default` para
+    /// que un `cache_json` escrito por una versión anterior siga leyéndose.
+    #[serde(default)]
+    pub installs: Option<String>,
 }
 
 /// Progreso de la resolución de un registry, emitido al frontend como evento
@@ -203,9 +211,10 @@ pub async fn add_registry(
     db: tauri::State<'_, DbConnection>,
     app: tauri::AppHandle,
 ) -> Result<RegistrySummary, String> {
-    if source_type != "local" && source_type != "github" {
+    if !matches!(source_type.as_str(), "local" | "github" | "skillssh") {
         return Err(format!(
-            "Tipo de registry no soportado todavía: {source_type} (solo 'local' o 'github')"
+            "Tipo de registry no soportado todavía: {source_type} \
+             (solo 'local', 'github' o 'skillssh')"
         ));
     }
 
@@ -218,6 +227,9 @@ pub async fn add_registry(
             parse_github_location(&location)?;
             normalize_github_location(&location)
         }
+        // Para skills.sh la ubicación no es un lugar sino un filtro opcional por
+        // publicador; vacío significa "todo el directorio".
+        "skillssh" => normalize_owner_filter(&location)?,
         _ => location.trim().to_string(),
     };
 
@@ -344,6 +356,10 @@ async fn refresh_registry_internal(
     let result: Result<Vec<MarketplaceSkillEntry>, String> = match source_type.as_str() {
         "local" => scan_local_registry(id, &name, &location, &progress),
         "github" => fetch_github_registry(id, &name, &location, &progress).await,
+        "skillssh" => {
+            progress.phase("connecting");
+            refresh_skillssh(db, id).await
+        }
         other => Err(format!("Tipo de registry desconocido: {other}")),
     };
 
@@ -477,6 +493,7 @@ pub async fn install_marketplace_skill(
             install_skill_internal(&file.to_string_lossy(), None, origin, &db)
         }
         "github" => install_from_github(&location, &entry, origin, &db).await,
+        "skillssh" => install_from_skillssh(&entry, origin, &db).await,
         other => Err(format!("Tipo de registry desconocido: {other}")),
     }
 }
@@ -518,6 +535,7 @@ fn scan_local_registry(
                 compatible_agents: s.compatible_agents,
                 folder_path: s.path,
                 files: Vec::new(),
+                installs: None,
             });
         }
         return Ok(out);
@@ -554,9 +572,198 @@ fn scan_local_registry(
             compatible_agents: meta.compatible_agents,
             folder_path: folder_name,
             files: Vec::new(),
+            installs: None,
         });
     }
     Ok(out)
+}
+
+// ── Fuente: skills.sh ────────────────────────────────────────────
+
+/// Valida el filtro por publicador de un registry `skillssh`. Vacío es válido y es el caso
+/// normal: significa buscar en todo el directorio.
+///
+/// Acepta que le peguen el link del perfil (`https://skills.sh/vercel-labs`) además del
+/// nombre pelado, por la misma razón que `normalize_github_location`: es lo que uno tiene
+/// en el portapapeles al venir de la web.
+fn normalize_owner_filter(input: &str) -> Result<String, String> {
+    let raw = input.trim().trim_end_matches('/');
+    let raw = raw.split(['?', '#']).next().unwrap_or(raw);
+    let owner = raw
+        .rsplit('/')
+        .find(|s| !s.is_empty())
+        .filter(|s| !s.contains(".sh") && !s.contains("://"))
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+
+    if owner.is_empty() {
+        return Ok(String::new());
+    }
+    // Mismas reglas que un usuario/organización de GitHub, que es de donde salen los
+    // publicadores del directorio.
+    let valido = owner.len() <= 39
+        && owner.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && !owner.starts_with('-')
+        && !owner.ends_with('-');
+    if !valido {
+        return Err(format!(
+            "'{owner}' no parece un publicador de skills.sh. Dejalo vacío para buscar en \
+             todo el directorio, o poné un usuario/organización de GitHub (ej. vercel-labs)."
+        ));
+    }
+    Ok(owner)
+}
+
+/// Convierte un resultado del directorio en una entrada de marketplace.
+///
+/// `folder_path` guarda el `owner/repo/slug` completo: es lo único que hace falta para
+/// volver a instalarla más tarde desde el cache, sin repetir la búsqueda.
+fn skillssh_entry(
+    hit: skillssh::SkillsShHit,
+    registry_id: &str,
+    registry_name: &str,
+) -> MarketplaceSkillEntry {
+    MarketplaceSkillEntry {
+        id: hit.id.clone(),
+        registry_id: registry_id.to_string(),
+        registry_name: registry_name.to_string(),
+        name: hit.slug.clone(),
+        // El directorio no expone la descripción en la búsqueda — la única forma de
+        // tenerla sería bajar cada skill entera, que son decenas de megas por búsqueda.
+        // Se muestra el repo de origen, que es el dato que sí ayuda a elegir.
+        description: Some(hit.source.clone()),
+        categories: Vec::new(),
+        compatible_agents: Vec::new(),
+        folder_path: hit.id,
+        files: Vec::new(),
+        installs: hit.installs,
+    }
+}
+
+/// Busca en los repositorios `skillssh` habilitados y deja los resultados en su cache.
+///
+/// El marketplace no puede listar skills.sh como lista a los otros repos: el directorio
+/// tiene miles de skills y su CLI solo sabe buscar (no enumerar), así que la búsqueda es la
+/// forma de navegarlo. Se llama desde el buscador del marketplace antes de releer la lista.
+///
+/// Guardar en `cache_json` no es solo para mostrar: instalar necesita reencontrar la skill
+/// por id, y así lo último buscado sigue ahí al volver a la pantalla.
+#[tauri::command]
+pub async fn search_remote_registries(
+    query: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    search_remote_conn(&db, &query).await
+}
+
+/// El trabajo real de [`search_remote_registries`], sin la capa de Tauri, para poder
+/// ejercitarlo contra una base de prueba.
+pub async fn search_remote_conn(db: &DbConnection, query: &str) -> Result<(), String> {
+    let targets: Vec<(String, String, String)> = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, location FROM registries
+                 WHERE source_type = 'skillssh' AND enabled = 1 ORDER BY priority ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        rows
+    };
+    if targets.is_empty() {
+        return Ok(());
+    }
+
+    for (id, name, owner) in targets {
+        // La CLI es un proceso que bloquea; correrla en el hilo del runtime congelaría toda
+        // la app mientras busca.
+        let (q, owner_owned) = (query.to_string(), owner.clone());
+        let found = tauri::async_runtime::spawn_blocking(move || {
+            skillssh::search(&q, Some(owner_owned.as_str()))
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+
+        let now = now_ts();
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        match found {
+            Ok(hits) => {
+                let entries: Vec<MarketplaceSkillEntry> = hits
+                    .into_iter()
+                    .map(|h| skillssh_entry(h, &id, &name))
+                    .collect();
+                let json = serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string());
+                conn.execute(
+                    "UPDATE registries SET cache_json = ?1, cache_error = NULL, last_fetched = ?2
+                     WHERE id = ?3",
+                    params![json, now, id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            // Un fallo de búsqueda no puede tumbar el resto del marketplace: queda anotado
+            // en el repositorio (la UI lo muestra ahí) y los demás siguen andando.
+            Err(e) => {
+                conn.execute(
+                    "UPDATE registries SET cache_error = ?1, last_fetched = ?2 WHERE id = ?3",
+                    params![e, now, id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// "Refrescar" un repositorio de skills.sh no puede rebajar la lista completa —  no existe
+/// tal cosa sin su API privada. Lo que sí puede es comprobar que la herramienta con la que
+/// se lo consulta esté disponible, que es el único motivo real por el que esta fuente deja
+/// de funcionar en una máquina. Los resultados de la última búsqueda se conservan.
+/// `ensure_npx` arranca un proceso y espera: eso NO puede pasar en el hilo del runtime.
+/// Refrescar repositorios recorre todos en serie, así que dejar esta comprobación bloqueando
+/// congelaba un worker durante todo el arranque de Node — y la instalación de skills, que es
+/// async, quedaba encolada detrás sin motivo aparente. La búsqueda y la instalación ya salían
+/// del runtime con `spawn_blocking`; esto se me había escapado.
+async fn refresh_skillssh(db: &DbConnection, id: &str) -> Result<Vec<MarketplaceSkillEntry>, String> {
+    tauri::async_runtime::spawn_blocking(skillssh::ensure_npx)
+        .await
+        .map_err(|e| e.to_string())??;
+
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let cache: Option<String> = conn
+        .query_row("SELECT cache_json FROM registries WHERE id = ?1", [id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    Ok(cache.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default())
+}
+
+/// Instala una skill del directorio: la CLI la deja en una carpeta temporal nuestra y de
+/// ahí sigue por el mismo camino que cualquier otra fuente.
+async fn install_from_skillssh(
+    entry: &MarketplaceSkillEntry,
+    origin: crate::skills::SkillOrigin<'_>,
+    db: &DbConnection,
+) -> Result<SkillInfo, String> {
+    let target = skillssh::add_target(&entry.folder_path)
+        .ok_or_else(|| format!("Identificador de skill inesperado: {}", entry.folder_path))?;
+
+    let staging = std::env::temp_dir().join(format!("controlcode-skillssh-{}", Uuid::new_v4()));
+    let staged = {
+        let staging = staging.clone();
+        tauri::async_runtime::spawn_blocking(move || skillssh::install_into(&staging, &target))
+            .await
+            .map_err(|e| e.to_string())?
+    };
+
+    let result = staged.and_then(|dir| {
+        install_skill_internal(&dir.join("SKILL.md").to_string_lossy(), None, origin, db)
+    });
+
+    let _ = std::fs::remove_dir_all(&staging);
+    result
 }
 
 // ── Fuente: repo de GitHub ───────────────────────────────────────
@@ -687,6 +894,10 @@ pub fn preview_registry_location(source_type: String, location: String) -> Resul
             }
             Ok(out)
         }
+        "skillssh" => match normalize_owner_filter(&location)? {
+            o if o.is_empty() => Ok("todo skills.sh".to_string()),
+            owner => Ok(format!("skills.sh · solo {owner}")),
+        },
         "local" => {
             let path = PathBuf::from(location.trim());
             if !path.is_dir() {
@@ -798,6 +1009,7 @@ async fn fetch_github_registry(
                 compatible_agents: s.compatible_agents,
                 folder_path: folder,
                 files,
+                installs: None,
             });
         }
         return Ok(out);
@@ -838,6 +1050,7 @@ async fn fetch_github_registry(
             compatible_agents: meta.compatible_agents,
             folder_path: folder.to_string(),
             files,
+            installs: None,
         });
     }
     Ok(out)
@@ -935,6 +1148,120 @@ mod tests {
         assert_eq!((owner.as_str(), repo.as_str()), ("anthropics", "skills"));
         assert_eq!(branch.as_deref(), Some("main"));
         assert_eq!(subpath.as_deref(), Some("document-skills"));
+    }
+
+    /// El filtro por publicador es opcional; vacío significa "todo el directorio" y tiene
+    /// que ser un caso válido, no un error.
+    #[test]
+    fn el_filtro_por_publicador_acepta_vacio_nombre_y_link() {
+        for (input, expected) in [
+            ("", ""),
+            ("   ", ""),
+            ("vercel-labs", "vercel-labs"),
+            ("Vercel-Labs", "vercel-labs"),
+            ("https://skills.sh/vercel-labs", "vercel-labs"),
+            ("https://www.skills.sh/vercel-labs/", "vercel-labs"),
+            ("https://skills.sh/", ""),
+        ] {
+            assert_eq!(normalize_owner_filter(input).unwrap(), expected, "input: {input:?}");
+        }
+
+        for bad in ["-malo", "malo-", "con espacio", "con_guion_bajo", "a".repeat(40).as_str()] {
+            assert!(normalize_owner_filter(bad).is_err(), "debería fallar: {bad:?}");
+        }
+    }
+
+    /// `folder_path` es lo único que sobrevive en el cache para poder reinstalar después,
+    /// así que tiene que quedar en la forma que la CLI entiende tras partirlo.
+    #[test]
+    fn una_skill_del_directorio_conserva_como_reinstalarse() {
+        let hit = skillssh::SkillsShHit {
+            id: "vercel-labs/agent-skills/vercel-react-best-practices".into(),
+            source: "vercel-labs/agent-skills".into(),
+            slug: "vercel-react-best-practices".into(),
+            installs: Some("626K".into()),
+        };
+        let entry = skillssh_entry(hit, "reg-1", "skills.sh");
+
+        assert_eq!(entry.name, "vercel-react-best-practices");
+        assert_eq!(entry.registry_id, "reg-1");
+        assert_eq!(entry.installs.as_deref(), Some("626K"));
+        assert_eq!(
+            skillssh::add_target(&entry.folder_path).as_deref(),
+            Some("vercel-labs/agent-skills@vercel-react-best-practices")
+        );
+    }
+
+    /// El campo es nuevo: un `cache_json` escrito por una versión anterior no lo tiene y
+    /// tiene que seguir leyéndose, o el marketplace aparecería vacío tras actualizar.
+    #[test]
+    fn el_cache_viejo_sin_installs_sigue_siendo_legible() {
+        let viejo = r#"[{"id":"a","registryId":"r","registryName":"n","name":"A",
+            "description":null,"categories":[],"compatibleAgents":[],"folderPath":"a","files":[]}]"#;
+        let entries: Vec<MarketplaceSkillEntry> = serde_json::from_str(viejo).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].installs, None);
+    }
+
+    /// El camino completo de una búsqueda: consultar el directorio, guardar en el cache del
+    /// repositorio y poder volver de ahí a una skill instalable.
+    ///
+    /// Es lo que une los dos lados — sin esto, el parser puede estar bien y el cache quedar
+    /// con algo que `install_marketplace_skill` no sabe reinstalar. `#[ignore]` porque
+    /// necesita red y Node (ver `skillssh::tests::e2e_…`).
+    #[tokio::test]
+    #[ignore = "necesita red y Node.js instalado"]
+    async fn e2e_buscar_deja_el_cache_listo_para_instalar() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE registries (id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                source_type TEXT NOT NULL, location TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1, last_fetched INTEGER, cache_json TEXT,
+                cache_error TEXT, created_at INTEGER NOT NULL);
+             INSERT INTO registries (id, name, source_type, location, priority, enabled, created_at)
+             VALUES ('r1', 'skills.sh', 'skillssh', '', 0, 1, 0);",
+        )
+        .unwrap();
+        let db: DbConnection = std::sync::Arc::new(std::sync::Mutex::new(conn));
+
+        search_remote_conn(&db, "react testing").await.unwrap();
+
+        let (json, error): (Option<String>, Option<String>) = {
+            let conn = db.lock().unwrap();
+            conn.query_row(
+                "SELECT cache_json, cache_error FROM registries WHERE id = 'r1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(error, None, "la búsqueda no debería dejar error");
+
+        let entries: Vec<MarketplaceSkillEntry> = serde_json::from_str(&json.unwrap()).unwrap();
+        assert!(!entries.is_empty(), "tiene que haber guardado resultados");
+        for e in &entries {
+            assert_eq!(e.registry_id, "r1");
+            // Lo que `install_marketplace_skill` necesita para poder reinstalarla después.
+            assert!(skillssh::add_target(&e.folder_path).is_some(), "no instalable: {}", e.id);
+        }
+
+        // Buscar otra cosa REEMPLAZA lo anterior en vez de acumularse: si no, la grilla
+        // seguiría mostrando resultados de la búsqueda pasada mezclados con los nuevos.
+        // (El buscador del directorio es difuso y casi siempre devuelve algo, así que el
+        // caso a cubrir es el reemplazo, no el vacío.)
+        let antes: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();
+        search_remote_conn(&db, "postgres database migrations").await.unwrap();
+        let json: Option<String> = {
+            let conn = db.lock().unwrap();
+            conn.query_row("SELECT cache_json FROM registries WHERE id = 'r1'", [], |r| r.get(0))
+                .unwrap()
+        };
+        let despues: Vec<String> = serde_json::from_str::<Vec<MarketplaceSkillEntry>>(&json.unwrap())
+            .unwrap()
+            .iter()
+            .map(|e| e.id.clone())
+            .collect();
+        assert_ne!(antes, despues, "el cache tiene que quedar con la búsqueda nueva");
     }
 
     #[test]

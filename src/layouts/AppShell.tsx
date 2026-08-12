@@ -115,8 +115,18 @@ export function AppShell() {
           }
         }
       })
-      .catch(console.error)
-      .finally(() => setHydrated(true));
+      // `hydrated` habilita el autosave, y el autosave BORRA las tabs que no vengan en su
+      // payload. Marcarlo en un `finally` lo ponía en true aunque la carga hubiera fallado:
+      // la ventana quedaba "lista" con cero tabs y el siguiente guardado archivaba y borraba
+      // las que sí tenía en la base (y con ellas, por cascada, sus skills). Era intermitente
+      // porque dependía de que fallara justo esa llamada.
+      //
+      // Ahora solo se marca cuando de verdad se cargó. Si falla, esta ventana no autosalva:
+      // perder los cambios de posición es reversible, borrarle las tabs al usuario no.
+      .then(() => setHydrated(true))
+      .catch((e) => {
+        console.error("No se pudo cargar el estado de esta ventana; el autosave queda desactivado", e);
+      });
   }, []);
 
   // Recoger tab arrastrado fuera de esta ventana (nueva ventana vacía que abre cc-detach)

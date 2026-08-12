@@ -12,7 +12,7 @@ import { useWorkspacesStore, WorkspaceSummary } from "../store/workspaces";
 import { WorkspaceList } from "../components/home/WorkspaceList";
 import { OpenWorkspaceDialog } from "../components/workspace/OpenWorkspaceDialog";
 import { SkillPickerStep } from "../components/wizard/SkillPickerStep";
-import { flushPendingSave } from "../store/persistTabs";
+import { attachSkillsToTab } from "../lib/attachSkills";
 import { registerPendingSkillSetup } from "../lib/pendingSkillSetup";
 import { agentIcon } from "../lib/agentIcons";
 import { AccountPickerStep } from "../components/wizard/AccountPickerStep";
@@ -89,14 +89,7 @@ export function HomePage() {
     // elegidas (más las que ya estaban attacheadas a nivel workspace) tienen que
     // existir en el cwd ANTES de que el agente arranque — Terminal.tsx espera esta
     // promesa antes de invocar pty_create.
-    const setup = (async () => {
-      await flushPendingSave();
-      for (const skillId of selectedSkillIds) {
-        await invoke("attach_skill", { skillId, workspaceId, scope: "tab", tabId }).catch(console.error);
-      }
-      await invoke("sync_workspace_skills", { workspaceId }).catch(() => {});
-    })();
-    registerPendingSkillSetup(tabId, setup);
+    registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, selectedSkillIds));
   };
 
   return (

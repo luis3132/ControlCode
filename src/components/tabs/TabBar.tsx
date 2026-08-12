@@ -10,6 +10,7 @@ import { NewTabWizard } from "../wizard/NewTabWizard";
 import { refreshSessionTitle } from "../../lib/sessionTitle";
 import { markPtyTransferring } from "../../lib/ptyTransfer";
 import { flushPendingSave } from "../../store/persistTabs";
+import { attachSkillsToTab } from "../../lib/attachSkills";
 import { registerPendingSkillSetup } from "../../lib/pendingSkillSetup";
 import { AddIcon } from "neogestify-ui-components";
 
@@ -264,20 +265,7 @@ export function TabBar() {
           // Los symlinks de las skills elegidas tienen que existir en el cwd ANTES de
           // que el agente arranque (algunos solo escanean su carpeta de skills al
           // boot) — Terminal.tsx espera esta promesa antes de invocar pty_create.
-          const setup = (async () => {
-            // attach_skill necesita que la tab ya sea una fila real en SQLite (scope
-            // 'tab' la busca por id) — el autosave normal tiene 400ms de debounce,
-            // así que se fuerza el flush en vez de arriesgarse a una condición de
-            // carrera contra esa espera.
-            await flushPendingSave();
-            for (const skillId of skillIds) {
-              await invoke("attach_skill", { skillId, workspaceId, scope: "tab", tabId }).catch(console.error);
-            }
-            // Best-effort: si el workspace tiene skills a nivel workspace ya
-            // attacheadas, esta tab nueva las hereda también.
-            await invoke("sync_workspace_skills", { workspaceId }).catch(() => {});
-          })();
-          registerPendingSkillSetup(tabId, setup);
+          registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, skillIds));
         }}
       />
     </>

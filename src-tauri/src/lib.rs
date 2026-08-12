@@ -196,6 +196,7 @@ pub fn run() {
             marketplace::reorder_registries,
             marketplace::refresh_registry,
             marketplace::list_marketplace_skills,
+            marketplace::search_remote_registries,
             marketplace::install_marketplace_skill,
             skills::registry_skills,
             // Modo orquestador (Fase 9): consumo estimado y tabs observadas

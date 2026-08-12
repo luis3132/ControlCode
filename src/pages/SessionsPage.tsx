@@ -24,6 +24,7 @@ import {
   hasActiveFilters,
 } from "../components/sessions/SessionFilters";
 import { flushPendingSave } from "../store/persistTabs";
+import { attachSkillsToTab } from "../lib/attachSkills";
 import { registerPendingSkillSetup } from "../lib/pendingSkillSetup";
 
 interface OpenTabLocation {
@@ -144,24 +145,23 @@ export function SessionsPage() {
 
     // Mismo gate que el wizard del "+": los symlinks tienen que estar en disco ANTES de
     // que arranque el agente, porque varios escanean sus skills solo al boot.
-    const setup = (async () => {
-      await flushPendingSave();
+    const setup = (async (): Promise<string[]> => {
       if (skillIds === undefined) {
-        await restoreSessionSkills(entry.id, workspaceId, tabId).catch(console.error);
-        return;
+        // La fila de la tab tiene que existir antes de reattachear nada.
+        await flushPendingSave();
+        try {
+          const missing = await restoreSessionSkills(entry.id, workspaceId, tabId);
+          // Las que ya no están instaladas no son un fallo del montaje, pero tampoco
+          // pueden pasar desapercibidas: la sesión se reabre distinta a como se cerró.
+          return missing.map((name) => t("sessions.skillNoLongerInstalled", { name }));
+        } catch (e) {
+          return [String(e)];
+        }
       }
       // Mismo scope que usa `restore_session_skills`: la sesión se reabre como una tab
       // puntual, así que todo entra con scope='tab' aunque en su momento viniera del
-      // workspace. Best-effort por skill, para que un conflicto de symlink en una no deje
-      // la tab sin las demás.
-      for (const skillId of skillIds) {
-        await invoke("attach_skill", {
-          skillId,
-          workspaceId,
-          scope: "tab",
-          tabId,
-        }).catch(console.error);
-      }
+      // workspace.
+      return attachSkillsToTab(tabId, workspaceId, skillIds);
     })();
     registerPendingSkillSetup(tabId, setup);
   };

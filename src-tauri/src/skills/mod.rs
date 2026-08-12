@@ -1419,21 +1419,26 @@ pub fn restore_session_skills(
 // para obtener un `tauri::State<DbConnection>` legítimo (no se puede construir a mano,
 // el campo es privado) y así llamar los comandos tal cual los llamaría el frontend.
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::database::db_mark_window_closed;
     use rusqlite::Connection;
     use tauri::Manager;
 
+    /// Copia fiel del schema real (ver `database::db::init_db`), **incluidas las claves
+    /// foráneas**. Que faltaran no era un detalle: `project_skills.tab_id` cascadea con
+    /// `tabs`, y sin esa FK (ni el `PRAGMA foreign_keys = ON` que sí tiene la base real)
+    /// los tests no podían reproducir que cerrar/reescribir una tab se lleve puestos sus
+    /// attachments — justo la clase de bug que se busca acá.
     pub(crate) const TEST_SCHEMA: &str = "
         CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
-        CREATE TABLE windows (id TEXT PRIMARY KEY, label TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL, pos_x INTEGER, pos_y INTEGER, width INTEGER, height INTEGER, monitor TEXT, is_open INTEGER NOT NULL DEFAULT 1, last_active INTEGER NOT NULL);
-        CREATE TABLE tabs (id TEXT PRIMARY KEY, window_id TEXT NOT NULL, title TEXT, title_is_custom INTEGER NOT NULL DEFAULT 0, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, tab_order INTEGER NOT NULL DEFAULT 0, session_id TEXT, scrollback TEXT, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
+        CREATE TABLE windows (id TEXT PRIMARY KEY, label TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, pos_x INTEGER, pos_y INTEGER, width INTEGER, height INTEGER, monitor TEXT, is_open INTEGER NOT NULL DEFAULT 1, last_active INTEGER NOT NULL);
+        CREATE TABLE tabs (id TEXT PRIMARY KEY, window_id TEXT NOT NULL REFERENCES windows(id) ON DELETE CASCADE, title TEXT, title_is_custom INTEGER NOT NULL DEFAULT 0, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, tab_order INTEGER NOT NULL DEFAULT 0, session_id TEXT, scrollback TEXT, history_id TEXT, account_id TEXT, prelaunch TEXT NOT NULL DEFAULT '[]', opened_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
         CREATE TABLE skills (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, version TEXT NOT NULL DEFAULT '0.1.0', categories TEXT NOT NULL DEFAULT '[]', compatible_agents TEXT NOT NULL DEFAULT '[]', compatible_versions TEXT NOT NULL DEFAULT '{}', author TEXT, license TEXT, homepage TEXT, source_path TEXT NOT NULL UNIQUE, installed_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, registry_id TEXT, registry_name TEXT);
-        CREATE TABLE project_skills (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, workspace_id TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'workspace', tab_id TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, UNIQUE (skill_id, workspace_id, scope, tab_id));
+        CREATE TABLE project_skills (id TEXT PRIMARY KEY, skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, scope TEXT NOT NULL DEFAULT 'workspace', tab_id TEXT REFERENCES tabs(id) ON DELETE CASCADE, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, UNIQUE (skill_id, workspace_id, scope, tab_id));
         CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE custom_agents (id TEXT PRIMARY KEY, label TEXT NOT NULL, command TEXT NOT NULL, resume_args TEXT, skills_dir TEXT, sessions_dir TEXT, session_id_from TEXT NOT NULL DEFAULT 'filename', env_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL);
-        CREATE TABLE session_history (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT, session_id TEXT, skills TEXT NOT NULL DEFAULT '[]', sibling_tabs TEXT NOT NULL DEFAULT '[]', opened_at INTEGER NOT NULL, closed_at INTEGER NOT NULL);
+        CREATE TABLE session_history (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT, session_id TEXT, skills TEXT NOT NULL DEFAULT '[]', sibling_tabs TEXT NOT NULL DEFAULT '[]', account_id TEXT, prelaunch TEXT NOT NULL DEFAULT '[]', opened_at INTEGER NOT NULL, closed_at INTEGER NOT NULL);
         CREATE TABLE registries (id TEXT PRIMARY KEY, name TEXT NOT NULL, source_type TEXT NOT NULL, location TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, last_fetched INTEGER, cache_json TEXT, cache_error TEXT, created_at INTEGER NOT NULL);
     ";
 
@@ -1448,6 +1453,9 @@ mod tests {
     /// carpeta temporal — replica el estado mínimo que attach_skill necesita.
     fn setup() -> (DbConnection, String, String, PathBuf, PathBuf) {
         let conn = Connection::open_in_memory().unwrap();
+        // Igual que la base real: sin esto SQLite ignora las FK y los `ON DELETE CASCADE`
+        // no se disparan, que es la mitad del comportamiento que estos tests verifican.
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
         conn.execute_batch(TEST_SCHEMA).unwrap();
 
         let workspace_id = "ws-test".to_string();
@@ -1575,6 +1583,180 @@ mod tests {
         let links = links_dir_for(&tab_cwd.to_string_lossy(), "claude-code").unwrap();
         assert_eq!(std::fs::read_link(links.join(&slug_a)).unwrap(), Path::new(&a.source_path));
         assert_eq!(std::fs::read_link(links.join(&slug_b)).unwrap(), Path::new(&b.source_path));
+    }
+
+    /// Instala `n` skills distintas y devuelve sus filas.
+    fn install_n_skills(state: &tauri::State<DbConnection>, n: usize) -> Vec<SkillInfo> {
+        (0..n)
+            .map(|i| {
+                let src = temp_dir(&format!("multi-{i}"));
+                write_named_skill(&src, &format!("skill-{i}"), "cuerpo");
+                install_skill_internal(&src.join("SKILL.md").to_string_lossy(), None, None, state)
+                    .expect("instalar")
+            })
+            .collect()
+    }
+
+    fn linked_slugs(tab_cwd: &Path) -> Vec<String> {
+        let Some(dir) = links_dir_for(&tab_cwd.to_string_lossy(), "claude-code") else {
+            return Vec::new();
+        };
+        let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+        let mut out: Vec<String> =
+            entries.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        out.sort();
+        out
+    }
+
+    /// El caso reportado: una tab con VARIAS skills tiene que abrirse con todas.
+    #[test]
+    fn una_tab_con_varias_skills_las_monta_a_todas() {
+        let (db, workspace_id, tab_id, tab_cwd, _skills_dir) = setup();
+        let app = tauri::test::mock_app();
+        app.manage(db);
+        let state = app.state::<DbConnection>();
+
+        let skills = install_n_skills(&state, 4);
+        for s in &skills {
+            attach_skill(
+                s.id.clone(),
+                workspace_id.clone(),
+                "tab".to_string(),
+                Some(tab_id.clone()),
+                state.clone(),
+            )
+            .expect("attach");
+        }
+
+        assert_eq!(
+            linked_slugs(&tab_cwd),
+            vec!["skill-0", "skill-1", "skill-2", "skill-3"],
+            "las cuatro skills tienen que quedar montadas"
+        );
+
+        // Y lo que corre justo antes de lanzar el agente no puede desmontarlas.
+        reconcile_tab_skills(tab_id.clone(), state.clone()).expect("reconcile");
+        assert_eq!(linked_slugs(&tab_cwd).len(), 4, "reconciliar no debe quitar skills");
+    }
+
+    /// Una ventana marcada como cerrada hace que sus tabs dejen de reclamar sus skills —
+    /// eso es DELIBERADO (un workspace cerrado no debe dejar symlinks en las carpetas del
+    /// usuario). Lo que no puede pasar es quedarse ahí: al volver a estar abierta, las
+    /// skills tienen que volver, sin que el usuario tenga que reattachear nada.
+    ///
+    /// Este es el modo de fallo que dejaba la base perfecta y el disco vacío.
+    #[test]
+    fn una_ventana_que_vuelve_a_abrirse_recupera_las_skills_de_sus_tabs() {
+        let (db, workspace_id, tab_id, tab_cwd, _skills_dir) = setup();
+        let app = tauri::test::mock_app();
+        app.manage(db);
+        let state = app.state::<DbConnection>();
+
+        let skills = install_n_skills(&state, 3);
+        for s in &skills {
+            attach_skill(
+                s.id.clone(),
+                workspace_id.clone(),
+                "tab".to_string(),
+                Some(tab_id.clone()),
+                state.clone(),
+            )
+            .expect("attach");
+        }
+        assert_eq!(linked_slugs(&tab_cwd).len(), 3);
+
+        // Ventana cerrada: las skills se retiran del proyecto.
+        {
+            let conn = state.lock().unwrap();
+            conn.execute("UPDATE windows SET is_open = 0", []).unwrap();
+            reconcile_link_dir(&conn, &tab_cwd.to_string_lossy(), "claude-code").unwrap();
+        }
+        assert!(linked_slugs(&tab_cwd).is_empty(), "cerrada, no deja symlinks");
+
+        // Y abierta de nuevo, vuelven solas.
+        {
+            let conn = state.lock().unwrap();
+            conn.execute("UPDATE windows SET is_open = 1", []).unwrap();
+        }
+        reconcile_tab_skills(tab_id, state.clone()).expect("reconcile");
+        assert_eq!(
+            linked_slugs(&tab_cwd),
+            vec!["skill-0", "skill-1", "skill-2"],
+            "al reabrirse, las skills tienen que volver"
+        );
+    }
+
+    /// El otro caso reportado: reanudar una sesión tiene que devolverle sus skills.
+    ///
+    /// Recorre el ciclo completo — attachear, archivar al cerrar, y restaurar sobre una
+    /// tab nueva — porque el fallo no está en ninguno de los pasos por separado.
+    #[test]
+    fn reanudar_una_sesion_recupera_sus_skills() {
+        let (db, workspace_id, tab_id, tab_cwd, _skills_dir) = setup();
+        let app = tauri::test::mock_app();
+        app.manage(db);
+        let state = app.state::<DbConnection>();
+
+        let skills = install_n_skills(&state, 3);
+        for s in &skills {
+            attach_skill(
+                s.id.clone(),
+                workspace_id.clone(),
+                "tab".to_string(),
+                Some(tab_id.clone()),
+                state.clone(),
+            )
+            .expect("attach");
+        }
+        assert_eq!(linked_slugs(&tab_cwd).len(), 3);
+
+        // Cerrar la tab: se archiva y su fila desaparece (con ella, por cascada, sus
+        // attachments).
+        let history_id = {
+            let conn = state.lock().unwrap();
+            crate::database::archive_tab_row(&conn, &tab_id, &workspace_id).expect("archivar");
+            conn.execute("DELETE FROM tabs WHERE id = ?1", [&tab_id]).unwrap();
+            conn.query_row("SELECT id FROM session_history", [], |r| r.get::<_, String>(0))
+                .expect("tiene que haber quedado una entrada de historial")
+        };
+
+        // Lo archivado tiene que incluir las tres, o no hay nada que restaurar después.
+        {
+            let conn = state.lock().unwrap();
+            let archived = crate::database::archived_skills_of_session(&conn, &history_id).unwrap();
+            assert_eq!(archived.len(), 3, "el historial debe conservar las 3 skills");
+        }
+
+        // Reanudar: tab nueva, mismo cwd (es la misma sesión que se reabre).
+        let nueva_tab = "tab-reanudada".to_string();
+        {
+            let conn = state.lock().unwrap();
+            conn.execute(
+                "INSERT INTO tabs (id, window_id, title, agent_id, agent_label, command, cwd, history_id, created_at, last_active)
+                 VALUES (?1, 'win-test', 'Reanudada', 'claude-code', 'Claude Code', 'claude', ?2, ?3, 0, 0)",
+                rusqlite::params![nueva_tab, tab_cwd.to_string_lossy(), history_id],
+            )
+            .unwrap();
+        }
+
+        let missing = restore_session_skills(
+            history_id,
+            workspace_id.clone(),
+            nueva_tab.clone(),
+            state.clone(),
+        )
+        .expect("restore_session_skills");
+        assert!(missing.is_empty(), "las 3 siguen instaladas: {missing:?}");
+
+        assert_eq!(
+            linked_slugs(&tab_cwd),
+            vec!["skill-0", "skill-1", "skill-2"],
+            "reanudar tiene que devolver las skills de la sesión"
+        );
+
+        // Y el reconcile previo al lanzamiento del agente tampoco puede quitarlas.
+        reconcile_tab_skills(nueva_tab, state.clone()).expect("reconcile");
+        assert_eq!(linked_slugs(&tab_cwd).len(), 3, "reconciliar no debe quitar skills");
     }
 
     /// Una skill elegida a mano desde el disco no viene de ningún repo: va al bucket

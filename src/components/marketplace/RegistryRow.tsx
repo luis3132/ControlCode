@@ -44,7 +44,8 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
   // genérico: `RemoveRegistryDialog` las lista antes de dejar seguir.
   const [confirmRemove, setConfirmRemove] = useState(false);
 
-  const SourceIcon = r.sourceType === "github" ? CloudIcon : FolderIcon;
+  // Todo lo que no sea una carpeta del disco viene de la red.
+  const SourceIcon = r.sourceType === "local" ? FolderIcon : CloudIcon;
 
   return (
     <li className="flex flex-col px-4 py-3">
@@ -88,7 +89,11 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
             </span>
           </div>
 
-          <p className="text-xs text-gray-400 dark:text-gray-500 truncate font-mono">{r.location}</p>
+          {/* Un repo de skills.sh sin filtro no tiene ubicación que mostrar; sin esto la
+              línea queda vacía y parece un dato que falta. */}
+          <p className="text-xs text-gray-400 dark:text-gray-500 truncate font-mono">
+            {r.location || t("marketplace.registries.wholeDirectory")}
+          </p>
 
           {r.error ? (
             <p className="text-xs text-red-500 dark:text-red-400 truncate mt-0.5">{r.error}</p>
@@ -97,6 +102,17 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
               {r.lastFetched != null
                 ? `${t("marketplace.registries.skillCount", { count: r.skillCount })} · ${t("marketplace.registries.fetchedAgo", { time: timeAgo(r.lastFetched) })}`
                 : t("marketplace.registries.neverFetched")}
+            </p>
+          )}
+
+          {/* Un repositorio en 0 normalmente significa "vacío o roto"; acá no. skills.sh no
+              expone forma de enumerar su catálogo (solo responde a búsquedas), así que
+              refrescarlo NUNCA le va a subir el conteo, y sin decirlo parece un repositorio
+              defectuoso. Se muestra siempre, no solo en 0: es una propiedad de la fuente, y
+              el número que llegue a haber es el de la última búsqueda, no su tamaño real. */}
+          {r.sourceType === "skillssh" && (
+            <p className="text-xs text-amber-600 dark:text-amber-400/80 mt-0.5">
+              {t("marketplace.registries.skillsShNotListable")}
             </p>
           )}
         </div>

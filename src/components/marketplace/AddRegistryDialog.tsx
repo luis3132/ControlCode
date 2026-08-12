@@ -41,7 +41,9 @@ export function AddRegistryDialog({ onClose }: AddRegistryDialogProps) {
   // tecla, y descartando respuestas viejas si el input siguió cambiando.
   useEffect(() => {
     const raw = location.trim();
-    if (!raw) { setResolved(null); return; }
+    // En skills.sh la ubicación es un filtro opcional, así que vacío también es un estado
+    // válido que vale la pena mostrar resuelto ("todo skills.sh").
+    if (!raw && sourceType !== "skillssh") { setResolved(null); return; }
     let stale = false;
     const timer = setTimeout(() => {
       invoke<string>("preview_registry_location", { sourceType, location: raw })
@@ -57,7 +59,7 @@ export function AddRegistryDialog({ onClose }: AddRegistryDialogProps) {
   };
 
   const handleSubmit = async () => {
-    if (!name.trim() || !location.trim()) {
+    if (!name.trim() || (!location.trim() && sourceType !== "skillssh")) {
       setError(t("marketplace.add.error.required"));
       return;
     }
@@ -104,6 +106,7 @@ export function AddRegistryDialog({ onClose }: AddRegistryDialogProps) {
           onChange={(e) => { setSourceType(e.target.value as RegistrySourceType); setLocation(""); }}
           options={[
             { value: "github", label: t("marketplace.add.sourceGithub") },
+            { value: "skillssh", label: t("marketplace.add.sourceSkillsSh") },
             { value: "local", label: t("marketplace.add.sourceLocal") },
           ]}
           variant="outline"
@@ -119,7 +122,25 @@ export function AddRegistryDialog({ onClose }: AddRegistryDialogProps) {
           disabled={busy}
         />
 
-        {sourceType === "github" ? (
+        {sourceType === "skillssh" ? (
+          <div className="flex flex-col gap-1">
+            <Input
+              label={t("marketplace.add.skillsShOwner")}
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder={t("marketplace.add.skillsShOwnerPlaceholder")}
+              variant="outline"
+              disabled={busy}
+            />
+            {resolved ? (
+              <p className="text-xs font-mono text-blue-500 dark:text-blue-400 truncate">→ {resolved}</p>
+            ) : (
+              <p className="text-xs text-gray-400 dark:text-white/40">
+                {t("marketplace.add.skillsShHelper")}
+              </p>
+            )}
+          </div>
+        ) : sourceType === "github" ? (
           <div className="flex flex-col gap-1">
             <Input
               label={t("marketplace.add.githubLocation")}

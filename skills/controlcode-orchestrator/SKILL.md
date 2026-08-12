@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents in specific folders, read what they printed, type into them, and manage windows, workspaces and skills. Use when the user asks to set up a workspace, spin up agents across a monorepo, check on what a tab is doing, or send input to a running agent.
-version: 1.4.0
+version: 1.5.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -29,6 +29,7 @@ Each command's main argument can be written loose, without its flag. Both forms 
 ```bash
 ccode tab output t1                 # same as --tab t1
 ccode skill install git-helper      # same as --skill git-helper
+ccode skill search react            # same as --query react
 ccode tab send t1 "run the tests"   # same as --tab t1 --text "run the tests"
 ```
 
@@ -49,7 +50,7 @@ Don't guess these — ask:
 ```bash
 ccode agents      # every agent id you can pass to --agent
 ccode accounts    # every account name you can pass to --account
-ccode skills      # every skill name you can pass to --skills
+ccode skills      # every skill name you can pass to --skills (installed + cached repos)
 ccode prelaunch   # every saved command you can pass to --pre
 ```
 
@@ -65,6 +66,10 @@ forgiving: `claudecode`, `claude-code` and `Claude Code` all work.
 ```bash
 ccode skill install git-helper
 ```
+
+`available` is **not** the whole catalogue, and refreshing won't make it one: the skills.sh
+directory cannot be listed, only searched, so nothing from it ever appears there. Use
+`ccode skill search <text>` to reach it — see "Installing skills".
 
 `accounts` lists the extra accounts the user created for a TUI, as `{id, agent, name}`.
 The **main account is not listed** — it isn't something the app manages, it's simply what
@@ -286,15 +291,37 @@ work in those tabs.
 
 ```bash
 ccode skills                       # see "What you can put in --agent and --skills"
-ccode skill install git-helper     # the name exactly as it appears in that listing
+ccode skill search react testing   # search every repo, including the skills.sh directory
+ccode skill install git-helper     # the name exactly as it appears in either listing
 ```
 
 Names come from either array `ccode skills` returns. One from `installed` is already there
 (the app says so and there's nothing to do); one from `available` gets downloaded from the
 repository it names.
 
-If a skill you want appears in neither `installed` nor `available`, the user has to add its
-repository from the Marketplace first — say so rather than guessing at a name.
+**`ccode skills` does not list everything.** The skills.sh directory holds thousands of
+skills and can only be queried by searching — it never shows up under `available`. Use
+`ccode skill search <text>` to reach it; each result carries its `registry` and, for
+skills.sh, its `installs` count.
+
+**`skill search` always queries skills.sh**, together with your own repositories — one
+search, everything that exists. That costs an `npx` process, so the call takes a few seconds;
+that's the price of a complete answer, not a hang. Don't retry it.
+
+The response reports `searched` (`["repos","skills.sh"]`, or just `["repos"]` if the
+directory couldn't be reached) plus `skillsShError` with the reason — no Node installed, no
+network. A failure there never hides what your own repositories matched.
+
+`skill install` reaches the directory too: if the name isn't in any repository's cache it
+searches skills.sh before giving up, so installing by name works without searching first.
+
+**Why skills.sh can show 0 skills even right after a refresh:** its catalogue cannot be
+listed — there is no endpoint that returns it whole, only search. So refreshing that
+repository never raises its count, and whatever number it shows is the size of the last
+search, not the size of the directory. It is not broken; search it.
+
+If a skill appears in none of these, the user has to add its repository from the Marketplace
+first — say so rather than guessing at a name.
 
 ## Working rules
 

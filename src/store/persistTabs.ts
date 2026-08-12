@@ -55,7 +55,7 @@ async function cachedOrFetchScrollback(ptyId: number | null): Promise<string | n
 
 async function saveNow(opts: { refreshScrollback: boolean } = { refreshScrollback: false }) {
   const win = getCurrentWindow();
-  const { tabs, workspaceId } = useTabsStore.getState();
+  const { tabs, workspaceId, hydrated } = useTabsStore.getState();
   const resolveScrollback = opts.refreshScrollback ? fetchScrollback : cachedOrFetchScrollback;
 
   let bounds: { x: number | null; y: number | null; width: number | null; height: number | null } = {
@@ -105,6 +105,10 @@ async function saveNow(opts: { refreshScrollback: boolean } = { refreshScrollbac
       height: bounds.height,
       monitor: null,
       tabs: tabsPayload,
+      // Solo una ventana ya hidratada puede afirmar "estas son TODAS mis tabs", que es lo
+      // único que autoriza al backend a dar por cerradas las que falten. Ver
+      // `WindowStatePayload::authoritative`.
+      authoritative: hydrated,
     },
   }).catch(console.error);
 }
@@ -122,12 +126,46 @@ function scheduleSave() {
  * duplicada con la copia que ya persistió la ventana destino. Ver bug: dos filas en
  * `windows` con la misma tab, ambas revividas al reabrir la app. */
 export async function flushPendingSave(): Promise<void> {
+  // Nunca persistir un estado PRE-HIDRATACIÓN. El resto de los disparadores del guardado
+  // (la suscripción al store y el ciclo periódico) ya se abstienen mientras `hydrated` sea
+  // false; este se los saltaba, y era el único que el usuario podía disparar a mano.
+  //
+  // El daño no era perder un guardado: `db_save_window_state` trata a las tabs que NO
+  // vienen en el payload como tabs cerradas —las archiva y BORRA su fila—, y
+  // `project_skills.tab_id` cascadea con `tabs`. O sea que un flush disparado antes de que
+  // la ventana terminara de hidratarse mandaba un payload sin sus tabs reales y se llevaba
+  // puestas las skills de todas ellas, dejando además entradas de historial con `skills: []`
+  // que ya no se podían reanudar con sus skills. Verificado sobre una base real.
+  //
+  // Se ESPERA a la hidratación en vez de saltear el guardado: quien llama a esto necesita
+  // que la tab que acaba de crear exista como fila antes de attachearle nada (`attach_skill`
+  // con scope='tab' la busca por id). El tope existe para no colgar la creación de una tab
+  // si la hidratación nunca llegara.
+  await waitForHydration();
+
   if (debounceTimer) {
     clearTimeout(debounceTimer);
     debounceTimer = null;
   }
   enqueueSave();
   await saveChain;
+}
+
+const HYDRATION_TIMEOUT_MS = 5_000;
+
+function waitForHydration(): Promise<void> {
+  if (useTabsStore.getState().hydrated) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    };
+    const timer = setTimeout(done, HYDRATION_TIMEOUT_MS);
+    const unsubscribe = useTabsStore.subscribe((state) => {
+      if (state.hydrated) done();
+    });
+  });
 }
 
 /** Centraliza el guardado automático del estado de tabs/ventana hacia SQLite. */

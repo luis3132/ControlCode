@@ -317,6 +317,7 @@ pub fn init_db() -> SqlResult<DbConnection> {
     ensure_default_workspace(&conn)?;
     ensure_default_settings(&conn)?;
     ensure_default_registries(&conn)?;
+    ensure_skillssh_registry(&conn)?;
     dedupe_session_history(&conn)?;
 
     Ok(Arc::new(Mutex::new(conn)))
@@ -357,6 +358,38 @@ fn ensure_default_registries(conn: &Connection) -> SqlResult<()> {
             )?;
         }
     }
+    Ok(())
+}
+
+/// Agrega el directorio de skills.sh como fuente, una única vez.
+///
+/// No va en `DEFAULT_REGISTRIES` porque esa siembra solo corre con la tabla vacía, y quien
+/// ya venía usando la app se quedaría sin la fuente nueva para siempre. Acá el candado es
+/// un flag propio en `settings`: se agrega una vez y nunca más, así borrarlo es una
+/// decisión que se respeta en vez de deshacerse en el próximo arranque.
+fn ensure_skillssh_registry(conn: &Connection) -> SqlResult<()> {
+    const FLAG: &str = "skillssh_registry_seeded";
+    let ya: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM settings WHERE key = ?1",
+        [FLAG],
+        |r| r.get(0),
+    )?;
+    if ya > 0 {
+        return Ok(());
+    }
+
+    // `location` vacío = todo el directorio, sin filtrar por publicador.
+    // Queda último en prioridad: es el único que no aporta nada hasta que se busque algo,
+    // así que arriba estorbaría a los repos que sí listan solos.
+    let next: i32 = conn.query_row("SELECT COALESCE(MAX(priority), -1) + 1 FROM registries", [], |r| {
+        r.get(0)
+    })?;
+    conn.execute(
+        "INSERT INTO registries (id, name, source_type, location, priority, enabled, created_at)
+         VALUES (?1, 'skills.sh', 'skillssh', '', ?2, 1, ?3)",
+        rusqlite::params![Uuid::new_v4().to_string(), next, now_ts()],
+    )?;
+    conn.execute("INSERT INTO settings (key, value) VALUES (?1, '1')", [FLAG])?;
     Ok(())
 }
 
@@ -517,6 +550,22 @@ pub struct WindowStatePayload {
     pub height: Option<i32>,
     pub monitor: Option<String>,
     pub tabs: Vec<TabStatePayload>,
+    /// Si esta foto de tabs es AUTORITATIVA, o sea: la ventana ya cargó su estado desde la
+    /// base y lo que manda es realmente todo lo que tiene.
+    ///
+    /// Solo con esto en `true` se interpreta que una tab ausente del payload es una tab que
+    /// el usuario cerró (se archiva y se borra su fila). Una ventana que todavía no cargó su
+    /// estado —o que falló al intentarlo— manda `false`: sus tabs se guardan igual, pero no
+    /// se borra nada, porque no sabe lo suficiente como para afirmar que algo desapareció.
+    ///
+    /// El default es `false` a propósito: ante un payload viejo o incompleto, la opción
+    /// segura es no destruir. Sin esto, una carga fallida marcaba la ventana como lista, el
+    /// autosave mandaba una lista vacía y el backend archivaba y borraba todas sus tabs —
+    /// llevándose por cascada (`project_skills.tab_id`) las skills de cada una, y dejando
+    /// entradas de historial con `skills: []` imposibles de reanudar bien. Intermitente,
+    /// porque dependía de que esa única carga fallara o llegara tarde.
+    #[serde(default)]
+    pub authoritative: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -987,7 +1036,11 @@ fn reconcile_session_id(
     Some(found)
 }
 
-fn archive_tab_row(conn: &Connection, tab_id: &str, workspace_id: &str) -> Result<(), String> {
+pub(crate) fn archive_tab_row(
+    conn: &Connection,
+    tab_id: &str,
+    workspace_id: &str,
+) -> Result<(), String> {
     #[allow(clippy::type_complexity)]
     #[allow(clippy::type_complexity)]
     let row: Option<(String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, String, i64, bool)> = conn
@@ -1464,10 +1517,12 @@ pub async fn db_save_window_state(
         .map_err(|e| e.to_string())?
 }
 
-fn db_save_window_state_sync(
+/// Genérica sobre el runtime para poder ejercitarla con el runtime de prueba de Tauri: es
+/// la función que decide qué tabs se dan por cerradas, y eso necesita test.
+fn db_save_window_state_sync<R: tauri::Runtime>(
     state: WindowStatePayload,
     db: &DbConnection,
-    app: &tauri::AppHandle,
+    app: &tauri::AppHandle<R>,
 ) -> Result<(), String> {
     // Un guardado de una ventana que ya no existe nativamente es un guardado zombi: el
     // JS de una ventana en pleno teardown (o cuyo timer periódico de 20s disparó justo
@@ -1490,6 +1545,13 @@ fn db_save_window_state_sync(
            pos_x = excluded.pos_x, pos_y = excluded.pos_y,
            width = excluded.width, height = excluded.height,
            monitor = excluded.monitor,
+           -- Una ventana que está autosalvando ESTÁ abierta: llegar hasta acá ya probó que
+           -- su ventana nativa existe (el early return de arriba). Antes `is_open` solo se
+           -- escribía en el INSERT, así que una fila que quedaba en 0 con su ventana viva
+           -- no se recuperaba nunca — y `desired_skills_for_link_dir` exige `is_open = 1`,
+           -- con lo cual cada reconcile borraba los symlinks de esas tabs: las filas de
+           -- `project_skills` intactas y ni una skill en disco.
+           is_open = 1,
            last_active = excluded.last_active",
         rusqlite::params![
             Uuid::new_v4().to_string(),
@@ -1536,7 +1598,14 @@ fn db_save_window_state_sync(
     // Directorios de skills que quedan sin dueño al desaparecer estas tabs — se
     // reconcilian al final, ya con las filas borradas (ver `skills::reconcile_link_dir`).
     let mut orphaned_dirs: Vec<(String, String)> = Vec::new();
-    for closed_id in existing_ids.iter().filter(|id| !incoming_ids.contains(id.as_str())) {
+    // Solo una ventana que sabe lo que tiene puede afirmar que una tab se cerró: ver
+    // `WindowStatePayload::authoritative`.
+    let closed_ids: Vec<&String> = if state.authoritative {
+        existing_ids.iter().filter(|id| !incoming_ids.contains(id.as_str())).collect()
+    } else {
+        Vec::new()
+    };
+    for closed_id in closed_ids {
         archive_tab_row(&conn, closed_id, &state.workspace_id)?;
         if let Ok(pair) = conn.query_row(
             "SELECT cwd, agent_id FROM tabs WHERE id = ?1",
@@ -1857,6 +1926,181 @@ mod tests {
              INSERT INTO windows VALUES ('win', 'win', 'ws', 1, 0);",
         ).unwrap();
         conn
+    }
+
+    /// Base con las FK reales y una ventana `main` (el label que usa `mock_app`) con dos
+    /// tabs, la primera con una skill attacheada.
+    fn setup_window_save() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn.execute_batch(crate::skills::tests::TEST_SCHEMA).unwrap();
+        conn.execute_batch(
+            "INSERT INTO workspaces VALUES ('ws', 'WS', 0, 0);
+             INSERT INTO windows (id, label, workspace_id, is_open, last_active) VALUES ('w1', 'main', 'ws', 1, 0);
+             INSERT INTO tabs (id, window_id, agent_id, agent_label, command, cwd, created_at, last_active)
+                VALUES ('t1', 'w1', 'claude-code', 'Claude Code', 'claude', '/tmp/uno', 0, 0);
+             INSERT INTO tabs (id, window_id, agent_id, agent_label, command, cwd, created_at, last_active)
+                VALUES ('t2', 'w1', 'claude-code', 'Claude Code', 'claude', '/tmp/dos', 0, 0);
+             INSERT INTO skills (id, name, source_path, installed_at, updated_at)
+                VALUES ('sk', 'una-skill', '/tmp/skills/una-skill', 0, 0);
+             INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, enabled, created_at)
+                VALUES ('ps', 'sk', 'ws', 'tab', 't2', 1, 0);",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn payload(tabs: Vec<&str>, authoritative: bool) -> WindowStatePayload {
+        WindowStatePayload {
+            label: "main".into(),
+            workspace_id: "ws".into(),
+            pos_x: None, pos_y: None, width: None, height: None, monitor: None,
+            authoritative,
+            tabs: tabs
+                .into_iter()
+                .map(|id| TabStatePayload {
+                    id: id.into(),
+                    title: String::new(),
+                    title_is_custom: false,
+                    agent_id: "claude-code".into(),
+                    agent_label: "Claude Code".into(),
+                    command: "claude".into(),
+                    cwd: format!("/tmp/{id}"),
+                    tab_order: 0,
+                    session_id: None,
+                    scrollback: None,
+                    history_id: None,
+                    account_id: None,
+                    prelaunch: Vec::new(),
+                    opened_at: 0,
+                })
+                .collect(),
+        }
+    }
+
+    fn count(conn: &Connection, sql: &str) -> i64 {
+        conn.query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    /// App de prueba CON una ventana `main` de verdad. Sin ella, `db_save_window_state_sync`
+    /// se va por su early return ("guardado de una ventana que ya no existe") y los tests
+    /// pasarían sin ejercitar nada.
+    fn mock_app_with_main_window() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::App("/".into()))
+            .build()
+            .expect("la ventana de prueba tiene que existir");
+        app
+    }
+
+    /// EL bug intermitente: una ventana que todavía no cargó su estado (o que falló al
+    /// intentarlo) mandaba una lista de tabs incompleta, y el backend daba por cerradas las
+    /// que faltaban — borrándolas y llevándose por cascada sus skills.
+    ///
+    /// Un payload no autoritativo tiene que poder guardar lo que trae SIN borrar nada.
+    #[test]
+    fn un_guardado_no_autoritativo_no_puede_borrar_tabs() {
+        let conn = setup_window_save();
+        let db: DbConnection = std::sync::Arc::new(std::sync::Mutex::new(conn));
+        let app = mock_app_with_main_window();
+
+        db_save_window_state_sync(payload(vec!["t1"], false), &db, app.handle()).unwrap();
+
+        let conn = db.lock().unwrap();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM tabs"), 2, "no se borra ninguna tab");
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM project_skills"), 1, "la skill sigue attacheada");
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM session_history"), 0, "no se archiva nada");
+    }
+
+    /// Y con el estado ya cargado sí manda: una tab ausente es una tab que el usuario cerró.
+    #[test]
+    fn un_guardado_autoritativo_si_cierra_las_tabs_que_faltan() {
+        let conn = setup_window_save();
+        let db: DbConnection = std::sync::Arc::new(std::sync::Mutex::new(conn));
+        let app = mock_app_with_main_window();
+
+        db_save_window_state_sync(payload(vec!["t1"], true), &db, app.handle()).unwrap();
+
+        let conn = db.lock().unwrap();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM tabs"), 1, "t2 se cerró");
+        assert_eq!(
+            count(&conn, "SELECT COUNT(*) FROM session_history"),
+            1,
+            "y quedó archivada en el historial"
+        );
+        // Lo que importa del archivado: sus skills quedan guardadas, no perdidas.
+        let skills: String = conn
+            .query_row("SELECT skills FROM session_history", [], |r| r.get(0))
+            .unwrap();
+        assert!(skills.contains("una-skill"), "el historial guarda la skill: {skills}");
+    }
+
+    /// Schema mínimo para ejercitar la siembra de repositorios.
+    fn setup_registries() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE registries (id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                source_type TEXT NOT NULL, location TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1, last_fetched INTEGER, cache_json TEXT,
+                cache_error TEXT, created_at INTEGER NOT NULL);",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn skillssh_count(conn: &Connection) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM registries WHERE source_type = 'skillssh'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    /// La fuente nueva tiene que aparecerle también a quien ya venía usando la app — o sea,
+    /// con la tabla de repositorios NO vacía, que es donde la siembra original no llega.
+    #[test]
+    fn skills_sh_se_agrega_aunque_ya_hubiera_repositorios() {
+        let conn = setup_registries();
+        conn.execute(
+            "INSERT INTO registries (id, name, source_type, location, priority, enabled, created_at)
+             VALUES ('viejo', 'Uno', 'github', 'a/b', 0, 1, 0)",
+            [],
+        )
+        .unwrap();
+
+        ensure_skillssh_registry(&conn).unwrap();
+        assert_eq!(skillssh_count(&conn), 1);
+
+        // Queda detrás de los que ya estaban: hasta que se busque algo no aporta nada.
+        let priority: i32 = conn
+            .query_row("SELECT priority FROM registries WHERE source_type = 'skillssh'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(priority, 1);
+    }
+
+    /// Arrancar la app N veces no puede dejar N copias del mismo repositorio.
+    #[test]
+    fn sembrar_skills_sh_dos_veces_no_lo_duplica() {
+        let conn = setup_registries();
+        ensure_skillssh_registry(&conn).unwrap();
+        ensure_skillssh_registry(&conn).unwrap();
+        assert_eq!(skillssh_count(&conn), 1);
+    }
+
+    /// Borrarlo es una decisión del usuario: el próximo arranque tiene que respetarla en
+    /// vez de devolverle el repositorio que acaba de sacar.
+    #[test]
+    fn skills_sh_borrado_no_vuelve_en_el_siguiente_arranque() {
+        let conn = setup_registries();
+        ensure_skillssh_registry(&conn).unwrap();
+        conn.execute("DELETE FROM registries WHERE source_type = 'skillssh'", []).unwrap();
+
+        ensure_skillssh_registry(&conn).unwrap();
+        assert_eq!(skillssh_count(&conn), 0);
     }
 
     /// Reanudar tiene que ENFOCAR la tab existente, no abrir otra. Antes esto solo

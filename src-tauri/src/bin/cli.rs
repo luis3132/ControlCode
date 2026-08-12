@@ -66,6 +66,8 @@ AGENTES, CUENTAS Y SKILLS
   accounts                                    Qué poner en --account, por TUI
   prelaunch [list]                            Qué poner en --pre
   skills                                      Qué poner en --skills (instaladas)
+  skill search <texto>                        Busca en TODOS los repos, skills.sh incluido
+                                              (tarda: el directorio se consulta por npx)
   skill install <nombre>                      Instala desde los repos habilitados
 
 OTROS
@@ -167,6 +169,8 @@ fn shortcut(word: &str) -> Option<&'static str> {
 fn positionals(command: &str) -> &'static [&'static str] {
     match command {
         "skill.install" => &["skill"],
+        // `ccode skill search react` en vez de `--query react`.
+        "skill.search" => &["query"],
         // El texto va segundo: `ccode tab send <id> "corré los tests"`.
         "tab.send" => &["tab", "text"],
         "tab.output" | "tab.close" | "watch.add" | "watch.remove" => &["tab"],
@@ -474,6 +478,10 @@ mod tests {
     #[test]
     fn the_first_loose_value_fills_the_commands_main_flag() {
         assert_eq!(parse("skill.install", &["git-helper"]).unwrap()["skill"], "git-helper");
+        // Buscar es la única forma de llegar a lo que hay en skills.sh: su directorio no se
+        // puede listar de antemano, así que el texto suelto tiene que funcionar igual que
+        // en `install`.
+        assert_eq!(parse("skill.search", &["react testing"]).unwrap()["query"], "react testing");
         assert_eq!(parse("tab.output", &["t1"]).unwrap()["tab"], "t1");
         assert_eq!(parse("workspace.open", &["cliente"]).unwrap()["workspace"], "cliente");
         assert_eq!(parse("tab.create", &["/repo/api"]).unwrap()["cwd"], "/repo/api");

@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabsStore } from "../store/tabs";
 import type { PrelaunchStep } from "../store/prelaunch";
 import { useSettingsStore } from "../store/settings";
-import { flushPendingSave } from "../store/persistTabs";
+import { attachSkillsToTab } from "./attachSkills";
 import { registerPendingSkillSetup } from "./pendingSkillSetup";
 
 /**
@@ -90,15 +90,12 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
   // devuelva "listo" mientras los symlinks todavía se están escribiendo.
   const skillIds = Array.isArray(args.skills) ? (args.skills as string[]) : [];
   const workspaceId = useTabsStore.getState().workspaceId;
-  const setup = (async () => {
-    await flushPendingSave();
-    for (const skillId of skillIds) {
-      await invoke("attach_skill", { skillId, workspaceId, scope: "tab", tabId });
-    }
-    await invoke("sync_workspace_skills", { workspaceId }).catch(() => {});
-  })();
+  const setup = attachSkillsToTab(tabId, workspaceId, skillIds);
   registerPendingSkillSetup(tabId, setup);
-  await setup;
+  // La CLI sí falla fuerte: quien automatiza necesita enterarse de que la tab quedó sin
+  // las skills que pidió, no descubrirlo después mirando la terminal.
+  const errors = await setup;
+  if (errors.length > 0) throw new Error(errors.join(" · "));
 
   // `accountId` viaja de vuelta para que el orquestador pueda comprobar con qué cuenta
   // quedó la tab sin tener que consultarlo aparte.

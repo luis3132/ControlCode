@@ -16,8 +16,8 @@ export function MarketplacePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const {
-    registries, skills, loading, installingKey, refreshingId,
-    loadRegistries, loadSkills, installSkill, refreshRegistry,
+    registries, skills, loading, searchingRemote, installingKey, refreshingId,
+    loadRegistries, loadSkills, searchRemote, installSkill, refreshRegistry,
   } = useMarketplaceStore();
   const [query, setQuery] = useState("");
   const [selectedRegistry, setSelectedRegistry] = useState<RegistryFilter>(null);
@@ -40,12 +40,38 @@ export function MarketplacePage() {
     return () => clearTimeout(handle);
   }, [query, loadSkills]);
 
+  // skills.sh se consulta SIEMPRE, junto con el resto: buscar en el Marketplace tiene que
+  // mostrar todo lo que hay, sin que el usuario tenga que decidir cuándo mirar cada fuente.
+  //
+  // Va en su propio efecto y con más espera que el filtro local porque cada disparo arranca
+  // un proceso `npx` que tarda segundos: la espera es para no lanzar uno por tecla, no para
+  // que el usuario tenga que pedirlo.
+  useEffect(() => {
+    const handle = setTimeout(() => searchRemote(query), 700);
+    return () => clearTimeout(handle);
+  }, [query, searchRemote]);
+
   // Por nombre normalizado: el id del marketplace es el nombre de carpeta en el repo y el
   // de la copia instalada es un UUID, así que ninguno cruza. El `name` de las dos puntas sí
   // sale del mismo campo del frontmatter de SKILL.md.
   const installedNames = useMemo(
     () => new Set(installedSkills.map((s) => s.name.trim().toLowerCase())),
     [installedSkills]
+  );
+
+  // Todo lo que se ve viene de un repo que solo responde a búsquedas, y todavía no hay
+  // ninguna: el vacío se explica solo, no hay nada que arreglar.
+  const remoteNeedsQuery = useMemo(() => {
+    if (query.trim().length >= 2) return false;
+    const relevant = selectedRegistry
+      ? registries.filter((r) => r.id === selectedRegistry)
+      : registries.filter((r) => r.enabled);
+    return relevant.length > 0 && relevant.every((r) => r.sourceType === "skillssh");
+  }, [query, selectedRegistry, registries]);
+
+  const hasSkillsSh = useMemo(
+    () => registries.some((r) => r.sourceType === "skillssh" && r.enabled),
+    [registries]
   );
 
   const visible = useMemo(
@@ -144,7 +170,13 @@ export function MarketplacePage() {
                       <li key={r.id} className="flex items-center gap-0.5">
                         <button
                           onClick={() => setSelectedRegistry(r.id)}
-                          title={r.location}
+                          // Su conteo es el de la última búsqueda, no su tamaño: sin esto,
+                          // un 0 al lado de skills.sh se lee como repositorio roto.
+                          title={
+                            r.sourceType === "skillssh"
+                              ? t("marketplace.registries.skillsShNotListable")
+                              : r.location
+                          }
                           className={`flex items-center gap-1.5 min-w-0 flex-1 px-2 py-1.5 rounded-lg text-xs
                             transition-colors
                             ${active
@@ -152,9 +184,9 @@ export function MarketplacePage() {
                               : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5"}
                             ${r.enabled ? "" : "opacity-50"}`}
                         >
-                          {r.sourceType === "github"
-                            ? <CloudIcon className="w-3 h-3 shrink-0" />
-                            : <FolderIcon className="w-3 h-3 shrink-0" />}
+                          {r.sourceType === "local"
+                            ? <FolderIcon className="w-3 h-3 shrink-0" />
+                            : <CloudIcon className="w-3 h-3 shrink-0" />}
                           <span className="truncate flex-1 text-left">{r.name}</span>
                           <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">
                             {countByRegistry.get(r.id) ?? 0}
@@ -193,9 +225,30 @@ export function MarketplacePage() {
                 clearable
                 onClear={() => setQuery("")}
               />
+
+              {/* Por qué skills.sh puede figurar en 0 aunque lo refresques: no es que esté
+                  roto ni desactualizado, es que su directorio no se puede enumerar. Se dice
+                  acá, junto al buscador, que es donde el usuario se lo pregunta. */}
+              {hasSkillsSh && query.trim().length < 2 && (
+                <p className="mt-2 px-1 text-xs text-gray-400 dark:text-gray-500">
+                  {t("marketplace.skillsShNeedsQuery")}
+                </p>
+              )}
             </div>
 
             {error && <p className="text-sm text-red-500 dark:text-red-400 mb-4 px-1">{error}</p>}
+
+            {/* La búsqueda en skills.sh NO vacía la grilla: los repos con cache ya
+                respondieron y tapar esos resultados durante los segundos que tarda `npx`
+                haría parecer que la búsqueda "se reinicia" en cada consulta. Se avisa que
+                sigue trabajando y los resultados del directorio se suman al llegar. */}
+            {searchingRemote && (
+              <div className="flex items-center gap-2 mb-3 px-1 text-xs
+                text-gray-400 dark:text-gray-500">
+                <AnimateSpin className="w-3 h-3" />
+                {t("marketplace.searchingRemote")}
+              </div>
+            )}
 
             {loading ? (
               <div className="flex items-center justify-center gap-2 py-6 text-sm
@@ -203,11 +256,17 @@ export function MarketplacePage() {
                 <AnimateSpin className="w-4 h-4" />
                 {t("marketplace.loading")}
               </div>
-            ) : visible.length === 0 ? (
+            ) : visible.length === 0 && !searchingRemote ? (
               <div className="flex flex-col items-center gap-2 py-14 text-gray-400 dark:text-gray-500">
                 <CloudIcon className="w-8 h-8 opacity-30" />
                 <p className="text-sm text-center max-w-xs">
-                  {selectedRegistry ? t("marketplace.emptyForRegistry") : t("marketplace.empty")}
+                  {/* Un repo de skills.sh vacío no está roto ni desactualizado: es que
+                      todavía no se buscó nada. Decirlo evita que parezca lo primero. */}
+                  {remoteNeedsQuery
+                    ? t("marketplace.remoteNeedsQuery")
+                    : selectedRegistry
+                      ? t("marketplace.emptyForRegistry")
+                      : t("marketplace.empty")}
                 </p>
                 {selectedRegistry && (
                   <Button variant="outline" onClick={() => setSelectedRegistry(null)} className="!text-xs">
@@ -252,6 +311,15 @@ export function MarketplacePage() {
                             </span>
                             {/* El botón ya lo dice, pero deshabilitado se lee poco: en una
                                 grilla conviene algo que se note al barrer con la vista. */}
+                            {/* Las skills de skills.sh no traen descripción, así que las
+                                instalaciones son la única señal para comparar entre
+                                resultados parecidos. */}
+                            {skill.installs && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full
+                                bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                                {t("marketplace.installs", { count: skill.installs })}
+                              </span>
+                            )}
                             {installed && (
                               <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full
                                 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">

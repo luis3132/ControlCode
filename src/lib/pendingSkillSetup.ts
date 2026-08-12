@@ -4,9 +4,14 @@
  * primero, escanea su cwd sin encontrarlas (algunos solo las leen al boot). Ver
  * NewTabWizard/TabBar (donde se registra) y Terminal.tsx (donde se espera).
  */
-const pending = new Map<string, Promise<void>>();
+/**
+ * La promesa resuelve con los errores de montaje (una línea por skill que falló), no con
+ * `void`: quien espera este gate es la terminal, y es el único lugar con dónde mostrarlos.
+ * Antes se descartaban en un `console.error` y la tab arrancaba sin skills en silencio.
+ */
+const pending = new Map<string, Promise<string[]>>();
 
-export function registerPendingSkillSetup(tabId: string, setup: Promise<void>): void {
+export function registerPendingSkillSetup(tabId: string, setup: Promise<string[]>): void {
   pending.set(tabId, setup);
   setup.finally(() => {
     // Solo se borra si sigue siendo LA MISMA promesa (no pisar un registro más nuevo
@@ -15,6 +20,8 @@ export function registerPendingSkillSetup(tabId: string, setup: Promise<void>): 
   });
 }
 
-export function awaitSkillSetup(tabId: string): Promise<void> {
-  return pending.get(tabId) ?? Promise.resolve();
+export function awaitSkillSetup(tabId: string): Promise<string[]> {
+  // Un setup que falló entero (no una skill puntual) tampoco puede tumbar el arranque de
+  // la terminal: se reporta como un error más y la tab abre igual.
+  return (pending.get(tabId) ?? Promise.resolve([])).catch((e) => [String(e)]);
 }

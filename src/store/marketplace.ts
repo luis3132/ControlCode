@@ -2,7 +2,8 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { SkillSummary } from "./skills";
 
-export type RegistrySourceType = "local" | "github";
+/** `skillssh` es el directorio abierto de skills.sh, consultado por su CLI (`npx skills`). */
+export type RegistrySourceType = "local" | "github" | "skillssh";
 
 export interface RegistrySummary {
   id: string;
@@ -26,6 +27,8 @@ export interface MarketplaceSkillEntry {
   compatibleAgents: string[];
   folderPath: string;
   files: string[];
+  /** Instalaciones acumuladas ya formateadas (`"3.3K"`); solo lo informa skills.sh. */
+  installs: string | null;
 }
 
 /** Payload del evento `cc-registry-progress` (ver `marketplace/mod.rs`). */
@@ -42,11 +45,17 @@ interface MarketplaceState {
   registries: RegistrySummary[];
   skills: MarketplaceSkillEntry[];
   loading: boolean;
+  /** Una búsqueda contra un repo remoto en curso (skills.sh). Es lenta y separada de
+   *  `loading`, que solo cubre releer lo que ya está en la base. */
+  searchingRemote: boolean;
   refreshingId: string | null;
   installingKey: string | null;
 
   loadRegistries: () => Promise<void>;
   loadSkills: (query?: string, category?: string) => Promise<void>;
+  /** Busca en los repos que no se pueden listar de antemano (skills.sh) y refresca la
+   *  lista con lo que encuentre. No hace nada si no hay ninguno configurado. */
+  searchRemote: (query: string) => Promise<void>;
   /** `id` es opcional pero conviene mandarlo: los eventos de progreso vienen etiquetados
    *  con él, y esta promesa recién resuelve cuando el repo terminó de resolverse. */
   addRegistry: (name: string, sourceType: RegistrySourceType, location: string, id?: string) => Promise<void>;
@@ -65,6 +74,7 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   registries: [],
   skills: [],
   loading: false,
+  searchingRemote: false,
   refreshingId: null,
   installingKey: null,
 
@@ -83,6 +93,21 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
       set({ skills });
     } finally {
       set({ loading: false });
+    }
+  },
+
+  searchRemote: async (query) => {
+    const hasRemote = get().registries.some((r) => r.sourceType === "skillssh" && r.enabled);
+    if (!hasRemote || query.trim().length < 2) return;
+    set({ searchingRemote: true });
+    try {
+      await invoke("search_remote_registries", { query });
+      // El backend deja los resultados en el cache del repo; releerlo es lo que los trae
+      // a la grilla. `loadRegistries` además refresca el error del repo (ej. falta Node).
+      await get().loadRegistries();
+      await get().loadSkills(query);
+    } finally {
+      set({ searchingRemote: false });
     }
   },
 

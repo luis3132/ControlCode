@@ -407,7 +407,15 @@ export function Terminal({
         // todavía escribiéndose en su cwd), esperarlo antes de lanzar el proceso — si
         // el agente arranca primero, algunos escanean su carpeta de skills solo al
         // boot y nunca verían las que el usuario acaba de elegir.
-        if (tabId) await awaitSkillSetup(tabId);
+        // Lo que no se pudo montar se DICE. Antes esto se perdía en un `console.error` del
+        // webview y la tab arrancaba sin skills sin ninguna señal — que es exactamente el
+        // síntoma "se abrió sin ninguna" que había que diagnosticar a ciegas.
+        if (tabId) {
+          const skillErrors = await awaitSkillSetup(tabId);
+          for (const err of skillErrors) {
+            term.write(`\r\n\x1b[33m${t("terminal.skillSetupFailed", { error: err })}\x1b[0m\r\n`);
+          }
+        }
         if (cancelled) return;
 
         // Toda tab que arranca (nueva, restaurada o reabierta desde el historial) deja su
