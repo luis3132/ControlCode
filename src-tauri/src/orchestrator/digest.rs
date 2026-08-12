@@ -23,14 +23,14 @@
 
 /// Un error o warning más largo que esto casi siempre trae un stack o un dump: se corta y
 /// el modelo puede pedir el crudo con `--raw` si de verdad lo necesita.
-const MAX_LINE_CHARS: usize = 400;
+pub(crate) const MAX_LINE_CHARS: usize = 400;
 const MAX_ERRORS: usize = 20;
 const MAX_WARNINGS: usize = 10;
 
 /// Glifos de spinner y de barra de progreso. Se borran ANTES de comparar dos líneas
 /// consecutivas (no del texto que se devuelve), que es lo que hace que dos marcos de un
 /// redibujado se reconozcan como el mismo.
-const SPINNER_GLYPHS: &[char] = &[
+pub(crate) const SPINNER_GLYPHS: &[char] = &[
     '⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏', '⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯',
     '⣷', '◐', '◓', '◑', '◒', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█', '░', '▒', '▓', '▏',
     '▎', '▍', '▌', '▋', '▊', '▉',
@@ -267,128 +267,4 @@ pub fn digest(raw: &str, tail_lines: usize) -> Digest {
 /// orden de magnitud de lo que la CLI le está mandando a un modelo, no para facturar.
 pub fn estimate_tokens(text: &str) -> u64 {
     text.chars().count().div_ceil(4) as u64
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ansi_sequences_disappear_but_the_text_stays() {
-        assert_eq!(strip_ansi("\x1b[31mrojo\x1b[0m"), "rojo");
-        assert_eq!(strip_ansi("\x1b]0;titulo\x07hola"), "hola");
-        assert_eq!(strip_ansi("\x1b[2J\x1b[Hlimpio"), "limpio");
-        // El hyperlink OSC 8 termina con ESC \ en vez de BEL.
-        assert_eq!(strip_ansi("\x1b]8;;http://x\x1b\\link"), "link");
-    }
-
-    /// Una barra de progreso es UNA línea física reescrita muchas veces. Devolver las 40
-    /// versiones intermedias es el caso más caro y más inútil que existía.
-    #[test]
-    fn carriage_returns_leave_only_what_is_visible() {
-        assert_eq!(visible_line("5%\r10%\r100% listo"), "100% listo");
-        // CRLF no debe vaciar la línea.
-        assert_eq!(visible_line("terminado\r"), "terminado");
-    }
-
-    #[test]
-    fn blank_and_spinner_only_lines_are_dropped() {
-        let d = digest("uno\n\n\n|\n/\ndos", 10);
-        assert_eq!(d.tail, vec!["uno", "dos"]);
-        assert_eq!(d.raw_lines, 6);
-        assert_eq!(d.kept_lines, 2);
-    }
-
-    /// El caso de un redibujado de TUI: la misma línea con otro marco de spinner.
-    #[test]
-    fn redraw_frames_collapse_into_one_line_with_a_count() {
-        let raw = "⠋ Pensando\n⠙ Pensando\n⠹ Pensando\n⠸ Pensando\nListo";
-        let d = digest(raw, 10);
-        assert_eq!(d.tail, vec!["⠸ Pensando (×4)", "Listo"]);
-    }
-
-    /// Colapsar solo aplica a líneas CONSECUTIVAS: dos ejecuciones separadas del mismo
-    /// comando son dos hechos distintos y el orquestador tiene que poder verlos.
-    #[test]
-    fn identical_lines_far_apart_are_not_collapsed() {
-        let d = digest("build ok\nalgo\nbuild ok", 10);
-        assert_eq!(d.tail, vec!["build ok", "algo", "build ok"]);
-    }
-
-    /// Lo que justifica toda la fase: un error de hace mil líneas sobrevive al recorte de
-    /// la cola. Si solo devolviéramos las últimas N líneas, se perdía.
-    #[test]
-    fn errors_survive_even_when_they_fall_outside_the_tail() {
-        let mut raw = String::from("ERROR: no se pudo compilar main.rs\n");
-        for i in 0..500 {
-            raw.push_str(&format!("linea de relleno {i}\n"));
-        }
-        let d = digest(&raw, 5);
-        assert_eq!(d.tail.len(), 5);
-        assert!(!d.tail.iter().any(|l| l.contains("no se pudo compilar")));
-        assert_eq!(d.errors, vec!["ERROR: no se pudo compilar main.rs"]);
-    }
-
-    #[test]
-    fn warnings_and_errors_are_separate_buckets() {
-        let d = digest("warning: campo sin usar\nError: falta un punto y coma", 10);
-        assert_eq!(d.warnings, vec!["warning: campo sin usar"]);
-        assert_eq!(d.errors, vec!["Error: falta un punto y coma"]);
-    }
-
-    /// "0 errors" es el final feliz de casi todo build. Reportarlo como error mandaría al
-    /// orquestador a leer el crudo de una tab que está perfecta.
-    #[test]
-    fn a_zero_error_summary_is_not_an_error() {
-        let d = digest("Compiled with 0 errors\nno errors found\nfinished", 10);
-        assert!(d.errors.is_empty());
-        assert!(d.warnings.is_empty());
-    }
-
-    #[test]
-    fn the_same_error_repeated_is_reported_once_with_its_count() {
-        let d = digest("ERROR: x\nok\nERROR: x\nok\nERROR: x", 10);
-        assert_eq!(d.errors, vec!["ERROR: x (×3)"]);
-    }
-
-    #[test]
-    fn very_long_lines_are_truncated() {
-        let long = "e".repeat(1000);
-        let d = digest(&format!("ERROR {long}"), 10);
-        assert!(d.errors[0].ends_with('…'));
-        assert!(d.errors[0].chars().count() <= MAX_LINE_CHARS + 1);
-    }
-
-    #[test]
-    fn tail_keeps_the_end_not_the_beginning() {
-        let raw: String = (0..100).map(|i| format!("l{i}\n")).collect();
-        let d = digest(&raw, 3);
-        assert_eq!(d.tail, vec!["l97", "l98", "l99"]);
-    }
-
-    /// Medición del ahorro sobre una entrada con la forma real de una TUI de agente:
-    /// spinner redibujado + ANSI + padding.
-    #[test]
-    fn a_realistic_agent_transcript_shrinks_a_lot() {
-        let mut raw = String::new();
-        for i in 0..200 {
-            let frame = SPINNER_GLYPHS[i % 10];
-            raw.push_str(&format!("\x1b[2K\r\x1b[36m{frame}\x1b[0m Trabajando…\n\n"));
-        }
-        raw.push_str("Listo: 3 archivos modificados\n");
-
-        let d = digest(&raw, 40);
-        let before = estimate_tokens(&raw);
-        let after = estimate_tokens(&d.tail.join("\n"));
-        assert_eq!(d.tail.len(), 2, "200 marcos de spinner tienen que quedar en 1 línea");
-        assert!(after * 10 < before, "esperado un ahorro grande: {before} → {after}");
-    }
-
-    #[test]
-    fn token_estimate_rounds_up() {
-        assert_eq!(estimate_tokens(""), 0);
-        assert_eq!(estimate_tokens("abc"), 1);
-        assert_eq!(estimate_tokens("abcd"), 1);
-        assert_eq!(estimate_tokens("abcde"), 2);
-    }
 }
