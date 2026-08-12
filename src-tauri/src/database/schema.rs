@@ -1,8 +1,12 @@
 //! Schema de la base y sus migraciones.
 //!
-//! Todo lo que define CÓMO son las tablas vive acá: el DDL, los saltos de versión que
-//! recrean tablas viejas y los `ALTER` de las columnas que se agregaron después. La
-//! conexión en sí la abre `connection`; las consultas viven en `queries`.
+//! Todo lo que define CÓMO son las tablas vive acá: el DDL, los saltos de versión y los
+//! `ALTER` de las columnas que se agregaron después. La conexión en sí la abre
+//! `connection`; las consultas viven en `queries`.
+//!
+//! La versión del schema vive en `PRAGMA user_version`: cada migración se aplica una vez
+//! y queda registrada. Antes se deducía en cada arranque probando qué columnas existían, y
+//! la rama de "esto es viejo" borraba tablas enteras.
 //!
 //! Los tests construyen su base con [`in_memory`], que corre exactamente esta misma
 //! migración — antes cada módulo mantenía a mano su propia copia del schema y esas copias
@@ -10,48 +14,99 @@
 
 use rusqlite::{Connection, Result as SqlResult};
 
-/// Detecta si el schema de `workspaces`/`windows`/`tabs` es el de una versión anterior
-/// a esta fase: workspaces todavía indexado por `root_path` (modelo viejo de "carpeta raíz")
-/// en vez de `name` (modelo de "layout guardado de ventanas/tabs").
-fn needs_schema_v3(conn: &Connection) -> bool {
-    conn.prepare("SELECT root_path FROM workspaces LIMIT 1").is_ok()
-        || conn.prepare("SELECT workspace_id FROM tabs LIMIT 1").is_ok()
+/// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
+/// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
+const SCHEMA_VERSION: i32 = 7;
+
+fn user_version(conn: &Connection) -> SqlResult<i32> {
+    conn.query_row("PRAGMA user_version", [], |r| r.get(0))
 }
 
-/// Detecta el scaffolding viejo (sin usar) de `skills`/`project_skills`, previo a la
-/// Fase 5: `skills.file_path` en vez de `source_path`, o `project_skills` sin `id`
-/// sintético. Ninguna de las dos tablas tuvo datos reales en producción todavía.
-fn needs_schema_v4(conn: &Connection) -> bool {
-    conn.prepare("SELECT source_path FROM skills LIMIT 1").is_err()
-        || conn.prepare("SELECT id FROM project_skills LIMIT 1").is_err()
+fn set_user_version(conn: &Connection, v: i32) -> SqlResult<()> {
+    // `PRAGMA` no acepta parámetros, y `v` es una constante nuestra, no entrada de nadie.
+    conn.execute_batch(&format!("PRAGMA user_version = {v};"))
 }
 
-/// Detecta si a `tabs` le falta `opened_at` (fecha/hora en que el usuario abrió la tab
-/// por primera vez, tal como la reporta el frontend, sin depender de cuándo se persistió
-/// la fila).
-fn needs_schema_v6(conn: &Connection) -> bool {
-    conn.prepare("SELECT opened_at FROM tabs LIMIT 1").is_err()
+fn table_exists(conn: &Connection, name: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [name],
+        |_| Ok(()),
+    )
+    .is_ok()
 }
 
-/// Deja la base con el schema actual: recrea lo que quedó de versiones viejas, crea lo
-/// que falte y agrega las columnas nuevas sobre tablas que ya existían.
+fn has_column(conn: &Connection, table: &str, column: &str) -> bool {
+    conn.prepare(&format!("SELECT {column} FROM {table} LIMIT 1")).is_ok()
+}
+
+/// En qué versión está una base que todavía no tiene `user_version` (todas las creadas
+/// antes de que existiera este mecanismo).
+///
+/// Se deduce UNA sola vez, probando por qué columnas tiene; a partir de ahí queda
+/// estampada y nunca más se adivina. Antes esta detección corría en CADA arranque y su
+/// rama de "schema viejo" hacía `DROP TABLE workspaces/windows/tabs`: bastaba con que una
+/// de esas pruebas se evaluara mal para borrarle los workspaces al usuario sin aviso.
+fn detect_legacy_version(conn: &Connection) -> i32 {
+    // Base recién creada: no hay nada que migrar, solo que crear.
+    if !table_exists(conn, "workspaces") {
+        return SCHEMA_VERSION;
+    }
+    // Modelo viejo de "carpeta raíz": workspaces indexado por `root_path` y tabs colgando
+    // directo del workspace, sin ventanas de por medio.
+    if has_column(conn, "workspaces", "root_path") || has_column(conn, "tabs", "workspace_id") {
+        return 2;
+    }
+    // Scaffolding previo a la Fase 5 de skills.
+    if table_exists(conn, "skills") && !has_column(conn, "skills", "source_path") {
+        return 3;
+    }
+    if table_exists(conn, "tabs") && !has_column(conn, "tabs", "opened_at") {
+        return 5;
+    }
+    SCHEMA_VERSION
+}
+
+/// Deja la base con el schema actual.
+///
+/// Es idempotente y va siempre hacia adelante: cada paso se aplica solo si la versión
+/// guardada es anterior, y al final la base queda estampada con [`SCHEMA_VERSION`].
+/// **Ningún paso borra datos del usuario**: lo que no se puede migrar se aparta con un
+/// nombre `_legacy_*`, para que un error de detección cueste una tabla huérfana y no los
+/// workspaces de alguien.
 pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
-    // Pre-MVP: no hay datos reales que preservar, así que en vez de migrar
-    // incrementalmente se recrean las tablas si el schema está desactualizado.
-    if needs_schema_v3(conn) {
-        conn.execute_batch(
-            "DROP TABLE IF EXISTS tabs; DROP TABLE IF EXISTS windows; DROP TABLE IF EXISTS workspaces;",
-        )?;
+    let mut version = user_version(conn)?;
+    if version == 0 {
+        version = detect_legacy_version(conn);
     }
-    if needs_schema_v4(conn) {
-        conn.execute_batch(
-            "DROP TABLE IF EXISTS project_skills; DROP TABLE IF EXISTS skills;",
-        )?;
+
+    if version < 3 {
+        // El modelo cambió tanto (workspaces por carpeta → workspaces como layout de
+        // ventanas) que no hay traducción posible fila a fila. Se aparta en vez de
+        // borrarse: la app arranca limpia y los datos viejos siguen ahí para quien los
+        // quiera mirar.
+        for table in ["tabs", "windows", "workspaces"] {
+            if table_exists(conn, table) {
+                conn.execute_batch(&format!(
+                    "DROP TABLE IF EXISTS {table}_legacy_v2;
+                     ALTER TABLE {table} RENAME TO {table}_legacy_v2;"
+                ))?;
+            }
+        }
     }
-    if needs_schema_v6(conn) {
-        conn.execute_batch(
-            "DROP TABLE IF EXISTS project_skills; DROP TABLE IF EXISTS tabs;",
-        )?;
+
+    if version < 4 {
+        // Estas dos SÍ se borran: eran scaffolding sin usar de antes de la Fase 5 —
+        // nunca tuvieron una fila real, y conservarlas obligaría a arrastrar un esquema
+        // incompatible para siempre.
+        conn.execute_batch("DROP TABLE IF EXISTS project_skills; DROP TABLE IF EXISTS skills;")?;
+    }
+
+    if version < 6 && table_exists(conn, "tabs") && !has_column(conn, "tabs", "opened_at") {
+        // Antes esto recreaba `tabs` desde cero, o sea que actualizar la app te borraba
+        // todas las tabs guardadas. La columna se puede agregar sin más: las filas que ya
+        // existían no saben cuándo se abrieron, y 0 es exactamente eso.
+        conn.execute("ALTER TABLE tabs ADD COLUMN opened_at INTEGER NOT NULL DEFAULT 0", [])?;
     }
 
     conn.execute_batch(
@@ -296,6 +351,7 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         conn.execute("ALTER TABLE skills ADD COLUMN registry_name TEXT", [])?;
     }
 
+    set_user_version(conn, SCHEMA_VERSION)?;
     Ok(())
 }
 

@@ -579,3 +579,64 @@ fn los_labels_de_ventana_generados_no_colisionan() {
         (0..500).map(|_| fresh_window_label()).collect();
     assert_eq!(labels.len(), 500);
 }
+
+// ── Migraciones ──────────────────────────────────────────────────
+
+/// Una base ya al día no tiene nada que migrar, y queda estampada con su versión: lo que
+/// evita volver a adivinar (y a decidir mal) en el próximo arranque.
+#[test]
+fn una_base_nueva_queda_estampada_con_su_version() {
+    let conn = schema::in_memory();
+    let v: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    assert!(v > 0, "la base tiene que quedar con su versión de schema");
+
+    // Volver a migrar es un no-op.
+    schema::migrate(&conn).unwrap();
+    let v2: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(v, v2);
+}
+
+/// El bug que importaba: a una base sin `tabs.opened_at` la versión anterior le hacía
+/// `DROP TABLE tabs`, o sea que actualizar la app te borraba todas las tabs guardadas.
+/// Ahora se agrega la columna y las filas sobreviven.
+#[test]
+fn migrar_una_base_vieja_no_le_borra_las_tabs() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
+         CREATE TABLE windows (id TEXT PRIMARY KEY, label TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL, is_open INTEGER NOT NULL DEFAULT 1, last_active INTEGER NOT NULL);
+         CREATE TABLE tabs (id TEXT PRIMARY KEY, window_id TEXT NOT NULL, title TEXT, title_is_custom INTEGER NOT NULL DEFAULT 0, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL, command TEXT NOT NULL, cwd TEXT NOT NULL, tab_order INTEGER NOT NULL DEFAULT 0, session_id TEXT, scrollback TEXT, created_at INTEGER NOT NULL, last_active INTEGER NOT NULL);
+         INSERT INTO workspaces VALUES ('ws', 'WS', 0, 0);
+         INSERT INTO windows VALUES ('w', 'w', 'ws', 1, 0);
+         INSERT INTO tabs (id, window_id, agent_id, agent_label, command, cwd, created_at, last_active)
+            VALUES ('t1', 'w', 'claude-code', 'Claude Code', 'claude', '/proj', 0, 0);",
+    )
+    .unwrap();
+
+    schema::migrate(&conn).unwrap();
+
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM tabs"), 1, "la tab guardada sobrevive");
+    assert_eq!(count(&conn, "SELECT opened_at FROM tabs WHERE id = 't1'"), 0);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM workspaces"), 1);
+}
+
+/// El modelo pre-v3 no tiene traducción fila a fila, pero tampoco se borra: se aparta con
+/// otro nombre, así un error de detección cuesta una tabla huérfana y no los datos.
+#[test]
+fn el_modelo_viejo_se_aparta_en_vez_de_borrarse() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE workspaces (id TEXT PRIMARY KEY, root_path TEXT NOT NULL);
+         INSERT INTO workspaces VALUES ('ws', '/proj');",
+    )
+    .unwrap();
+
+    schema::migrate(&conn).unwrap();
+
+    assert_eq!(
+        count(&conn, "SELECT COUNT(*) FROM workspaces_legacy_v2"),
+        1,
+        "los datos viejos siguen ahí"
+    );
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM workspaces"), 0, "y la tabla nueva arranca vacía");
+}
