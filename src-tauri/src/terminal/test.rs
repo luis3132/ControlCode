@@ -1,7 +1,6 @@
 //! Tests de la terminal: cómo se arma el lanzamiento y cómo se contiene el árbol de
 //! procesos de una tab.
 
-use super::containment::ProcessGroup;
 use super::pty_manager::{build_launch, launch_script};
 
 // ── Lanzamiento del agente ──────────────────────────────────────
