@@ -35,7 +35,7 @@ pub enum SessionIdSource {
 }
 
 impl SessionIdSource {
-    fn parse(raw: &str) -> Self {
+    pub(super) fn parse(raw: &str) -> Self {
         match raw.split_once(':') {
             Some(("field", key)) if !key.trim().is_empty() => {
                 SessionIdSource::Field(key.trim().to_string())
@@ -251,23 +251,4 @@ pub struct LegacyCustomAgent {
     pub id: String,
     pub label: String,
     pub command: String,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn session_id_source_parses_both_forms() {
-        assert_eq!(SessionIdSource::parse("filename"), SessionIdSource::Filename);
-        assert_eq!(
-            SessionIdSource::parse("field:session_id"),
-            SessionIdSource::Field("session_id".to_string())
-        );
-        assert_eq!(SessionIdSource::parse("field: id "), SessionIdSource::Field("id".to_string()));
-        // Formas inválidas caen al default en vez de romper: el descubrimiento por nombre
-        // de archivo es el que funciona sin conocer nada del formato interno.
-        assert_eq!(SessionIdSource::parse("field:"), SessionIdSource::Filename);
-        assert_eq!(SessionIdSource::parse("cualquier cosa"), SessionIdSource::Filename);
-    }
 }
