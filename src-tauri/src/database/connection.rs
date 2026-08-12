@@ -31,7 +31,7 @@ pub fn init_db() -> SqlResult<DbConnection> {
 
     super::schema::migrate(&conn)?;
     super::seeds::seed_defaults(&conn)?;
-    super::queries::dedupe_session_history(&conn)?;
+    super::queries::dedupe_session_history_once(&conn)?;
 
     Ok(Arc::new(Mutex::new(conn)))
 }

@@ -106,6 +106,43 @@ pub(super) fn launch_script(command: &str, prelaunch: &[String]) -> String {
     format!("{} && {command}", prelaunch.join(" && "))
 }
 
+/// Parte un comando en programa + argumentos respetando comillas.
+///
+/// `split_whitespace` a secas rompía dos casos reales: una TUI custom instalada en una
+/// ruta con espacios (`/home/u/mis tools/agente`) y cualquier flag con un valor
+/// entrecomillado (`--system-prompt "hola mundo"`), que llegaba partido en pedazos.
+/// No pretende ser un shell: resuelve comillas simples y dobles, que es lo que se escribe
+/// en el campo de comando de un agente.
+pub(super) fn split_command(command: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut actual = String::new();
+    let mut abierta: Option<char> = None;
+    let mut hubo_comillas = false;
+
+    for c in command.chars() {
+        match abierta {
+            Some(q) if c == q => abierta = None,
+            Some(_) => actual.push(c),
+            None if c == '\'' || c == '"' => {
+                abierta = Some(c);
+                // `--flag=""` tiene que producir un argumento vacío, no ninguno.
+                hubo_comillas = true;
+            }
+            None if c.is_whitespace() => {
+                if !actual.is_empty() || hubo_comillas {
+                    out.push(std::mem::take(&mut actual));
+                    hubo_comillas = false;
+                }
+            }
+            None => actual.push(c),
+        }
+    }
+    if !actual.is_empty() || hubo_comillas {
+        out.push(actual);
+    }
+    out
+}
+
 /// Arma el proceso a lanzar.
 ///
 /// Sin pre-comandos devuelve exactamente lo de siempre: el binario con sus argumentos,
@@ -114,7 +151,8 @@ pub(super) fn launch_script(command: &str, prelaunch: &[String]) -> String {
 /// proceso aparte, su efecto muere con él (ver el módulo `prelaunch`).
 pub(super) fn build_launch(command: &str, prelaunch: &[String]) -> CommandBuilder {
     if prelaunch.is_empty() {
-        let mut parts = command.split_whitespace();
+        let parts = split_command(command);
+        let mut parts = parts.iter().map(String::as_str);
         let program = parts.next().unwrap_or(command);
         let mut cmd = CommandBuilder::new(program);
         for arg in parts {

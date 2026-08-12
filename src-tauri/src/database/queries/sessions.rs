@@ -354,6 +354,23 @@ pub(crate) fn archive_tab_row(
 /// (tratando NULL como "sin id"). De cada grupo sobrevive la cerrada más recientemente —
 /// la que tiene el título y las skills más actuales — pero heredando el `opened_at` más
 /// viejo del grupo, que es cuándo empezó realmente la conversación.
+///
+/// Corre **una sola vez** (candado en `settings`). Es una limpieza de datos que ya dejó
+/// de generarse; dejarla en cada arranque significaba un UPDATE con subconsulta
+/// correlacionada más un DELETE con subconsulta anidada sobre todo el historial cada vez
+/// que se abre la app, para no encontrar nada.
+pub(crate) fn dedupe_session_history_once(conn: &Connection) -> SqlResult<()> {
+    const FLAG: &str = "session_history_deduped";
+    let ya: i64 =
+        conn.query_row("SELECT COUNT(*) FROM settings WHERE key = ?1", [FLAG], |r| r.get(0))?;
+    if ya > 0 {
+        return Ok(());
+    }
+    dedupe_session_history(conn)?;
+    conn.execute("INSERT INTO settings (key, value) VALUES (?1, '1')", [FLAG])?;
+    Ok(())
+}
+
 pub(crate) fn dedupe_session_history(conn: &Connection) -> SqlResult<()> {
     // El opened_at se normaliza ANTES de borrar: después ya no habría de dónde sacarlo.
     conn.execute(

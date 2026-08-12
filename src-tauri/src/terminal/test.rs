@@ -323,3 +323,25 @@ mod tests_e2e {
         assert!(!sobrevivio, "el nieto {nieto} quedó huérfano tras matar el grupo");
     }
 }
+
+/// Sin pre-comandos el comando se parte para lanzar el binario directo, y ahí las comillas
+/// importan: una TUI instalada en una ruta con espacios, o un flag con un valor
+/// entrecomillado, llegaban partidos en pedazos.
+#[test]
+fn el_comando_se_parte_respetando_las_comillas() {
+    use super::pty_manager::split_command;
+
+    assert_eq!(split_command("claude --resume abc"), vec!["claude", "--resume", "abc"]);
+    assert_eq!(
+        split_command("\"/home/u/mis tools/agente\" --flag"),
+        vec!["/home/u/mis tools/agente", "--flag"]
+    );
+    assert_eq!(
+        split_command("claude --system-prompt \"hola mundo\""),
+        vec!["claude", "--system-prompt", "hola mundo"]
+    );
+    assert_eq!(split_command("agente 'un solo arg'"), vec!["agente", "un solo arg"]);
+    // Un argumento vacío explícito es un argumento, no la ausencia de uno.
+    assert_eq!(split_command("agente --flag \"\""), vec!["agente", "--flag", ""]);
+    assert!(split_command("   ").is_empty());
+}

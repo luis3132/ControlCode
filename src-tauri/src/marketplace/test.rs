@@ -163,6 +163,9 @@ fn una_busqueda_demasiado_corta_no_llega_a_ejecutar_nada() {
     assert_eq!(search("   ", None).unwrap(), Vec::new());
 }
 
+/// Con varias candidatas se elige la que coincide con el slug, y **solo** esa: `read_dir`
+/// no tiene orden garantizado, así que caer a "la primera" instalaba una skill al azar
+/// bajo el nombre de otra.
 #[test]
 fn se_elige_la_carpeta_que_coincide_con_el_slug() {
     let tmp = std::env::temp_dir().join(format!("cc-skillssh-{}", uuid::Uuid::new_v4()));
@@ -176,8 +179,25 @@ fn se_elige_la_carpeta_que_coincide_con_el_slug() {
 
     let found = find_installed_skill(&tmp, "buscada").unwrap();
     assert_eq!(found.file_name().unwrap(), "buscada");
-    assert!(find_installed_skill(&tmp, "inexistente").is_some(), "cae a la única/primera");
+    assert!(
+        find_installed_skill(&tmp, "inexistente").is_none(),
+        "con varias candidatas no se adivina"
+    );
     assert!(find_installed_skill(&tmp.join("nada"), "x").is_none());
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// La contracara: si la CLI nombró la carpeta distinto pero hay una sola, esa es.
+#[test]
+fn con_una_sola_candidata_se_acepta_aunque_no_coincida_el_nombre() {
+    let tmp = std::env::temp_dir().join(format!("cc-skillssh-{}", uuid::Uuid::new_v4()));
+    let dir = tmp.join("nombre-que-puso-la-cli");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("SKILL.md"), "---\nname: x\n---\n").unwrap();
+
+    let found = find_installed_skill(&tmp, "el-slug-que-pedimos").unwrap();
+    assert_eq!(found.file_name().unwrap(), "nombre-que-puso-la-cli");
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

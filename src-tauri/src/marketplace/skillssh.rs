@@ -296,8 +296,12 @@ pub fn install_into(staging: &Path, target: &str) -> Result<PathBuf, String> {
     })
 }
 
-/// Busca la carpeta instalada dentro de `.claude/skills/`. Se prefiere la que coincide con
-/// el slug pedido, pero si la CLI la nombró distinto y hay una sola, se toma esa.
+/// Busca la carpeta instalada dentro de `.claude/skills/`.
+///
+/// Se prefiere la que coincide con el slug pedido; si la CLI la nombró distinto y hay
+/// **una sola**, se toma esa. Con varias no se adivina: `read_dir` no tiene orden
+/// garantizado, así que quedarse con la primera instalaba una skill al azar bajo el
+/// nombre de otra.
 pub(super) fn find_installed_skill(dir: &Path, slug: &str) -> Option<PathBuf> {
     let candidates: Vec<PathBuf> = std::fs::read_dir(dir)
         .ok()?
@@ -309,7 +313,7 @@ pub(super) fn find_installed_skill(dir: &Path, slug: &str) -> Option<PathBuf> {
     candidates
         .iter()
         .find(|p| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case(slug)))
-        .or_else(|| candidates.first())
+        .or_else(|| candidates.first().filter(|_| candidates.len() == 1))
         .cloned()
 }
 
