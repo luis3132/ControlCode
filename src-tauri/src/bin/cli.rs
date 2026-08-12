@@ -397,6 +397,9 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
     })
 }
 
+// El archivo vive fuera de `src/bin/` a propósito: el bundler de Tauri trata CADA entrada
+// de ese directorio como un ejecutable a empaquetar, así que una carpeta `cli/` al lado de
+// `cli.rs` le hacía buscar un binario `cli` que no existe y abortaba el empaquetado.
 #[cfg(test)]
-#[path = "cli/test.rs"]
+#[path = "../cli_test.rs"]
 mod test;
