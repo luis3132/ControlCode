@@ -15,5 +15,9 @@ mod seeds;
 mod test;
 
 pub use connection::{init_db, DbConnection};
+
+/// Base en memoria con el schema real, para los tests de cualquier módulo.
+#[cfg(test)]
+pub(crate) use schema::in_memory as test_db;
 pub use models::*;
 pub use queries::*;
