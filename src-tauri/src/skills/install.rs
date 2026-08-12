@@ -17,6 +17,7 @@ use super::types::{
 
 /// Lee el SKILL.md elegido y devuelve su metadata parseada más la lista de campos
 /// "sugeridos" que no vinieron en el frontmatter — el frontend usa `missing` para
+/// decidir si mostrar un formulario de metadata antes de instalar.
 #[tauri::command]
 pub fn preview_skill_metadata(source_file: String) -> Result<SkillPreview, String> {
     let (file, folder) = resolve_skill_file(&source_file)?;
@@ -48,7 +49,7 @@ pub(crate) type SkillOrigin<'a> = Option<(&'a str, &'a str)>;
 ///
 /// Una por repositorio, más `local` para las instaladas a mano. Dos repos pueden traer
 /// skills con el mismo nombre y funcionalidad distinta (`testing` de uno no es `testing`
-
+/// del otro), así que mezclarlas en un solo nivel las hacía competir por la misma carpeta.
 pub(super) fn bucket_for_origin(origin: SkillOrigin) -> String {
     match origin {
         Some((_, registry_name)) => slugify(registry_name),
@@ -192,6 +193,7 @@ pub(crate) fn install_skill_internal(
 
 /// Borra todas las skills instaladas desde un repo. Best-effort por skill: que una falle
 /// (carpeta ya borrada a mano, symlink en conflicto) no debe dejar el resto a medias ni
+/// abortar el borrado del repositorio.
 pub(crate) fn delete_skills_of_registry(
     registry_id: &str,
     db: &DbConnection,

@@ -116,10 +116,7 @@ pub(super) fn parse_github_location(
     Ok((owner.to_string(), repo.to_string(), branch, subpath))
 }
 
-/// Valida y normaliza una ubicación desde la UI sin llegar a crear el registry — el
-/// diálogo de "agregar repositorio" la usa mientras el usuario tipea, para mostrarle en
-/// qué se traduce el link que pegó (o el error, si no es un repo válido).
-
+/// Rama por defecto del repo, para poder listar su árbol sin que el usuario la escriba.
 async fn resolve_branch(
     client: &reqwest::Client,
     owner: &str,

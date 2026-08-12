@@ -194,6 +194,7 @@ pub(super) fn collect_linked_tabs(conn: &rusqlite::Connection, skill_id: &str) -
 
 /// Skills instaladas desde un repositorio concreto. La usa el diálogo de borrar un repo
 /// para poder listarle al usuario, por nombre, qué se va a llevar puesto la operación —
+/// borrar el repo borra sus skills, y eso no puede ser una sorpresa.
 
 #[tauri::command]
 pub fn registry_skills(

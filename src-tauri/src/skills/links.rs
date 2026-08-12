@@ -16,6 +16,7 @@ use super::types::{now_ts, SkillInfo, SymlinkHealthEntry};
 
 /// Remueve un symlink si existe, ignorando errores (ya borrado a mano, roto, etc.) —
 /// usado por delete_skill/detach_skill, donde una limpieza a medias no debe bloquear
+/// el resto de la operación.
 pub(super) fn remove_symlink_best_effort(path: &Path) {
     if path.symlink_metadata().is_ok() {
         let _ = symlink::remove_symlink_auto(path);

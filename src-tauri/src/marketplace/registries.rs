@@ -353,6 +353,9 @@ pub async fn install_marketplace_skill(
     }
 }
 
+/// Valida y normaliza una ubicación desde la UI sin llegar a crear el registry — el
+/// diálogo de "agregar repositorio" la usa mientras el usuario tipea, para mostrarle en
+/// qué se traduce el link que pegó (o el error, si no es un repo válido).
 #[tauri::command]
 pub fn preview_registry_location(source_type: String, location: String) -> Result<String, String> {
     match source_type.as_str() {
