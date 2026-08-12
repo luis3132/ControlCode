@@ -13,6 +13,7 @@ mod prelaunch;
 mod session;
 mod skills;
 mod terminal;
+mod util;
 mod window;
 
 pub use app::run;

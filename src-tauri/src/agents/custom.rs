@@ -17,13 +17,7 @@ use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-
-fn now_ts() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
-}
+use crate::util::now_ts;
 
 /// De dónde sale el id de sesión del archivo que la TUI acaba de crear.
 #[derive(Debug, Clone, PartialEq)]

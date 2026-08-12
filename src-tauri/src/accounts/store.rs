@@ -9,13 +9,6 @@ use tauri::{AppHandle, Manager};
 
 use super::profiles::{read_identity, spec_for};
 
-pub(super) fn now_ts() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 // ── Nombre de la cuenta ─────────────────────────────────────────
 
 /// El nombre que elige el usuario ES el nombre de la carpeta, así que se valida como tal.

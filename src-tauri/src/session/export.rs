@@ -150,7 +150,9 @@ pub(super) fn opencode_transcript(session_id: &str, profile: Option<&str>) -> Ve
     if let Some(dir) = profile {
         command.env("XDG_DATA_HOME", dir);
     }
-    let Ok(output) = command.output() else {
+    let Ok(output) =
+        crate::util::output_with_timeout(&mut command, std::time::Duration::from_secs(30))
+    else {
         return Vec::new();
     };
     if !output.status.success() {

@@ -3,14 +3,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Segundos desde epoch, igual que el resto de las columnas de tiempo de la base.
-pub(super) fn now_ts() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 // ── Types ────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

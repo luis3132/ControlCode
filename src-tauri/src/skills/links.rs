@@ -12,7 +12,9 @@ use crate::database::DbConnection;
 use super::files::slug_from_source_path;
 use super::settings::skills_dir_from_conn;
 use super::store::{row_to_skill_info, SKILL_COLUMNS, SKILL_COLUMNS_QUALIFIED};
-use super::types::{now_ts, SkillInfo, SymlinkHealthEntry};
+use crate::util::now_ts;
+
+use super::types::{SkillInfo, SymlinkHealthEntry};
 
 /// Remueve un symlink si existe, ignorando errores (ya borrado a mano, roto, etc.) —
 /// usado por delete_skill/detach_skill, donde una limpieza a medias no debe bloquear

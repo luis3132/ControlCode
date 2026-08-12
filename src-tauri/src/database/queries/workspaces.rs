@@ -4,13 +4,13 @@
 use rusqlite::Connection;
 use uuid::Uuid;
 
-use crate::database::connection::now_ts;
+use crate::util::now_ts;
 use crate::database::models::{
     row_to_window, WindowRow, Workspace, WorkspaceSummary, DEFAULT_WORKSPACE_ID,
 };
 use crate::database::DbConnection;
 
-use super::sessions::archive_tab_row;
+use super::sessions::{archive_tab_row, resolve_for_archive};
 
 // (no una carpeta raíz). Se crea explícitamente con "Guardar como workspace...".
 
@@ -118,6 +118,29 @@ pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<Workspac
 /// como nunca se guarda con nombre, "Nuevo workspace" simplemente lo vacía por completo
 /// en vez de crear un id nuevo — si el usuario quiere conservarlo, usa "Guardar workspace".
 pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result<(), String> {
+    // Antes del lock: resolver la sesión de cada tab lee disco y puede lanzar procesos
+    // (ver `ResolvedSession`), y hacerlo con el mutex tomado bloquea la base para toda la
+    // app.
+    let resolved: std::collections::HashMap<String, super::sessions::ResolvedSession> = {
+        let ids: Vec<String> = {
+            let Ok(conn) = db.lock() else { return Err("base ocupada".to_string()) };
+            let mut stmt = conn
+                .prepare(
+                    "SELECT t.id FROM tabs t JOIN windows w ON w.id = t.window_id
+                     WHERE w.workspace_id = ?1",
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([workspace_id], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        ids.into_iter().map(|id| {
+            let resolved = resolve_for_archive(db, &id);
+            (id, resolved)
+        }).collect()
+    };
+
     let conn = db.lock().map_err(|e| e.to_string())?;
 
     // Antes de perder todo (cascada windows→tabs→project_skills.tab_id), archivar cada
@@ -135,7 +158,8 @@ pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result
         .collect();
     drop(tab_ids_stmt);
     for tab_id in &tab_ids {
-        archive_tab_row(&conn, tab_id, workspace_id)?;
+        let resolved = resolved.get(tab_id.as_str()).cloned().unwrap_or_default();
+        archive_tab_row(&conn, tab_id, workspace_id, &resolved)?;
     }
 
     let affected_dirs = crate::skills::link_dirs_of_workspace(&conn, workspace_id);

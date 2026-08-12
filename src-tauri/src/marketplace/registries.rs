@@ -12,7 +12,9 @@ use uuid::Uuid;
 use super::github::{fetch_github_registry, install_from_github, normalize_github_location, parse_github_location};
 use super::local::scan_local_registry;
 use super::skillssh::{install_from_skillssh, normalize_owner_filter, refresh_skillssh};
-use super::types::{now_ts, MarketplaceSkillEntry, ProgressReporter, RegistrySummary};
+use crate::util::now_ts;
+
+use super::types::{MarketplaceSkillEntry, ProgressReporter, RegistrySummary};
 
 fn row_to_summary(row: &rusqlite::Row) -> rusqlite::Result<RegistrySummary> {
     let cache_json: Option<String> = row.get(6)?;

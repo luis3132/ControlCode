@@ -588,6 +588,11 @@ pub(super) struct OpencodeSession {
 /// la sesión" es indistinguible de "opencode no está en el PATH del proceso de la app",
 /// que es un caso real cuando la app se lanza desde el menú del escritorio y no desde una
 /// terminal (el PATH del launcher no incluye `~/.opencode/bin`).
+/// Cuánto se espera a `opencode` antes de darlo por colgado. Generoso frente a lo que
+/// tarda de verdad (~1s medido) y muy por debajo de lo que un usuario tolera esperando a
+/// que cierre una ventana.
+const OPENCODE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 pub(super) fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<OpencodeSession> {
     let mut command = std::process::Command::new("opencode");
     command
@@ -599,8 +604,9 @@ pub(super) fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<Openco
     if let Some(dir) = profile {
         command.env("XDG_DATA_HOME", dir);
     }
-    let output = match command.output()
-    {
+    // Con plazo: esta función corre en el camino de cerrar una tab, y un `opencode`
+    // colgado no puede dejar a la app esperándolo para siempre.
+    let output = match crate::util::output_with_timeout(&mut command, OPENCODE_TIMEOUT) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("[opencode] no se pudo ejecutar `opencode session list`: {e}");

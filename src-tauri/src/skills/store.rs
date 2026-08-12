@@ -6,10 +6,9 @@ use std::path::Path;
 use crate::database::DbConnection;
 
 use super::frontmatter::parse_frontmatter;
-use super::types::{
-    now_ts,
-    SkillDetail, SkillInfo, SkillUsageEntry, SkillWithUsage,
-};
+use crate::util::now_ts;
+
+use super::types::{SkillDetail, SkillInfo, SkillUsageEntry, SkillWithUsage};
 
 pub(super) fn row_to_skill_info(row: &rusqlite::Row) -> rusqlite::Result<SkillInfo> {
     let categories_json: String = row.get(3)?;

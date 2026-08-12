@@ -11,8 +11,10 @@ use super::frontmatter::render_skill_md;
 use super::links::reconcile_link_dirs;
 use super::settings::resolve_skills_dir;
 use super::store::collect_linked_tabs;
+use crate::util::now_ts;
+
 use super::types::{
-    missing_fields, now_ts, SkillFrontmatter, SkillFrontmatterInput, SkillInfo, SkillPreview,
+    missing_fields, SkillFrontmatter, SkillFrontmatterInput, SkillInfo, SkillPreview,
 };
 
 /// Lee el SKILL.md elegido y devuelve su metadata parseada más la lista de campos

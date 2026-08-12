@@ -6,7 +6,7 @@
 use rusqlite::{Connection, Result as SqlResult};
 use uuid::Uuid;
 
-use super::connection::now_ts;
+use crate::util::now_ts;
 use super::models::DEFAULT_WORKSPACE_ID;
 
 /// Corre todas las siembras. La llama `connection::init_db` justo después de migrar.

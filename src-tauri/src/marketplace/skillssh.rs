@@ -28,11 +28,29 @@ use std::process::Command;
 use crate::database::DbConnection;
 use crate::skills::{install_skill_internal, SkillInfo};
 
-use super::types::{now_ts, MarketplaceSkillEntry};
+use crate::util::now_ts;
+
+use super::types::MarketplaceSkillEntry;
 
 /// Cuánto puede tardar `npx skills add` clonando el repo de origen antes de rendirse.
 /// La CLI clona el repo entero para sacar una sola skill, así que un repo grande con una
 /// conexión lenta necesita bastante más que un fetch normal.
+/// Plazos de cada llamada a la CLI. `add` clona el repo de origen entero, así que es la
+/// que puede tardar de verdad; `--version` tendría que ser inmediata.
+const NPX_VERSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const FIND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+const ADD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Un plazo vencido merece su propio mensaje: "Node no está instalado" mandaría a revisar
+/// algo que sí está.
+fn timeout_or(e: std::io::Error, ausente: &str) -> String {
+    if e.kind() == std::io::ErrorKind::TimedOut {
+        format!("`npx skills` no respondió a tiempo ({e}). Probá de nuevo o revisá tu conexión.")
+    } else {
+        ausente.to_string()
+    }
+}
+
 const CLONE_TIMEOUT_MS: &str = "180000";
 
 /// El identificador de Claude Code dentro de la CLI de skills — define en qué carpeta deja
@@ -115,7 +133,7 @@ fn with_env(cmd: &mut Command) {
 pub fn ensure_npx() -> Result<(), String> {
     let mut cmd = npx_command();
     with_env(&mut cmd);
-    match cmd.arg("--version").output() {
+    match crate::util::output_with_timeout(cmd.arg("--version"), NPX_VERSION_TIMEOUT) {
         Ok(out) if out.status.success() => Ok(()),
         // `npx` existe pero devolvió error: raro, pero es un entorno de Node roto, no uno
         // ausente — conviene decir cuál de las dos cosas es.
@@ -228,7 +246,8 @@ pub fn search(query: &str, owner: Option<&str>) -> Result<Vec<SkillsShHit>, Stri
         cmd.args(["--owner", owner]);
     }
 
-    let out = cmd.output().map_err(|_| NPX_MISSING.to_string())?;
+    let out = crate::util::output_with_timeout(&mut cmd, FIND_TIMEOUT)
+        .map_err(|e| timeout_or(e, NPX_MISSING))?;
     if !out.status.success() {
         return Err(format!(
             "`npx skills find` falló: {}",
@@ -254,7 +273,8 @@ pub fn install_into(staging: &Path, target: &str) -> Result<PathBuf, String> {
     cmd.current_dir(staging);
     cmd.args(["-y", "skills", "add", target, "--agent", SKILLS_AGENT, "--yes", "--copy"]);
 
-    let out = cmd.output().map_err(|_| NPX_MISSING.to_string())?;
+    let out = crate::util::output_with_timeout(&mut cmd, ADD_TIMEOUT)
+        .map_err(|e| timeout_or(e, NPX_MISSING))?;
     if !out.status.success() {
         return Err(format!(
             "`npx skills add {target}` falló: {}",

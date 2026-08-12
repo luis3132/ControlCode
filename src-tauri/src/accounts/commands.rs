@@ -5,8 +5,10 @@ use std::collections::HashMap;
 use tauri::AppHandle;
 
 use super::profiles::{spec_for, PROFILES};
+use crate::util::now_ts;
+
 use super::store::{
-    accounts_root, env_for_account, now_ts, row_to_account, validate_name, AccountCapableAgent,
+    accounts_root, env_for_account, row_to_account, validate_name, AccountCapableAgent,
     AgentAccount,
 };
 

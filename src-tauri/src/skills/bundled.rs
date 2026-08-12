@@ -20,7 +20,7 @@
 
 use super::files::{copy_dir_recursive, scan_skill_file};
 use super::install::install_skill_internal;
-use super::types::now_ts;
+use crate::util::now_ts;
 use crate::database::DbConnection;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};

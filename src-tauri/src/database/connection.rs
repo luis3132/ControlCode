@@ -18,14 +18,6 @@ fn db_path() -> PathBuf {
     dir.join("data.db")
 }
 
-/// Segundos desde epoch. Todas las columnas de tiempo de la base usan esta escala.
-pub(super) fn now_ts() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
-
 /// Abre (o crea) la base del usuario y la deja lista para usar.
 pub fn init_db() -> SqlResult<DbConnection> {
     let conn = Connection::open(db_path())?;

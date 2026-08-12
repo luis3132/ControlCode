@@ -7,7 +7,7 @@
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use uuid::Uuid;
 
-use crate::database::connection::now_ts;
+use crate::util::now_ts;
 use crate::database::models::{
     ArchivedSkill, OpenTabLocation, SessionHistoryEntry, SiblingTab,
 };
@@ -23,72 +23,191 @@ use crate::database::DbConnection;
 /// `SESSION_DISCOVERY_LOOKBACK_S` en el frontend).
 const REDISCOVERY_LOOKBACK_S: i64 = 3;
 
-/// Qué sesión estuvo usando REALMENTE esta tab, mirando el disco en el momento de cerrarla.
+/// Lo caro del archivado, ya resuelto: contra qué sesión real corría la tab y con qué
+/// título quedó.
 ///
-/// Devuelve el id que corresponde archivar: el re-descubierto si hay uno mejor, o el que ya
-/// tenía la tab. Nunca devuelve `None` habiendo un id previo — no encontrar nada significa
-/// "no sé", no "no tenía sesión".
-fn reconcile_session_id(
-    conn: &Connection,
-    tab_id: &str,
-    agent_id: &str,
-    cwd: &str,
-    current: Option<String>,
-    account_id: Option<&str>,
-    opened_at: i64,
-) -> Option<String> {
-    let profile = account_id.and_then(|id| crate::accounts::dir_for_conn(conn, id));
-    let custom = crate::agents::find(conn, agent_id);
+/// Existe porque resolverlo implica leer el disco y, para algunas TUIs, **lanzar un
+/// proceso** (`opencode session list`). Hacerlo dentro de `archive_tab_row` —que corre con
+/// el mutex de SQLite tomado— dejaba la base entera bloqueada ~1s por tab cerrada, y para
+/// siempre si ese proceso se colgaba: toda la app pasa por esa única conexión. Ahora se
+/// resuelve ANTES de pedir el lock (ver [`resolve_for_archive`]) y el archivado solo
+/// escribe.
+#[derive(Default, Debug, Clone)]
+pub struct ResolvedSession {
+    /// `None` = no se resolvió nada mejor; se conserva lo que ya tenía la tab.
+    pub session_id: Option<String>,
+    pub title: Option<String>,
+}
 
-    let found = crate::session::discover_session_id_sync(
+/// Datos de la tab necesarios para resolver su sesión, leídos de una sola vez.
+struct ArchiveInput {
+    agent_id: String,
+    cwd: String,
+    session_id: Option<String>,
+    title: Option<String>,
+    title_is_custom: bool,
+    opened_at: i64,
+    profile: Option<String>,
+    custom: Option<crate::agents::CustomAgent>,
+}
+
+fn read_archive_input(conn: &Connection, tab_id: &str) -> Option<ArchiveInput> {
+    let (agent_id, cwd, session_id, title, title_is_custom, opened_at, account_id): (
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        bool,
+        i64,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT agent_id, cwd, session_id, title, title_is_custom, opened_at, account_id
+             FROM tabs WHERE id = ?1",
+            [tab_id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get::<_, i64>(4)? != 0,
+                    r.get(5)?,
+                    r.get(6)?,
+                ))
+            },
+        )
+        .optional()
+        .ok()
+        .flatten()?;
+
+    let profile = account_id.as_deref().and_then(|id| crate::accounts::dir_for_conn(conn, id));
+    let custom = crate::agents::find(conn, &agent_id);
+    Some(ArchiveInput {
         agent_id,
         cwd,
-        opened_at - REDISCOVERY_LOOKBACK_S,
-        profile.as_deref().map(std::path::Path::new),
-        custom.as_ref(),
+        session_id,
+        title,
+        title_is_custom,
+        opened_at,
+        profile,
+        custom,
+    })
+}
+
+/// Qué sesión estuvo usando REALMENTE esta tab y con qué título archivarla, mirando el
+/// disco en el momento de cerrarla.
+///
+/// **Toma el lock de la base solo para leer, en tramos cortos, y lo suelta antes de tocar
+/// el disco.** Llamarla con el lock ya tomado es un deadlock; ese es todo el punto de que
+/// exista separada de `archive_tab_row`.
+///
+/// El id que trae la tab es el que se descubrió al ARRANCAR. Si el usuario retomó otra
+/// conversación desde adentro de la TUI (`/resume` de Claude y equivalentes), la tab
+/// estuvo trabajando sobre una sesión distinta, y archivar con el id viejo crea una
+/// entrada nueva en vez de actualizar la conversación que de verdad se continuó.
+pub fn resolve_for_archive(db: &DbConnection, tab_id: &str) -> ResolvedSession {
+    let input = {
+        let Ok(conn) = db.lock() else { return ResolvedSession::default() };
+        read_archive_input(&conn, tab_id)
+    };
+    let Some(input) = input else { return ResolvedSession::default() };
+    let profile = input.profile.as_deref().map(std::path::Path::new);
+
+    // Sin el lock: acá se lee disco y, para algunas TUIs, se lanza un proceso.
+    let found = crate::session::discover_session_id_sync(
+        &input.agent_id,
+        &input.cwd,
+        input.opened_at - REDISCOVERY_LOOKBACK_S,
+        profile,
+        input.custom.as_ref(),
     );
 
     // Traza deliberada: este camino solo se puede observar con una TUI real retomando una
     // conversación real, algo que no se puede reproducir en un test. Sale por stderr, así
     // que en `tauri dev` aparece en la terminal desde donde se levantó la app.
+    let current = input.session_id.clone();
     eprintln!(
-        "[sesión] al cerrar {tab_id}: agente={agent_id} guardada={current:?} encontrada={found:?}"
+        "[sesión] al cerrar {tab_id}: agente={} guardada={current:?} encontrada={found:?}",
+        input.agent_id
     );
 
-    let Some(found) = found else { return current };
-    if Some(&found) == current.as_ref() {
-        return current;
-    }
+    let session_id = match found {
+        // No encontrar nada significa "no sé", no "no tenía sesión": se conserva el previo.
+        None => current,
+        Some(found) if Some(&found) == current.as_ref() => current,
+        Some(found) => {
+            // Con dos tabs del mismo agente en la misma carpeta, "el archivo más nuevo"
+            // puede ser el de la OTRA tab. Robarle su sesión sería peor que no reconciliar:
+            // quedarían dos entradas del historial apuntando a la misma conversación.
+            let taken = db
+                .lock()
+                .ok()
+                .and_then(|conn| {
+                    conn.query_row(
+                        "SELECT COUNT(*) FROM tabs WHERE id != ?1 AND session_id = ?2",
+                        rusqlite::params![tab_id, found],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .ok()
+                })
+                .unwrap_or(0);
+            if taken > 0 {
+                eprintln!("[sesión] {found} ya es de otra tab abierta — se conserva {current:?}");
+                current
+            } else {
+                eprintln!("[sesión] la tab había cambiado de conversación: {current:?} → {found}");
+                Some(found)
+            }
+        }
+    };
 
-    // Con dos tabs del mismo agente en la misma carpeta, "el archivo más nuevo" puede ser
-    // el de la OTRA tab. Robarle su sesión sería peor que no reconciliar: quedarían dos
-    // entradas del historial apuntando a la misma conversación.
-    let taken: Result<i64, _> = conn.query_row(
-        "SELECT COUNT(*) FROM tabs WHERE id != ?1 AND session_id = ?2",
-        rusqlite::params![tab_id, found],
-        |r| r.get(0),
-    );
-    if taken.unwrap_or(0) > 0 {
-        eprintln!("[sesión] {found} ya es de otra tab abierta — se conserva {current:?}");
-        return current;
-    }
+    // El título se resuelve contra la sesión real y no se confía en el que traía la tab.
+    // Dos motivos, los dos verificados sobre un historial de verdad:
+    //
+    // - Si la sesión resultó ser otra, el título de la tab es el de la conversación
+    //   equivocada — y como el archivado ACTUALIZA la entrada existente, escribirlo le
+    //   pisaría el título bueno a la conversación que se retomó.
+    // - El refresco de título del frontend solo corre al cerrar la tab a mano; una tab que
+    //   se va con la ventana o con la app se archivaba con el título de relleno
+    //   ("Claude Code — carpeta"). En una base real eso era el 100% de las entradas.
+    //
+    // Un título puesto a mano por el usuario manda siempre y no se toca.
+    let title = if input.title_is_custom {
+        input.title
+    } else {
+        Some(
+            crate::session::get_session_title_sync(
+                &input.agent_id,
+                &input.cwd,
+                session_id.clone(),
+                input.title.clone().unwrap_or_default(),
+                profile,
+                input.custom.as_ref(),
+            )
+            .title,
+        )
+        .filter(|t| !t.is_empty())
+        .or(input.title)
+    };
 
-    eprintln!("[sesión] la tab había cambiado de conversación: {current:?} → {found}");
-    Some(found)
+    ResolvedSession { session_id, title }
 }
 
+/// Escribe la tab en el historial. `resolved` viene de [`resolve_for_archive`], que hay
+/// que llamar ANTES de tomar el lock que esta función necesita.
 pub(crate) fn archive_tab_row(
     conn: &Connection,
     tab_id: &str,
     workspace_id: &str,
+    resolved: &ResolvedSession,
 ) -> Result<(), String> {
     #[allow(clippy::type_complexity)]
-    #[allow(clippy::type_complexity)]
-    let row: Option<(String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, String, i64, bool)> = conn
+    let row: Option<(String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, String, i64)> = conn
         .query_row(
-            "SELECT agent_id, agent_label, command, cwd, title, session_id, history_id, account_id, prelaunch, opened_at, title_is_custom FROM tabs WHERE id = ?1",
+            "SELECT agent_id, agent_label, command, cwd, title, session_id, history_id, account_id, prelaunch, opened_at FROM tabs WHERE id = ?1",
             [tab_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get::<_, i64>(10)? != 0)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
@@ -104,53 +223,12 @@ pub(crate) fn archive_tab_row(
         account_id,
         prelaunch,
         opened_at,
-        title_is_custom,
     )) = row
     else { return Ok(()) };
 
-    // El id de sesión que trae la tab es el que se descubrió al ARRANCAR. Si el usuario
-    // retomó otra conversación desde adentro de la TUI (`/resume` de Claude y equivalentes),
-    // la tab estuvo trabajando sobre una sesión distinta, y archivar con el id viejo crea
-    // una entrada nueva en vez de actualizar la conversación que de verdad se continuó.
-    //
-    // Acá es el único punto por el que pasan TODOS los cierres (cerrar la tab, cerrar la
-    // ventana, salir de la app), así que reconciliar acá lo cubre todo de una vez.
-    let session_id = reconcile_session_id(
-        conn, tab_id, &agent_id, &cwd, session_id, account_id.as_deref(), opened_at,
-    );
-
-    // El título se resuelve ACÁ, contra la sesión real, y no se confía en el que traía la
-    // tab. Dos motivos, los dos verificados sobre un historial de verdad:
-    //
-    // - Si la sesión resultó ser otra, el título de la tab es el de la conversación
-    //   equivocada — y como el archivado ACTUALIZA la entrada existente, escribirlo le
-    //   pisaría el título bueno a la conversación que se retomó.
-    // - El refresco de título del frontend solo corre al cerrar la tab a mano; una tab que
-    //   se va con la ventana o con la app se archivaba con el título de relleno
-    //   ("Claude Code — carpeta"). En una base real eso era el 100% de las entradas.
-    //
-    // Un título puesto a mano por el usuario manda siempre y no se toca.
-    let title = if !title_is_custom {
-        let profile = account_id
-            .as_deref()
-            .and_then(|id| crate::accounts::dir_for_conn(conn, id));
-        let custom = crate::agents::find(conn, &agent_id);
-        Some(
-            crate::session::get_session_title_sync(
-                &agent_id,
-                &cwd,
-                session_id.clone(),
-                title.clone().unwrap_or_default(),
-                profile.as_deref().map(std::path::Path::new),
-                custom.as_ref(),
-            )
-            .title,
-        )
-        .filter(|t| !t.is_empty())
-        .or(title)
-    } else {
-        title
-    };
+    // Lo resuelto fuera del lock manda; si no se resolvió nada, queda lo que traía la tab.
+    let session_id = resolved.session_id.clone().or(session_id);
+    let title = resolved.title.clone().or(title);
 
     // Skills activas para esta tab al momento de archivar: por-tab (scope='tab') o
     // por-workspace (scope='workspace'). Se "congelan" acá porque `project_skills.tab_id`

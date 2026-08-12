@@ -3,13 +3,15 @@
 use rusqlite::OptionalExtension;
 use uuid::Uuid;
 
-use crate::database::connection::now_ts;
+use crate::util::now_ts;
 use crate::database::models::{
     row_to_tab, row_to_window, RestoredWindowState, WindowRow, WindowStatePayload,
 };
 use crate::database::DbConnection;
 
-use super::sessions::archive_tab_row;
+use std::collections::HashMap;
+
+use super::sessions::{archive_tab_row, resolve_for_archive, ResolvedSession};
 
 /// Guarda el estado de la ventana (posición, tamaño, tabs) y archiva las tabs que
 /// desaparecieron del payload.
@@ -31,6 +33,40 @@ pub async fn db_save_window_state(
         .map_err(|e| e.to_string())?
 }
 
+/// Resuelve, SIN el lock puesto, la sesión y el título de cada tab que este guardado va a
+/// dar por cerrada.
+///
+/// Que la lista de tabs a cerrar se calcule acá y no dentro del guardado abre una ventana
+/// mínima en la que una tab podría aparecer o desaparecer; el guardado vuelve a
+/// calcularla con el lock tomado y usa esta tabla solo como cache. Una tab que llegue sin
+/// resolver se archiva con lo que ya tenía guardado, que es exactamente el comportamiento
+/// anterior a esta feature.
+fn resolve_closing_tabs(state: &WindowStatePayload, db: &DbConnection) -> HashMap<String, ResolvedSession> {
+    if !state.authoritative {
+        return HashMap::new();
+    }
+    let incoming: std::collections::HashSet<&str> =
+        state.tabs.iter().map(|t| t.id.as_str()).collect();
+
+    let closing: Vec<String> = {
+        let Ok(conn) = db.lock() else { return HashMap::new() };
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT t.id FROM tabs t JOIN windows w ON w.id = t.window_id WHERE w.label = ?1",
+        ) else {
+            return HashMap::new();
+        };
+        let Ok(rows) = stmt.query_map([&state.label], |r| r.get::<_, String>(0)) else {
+            return HashMap::new();
+        };
+        rows.filter_map(|r| r.ok()).filter(|id| !incoming.contains(id.as_str())).collect()
+    };
+
+    closing.into_iter().map(|id| {
+        let resolved = resolve_for_archive(db, &id);
+        (id, resolved)
+    }).collect()
+}
+
 /// Genérica sobre el runtime para poder ejercitarla con el runtime de prueba de Tauri: es
 /// la función que decide qué tabs se dan por cerradas, y eso necesita test.
 pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
@@ -48,6 +84,11 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     if tauri::Manager::get_webview_window(app, &state.label).is_none() {
         return Ok(());
     }
+
+    // Qué tabs se van a dar por cerradas, y con qué sesión/título archivarlas — todo esto
+    // ANTES de tomar el lock: resolver la sesión lee disco y puede lanzar un proceso, y
+    // hacerlo con el mutex tomado bloquea la base para toda la app (ver `ResolvedSession`).
+    let resolved = resolve_closing_tabs(&state, db);
 
     let conn = db.lock().map_err(|e| e.to_string())?;
     let now = now_ts();
@@ -120,7 +161,8 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
         Vec::new()
     };
     for closed_id in closed_ids {
-        archive_tab_row(&conn, closed_id, &state.workspace_id)?;
+        let resolved = resolved.get(closed_id.as_str()).cloned().unwrap_or_default();
+        archive_tab_row(&conn, closed_id, &state.workspace_id, &resolved)?;
         if let Ok(pair) = conn.query_row(
             "SELECT cwd, agent_id FROM tabs WHERE id = ?1",
             [closed_id],
@@ -304,6 +346,10 @@ pub fn db_mark_window_closed(label: String, db: tauri::State<DbConnection>) -> R
 /// informativo: cerrar una ventana nunca abre otra en su lugar (ver
 /// `close_and_forget_window`).
 pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<Option<String>, String> {
+    // Antes del lock: si esta ventana pierde sus tabs, hay que resolverles la sesión, y eso
+    // lee disco y puede lanzar procesos (ver `ResolvedSession`).
+    let resolved = resolve_tabs_of_window(db, label);
+
     let conn = db.lock().map_err(|e| e.to_string())?;
 
     let row: Option<(String, String)> = conn
@@ -343,7 +389,8 @@ pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<O
             .collect();
         drop(tab_ids_stmt);
         for tab_id in &tab_ids {
-            archive_tab_row(&conn, tab_id, &workspace_id)?;
+            let r = resolved.get(tab_id.as_str()).cloned().unwrap_or_default();
+            archive_tab_row(&conn, tab_id, &workspace_id, &r)?;
         }
 
         conn.execute("DELETE FROM windows WHERE id = ?1", [&window_id])
@@ -415,4 +462,24 @@ pub fn count_tabs_for_window(db: &DbConnection, window_id: &str) -> Result<i64, 
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.query_row("SELECT COUNT(*) FROM tabs WHERE window_id = ?1", [window_id], |row| row.get(0))
         .map_err(|e| e.to_string())
+}
+
+/// Igual que `resolve_closing_tabs`, para los cierres que se llevan una ventana entera.
+fn resolve_tabs_of_window(db: &DbConnection, label: &str) -> HashMap<String, ResolvedSession> {
+    let ids: Vec<String> = {
+        let Ok(conn) = db.lock() else { return HashMap::new() };
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT t.id FROM tabs t JOIN windows w ON w.id = t.window_id WHERE w.label = ?1",
+        ) else {
+            return HashMap::new();
+        };
+        let Ok(rows) = stmt.query_map([label], |r| r.get::<_, String>(0)) else {
+            return HashMap::new();
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    ids.into_iter().map(|id| {
+        let resolved = resolve_for_archive(db, &id);
+        (id, resolved)
+    }).collect()
 }

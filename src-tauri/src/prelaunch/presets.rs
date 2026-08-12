@@ -3,13 +3,7 @@
 use crate::database::DbConnection;
 
 use super::steps::PrelaunchPreset;
-
-fn now_ts() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
+use crate::util::now_ts;
 
 /// Nombres vacíos o solo espacios harían un preset imposible de elegir en la UI y de
 /// nombrar desde `ccode --pre-preset`.

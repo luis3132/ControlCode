@@ -299,6 +299,18 @@ fn archived_session_id(conn: &Connection) -> Option<String> {
     conn.query_row("SELECT session_id FROM session_history", [], |r| r.get(0)).unwrap()
 }
 
+/// Archiva como lo hace la app: la sesión se resuelve con el lock SUELTO (lee disco y
+/// puede lanzar procesos) y recién después se escribe con el lock puesto.
+fn archive(db: &DbConnection, tab_id: &str, ws: &str) {
+    let resolved = resolve_for_archive(db, tab_id);
+    let conn = db.lock().unwrap();
+    archive_tab_row(&conn, tab_id, ws, &resolved).unwrap();
+}
+
+fn setup_db() -> DbConnection {
+    std::sync::Arc::new(std::sync::Mutex::new(setup()))
+}
+
 /// El bug reportado: retomar una conversación DESDE ADENTRO de la TUI (`/resume`) dejaba
 /// la tab con el id que se descubrió al arrancar, así que al cerrar se archivaba una
 /// sesión nueva y la conversación continuada quedaba sin actualizar.
@@ -307,13 +319,14 @@ fn archived_session_id(conn: &Connection) -> Option<String> {
 /// escribirlo pisaría el título bueno de la que se retomó, así que se recalcula.
 #[test]
 fn archivar_sigue_a_la_sesion_retomada_dentro_de_la_tui() {
-    let conn = setup();
+    let db = setup_db();
     let profile = TempDir::new();
     write_transcript(&profile.0, "/proj", "la-retomada", Some("Charla retomada"));
-    insert_tab_with_account(&conn, "tab-1", Some("la-de-arranque"), &profile.0);
+    insert_tab_with_account(&db.lock().unwrap(), "tab-1", Some("la-de-arranque"), &profile.0);
 
-    archive_tab_row(&conn, "tab-1", "ws").unwrap();
+    archive(&db, "tab-1", "ws");
 
+    let conn = db.lock().unwrap();
     assert_eq!(archived_session_id(&conn).as_deref(), Some("la-retomada"));
     let title: Option<String> =
         conn.query_row("SELECT title FROM session_history", [], |r| r.get(0)).unwrap();
@@ -325,27 +338,30 @@ fn archivar_sigue_a_la_sesion_retomada_dentro_de_la_tui() {
 /// conversación, que es peor que no reconciliar.
 #[test]
 fn la_reconciliacion_no_le_roba_la_sesion_a_otra_tab() {
-    let conn = setup();
+    let db = setup_db();
     let profile = TempDir::new();
     write_transcript(&profile.0, "/proj", "de-la-otra-tab", None);
-    insert_tab_with_account(&conn, "tab-1", Some("la-mia"), &profile.0);
-    insert_tab_with_account(&conn, "tab-2", Some("de-la-otra-tab"), &profile.0);
+    {
+        let conn = db.lock().unwrap();
+        insert_tab_with_account(&conn, "tab-1", Some("la-mia"), &profile.0);
+        insert_tab_with_account(&conn, "tab-2", Some("de-la-otra-tab"), &profile.0);
+    }
 
-    archive_tab_row(&conn, "tab-1", "ws").unwrap();
+    archive(&db, "tab-1", "ws");
 
-    assert_eq!(archived_session_id(&conn).as_deref(), Some("la-mia"));
+    assert_eq!(archived_session_id(&db.lock().unwrap()).as_deref(), Some("la-mia"));
 }
 
 /// No encontrar nada significa "no sé", no "no tenía sesión": el id previo se conserva.
 #[test]
 fn la_reconciliacion_conserva_el_id_previo_si_no_encuentra_nada() {
-    let conn = setup();
+    let db = setup_db();
     let profile = TempDir::new();
-    insert_tab_with_account(&conn, "tab-1", Some("la-unica"), &profile.0);
+    insert_tab_with_account(&db.lock().unwrap(), "tab-1", Some("la-unica"), &profile.0);
 
-    archive_tab_row(&conn, "tab-1", "ws").unwrap();
+    archive(&db, "tab-1", "ws");
 
-    assert_eq!(archived_session_id(&conn).as_deref(), Some("la-unica"));
+    assert_eq!(archived_session_id(&db.lock().unwrap()).as_deref(), Some("la-unica"));
 }
 
 // ── Historial: una entrada por conversación ─────────────────────
@@ -355,31 +371,37 @@ fn la_reconciliacion_conserva_el_id_previo_si_no_encuentra_nada() {
 #[test]
 fn reabrir_y_cerrar_una_sesion_actualiza_su_entrada() {
     for session_id in [None, Some("sess-1")] {
-        let conn = setup();
+        let db = setup_db();
 
         // Primer ciclo: la tab se abre y se cierra → una entrada.
-        insert_tab(&conn, "tab-1", session_id, None);
-        archive_tab_row(&conn, "tab-1", "ws").unwrap();
-        assert_eq!(history_count(&conn), 1, "el primer cierre crea una sola entrada");
+        insert_tab(&db.lock().unwrap(), "tab-1", session_id, None);
+        archive(&db, "tab-1", "ws");
 
-        let (hid, opened_at): (String, i64) = conn
-            .query_row("SELECT id, opened_at FROM session_history", [], |r| {
+        let (hid, opened_at): (String, i64) = {
+            let conn = db.lock().unwrap();
+            assert_eq!(history_count(&conn), 1, "el primer cierre crea una sola entrada");
+            conn.query_row("SELECT id, opened_at FROM session_history", [], |r| {
                 Ok((r.get(0)?, r.get(1)?))
             })
-            .unwrap();
+            .unwrap()
+        };
         assert_eq!(opened_at, 100);
 
         // Segundo ciclo: se reabre DESDE el historial (la tab nueva lleva history_id)
         // y se vuelve a cerrar. Debe seguir habiendo una sola entrada.
-        conn.execute("DELETE FROM tabs WHERE id = 'tab-1'", []).unwrap();
-        insert_tab(&conn, "tab-2", session_id, Some(&hid));
-        archive_tab_row(&conn, "tab-2", "ws").unwrap();
+        {
+            let conn = db.lock().unwrap();
+            conn.execute("DELETE FROM tabs WHERE id = 'tab-1'", []).unwrap();
+            insert_tab(&conn, "tab-2", session_id, Some(&hid));
+        }
+        archive(&db, "tab-2", "ws");
+
+        let conn = db.lock().unwrap();
         assert_eq!(
             history_count(&conn),
             1,
             "reabrir y cerrar no debe duplicar la sesión (session_id: {session_id:?})"
         );
-
         let same_id: String =
             conn.query_row("SELECT id FROM session_history", [], |r| r.get(0)).unwrap();
         assert_eq!(same_id, hid, "debe ser la MISMA entrada, actualizada");
@@ -390,29 +412,34 @@ fn reabrir_y_cerrar_una_sesion_actualiza_su_entrada() {
 /// agente en la misma carpeta es indistinguible de la anterior.
 #[test]
 fn las_sesiones_sin_ningun_id_no_se_acumulan() {
-    let conn = setup();
+    let db = setup_db();
     for i in 0..3 {
         let tab_id = format!("tab-{i}");
-        insert_tab(&conn, &tab_id, None, None);
-        archive_tab_row(&conn, &tab_id, "ws").unwrap();
-        conn.execute("DELETE FROM tabs WHERE id = ?1", [&tab_id]).unwrap();
+        insert_tab(&db.lock().unwrap(), &tab_id, None, None);
+        archive(&db, &tab_id, "ws");
+        db.lock().unwrap().execute("DELETE FROM tabs WHERE id = ?1", [&tab_id]).unwrap();
     }
-    assert_eq!(history_count(&conn), 1);
+    assert_eq!(history_count(&db.lock().unwrap()), 1);
 }
 
 /// Una sesión archivada sin id que resuelve uno al reabrirse queda identificada, sin
 /// dejar atrás la entrada vieja.
 #[test]
 fn el_id_de_sesion_descubierto_se_escribe_en_la_entrada_existente() {
-    let conn = setup();
-    insert_tab(&conn, "tab-1", None, None);
-    archive_tab_row(&conn, "tab-1", "ws").unwrap();
-    let hid: String = conn.query_row("SELECT id FROM session_history", [], |r| r.get(0)).unwrap();
+    let db = setup_db();
+    insert_tab(&db.lock().unwrap(), "tab-1", None, None);
+    archive(&db, "tab-1", "ws");
+    let hid: String =
+        db.lock().unwrap().query_row("SELECT id FROM session_history", [], |r| r.get(0)).unwrap();
 
-    conn.execute("DELETE FROM tabs WHERE id = 'tab-1'", []).unwrap();
-    insert_tab(&conn, "tab-2", Some("sess-descubierta"), Some(&hid));
-    archive_tab_row(&conn, "tab-2", "ws").unwrap();
+    {
+        let conn = db.lock().unwrap();
+        conn.execute("DELETE FROM tabs WHERE id = 'tab-1'", []).unwrap();
+        insert_tab(&conn, "tab-2", Some("sess-descubierta"), Some(&hid));
+    }
+    archive(&db, "tab-2", "ws");
 
+    let conn = db.lock().unwrap();
     assert_eq!(history_count(&conn), 1);
     let sid: Option<String> =
         conn.query_row("SELECT session_id FROM session_history", [], |r| r.get(0)).unwrap();
