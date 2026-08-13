@@ -38,6 +38,17 @@ export function MarketplaceSkillCard({
           <span className="flex flex-wrap items-center gap-1">
             {/* `max-w-full` + `truncate`: el nombre de un repo puede ser largo (una URL de
                 GitHub completa) y sin esto estira el badge más allá de la tarjeta. */}
+            {/* El autor va PRIMERO y destacado: con dos skills del mismo nombre en la
+                grilla, es el único dato que dice cuál es cuál. */}
+            {skill.author && (
+              <span
+                className="max-w-full truncate text-[10px] font-medium px-1.5 py-0.5 rounded-full
+                  bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400"
+                title={t("marketplace.author", { author: skill.author })}
+              >
+                {skill.author}
+              </span>
+            )}
             <span
               className="max-w-full truncate text-[10px] font-mono px-1.5 py-0.5 rounded-full
                 bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400"

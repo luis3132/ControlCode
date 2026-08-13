@@ -366,6 +366,9 @@ pub(super) fn skillssh_entry(
         registry_id: registry_id.to_string(),
         registry_name: registry_name.to_string(),
         name: hit.slug.clone(),
+        // El directorio lista skills de MUCHOS publicadores bajo un mismo "repositorio",
+        // así que sin el autor dos entradas homónimas son indistinguibles en la grilla.
+        author: hit.source.split('/').next().map(str::to_string),
         // El directorio no expone la descripción en la búsqueda — la única forma de
         // tenerla sería bajar cada skill entera, que son decenas de megas por búsqueda.
         // Se muestra el repo de origen, que es el dato que sí ayuda a elegir.
@@ -496,7 +499,7 @@ pub(super) async fn install_from_skillssh(
     };
 
     let result = staged.and_then(|dir| {
-        install_skill_internal(&dir.join("SKILL.md").to_string_lossy(), None, origin, db)
+        install_skill_internal(&dir.join("SKILL.md").to_string_lossy(), None, Some(origin), db)
     });
 
     let _ = std::fs::remove_dir_all(&staging);

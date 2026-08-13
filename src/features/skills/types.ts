@@ -20,6 +20,10 @@ export interface SkillSummary {
   sourcePath: string;
   /** Repo del que salió. `null` = instalada a mano desde un archivo local. */
   registryId: string | null;
+  /** Entrada del repositorio de la que salió. Con `registryId` identifica el origen de
+   *  forma exacta: el NOMBRE no identifica nada — dos skills homónimas pueden ser de
+   *  autores distintos, incluso dentro del mismo repositorio. */
+  originSkillId: string | null;
   /** Nombre del repo al momento de instalar — se guarda desnormalizado, así el badge
    *  sigue diciendo de dónde vino aunque después borres ese repositorio. */
   registryName: string | null;
@@ -29,6 +33,8 @@ export interface SkillSummary {
 }
 
 export interface SymlinkHealthEntry {
+  /** Qué skill exactamente: el nombre no alcanza para volver a encontrarla. */
+  skillId: string;
   skillName: string;
   tabId: string;
   tabTitle: string | null;

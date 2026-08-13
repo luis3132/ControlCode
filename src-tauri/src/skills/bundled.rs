@@ -121,7 +121,13 @@ pub(super) fn ensure_one(db: &DbConnection, name: &str, source: &Path) -> Result
             let info = install_skill_internal(
                 &skill_md.to_string_lossy(),
                 None,
-                Some((ORIGIN_ID, ORIGIN_NAME)),
+                Some(crate::skills::SkillOrigin {
+                    registry_id: ORIGIN_ID,
+                    registry_name: ORIGIN_NAME,
+                    // La skill que viaja con la app es su propia entrada: no hay un
+                    // repositorio detrás del que pueda venir otra con el mismo nombre.
+                    skill_id: name,
+                }),
                 db,
             )?;
             provisioned.insert(

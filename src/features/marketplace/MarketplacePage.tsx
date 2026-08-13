@@ -56,11 +56,19 @@ export function MarketplacePage() {
     return () => clearTimeout(handle);
   }, [query, searchRemote]);
 
-  // Por nombre normalizado: el id del marketplace es el nombre de carpeta en el repo y el
-  // de la copia instalada es un UUID, así que ninguno cruza. El `name` de las dos puntas sí
-  // sale del mismo campo del frontmatter de SKILL.md.
-  const installedNames = useMemo(
-    () => new Set(installedSkills.map((s) => s.name.trim().toLowerCase())),
+  // Por (repositorio, entrada de origen), NUNCA por nombre.
+  //
+  // El bug que esto arregla: había un `Set` de nombres, así que instalar `testing` de un
+  // repo marcaba como instalada la `testing` de todos los demás y te desactivaba el botón
+  // de una skill que no tenías. Y no es un caso raro — en un directorio como skills.sh el
+  // mismo nombre lo usan publicadores distintos para cosas distintas.
+  const installedOrigins = useMemo(
+    () =>
+      new Set(
+        installedSkills
+          .filter((s) => s.registryId && s.originSkillId)
+          .map((s) => `${s.registryId}\u0000${s.originSkillId}`)
+      ),
     [installedSkills]
   );
 
@@ -206,7 +214,7 @@ export function MarketplacePage() {
                     <MarketplaceSkillCard
                       key={key}
                       skill={skill}
-                      installed={installedNames.has(skill.name.trim().toLowerCase())}
+                      installed={installedOrigins.has(`${skill.registryId}\u0000${skill.id}`)}
                       installing={installingKey === key}
                       onInstall={() => handleInstall(skill.registryId, skill.id)}
                     />

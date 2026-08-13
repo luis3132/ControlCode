@@ -30,15 +30,16 @@ pub(super) fn row_to_skill_info(row: &rusqlite::Row) -> rusqlite::Result<SkillIn
         updated_at: row.get(12)?,
         registry_id: row.get(13)?,
         registry_name: row.get(14)?,
+        origin_skill_id: row.get(15)?,
     })
 }
 
-pub(super) const SKILL_COLUMNS: &str = "id, name, description, categories, compatible_agents, compatible_versions, version, author, license, homepage, source_path, installed_at, updated_at, registry_id, registry_name";
+pub(super) const SKILL_COLUMNS: &str = "id, name, description, categories, compatible_agents, compatible_versions, version, author, license, homepage, source_path, installed_at, updated_at, registry_id, registry_name, origin_skill_id";
 
 /// Mismas columnas y en el mismo orden que `SKILL_COLUMNS` (las lee el mismo
 /// `row_to_skill_info`), pero calificadas con el alias `s` — necesario en las queries que
 /// joinean `skills` con `tabs`/`windows`, donde `id`/`name` serían ambiguos.
-pub(super) const SKILL_COLUMNS_QUALIFIED: &str = "s.id, s.name, s.description, s.categories, s.compatible_agents, s.compatible_versions, s.version, s.author, s.license, s.homepage, s.source_path, s.installed_at, s.updated_at, s.registry_id, s.registry_name";
+pub(super) const SKILL_COLUMNS_QUALIFIED: &str = "s.id, s.name, s.description, s.categories, s.compatible_agents, s.compatible_versions, s.version, s.author, s.license, s.homepage, s.source_path, s.installed_at, s.updated_at, s.registry_id, s.registry_name, s.origin_skill_id";
 
 pub(super) fn fetch_usage_for_skill(conn: &rusqlite::Connection, skill_id: &str) -> Result<Vec<SkillUsageEntry>, String> {
     let mut stmt = conn
@@ -206,4 +207,50 @@ pub fn registry_skills(
         .filter_map(|r| r.ok())
         .collect();
     Ok(rows)
+}
+
+/// Vincula las skills instaladas que todavía no saben de qué ENTRADA del repositorio
+/// salieron (las que se instalaron antes de que existiera esa columna).
+///
+/// Se vincula **solo cuando la coincidencia es inequívoca**: si en el cache de ese
+/// repositorio hay más de una entrada con ese nombre, no se elige ninguna. Adivinar sería
+/// reintroducir exactamente el bug que esta columna viene a arreglar — dos skills
+/// homónimas del mismo repositorio pueden ser de autores distintos y tener contenido
+/// distinto, y vincular la equivocada haría que "actualizar" pisara una skill con otra.
+///
+/// Corre al refrescar un repositorio: recién ahí hay cache contra el que comparar.
+pub(crate) fn link_orphan_installs(conn: &rusqlite::Connection, registry_id: &str) {
+    let cache: Option<String> = conn
+        .query_row("SELECT cache_json FROM registries WHERE id = ?1", [registry_id], |r| r.get(0))
+        .optional()
+        .ok()
+        .flatten();
+    let Some(cache) = cache else { return };
+    let entries: Vec<crate::marketplace::MarketplaceSkillEntry> =
+        serde_json::from_str(&cache).unwrap_or_default();
+
+    let orphans: Vec<(String, String)> = {
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT id, name FROM skills WHERE registry_id = ?1 AND origin_skill_id IS NULL",
+        ) else {
+            return;
+        };
+        let Ok(rows) = stmt.query_map([registry_id], |r| Ok((r.get(0)?, r.get(1)?))) else {
+            return;
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    for (skill_id, name) in orphans {
+        let mut matches = entries.iter().filter(|e| e.name.eq_ignore_ascii_case(&name));
+        let Some(entry) = matches.next() else { continue };
+        if matches.next().is_some() {
+            // Ambigua: hay dos o más entradas con ese nombre en el repositorio.
+            continue;
+        }
+        let _ = conn.execute(
+            "UPDATE skills SET origin_skill_id = ?1 WHERE id = ?2",
+            rusqlite::params![entry.id, skill_id],
+        );
+    }
 }

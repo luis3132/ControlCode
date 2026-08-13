@@ -113,14 +113,22 @@ fn same_named_skills_from_two_registries_coexist() {
     let a = install_skill_internal(
         &src_a.join("SKILL.md").to_string_lossy(),
         None,
-        Some(("reg-a", "anthropics/skills")),
+        Some(SkillOrigin {
+            registry_id: "reg-a",
+            registry_name: "anthropics/skills",
+            skill_id: "testing",
+        }),
         &state,
     )
     .expect("instalar desde el repo A");
     let b = install_skill_internal(
         &src_b.join("SKILL.md").to_string_lossy(),
         None,
-        Some(("reg-b", "autoskills (midudev)")),
+        Some(SkillOrigin {
+            registry_id: "reg-b",
+            registry_name: "autoskills (midudev)",
+            skill_id: "testing",
+        }),
         &state,
     )
     .expect("instalar desde el repo B");
@@ -1257,4 +1265,111 @@ fn the_bundled_skill_in_the_repo_is_valid() {
         );
         assert!(!meta.compatible_agents.is_empty());
     }
+}
+
+// ── Identidad: el nombre NO identifica ───────────────────────────
+
+/// EL bug: dos skills homónimas de repos (o autores) distintos son cosas distintas.
+/// Instalar una no puede contar como tener la otra, ni pisarla al reinstalar.
+#[test]
+fn dos_homonimas_de_repos_distintos_conviven_con_su_origen_registrado() {
+    let (db, _ws, _tab, _cwd, _skills_dir) = setup();
+    let app = tauri::test::mock_app();
+    app.manage(db);
+    let state = app.state::<DbConnection>();
+
+    let src_a = temp_dir("autor-a");
+    let src_b = temp_dir("autor-b");
+    write_named_skill(&src_a, "testing", "la de anthropics");
+    write_named_skill(&src_b, "testing", "la de midudev");
+
+    let a = install_skill_internal(
+        &src_a.join("SKILL.md").to_string_lossy(),
+        None,
+        Some(SkillOrigin {
+            registry_id: "reg-a",
+            registry_name: "anthropics/skills",
+            skill_id: "document-skills/testing",
+        }),
+        &state,
+    )
+    .expect("instalar la primera");
+    let b = install_skill_internal(
+        &src_b.join("SKILL.md").to_string_lossy(),
+        None,
+        Some(SkillOrigin {
+            registry_id: "reg-b",
+            registry_name: "autoskills",
+            skill_id: "midudev/skills/testing",
+        }),
+        &state,
+    )
+    .expect("instalar la segunda");
+
+    assert_ne!(a.id, b.id, "son dos skills distintas");
+    assert_eq!(a.origin_skill_id.as_deref(), Some("document-skills/testing"));
+    assert_eq!(b.origin_skill_id.as_deref(), Some("midudev/skills/testing"));
+    assert_eq!(count_skills(&state), 2, "ninguna pisó a la otra");
+}
+
+/// Reinstalar la MISMA entrada del MISMO repo actualiza en vez de acumular copias — y
+/// conserva el id, así que los attachments que cuelgan de él sobreviven.
+#[test]
+fn reinstalar_la_misma_entrada_actualiza_en_vez_de_duplicar() {
+    let (db, workspace_id, tab_id, _cwd, _skills_dir) = setup();
+    let app = tauri::test::mock_app();
+    app.manage(db);
+    let state = app.state::<DbConnection>();
+
+    let src = temp_dir("repetida");
+    write_named_skill(&src, "testing", "version uno");
+    let origin = SkillOrigin {
+        registry_id: "reg-a",
+        registry_name: "anthropics/skills",
+        skill_id: "testing",
+    };
+
+    let primera = install_skill_internal(
+        &src.join("SKILL.md").to_string_lossy(),
+        None,
+        Some(origin),
+        &state,
+    )
+    .expect("instalar");
+    attach_skill(
+        primera.id.clone(),
+        workspace_id.clone(),
+        "tab".to_string(),
+        Some(tab_id),
+        state.clone(),
+    )
+    .expect("attach");
+
+    write_named_skill(&src, "testing", "version dos");
+    let segunda = install_skill_internal(
+        &src.join("SKILL.md").to_string_lossy(),
+        None,
+        Some(origin),
+        &state,
+    )
+    .expect("reinstalar");
+
+    assert_eq!(segunda.id, primera.id, "conserva el id: los attachments cuelgan de él");
+    assert_eq!(count_skills(&state), 1, "no quedó una segunda copia");
+    assert_eq!(
+        count(&state, "SELECT COUNT(*) FROM project_skills"),
+        1,
+        "el attachment sobrevive a la actualización"
+    );
+    let contenido =
+        std::fs::read_to_string(Path::new(&segunda.source_path).join("SKILL.md")).unwrap();
+    assert!(contenido.contains("version dos"), "quedó el contenido nuevo: {contenido}");
+}
+
+fn count(db: &DbConnection, sql: &str) -> i64 {
+    db.lock().unwrap().query_row(sql, [], |r| r.get(0)).unwrap()
+}
+
+fn count_skills(db: &DbConnection) -> i64 {
+    count(db, "SELECT COUNT(*) FROM skills")
 }

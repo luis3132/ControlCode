@@ -34,6 +34,10 @@ pub struct SkillInfo {
     /// Nombre del repo tal como se llamaba al instalar — desnormalizado para que el badge
     /// siga siendo correcto aunque el repositorio se borre después.
     pub registry_name: Option<String>,
+    /// Entrada del repositorio de la que salió. Con `registry_id` forma la identidad
+    /// exacta del origen — el nombre NO identifica: dos skills homónimas pueden ser de
+    /// autores distintos, incluso dentro del mismo repositorio (ver `SkillOrigin`).
+    pub origin_skill_id: Option<String>,
     pub installed_at: i64,
     pub updated_at: i64,
 }
@@ -160,6 +164,10 @@ impl From<SkillFrontmatterInput> for SkillFrontmatter {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SymlinkHealthEntry {
+    /// Qué skill exactamente. El nombre no alcanza para volver a encontrarla: dos
+    /// instaladas pueden llamarse igual y ser de autores distintos, así que la UI linkeaba
+    /// el aviso a la que encontrara primero.
+    pub skill_id: String,
     pub skill_name: String,
     pub tab_id: String,
     pub tab_title: Option<String>,
@@ -185,7 +193,16 @@ pub struct SessionSkillStatus {
     pub scope: String,
     /// Id de la copia instalada que la cubre hoy — puede diferir del archivado si el
     /// usuario la borró y la reinstaló (misma skill, id nuevo).
+    ///
+    /// `None` = ya no está instalada, o hay varias homónimas y no se eligió ninguna
+    /// (ver `ambiguous`).
     pub installed_skill_id: Option<String>,
+    /// La copia EXACTA que tenía la sesión ya no está y se resolvió con otra del mismo
+    /// nombre. Se avisa igual: puede ser de otro autor y hacer otra cosa.
+    pub substituted: bool,
+    /// La copia exacta no está y hay VARIAS instaladas con ese nombre, así que no se
+    /// eligió ninguna — elegir al azar le montaría a la sesión una skill que nunca tuvo.
+    pub ambiguous: bool,
     /// Si falta: de dónde se puede volver a bajar, si algún repo habilitado la ofrece.
     pub available_from: Option<SkillSource>,
 }

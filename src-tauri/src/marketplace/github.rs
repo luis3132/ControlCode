@@ -212,6 +212,7 @@ pub(super) async fn fetch_github_registry(
                 registry_id: registry_id.to_string(),
                 registry_name: registry_name.to_string(),
                 name: s.name.unwrap_or(default_name),
+                author: s.author,
                 description: s.description,
                 categories: s.categories,
                 compatible_agents: s.compatible_agents,
@@ -253,6 +254,7 @@ pub(super) async fn fetch_github_registry(
             registry_id: registry_id.to_string(),
             registry_name: registry_name.to_string(),
             name: meta.name.unwrap_or(folder_name),
+            author: meta.author,
             description: meta.description,
             categories: meta.categories,
             compatible_agents: meta.compatible_agents,
@@ -295,7 +297,7 @@ pub(super) async fn install_from_github(
         if !skill_md.is_file() {
             return Err("No se encontró SKILL.md tras descargar la carpeta de la skill".to_string());
         }
-        install_skill_internal(&skill_md.to_string_lossy(), None, origin, db)
+        install_skill_internal(&skill_md.to_string_lossy(), None, Some(origin), db)
     }
     .await;
 

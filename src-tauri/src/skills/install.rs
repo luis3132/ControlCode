@@ -1,13 +1,13 @@
 //! Instalar y desinstalar skills: la copia global bajo el directorio configurado.
 
+use rusqlite::OptionalExtension;
 use std::path::Path;
 use uuid::Uuid;
 
 use crate::database::DbConnection;
 
 use super::files::{copy_dir_recursive, resolve_skill_file, scan_skill_file, slugify};
-use super::frontmatter::split_frontmatter;
-use super::frontmatter::render_skill_md;
+use super::frontmatter::{render_skill_md, split_frontmatter};
 use super::links::reconcile_link_dirs;
 use super::settings::resolve_skills_dir;
 use super::store::collect_linked_tabs;
@@ -43,18 +43,30 @@ pub fn install_skill(
     install_skill_internal(&source_file, overrides, None, &db)
 }
 
-/// Repo del que viene una skill que se está instalando: su id y su nombre visible.
-/// `None` en una instalación manual desde un archivo del disco.
-pub(crate) type SkillOrigin<'a> = Option<(&'a str, &'a str)>;
+/// De dónde viene una skill que se está instalando. `None` = instalación manual desde un
+/// archivo del disco.
+///
+/// Lleva el id de la ENTRADA además del repo porque el repo solo no identifica nada: dos
+/// skills pueden llamarse igual, ser de autores distintos y venir del mismo repositorio
+/// (el directorio de skills.sh lista publicadores distintos bajo un único "repo"). El par
+/// (repo, entrada) sí es único — para skills.sh la entrada es `owner/repo/slug`, que ya
+/// lleva el autor adentro.
+#[derive(Clone, Copy)]
+pub(crate) struct SkillOrigin<'a> {
+    pub registry_id: &'a str,
+    pub registry_name: &'a str,
+    /// Id de la entrada dentro del repositorio.
+    pub skill_id: &'a str,
+}
 
 /// Carpeta donde vive la copia global de una skill, dentro del directorio de skills.
 ///
 /// Una por repositorio, más `local` para las instaladas a mano. Dos repos pueden traer
 /// skills con el mismo nombre y funcionalidad distinta (`testing` de uno no es `testing`
 /// del otro), así que mezclarlas en un solo nivel las hacía competir por la misma carpeta.
-pub(super) fn bucket_for_origin(origin: SkillOrigin) -> String {
+pub(super) fn bucket_for_origin(origin: Option<SkillOrigin>) -> String {
     match origin {
-        Some((_, registry_name)) => slugify(registry_name),
+        Some(o) => slugify(o.registry_name),
         None => "local".to_string(),
     }
 }
@@ -97,9 +109,33 @@ pub(super) fn taken_slugs(skills_dir: &Path) -> std::collections::HashSet<String
 pub(crate) fn install_skill_internal(
     source_file: &str,
     overrides: Option<SkillFrontmatterInput>,
-    origin: SkillOrigin,
+    origin: Option<SkillOrigin>,
     db: &DbConnection,
 ) -> Result<SkillInfo, String> {
+    // ¿Ya está instalada ESTA entrada de ESTE repositorio? Entonces reinstalar es
+    // actualizar, no duplicar: sin esto se acumulaban `testing`, `testing-2`, `testing-3`
+    // de la misma fuente, todas idénticas y compitiendo por el mismo symlink.
+    //
+    // Se compara por (repo, entrada) y nunca por nombre: dos skills homónimas pueden ser
+    // de autores distintos y son cosas distintas, así que instalar una NO puede pisar a la
+    // otra (ver `SkillOrigin`).
+    if let Some(o) = origin {
+        let existing: Option<(String, String)> = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            conn.query_row(
+                "SELECT id, source_path FROM skills WHERE registry_id = ?1 AND origin_skill_id = ?2",
+                rusqlite::params![o.registry_id, o.skill_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+        };
+        if let Some((existing_id, existing_path)) = existing {
+            return update_installed(&existing_id, &existing_path, source_file, overrides, db);
+        }
+    }
+
+
     let (file, source) = resolve_skill_file(source_file)?;
     let Some((parsed_meta, original_content)) = scan_skill_file(&file) else {
         return Err(format!("No se pudo leer {source_file}"));
@@ -161,16 +197,17 @@ pub(crate) fn install_skill_internal(
         license: meta.license,
         homepage: meta.homepage,
         source_path: dest.to_string_lossy().to_string(),
-        registry_id: origin.map(|(id, _)| id.to_string()),
-        registry_name: origin.map(|(_, name)| name.to_string()),
+        registry_id: origin.map(|o| o.registry_id.to_string()),
+        registry_name: origin.map(|o| o.registry_name.to_string()),
+        origin_skill_id: origin.map(|o| o.skill_id.to_string()),
         installed_at: now,
         updated_at: now,
     };
 
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO skills (id, name, description, version, categories, compatible_agents, compatible_versions, author, license, homepage, source_path, installed_at, updated_at, registry_id, registry_name)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14)",
+        "INSERT INTO skills (id, name, description, version, categories, compatible_agents, compatible_versions, author, license, homepage, source_path, installed_at, updated_at, registry_id, registry_name, origin_skill_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14, ?15)",
         rusqlite::params![
             info.id,
             info.name,
@@ -186,6 +223,7 @@ pub(crate) fn install_skill_internal(
             now,
             info.registry_id,
             info.registry_name,
+            info.origin_skill_id,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -254,3 +292,69 @@ pub(super) fn delete_skill_internal(skill_id: &str, db: &DbConnection) -> Result
     Ok(())
 }
 
+/// Reemplaza el contenido de una skill ya instalada con el de su origen, conservando su
+/// fila (y con ella sus attachments, que cuelgan del id).
+///
+/// Es lo que hace que "instalar" una skill que ya está sea "actualizarla": borrar y volver
+/// a insertar le cambiaría el id, y `project_skills.skill_id` cascadea — el usuario
+/// perdería todos los attachments de esa skill a cambio de nada.
+fn update_installed(
+    skill_id: &str,
+    dest: &str,
+    source_file: &str,
+    overrides: Option<SkillFrontmatterInput>,
+    db: &DbConnection,
+) -> Result<SkillInfo, String> {
+    let (file, source) = resolve_skill_file(source_file)?;
+    let Some((parsed_meta, original_content)) = scan_skill_file(&file) else {
+        return Err(format!("No se pudo leer {source_file}"));
+    };
+    let meta: SkillFrontmatter = match overrides {
+        Some(o) => o.into(),
+        None => parsed_meta,
+    };
+
+    // Se reemplaza la carpeta entera: los archivos que la versión nueva ya no trae no
+    // pueden sobrevivir, o lo instalado dejaría de ser igual a lo que ofrece el repo.
+    let dest_path = Path::new(dest);
+    let _ = std::fs::remove_dir_all(dest_path);
+    copy_dir_recursive(&source, dest_path).map_err(|e| e.to_string())?;
+
+    let name = meta
+        .name
+        .clone()
+        .or_else(|| source.file_name().map(|n| n.to_string_lossy().to_string()))
+        .unwrap_or_else(|| "skill".to_string());
+    let (_, body) = split_frontmatter(&original_content);
+    let mut meta_to_write = meta.clone();
+    meta_to_write.name = Some(name.clone());
+    std::fs::write(dest_path.join("SKILL.md"), render_skill_md(&meta_to_write, &body))
+        .map_err(|e| e.to_string())?;
+
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE skills SET name = ?1, description = ?2, version = ?3, categories = ?4,
+                 compatible_agents = ?5, compatible_versions = ?6, author = ?7, license = ?8,
+                 homepage = ?9, updated_at = ?10
+             WHERE id = ?11",
+            rusqlite::params![
+                name,
+                meta.description,
+                meta.version.clone().unwrap_or_else(|| "0.1.0".to_string()),
+                serde_json::to_string(&meta.categories).unwrap_or_default(),
+                serde_json::to_string(&meta.compatible_agents).unwrap_or_default(),
+                serde_json::to_string(&meta.compatible_versions).unwrap_or_default(),
+                meta.author,
+                meta.license,
+                meta.homepage,
+                now_ts(),
+                skill_id,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    super::links::fetch_skill_row(&conn, skill_id)
+}

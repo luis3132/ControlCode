@@ -44,7 +44,7 @@ export function SkillsPage() {
     if (!query.trim()) return true;
     // El repo entra en la búsqueda: con skills homónimas de repos distintos, filtrar por
     // "anthropics" es la forma natural de quedarse con la que buscabas.
-    const haystack = `${s.name} ${s.description ?? ""} ${s.categories.join(" ")} ${s.registryName ?? ""}`.toLowerCase();
+    const haystack = `${s.name} ${s.description ?? ""} ${s.categories.join(" ")} ${s.registryName ?? ""} ${s.author ?? ""}`.toLowerCase();
     return haystack.includes(query.trim().toLowerCase());
   });
 
@@ -76,11 +76,13 @@ export function SkillsPage() {
               </p>
             </div>
             <ul className="flex flex-col divide-y divide-amber-200/60 dark:divide-amber-700/30">
-              {brokenSymlinks.map((issue, i) => {
-                const skill = skills.find((s) => s.name === issue.skillName);
+              {brokenSymlinks.map((issue) => {
+                // Por id: con dos instaladas del mismo nombre, buscar por nombre linkeaba el
+                // aviso a la que apareciera primero — y los botones actuaban sobre esa.
+                const skill = skills.find((s) => s.id === issue.skillId);
                 const usage = skill?.usedBy.find((u) => u.tabId === issue.tabId);
                 return (
-                  <li key={i} className="flex items-center justify-between gap-2 px-4 py-2 text-xs font-mono text-amber-800 dark:text-amber-300">
+                  <li key={`${issue.skillId}:${issue.tabId}`} className="flex items-center justify-between gap-2 px-4 py-2 text-xs font-mono text-amber-800 dark:text-amber-300">
                     <span className="truncate">
                       {issue.skillName} — {issue.tabTitle ?? issue.tabId} ({t(`skills.health.${issue.issue === "stale_target" ? "staleTarget" : issue.issue}`)})
                     </span>
@@ -188,6 +190,17 @@ export function SkillsPage() {
                             {skill.registryName ?? t("skills.list.localOrigin")}
                           </span>
                         </span>
+                        {/* El autor, al lado del repo: dos skills con el mismo nombre y el
+                            mismo repositorio de origen solo se distinguen por acá. */}
+                        {skill.author && (
+                          <span
+                            title={t("marketplace.author", { author: skill.author })}
+                            className="min-w-0 max-w-full truncate text-[10px] px-1.5 py-0.5 rounded-full
+                              font-normal bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400"
+                          >
+                            {skill.author}
+                          </span>
+                        )}
                       </span>
                       {skill.description && (
                         <span className="text-xs text-gray-400 dark:text-gray-500 line-clamp-2">

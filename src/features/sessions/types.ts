@@ -18,8 +18,13 @@ export interface SkillSource {
 export interface SessionSkillStatus {
   name: string;
   scope: "tab" | "workspace";
-  /** `null` = ya no está instalada. */
+  /** `null` = ya no está instalada, o hay varias homónimas y no se eligió ninguna. */
   installedSkillId: string | null;
+  /** La copia exacta que tenía la sesión ya no está y se resolvió con otra del mismo
+   *  nombre: puede ser de otro autor y hacer otra cosa, así que se avisa. */
+  substituted: boolean;
+  /** La copia exacta no está y hay VARIAS con ese nombre: elegir sería adivinar. */
+  ambiguous: boolean;
   /** Presente solo si falta Y algún repo habilitado la ofrece. */
   availableFrom: SkillSource | null;
 }

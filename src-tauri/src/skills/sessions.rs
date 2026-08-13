@@ -53,8 +53,7 @@ pub fn check_session_skills(
 
     let mut out = Vec::with_capacity(archived.len());
     for a in archived {
-        // Primero por id (la copia exacta que tenía la sesión); si esa copia ya no está,
-        // se acepta otra instalada con el mismo nombre — para el usuario "tiene la skill".
+        // Primero la copia EXACTA que tenía la sesión, por id.
         let by_id: Option<String> = if a.id.is_empty() {
             None
         } else {
@@ -62,13 +61,41 @@ pub fn check_session_skills(
                 .optional()
                 .map_err(|e| e.to_string())?
         };
-        let installed_skill_id = match by_id {
-            Some(id) => Some(id),
-            None => conn
-                .query_row("SELECT id FROM skills WHERE name = ?1", [&a.name], |r| r.get(0))
-                .optional()
-                .map_err(|e| e.to_string())?,
+
+        // Si esa copia ya no está, se puede aceptar otra instalada con el mismo nombre —
+        // pero SOLO si hay una sola. Con dos homónimas no hay forma de saber cuál quería
+        // el usuario (pueden ser de autores distintos y hacer cosas distintas), y elegir
+        // al azar le montaría en la sesión una skill que nunca tuvo. En ese caso se
+        // reporta como faltante y el diálogo le deja decidir.
+        let (installed_skill_id, substituted) = match by_id {
+            Some(id) => (Some(id), false),
+            None => {
+                let same_name: Vec<String> = {
+                    let mut stmt = conn
+                        .prepare("SELECT id FROM skills WHERE name = ?1")
+                        .map_err(|e| e.to_string())?;
+                    let rows = stmt
+                        .query_map([&a.name], |r| r.get::<_, String>(0))
+                        .map_err(|e| e.to_string())?;
+                    rows.filter_map(|r| r.ok()).collect()
+                };
+                match same_name.len() {
+                    1 => (Some(same_name[0].clone()), true),
+                    _ => (None, false),
+                }
+            }
         };
+
+        let ambiguous = installed_skill_id.is_none()
+            && !a.id.is_empty()
+            && conn
+                .query_row(
+                    "SELECT COUNT(*) FROM skills WHERE name = ?1",
+                    [&a.name],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 1;
 
         let available_from = if installed_skill_id.is_none() {
             find_in_marketplace(&conn, &a.name)
@@ -80,6 +107,8 @@ pub fn check_session_skills(
             name: a.name,
             scope: a.scope,
             installed_skill_id,
+            substituted,
+            ambiguous,
             available_from,
         });
     }

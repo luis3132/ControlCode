@@ -43,6 +43,9 @@ pub(crate) struct ScannedSkillMeta {
     pub description: Option<String>,
     pub categories: Vec<String>,
     pub compatible_agents: Vec<String>,
+    /// Quién la publica. Es lo que deja distinguir dos skills homónimas en la grilla:
+    /// mismo nombre, autor distinto, contenido distinto.
+    pub author: Option<String>,
 }
 
 pub(crate) fn scan_frontmatter_for_marketplace(content: &str) -> ScannedSkillMeta {
@@ -52,6 +55,7 @@ pub(crate) fn scan_frontmatter_for_marketplace(content: &str) -> ScannedSkillMet
         description: meta.description,
         categories: meta.categories,
         compatible_agents: meta.compatible_agents,
+        author: meta.author,
     }
 }
 

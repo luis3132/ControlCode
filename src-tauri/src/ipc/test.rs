@@ -3,7 +3,9 @@
 
 use serde_json::json;
 
-use super::commands::{init_prompt, match_account_id, match_preset_id, match_skill_ids, skill_names};
+use super::commands::{
+    init_prompt, match_account_id, match_preset_id, match_skill_ids, skill_names, InstalledSkill,
+};
 use super::install::{is_installed, target_dir};
 use super::protocol::{arg_str, Handshake, Request, Response, PROTOCOL_VERSION};
 
@@ -119,10 +121,19 @@ fn una_cuenta_desconocida_explica_que_opciones_existen() {
     assert!(err.contains("no tiene ninguna cuenta creada"), "{err}");
 }
 
-fn installed() -> Vec<(String, String)> {
+fn skill(id: &str, name: &str, author: Option<&str>, registry: Option<&str>) -> InstalledSkill {
+    InstalledSkill {
+        id: id.to_string(),
+        name: name.to_string(),
+        author: author.map(str::to_string),
+        registry_name: registry.map(str::to_string),
+    }
+}
+
+fn installed() -> Vec<InstalledSkill> {
     vec![
-        ("11111111-aaaa".to_string(), "git-helper".to_string()),
-        ("22222222-bbbb".to_string(), "Testing Pro".to_string()),
+        skill("11111111-aaaa", "git-helper", None, None),
+        skill("22222222-bbbb", "Testing Pro", None, None),
     ]
 }
 
@@ -208,4 +219,29 @@ fn un_symlink_que_apunta_a_otro_lado_no_cuenta_como_instalado() {
     assert!(is_installed(&link, Some(&current)));
 
     let _ = std::fs::remove_dir_all(&base);
+}
+
+/// EL bug: dos skills instaladas con el mismo nombre y autores distintos. Quedarse con la
+/// primera que devuelva SQLite le monta a la tab una skill que el usuario no pidió, sin
+/// decir nada. Tiene que fallar y explicar cómo desambiguar.
+#[test]
+fn un_nombre_ambiguo_es_un_error_y_no_una_ruleta() {
+    let dos = vec![
+        skill("aaa", "testing", Some("anthropics"), Some("anthropics/skills")),
+        skill("bbb", "testing", Some("midudev"), Some("autoskills")),
+    ];
+
+    let err = match_skill_ids(&dos, &["testing".to_string()]).unwrap_err();
+    assert!(err.contains("aaa") && err.contains("bbb"), "tiene que listar las dos: {err}");
+    assert!(err.contains("anthropics") && err.contains("midudev"), "y sus autores: {err}");
+
+    // Con el id no hay ambigüedad posible.
+    assert_eq!(match_skill_ids(&dos, &["bbb".to_string()]).unwrap(), vec!["bbb"]);
+}
+
+/// Con una sola instalada con ese nombre no hay nada que preguntar.
+#[test]
+fn un_nombre_sin_homonimas_se_resuelve_derecho() {
+    let una = vec![skill("aaa", "testing", Some("anthropics"), None)];
+    assert_eq!(match_skill_ids(&una, &["TESTING".to_string()]).unwrap(), vec!["aaa"]);
 }

@@ -154,15 +154,33 @@ pub(crate) fn skill_names(args: &Value) -> Option<Vec<String>> {
 
 /// Nombre (o id) → id de skill instalada. Case-insensitive, porque escribir el nombre
 /// exacto de memoria en una terminal es pedir demasiado.
+/// Una skill instalada, con lo que hace falta para distinguirla de otra que se llame
+/// igual: el nombre no alcanza (ver `match_one_skill`).
+pub(crate) struct InstalledSkill {
+    pub id: String,
+    pub name: String,
+    pub author: Option<String>,
+    pub registry_name: Option<String>,
+}
+
 fn resolve_skill_ids(app: &AppHandle, requested: &[String]) -> Result<Vec<String>, String> {
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
 
-    let mut installed: Vec<(String, String)> = Vec::new();
+    let mut installed: Vec<InstalledSkill> = Vec::new();
     {
-        let mut stmt = conn.prepare("SELECT id, name FROM skills").map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id, name, author, registry_name FROM skills")
+            .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .query_map([], |r| {
+                Ok(InstalledSkill {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    author: r.get(2)?,
+                    registry_name: r.get(3)?,
+                })
+            })
             .map_err(|e| e.to_string())?;
         installed.extend(rows.filter_map(|r| r.ok()));
     }
@@ -172,27 +190,59 @@ fn resolve_skill_ids(app: &AppHandle, requested: &[String]) -> Result<Vec<String
 
 /// El emparejamiento en sí, sobre `(id, name)` ya leídos. Separado para poder probarlo.
 pub(crate) fn match_skill_ids(
-    installed: &[(String, String)],
+    installed: &[InstalledSkill],
     requested: &[String],
 ) -> Result<Vec<String>, String> {
-    requested
-        .iter()
-        .map(|wanted| {
-            let needle = wanted.to_lowercase();
-            installed
+    requested.iter().map(|wanted| match_one_skill(installed, wanted)).collect()
+}
+
+/// Resuelve UN nombre (o id) a un id instalado.
+///
+/// Un nombre que corresponde a varias skills es un ERROR, no una elección al azar: dos
+/// skills homónimas pueden ser de autores distintos y hacer cosas distintas, así que
+/// quedarse con la primera que devuelva SQLite le montaría a la tab una que el usuario no
+/// pidió — en silencio. El error dice cuáles son y cómo desambiguar (por id).
+fn match_one_skill(installed: &[InstalledSkill], wanted: &str) -> Result<String, String> {
+    let needle = wanted.to_lowercase();
+
+    // El id es único por definición: si coincide, no hay nada que desambiguar.
+    if let Some(s) = installed.iter().find(|s| s.id.to_lowercase() == needle) {
+        return Ok(s.id.clone());
+    }
+
+    let matches: Vec<&InstalledSkill> =
+        installed.iter().filter(|s| s.name.to_lowercase() == needle).collect();
+
+    match matches.as_slice() {
+        [only] => Ok(only.id.clone()),
+        [] => {
+            let names: Vec<&str> = installed.iter().map(|s| s.name.as_str()).collect();
+            if names.is_empty() {
+                Err(format!("No hay ninguna skill instalada, así que '{wanted}' no existe. Instalá una con 'ccode skill install --skill <nombre>'"))
+            } else {
+                Err(format!("No hay ninguna skill instalada llamada '{wanted}'. Instaladas: {}", names.join(", ")))
+            }
+        }
+        varias => {
+            let detalle: Vec<String> = varias
                 .iter()
-                .find(|(id, name)| id.to_lowercase() == needle || name.to_lowercase() == needle)
-                .map(|(id, _)| id.clone())
-                .ok_or_else(|| {
-                    let names: Vec<&str> = installed.iter().map(|(_, n)| n.as_str()).collect();
-                    if names.is_empty() {
-                        format!("No hay ninguna skill instalada, así que '{wanted}' no existe. Instalá una con 'ccode skill install --skill <nombre>'")
-                    } else {
-                        format!("No hay ninguna skill instalada llamada '{wanted}'. Instaladas: {}", names.join(", "))
-                    }
+                .map(|s| {
+                    let origen = match (&s.author, &s.registry_name) {
+                        (Some(a), Some(r)) => format!("{a}, {r}"),
+                        (Some(a), None) => a.clone(),
+                        (None, Some(r)) => r.clone(),
+                        (None, None) => "instalada a mano".to_string(),
+                    };
+                    format!("{} ({origen})", s.id)
                 })
-        })
-        .collect()
+                .collect();
+            Err(format!(
+                "Hay {} skills instaladas llamadas '{wanted}' y no son la misma. Usá el id: {}",
+                varias.len(),
+                detalle.join(" · ")
+            ))
+        }
+    }
 }
 
 /// Espera a que la TUI deje de escribir por `quiet`, hasta un máximo de `max`.

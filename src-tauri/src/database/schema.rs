@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 7;
+const SCHEMA_VERSION: i32 = 8;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -349,6 +349,21 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     if conn.prepare("SELECT registry_id FROM skills LIMIT 1").is_err() {
         conn.execute("ALTER TABLE skills ADD COLUMN registry_id TEXT", [])?;
         conn.execute("ALTER TABLE skills ADD COLUMN registry_name TEXT", [])?;
+    }
+
+    // De qué ENTRADA del repositorio salió cada skill instalada.
+    //
+    // Hasta acá solo se guardaba el repo, y la unicidad se decidía por nombre. No alcanza:
+    // dos skills pueden llamarse igual y ser de autores distintos, con contenido distinto —
+    // y en skills.sh eso pasa dentro de un MISMO repositorio, porque su directorio lista
+    // skills de muchos publicadores. Con el repo más esta columna la identidad es exacta:
+    // para skills.sh el id de la entrada es `owner/repo/slug`, o sea que ya lleva el autor
+    // adentro; para un repo de GitHub es la ruta de la carpeta, única por construcción.
+    //
+    // Las filas que ya existían quedan en NULL y las vincula `link_orphan_installs` cuando
+    // el repositorio tenga cache, y solo si la coincidencia es inequívoca.
+    if !has_column(conn, "skills", "origin_skill_id") {
+        conn.execute("ALTER TABLE skills ADD COLUMN origin_skill_id TEXT", [])?;
     }
 
     set_user_version(conn, SCHEMA_VERSION)?;

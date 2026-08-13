@@ -18,6 +18,9 @@ export interface MarketplaceSkillEntry {
   registryId: string;
   registryName: string;
   name: string;
+  /** Quién la publica. Es lo único que distingue dos entradas homónimas — que en un
+   *  directorio como skills.sh conviven dentro del mismo "repositorio". */
+  author: string | null;
   description: string | null;
   categories: string[];
   compatibleAgents: string[];

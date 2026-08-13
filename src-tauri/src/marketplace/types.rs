@@ -27,6 +27,13 @@ pub struct MarketplaceSkillEntry {
     pub registry_id: String,
     pub registry_name: String,
     pub name: String,
+    /// Quién la publica. Dos entradas pueden llamarse igual y ser cosas distintas — dentro
+    /// del MISMO repositorio, si ese repositorio es un directorio de publicadores como
+    /// skills.sh. Sin esto la grilla no da forma de saber cuál es cuál.
+    ///
+    /// `default` para que un `cache_json` de una versión anterior siga leyéndose.
+    #[serde(default)]
+    pub author: Option<String>,
     pub description: Option<String>,
     pub categories: Vec<String>,
     pub compatible_agents: Vec<String>,
@@ -107,6 +114,8 @@ pub(super) struct RegistryManifestSkill {
     pub(super) name: Option<String>,
     #[serde(default)]
     pub(super) description: Option<String>,
+    #[serde(default)]
+    pub(super) author: Option<String>,
     pub(super) path: String,
     #[serde(default)]
     pub(super) categories: Vec<String>,

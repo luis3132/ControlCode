@@ -4,7 +4,7 @@
 //! módulo; acá está lo que es común a todas: el CRUD, el cache y a quién delegar.
 
 use crate::database::DbConnection;
-use crate::skills::{install_skill_internal, SkillInfo};
+use crate::skills::{install_skill_internal, SkillInfo, SkillOrigin};
 use rusqlite::params;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -218,6 +218,9 @@ async fn refresh_registry_internal(
                     params![json, now, id],
                 )
                 .map_err(|e| e.to_string())?;
+                // Con el cache fresco se puede intentar vincular las skills instaladas que
+                // todavía no saben de qué entrada salieron (ver `link_orphan_installs`).
+                crate::skills::link_orphan_installs(&conn, id);
             }
             Err(e) => {
                 conn.execute(
@@ -320,19 +323,24 @@ pub async fn install_marketplace_skill(
         (source_type, location, registry_name, entries)
     };
 
-    // La copia global va a parar a la carpeta de este repo, y la fila guarda de dónde vino
-    // para poder mostrar el badge en la lista de skills.
-    let origin = Some((registry_id.as_str(), registry_name.as_str()));
-
     let entry = entries
         .into_iter()
         .find(|e| e.id == skill_id)
         .ok_or_else(|| "Esta skill ya no está en el registry (probá refrescarlo)".to_string())?;
 
+    // La copia global va a parar a la carpeta de este repo, y la fila guarda EXACTAMENTE de
+    // qué entrada salió: el repo solo no identifica nada cuando dos skills homónimas son de
+    // autores distintos (ver `SkillOrigin`).
+    let origin = SkillOrigin {
+        registry_id: registry_id.as_str(),
+        registry_name: registry_name.as_str(),
+        skill_id: entry.id.as_str(),
+    };
+
     match source_type.as_str() {
         "local" => {
             let file = PathBuf::from(&location).join(&entry.folder_path).join("SKILL.md");
-            install_skill_internal(&file.to_string_lossy(), None, origin, &db)
+            install_skill_internal(&file.to_string_lossy(), None, Some(origin), &db)
         }
         "github" => install_from_github(&location, &entry, origin, &db).await,
         "skillssh" => install_from_skillssh(&entry, origin, &db).await,

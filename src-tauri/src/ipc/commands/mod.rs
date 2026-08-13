@@ -15,4 +15,4 @@ pub use dispatch::dispatch;
 #[cfg(test)]
 pub(crate) use agents::{match_account_id, match_preset_id};
 #[cfg(test)]
-pub(crate) use tabs::{init_prompt, match_skill_ids, skill_names};
+pub(crate) use tabs::{init_prompt, match_skill_ids, skill_names, InstalledSkill};

@@ -463,6 +463,7 @@ pub fn check_symlinks_health(
 
             if let Some(issue) = issue {
                 issues.push(SymlinkHealthEntry {
+                    skill_id: skill.id.clone(),
                     skill_name: skill.name.clone(),
                     tab_id,
                     tab_title: title,

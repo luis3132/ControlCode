@@ -109,12 +109,29 @@ export function MissingSkillsDialog({
                       : "text-amber-600 dark:text-amber-400"}`}>
                     {s.name}
                   </span>
-                  <span className="text-[11px] text-gray-400 dark:text-gray-500">
-                    {isPresent
+                  {/* Se distingue la copia EXACTA de una homónima: reabrir con la skill de
+                      otro autor no es reabrir la sesión que se cerró, y el usuario tiene
+                      que enterarse antes y no después. */}
+                  <span
+                    className={`text-[11px] ${
+                      s.substituted || s.ambiguous
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-gray-400 dark:text-gray-500"
+                    }`}
+                  >
+                    {isRestored
                       ? t("sessions.missingSkills.present")
-                      : s.availableFrom
-                        ? t("sessions.missingSkills.availableIn", { registry: s.availableFrom.registryName })
-                        : t("sessions.missingSkills.notFound")}
+                      : s.substituted
+                        ? t("sessions.missingSkills.substituted")
+                        : s.ambiguous
+                          ? t("sessions.missingSkills.ambiguous")
+                          : isPresent
+                            ? t("sessions.missingSkills.present")
+                            : s.availableFrom
+                              ? t("sessions.missingSkills.availableIn", {
+                                  registry: s.availableFrom.registryName,
+                                })
+                              : t("sessions.missingSkills.notFound")}
                   </span>
                 </div>
 
