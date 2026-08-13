@@ -4,6 +4,8 @@
   "btn.home": "Home",
   "btn.browse": "Browse",
   "btn.add": "Add",
+  "btn.edit": "Edit",
+  "btn.delete": "Delete",
   "btn.cancel": "Cancel",
   "btn.next": "Next →",
   "btn.back": "← Back",

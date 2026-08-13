@@ -7,9 +7,8 @@ import { SkillPickerStep } from "@/features/tabs/wizard/SkillPickerStep";
 import { AccountPickerStep } from "@/features/tabs/wizard/AccountPickerStep";
 import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
-import { useTabsStore } from "@/features/tabs/store";
 import type { AgentInfo } from "@/features/tabs/types";
-import { useAgentsStore } from "@/features/agents/store";
+import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
 
 type Step = "folder" | "agent" | "skills";
 
@@ -29,8 +28,6 @@ interface NewTabWizardProps {
 
 export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) {
   const { t } = useTranslation();
-  const detectedAgents = useTabsStore((s) => s.detectedAgents);
-  const customAgents = useAgentsStore((s) => s.customAgents);
   const [step, setStep] = useState<Step>("folder");
   const [selectedCwd, setSelectedCwd] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
@@ -38,16 +35,7 @@ export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) 
   const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>();
   const [prelaunch, setPrelaunch] = useState<PrelaunchStep[]>([]);
 
-  const allAgents: AgentInfo[] = [
-    ...detectedAgents,
-    ...customAgents.map((ca) => ({
-      id: ca.id,
-      label: ca.label,
-      command: ca.command,
-      available: true,
-      isCustom: true,
-    })),
-  ];
+  const allAgents = useAvailableAgents();
 
   const reset = () => {
     setStep("folder");

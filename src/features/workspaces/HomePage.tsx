@@ -7,7 +7,6 @@ import { FolderIcon, HomeIcon, ArrowRightIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 import { useTabsStore } from "@/features/tabs/store";
 import type { AgentInfo } from "@/features/tabs/types";
-import { useAgentsStore } from "@/features/agents/store";
 import { useWorkspacesStore } from "@/features/workspaces/store";
 import type { WorkspaceSummary } from "@/features/workspaces/types";
 import { WorkspaceList } from "@/features/workspaces/WorkspaceList";
@@ -20,14 +19,13 @@ import { AccountPickerStep } from "@/features/tabs/wizard/AccountPickerStep";
 import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { homeDir } from "@/shared/ipc/window";
+import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
 
 export function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const addTab = useTabsStore((s) => s.addTab);
-  const detectedAgents = useTabsStore((s) => s.detectedAgents);
   const workspaceId = useTabsStore((s) => s.workspaceId);
-  const customAgents = useAgentsStore((s) => s.customAgents);
   const workspaces = useWorkspacesStore((s) => s.workspaces);
   const loadWorkspaces = useWorkspacesStore((s) => s.loadWorkspaces);
   const focusIfOpen = useWorkspacesStore((s) => s.focusIfOpen);
@@ -49,13 +47,7 @@ export function HomePage() {
     return () => { unlisten.then((fn) => fn()); };
   }, [loadWorkspaces]);
 
-  const allAgents: AgentInfo[] = [
-    ...detectedAgents,
-    ...customAgents.map((ca) => ({
-      id: ca.id, label: ca.label, command: ca.command,
-      available: true, isCustom: true,
-    })),
-  ].filter((a) => a.available);
+  const allAgents = useAvailableAgents();
 
   const canOpen = selectedCwd.trim() !== "" && selectedAgent !== null;
 
