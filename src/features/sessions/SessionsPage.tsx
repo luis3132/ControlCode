@@ -10,13 +10,13 @@ import { PageHeader } from "@/shared/ui/PageHeader";
 import { MissingSkillsDialog } from "@/features/sessions/MissingSkillsDialog";
 import { ResumeOptionsDialog } from "@/features/sessions/ResumeOptionsDialog";
 import { SessionRow } from "@/features/sessions/SessionRow";
+import { SessionFilters } from "@/features/sessions/SessionFilters";
 import {
   EMPTY_FILTERS,
-  SessionFilterState,
-  SessionFilters,
   filterSessions,
   hasActiveFilters,
-} from "@/features/sessions/SessionFilters";
+  type SessionFilterState,
+} from "@/features/sessions/filters";
 import { useResumeSession } from "./useResumeSession";
 
 export function SessionsPage() {

@@ -22,6 +22,14 @@ export default defineConfig(async () => ({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
 
+  // Los tests corren en Node: lo que se prueba es lógica pura (el parser de flags, los
+  // filtros, los reducers del store), no componentes montados — para eso haría falta un
+  // DOM y no es lo que estos tests cubren.
+  test: {
+    environment: "node",
+    include: ["src/**/tests/*.test.ts"],
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
