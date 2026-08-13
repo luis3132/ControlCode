@@ -387,5 +387,10 @@
   "skills.detail.saveAsCopy": "Save as local copy",
   "skills.detail.fromRegistryNote": "This skill came from {{registry}}. Saving creates your own copy and leaves the original untouched, still receiving repository updates.",
   "skills.builder.section.details": "Details",
-  "skills.builder.bodyHint": "What the agent reads when it uses this skill"
+  "skills.builder.bodyHint": "What the agent reads when it uses this skill",
+  "shortcuts.nextTab": "Next tab",
+  "shortcuts.prevTab": "Previous tab",
+  "settings.shortcuts": "Keyboard shortcuts",
+  "settings.shortcuts.desc": "Move around without leaving the keyboard. A section's shortcut also takes you back to the terminal when you're already there.",
+  "settings.shortcuts.terminalNote": "These are handled before the terminal, so inside an agent they stop working as editing keys: Ctrl+M was Enter, Ctrl+H was Backspace, and Ctrl+E and Ctrl+K moved the cursor. Enter and Backspace have their own keys and still work."
 }

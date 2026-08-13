@@ -30,6 +30,13 @@ import {
 } from "@/features/workspaces/ipc";
 import { closeAndForgetWindow, openNewWindow } from "@/shared/ipc/window";
 import { newWindowWorkspaceKey } from "@/features/tabs/transfer";
+import { shortcutForPath } from "@/app/shortcuts";
+
+/** "Marketplace · Ctrl+M". El tooltip es donde se entera alguien de que el atajo existe. */
+function withShortcut(label: string, path: string): string {
+  const hint = shortcutForPath(path);
+  return hint ? `${label} · ${hint}` : label;
+}
 
 const NAV_ITEMS = [
   { id: "home", Icon: HomeIcon, labelKey: "sidebar.home", path: "/" },
@@ -201,7 +208,7 @@ export function TopBar() {
               <Button
                 key={id}
                 variant="nav"
-                title={t(labelKey)}
+                title={withShortcut(t(labelKey), path)}
                 disabled={isDisabled}
                 onClick={() => path && navigate(path)}
                 className={`
@@ -241,7 +248,7 @@ export function TopBar() {
             <Button
               variant="icon"
               size="sm"
-              title={t("sidebar.settings")}
+              title={withShortcut(t("sidebar.settings"), "/settings")}
               onClick={() => navigate("/settings")}
               className={
                 location.pathname === "/settings"
