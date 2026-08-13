@@ -18,10 +18,13 @@ import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { accountEnv as accountEnvFor } from "@/features/accounts/ipc";
 import { resolvePrelaunch } from "@/features/prelaunch/ipc";
-import { discoverSessionId } from "@/features/sessions/ipc";
 import { reconcileTabSkills } from "@/features/skills/ipc";
 import { homeDir } from "@/shared/ipc/window";
 import { ptyAttach, ptyCreate, ptyKill, ptyResize, ptyWrite } from "./ipc";
+import { createFitter } from "./fit";
+import { StatusBadge, type TerminalStatus } from "./StatusBadge";
+import { LOOKBACK_S, startSessionDiscovery } from "./sessionDiscovery";
+import { MARK_LINE, MIN_CONTRAST, TERMINAL_THEMES } from "./theme";
 
 interface TerminalProps {
   /** Id de la tab en el store — solo se usa para esperar (si aplica) a que sus symlinks
@@ -59,122 +62,6 @@ interface TerminalProps {
   onSessionDiscovered?: (sessionId: string) => void;
 }
 
-// El agente puede tardar en escribir su primer log (p. ej. hasta el primer mensaje
-// del usuario), así que no basta con probar solo los primeros segundos tras lanzarla.
-// Pero cada intento sale a disco: codex/gemini-cli/kimi-code leen la metadata de las
-// sesiones candidatas y opencode levanta un proceso (~0.9s). Repetir eso cada 3s
-// indefinidamente durante toda la vida de una tab que jamás llega a resolverse (agente
-// sin sesión, cwd sin permisos, etc.) es I/O desperdiciado sin límite. Se usa backoff
-// hasta un techo y un número acotado de intentos en vez de un intervalo fijo infinito.
-const SESSION_DISCOVERY_INITIAL_MS = 3000;
-const SESSION_DISCOVERY_MAX_INTERVAL_MS = 30_000;
-const SESSION_DISCOVERY_MAX_ATTEMPTS = 60; // con backoff, cubre ~35 minutos antes de rendirse
-// Margen de seguridad: los timestamps de archivo tienen resolución de 1s y puede haber
-// un pequeño desfase entre este reloj y el de pty_create.
-const SESSION_DISCOVERY_LOOKBACK_S = 3;
-
-/**
- * Paletas de la terminal, una por tema. Son GitHub Dark y GitHub Light: el resto de la app
- * ya venía con la oscura, y usar el par oficial mantiene los 16 colores ANSI coherentes
- * entre sí en vez de aclarar la oscura a ojo (que deja los colores brillantes ilegibles
- * sobre blanco — un amarillo #e3b341 sobre fondo claro no se lee).
- */
-const TERMINAL_THEMES = {
-  dark: {
-    background: "#0d1117",
-    foreground: "#e6edf3",
-    cursor: "#58a6ff",
-    selectionBackground: "#388bfd40",
-    black: "#0d1117",
-    brightBlack: "#6e7681",
-    red: "#ff7b72",
-    brightRed: "#ffa198",
-    green: "#3fb950",
-    brightGreen: "#56d364",
-    yellow: "#d29922",
-    brightYellow: "#e3b341",
-    blue: "#388bfd",
-    brightBlue: "#79c0ff",
-    magenta: "#bc8cff",
-    brightMagenta: "#d2a8ff",
-    cyan: "#39c5cf",
-    brightCyan: "#56d4dd",
-    white: "#b1bac4",
-    brightWhite: "#f0f6fc",
-    // La barra de scroll de xterm por defecto es el color del texto al 20% — sobre este
-    // fondo, indistinguible. Estos valores la hacen visible sin que compita con el
-    // contenido, y suben al agarrarla para dar respuesta al arrastre.
-    scrollbarSliderBackground: "rgba(230, 237, 243, 0.30)",
-    scrollbarSliderHoverBackground: "rgba(230, 237, 243, 0.45)",
-    scrollbarSliderActiveBackground: "rgba(230, 237, 243, 0.60)",
-  },
-  light: {
-    // Gris, no blanco puro. El blanco a pantalla completa es agresivo en una superficie que
-    // se mira durante horas, y deja sin margen los tonos claros. Es exactamente el
-    // `bg-gray-100` que ya usa el panel que la contiene (ver TerminalPanel), así que la
-    // terminal se integra con la app en vez de recortarse como un rectángulo blanco.
-    background: "#f3f4f6",
-    foreground: "#1f2328",
-    cursor: "#0550ae",
-    selectionBackground: "#0969da33",
-    // Cada color cumple contraste sobre el fondo POR SÍ MISMO, conservando su tono. Esto
-    // evita pedirle a xterm que corrija el contraste en caliente: esa corrección, para
-    // llegar al ratio, arrastra el color hacia el negro y le borra el matiz — todo
-    // terminaba viéndose gris.
-    //
-    // Elegidos maximizando SATURACIÓN, no oscuridad. Es la diferencia entre un tema claro
-    // que se ve apagado y uno que se ve vivo: para ganar contraste sobre un fondo claro se
-    // puede bajar la luminosidad (que lava el color) o subir el croma (que lo mantiene). Un
-    // `#00792c` al 100% de saturación y un `#0a7d2e` al 85% contrastan casi igual, pero el
-    // primero se lee como verde de verdad.
-    //
-    // Las variantes `bright` van más OSCURAS que las normales, no más claras: sobre fondo
-    // claro, "más destacado" es más oscuro. Al revés se irían hacia el blanco y volverían
-    // al problema original.
-    black: "#24292e",
-    brightBlack: "#57606a",
-    red: "#d10d1f",
-    brightRed: "#a4071c",
-    green: "#00792c",
-    brightGreen: "#04591f",
-    yellow: "#b45309",
-    brightYellow: "#8a3d00",
-    blue: "#0969da",
-    brightBlue: "#0546b8",
-    magenta: "#7c3aed",
-    brightMagenta: "#5f21c9",
-    cyan: "#0e7490",
-    brightCyan: "#0a5568",
-    // La familia "white" va OSCURA a propósito. En la semántica de terminal, `white` y
-    // `brightWhite` son "el texto normal / el destacado": pensados para fondo negro. Si se
-    // dejan como grises claros (que es lo que trae GitHub Light), sobre fondo blanco
-    // desaparecen — y es justo lo que más usan los agentes para su texto principal.
-    white: "#4a5058",
-    brightWhite: "#24292f",
-    scrollbarSliderBackground: "rgba(31, 35, 40, 0.28)",
-    scrollbarSliderHoverBackground: "rgba(31, 35, 40, 0.42)",
-    scrollbarSliderActiveBackground: "rgba(31, 35, 40, 0.55)",
-  },
-} as const;
-
-/**
- * Piso de contraste que xterm corrige en caliente, contra el fondo real de cada celda.
- *
- * Deliberadamente BAJO (2, no el 4.5 de WCAG AA). Con 4.5, para alcanzar el ratio xterm
- * arrastra el color hacia el negro y le borra el tono: los rojos, verdes y azules
- * terminaban viéndose todos gris oscuro. Como la paleta clara de acá ya cumple ~4.5 por su
- * cuenta, un piso de 2 no llega a activarse nunca para un color normal — solo entra donde
- * la paleta no puede llegar: el texto atenuado (SGR 2), que xterm dibuja mezclando hacia el
- * fondo y en tema claro queda casi invisible, y los pares fondo/texto que impone el propio
- * programa.
- *
- * En oscuro queda apagado (1): esa paleta ya se veía bien y no hay nada que corregir.
- */
-const MIN_CONTRAST = { dark: 1, light: 2 } as const;
-
-/** Color de las líneas de corte (ver `terminalMarks`). Tenue a propósito: separa sin
- *  competir con el contenido, que es lo que se está leyendo. */
-const MARK_LINE = { dark: "rgba(88, 166, 255, 0.35)", light: "rgba(9, 105, 218, 0.28)" } as const;
 
 /** Une los mapas de entorno, o `null` si no hay ninguno — que es lo que espera `pty_create`
  *  para "no agregues nada". Un `{}` funcionaría igual, pero `null` deja el intent explícito
@@ -207,7 +94,7 @@ export function Terminal({
   const ptyIdRef = useRef<number | null>(null);
   const termRef = useRef<XTerm | null>(null);
   const { t } = useTranslation();
-  const [status, setStatus] = useState<"connecting" | "running" | "exited">("connecting");
+  const [status, setStatus] = useState<TerminalStatus>("connecting");
   const { theme } = useTheme();
   const isDark = theme === "dark";
   // El efecto de montaje corre una sola vez (`[]`) y no debe re-crear la terminal al
@@ -263,58 +150,13 @@ export function Terminal({
       ? installInputMarks(term, { line: MARK_LINE[themeRef.current] })
       : () => {};
 
-    // Mide cols/rows reales ANTES de spawnear el proceso (ver pty_create en Rust: el
-    // PTY nace con este tamaño, no con uno fijo que se corrige después).
-    //
-    // - `document.fonts.ready`: si fit() mide con la fuente de fallback (porque
-    //   "Cascadia Code"/"JetBrains Mono"/"Fira Code" todavía no cargó), calcula cols/rows
-    //   para celdas de un tamaño que no es el real — al terminar de cargar la fuente, el
-    //   contenido real desborda o queda recortado por el `overflow: hidden` del
-    //   contenedor (el "overflow"/márgenes raros reportados).
-    // - Doble rAF: el primero solo garantiza que el layout se pintó una vez; fit() antes
-    //   de eso puede medir un contenedor todavía en 0×0 (tab recién creada).
-    // `fit()` divide el alto disponible por el alto de celda *teórico* y redondea hacia
-    // abajo. Pero lo que el motor rasteriza no siempre mide eso: con escalado fraccionario
-    // (Wayland al 125%/150%) cada fila se redondea a píxeles de dispositivo y el error se
-    // acumula, así que las N filas calculadas terminan ocupando unos píxeles MÁS que el
-    // contenedor — y la última queda cortada contra el borde inferior.
-    //
-    // En vez de intentar predecir ese redondeo, se mide lo que realmente quedó pintado y,
-    // si desborda, se saca una fila. El medio píxel de tolerancia evita que el ruido de
-    // subpíxel dispare una corrección donde entra justo.
-    const trimOverflowingRow = () => {
-      const el = containerRef.current;
-      const screen = el?.querySelector<HTMLElement>(".xterm-screen");
-      if (!el || !screen) return;
-      const style = getComputedStyle(el);
-      const available =
-        el.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-      if (screen.getBoundingClientRect().height > available + 0.5 && term.rows > 1) {
-        term.resize(term.cols, term.rows - 1);
-      }
-    };
-
-    const fitAndTrim = () => {
-      try {
-        fitAddon.fit();
-        trimOverflowingRow();
-      } catch {
-        // ignorar si el terminal fue dispose()d
-      }
-    };
-
-    const fitOnce = async () => {
-      await document.fonts.ready.catch(() => {});
-      await new Promise(requestAnimationFrame);
-      await new Promise(requestAnimationFrame);
-      fitAndTrim();
-    };
+    // Ajuste de la grilla al contenedor real (ver `fit.ts`: el PTY nace con este tamaño).
+    const { fit: fitAndTrim, fitOnce } = createFitter(term, fitAddon, () => containerRef.current);
 
     // ── 2. Crear la sesión PTY en Rust ───────────────────────
     let unlistenData: UnlistenFn | null = null;
     let unlistenExit: UnlistenFn | null = null;
-    let discoveryTimer: ReturnType<typeof setTimeout> | null = null;
-    let discoveryAttempts = 0;
+    let stopDiscovery: (() => void) | null = null;
     let cancelled = false;
 
     const pollSessionId = (resolvedCwd: string, startedAfter: number) => {
@@ -323,36 +165,16 @@ export function Terminal({
       // levantar un proceso que abre su base de datos entera).
       if (knownSessionId) return;
 
-      const attempt = async () => {
-        if (cancelled) return;
-        discoveryAttempts += 1;
-        try {
-          const found = await discoverSessionId({
-            agentId,
-            cwd: resolvedCwd,
-            startedAfter,
-            // Con una cuenta alternativa los transcripts viven en SU carpeta, no en la del
-            // sistema: sin esto no se encontraría ninguna sesión y la tab se quedaría para
-            // siempre sin título ni posibilidad de reanudar.
-            accountId: accountId ?? null,
-          });
-          if (found) {
-            onSessionDiscovered(found);
-            return;
-          }
-        } catch {
-          // ignorar, se reintenta
-        }
-        if (!cancelled && discoveryAttempts < SESSION_DISCOVERY_MAX_ATTEMPTS) {
-          const delay = Math.min(
-            SESSION_DISCOVERY_INITIAL_MS * 2 ** Math.floor(discoveryAttempts / 3),
-            SESSION_DISCOVERY_MAX_INTERVAL_MS
-          );
-          discoveryTimer = setTimeout(attempt, delay);
-        }
-      };
-
-      discoveryTimer = setTimeout(attempt, SESSION_DISCOVERY_INITIAL_MS);
+      stopDiscovery = startSessionDiscovery({
+        agentId,
+        cwd: resolvedCwd,
+        startedAfter,
+        // Con una cuenta alternativa los transcripts viven en SU carpeta, no en la del
+        // sistema: sin esto no se encontraría ninguna sesión y la tab se quedaría para
+        // siempre sin título ni posibilidad de reanudar.
+        accountId: accountId ?? null,
+        onFound: onSessionDiscovered,
+      });
     };
 
     const attachListeners = async (ptyId: number) => {
@@ -435,7 +257,7 @@ export function Terminal({
         if (cancelled) return;
 
         const resolvedCwd: string = cwd ?? (await homeDir());
-        const startedAfter = Math.floor(Date.now() / 1000) - SESSION_DISCOVERY_LOOKBACK_S;
+        const startedAfter = Math.floor(Date.now() / 1000) - LOOKBACK_S;
 
         // Si esta tab corre con una cuenta alternativa, sus variables se piden ahora: la
         // cuenta pudo renombrarse o mudarse desde que la tab se guardó, y lo que importa es
@@ -534,7 +356,7 @@ export function Terminal({
     // ── 7. Cleanup ───────────────────────────────────────────
     return () => {
       cancelled = true;
-      if (discoveryTimer) clearTimeout(discoveryTimer);
+      stopDiscovery?.();
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeObserver.disconnect();
       disposeCapabilities();
@@ -578,33 +400,7 @@ export function Terminal({
 
   return (
     <div className="relative flex flex-col h-full w-full">
-      {/* Status badge. Flota sobre la terminal, así que sigue su paleta y no la de la app:
-          en modo claro un recuadro negro acá se leería como un artefacto pegado encima. */}
-      <div
-        className={`absolute top-2 right-2 z-10 flex items-center gap-2 px-2 py-1 rounded-lg
-          text-xs font-mono border
-          ${isDark
-            ? "bg-slate-900 border-slate-700"
-            : "bg-white/90 border-gray-200 shadow-sm"}`}
-      >
-        <span
-          className="w-1.5 h-1.5"
-          style={{
-            borderRadius: "50%",
-            background:
-              status === "running"
-                ? "#34d399"
-                : status === "connecting"
-                ? "#fbbf24"
-                : "#f87171",
-          }}
-        />
-        <span className={isDark ? "text-white/80" : "text-gray-600"}>
-          {status === "running"
-            ? command
-            : t(`terminal.status.${status}` as "terminal.status.connecting" | "terminal.status.exited")}
-        </span>
-      </div>
+      <StatusBadge status={status} command={command} isDark={isDark} />
 
       {/* Contenedor de xterm.
           Sin `height: 100%`: con `flex: 1` dentro de un padre `flex-col` ya recibe el alto

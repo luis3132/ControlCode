@@ -20,6 +20,7 @@ import { useWorkspacesStore } from "@/features/workspaces/store";
 import { SaveWorkspaceDialog } from "@/features/workspaces/SaveWorkspaceDialog";
 import { ResetDefaultDialog } from "@/features/workspaces/ResetDefaultDialog";
 import { ExitConfirmDialog } from "@/app/ExitConfirmDialog";
+import { WindowControls } from "@/app/WindowControls";
 import { OrchestratorIndicator } from "@/features/orchestrator/OrchestratorIndicator";
 import {
   closeWorkspaceWindows,
@@ -37,41 +38,10 @@ const NAV_ITEMS = [
 ] as const;
 
 // Iconos SVG para los controles de ventana
-function MinimizeIcon() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-      <line x1="1" y1="5.5" x2="10" y2="5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function MaximizeIcon({ isMaximized }: { isMaximized: boolean }) {
-  return isMaximized ? (
-    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-      <rect x="3" y="1" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.2" />
-      <path d="M1 4v5a1 1 0 0 0 1 1h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-    </svg>
-  ) : (
-    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-      <rect x="1" y="1" width="9" height="9" rx="1.2" stroke="currentColor" strokeWidth="1.2" />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-      <line x1="1.5" y1="1.5" x2="9.5" y2="9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <line x1="9.5" y1="1.5" x2="1.5" y2="9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 export function TopBar() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const [isMaximized, setIsMaximized] = useState(false);
   const [showSaveWorkspace, setShowSaveWorkspace] = useState(false);
   const [exitWindowCount, setExitWindowCount] = useState<number | null>(null);
   const [workspaceWindowCount, setWorkspaceWindowCount] = useState(1);
@@ -157,19 +127,6 @@ export function TopBar() {
     }
   };
 
-  useEffect(() => {
-    const win = getCurrentWindow();
-    win.isMaximized().then(setIsMaximized);
-
-    let unlisten: (() => void) | undefined;
-    win.onResized(async () => {
-      setIsMaximized(await win.isMaximized());
-    }).then((fn) => { unlisten = fn; });
-
-    return () => { unlisten?.(); };
-  }, []);
-
-  const win = getCurrentWindow();
 
   return (
     <>
@@ -296,47 +253,10 @@ export function TopBar() {
           {/* Separador */}
           <div className="w-px h-5 bg-gray-200 dark:bg-white/10 mx-1" data-tauri-drag-region="false" />
 
-          {/* Controles de ventana */}
-          <div className="flex items-center" data-tauri-drag-region="false">
-            <button
-              onClick={() => win.minimize()}
-              title="Minimizar"
-              className="flex items-center justify-center w-9 h-11
-            text-gray-400 dark:text-gray-500
-            hover:bg-gray-100 dark:hover:bg-white/10
-            hover:text-gray-700 dark:hover:text-white
-            transition-colors duration-150"
-            >
-              <MinimizeIcon />
-            </button>
-            <button
-              onClick={() => win.toggleMaximize()}
-              title={isMaximized ? "Restaurar" : "Maximizar"}
-              className="flex items-center justify-center w-9 h-11
-            text-gray-400 dark:text-gray-500
-            hover:bg-gray-100 dark:hover:bg-white/10
-            hover:text-gray-700 dark:hover:text-white
-            transition-colors duration-150"
-            >
-              <MaximizeIcon isMaximized={isMaximized} />
-            </button>
-            <button
-              onClick={handleCloseClick}
-              // El tooltip delata que el click va a preguntar en vez de cerrar de una,
-              // y refleja en vivo cuántas ventanas tiene el workspace ahora mismo.
-              title={
-                workspaceWindowCount > 1
-                  ? t("workspace.close.choose", { count: workspaceWindowCount })
-                  : t("workspace.close.window")
-              }
-              className="flex items-center justify-center w-9 h-11 rounded-tr-none
-            text-gray-400 dark:text-gray-500
-            hover:bg-red-500 hover:text-white
-            transition-colors duration-150"
-            >
-              <CloseIcon />
-            </button>
-          </div>
+          <WindowControls
+            workspaceWindowCount={workspaceWindowCount}
+            onClose={handleCloseClick}
+          />
         </div>
       </header>
 
