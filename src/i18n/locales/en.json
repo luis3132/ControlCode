@@ -370,7 +370,7 @@
   "marketplace.skillsShNeedsQuery": "skills.sh is searched along with your repositories, but its catalogue can't be listed: until you type something it shows 0 no matter how often you refresh.",
   "skills.builder.new": "Create skill",
   "skills.builder.title": "Create your own skill",
-  "skills.builder.subtitle": "It is saved as a local skill: it is yours and no update overwrites it.",
+  "skills.builder.subtitle": "Saved as a local skill: it is yours and no update overwrites it.",
   "skills.builder.name": "Name",
   "skills.builder.namePlaceholder": "my-skill",
   "skills.builder.nameHelper": "This is how the agent will refer to it. Lowercase with dashes works best.",
@@ -382,8 +382,10 @@
   "skills.builder.agentsHelper": "With none selected, the skill applies to all of them.",
   "skills.builder.body": "Instructions",
   "skills.builder.bodyPlaceholder": "# How to work on this project\n\nWrite here what the agent needs to know.",
-  "skills.builder.create": "Create",
+  "skills.builder.create": "Create skill",
   "skills.detail.name": "Name",
   "skills.detail.saveAsCopy": "Save as local copy",
-  "skills.detail.fromRegistryNote": "This skill came from {{registry}}. Saving creates your own copy and leaves the original untouched, still receiving repository updates."
+  "skills.detail.fromRegistryNote": "This skill came from {{registry}}. Saving creates your own copy and leaves the original untouched, still receiving repository updates.",
+  "skills.builder.section.details": "Details",
+  "skills.builder.bodyHint": "What the agent reads when it uses this skill"
 }

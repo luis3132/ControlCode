@@ -382,8 +382,10 @@
   "skills.builder.agentsHelper": "Sin ninguna elegida, la skill aplica a todas.",
   "skills.builder.body": "Instrucciones",
   "skills.builder.bodyPlaceholder": "# Cómo trabajar en este proyecto\n\nEscribí acá lo que el agente tiene que saber.",
-  "skills.builder.create": "Crear",
+  "skills.builder.create": "Crear skill",
   "skills.detail.name": "Nombre",
   "skills.detail.saveAsCopy": "Guardar como copia local",
-  "skills.detail.fromRegistryNote": "Esta skill vino de {{registry}}. Al guardarla se crea una copia tuya y la original queda intacta, recibiendo las actualizaciones del repositorio."
+  "skills.detail.fromRegistryNote": "Esta skill vino de {{registry}}. Al guardarla se crea una copia tuya y la original queda intacta, recibiendo las actualizaciones del repositorio.",
+  "skills.builder.section.details": "La ficha",
+  "skills.builder.bodyHint": "Lo que el agente lee cuando la usa"
 }
