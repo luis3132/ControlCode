@@ -93,7 +93,7 @@ fn append_to_buffer(id: u32, chunk: &[u8]) {
 /// fuera del entorno pedido es peor que no arrancar, y el error del shell queda escrito en
 /// la terminal para que se vea qué pasó.
 #[cfg(unix)]
-fn launch_script(command: &str, prelaunch: &[String]) -> String {
+pub(super) fn launch_script(command: &str, prelaunch: &[String]) -> String {
     format!("{} && exec {command}", prelaunch.join(" && "))
 }
 
@@ -102,8 +102,45 @@ fn launch_script(command: &str, prelaunch: &[String]) -> String {
 /// tab tiene que llevarse al árbol entero — de eso se encarga el Job Object de
 /// `containment`, sin el cual esta feature dejaría procesos huérfanos en cada cierre.
 #[cfg(windows)]
-fn launch_script(command: &str, prelaunch: &[String]) -> String {
+pub(super) fn launch_script(command: &str, prelaunch: &[String]) -> String {
     format!("{} && {command}", prelaunch.join(" && "))
+}
+
+/// Parte un comando en programa + argumentos respetando comillas.
+///
+/// `split_whitespace` a secas rompía dos casos reales: una TUI custom instalada en una
+/// ruta con espacios (`/home/u/mis tools/agente`) y cualquier flag con un valor
+/// entrecomillado (`--system-prompt "hola mundo"`), que llegaba partido en pedazos.
+/// No pretende ser un shell: resuelve comillas simples y dobles, que es lo que se escribe
+/// en el campo de comando de un agente.
+pub(super) fn split_command(command: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut actual = String::new();
+    let mut abierta: Option<char> = None;
+    let mut hubo_comillas = false;
+
+    for c in command.chars() {
+        match abierta {
+            Some(q) if c == q => abierta = None,
+            Some(_) => actual.push(c),
+            None if c == '\'' || c == '"' => {
+                abierta = Some(c);
+                // `--flag=""` tiene que producir un argumento vacío, no ninguno.
+                hubo_comillas = true;
+            }
+            None if c.is_whitespace() => {
+                if !actual.is_empty() || hubo_comillas {
+                    out.push(std::mem::take(&mut actual));
+                    hubo_comillas = false;
+                }
+            }
+            None => actual.push(c),
+        }
+    }
+    if !actual.is_empty() || hubo_comillas {
+        out.push(actual);
+    }
+    out
 }
 
 /// Arma el proceso a lanzar.
@@ -112,9 +149,10 @@ fn launch_script(command: &str, prelaunch: &[String]) -> String {
 /// sin ningún intermediario. Con pre-comandos hay que delegar en un shell, porque
 /// `conda activate` y compañía son funciones de shell y no programas: ejecutadas en un
 /// proceso aparte, su efecto muere con él (ver el módulo `prelaunch`).
-fn build_launch(command: &str, prelaunch: &[String]) -> CommandBuilder {
+pub(super) fn build_launch(command: &str, prelaunch: &[String]) -> CommandBuilder {
     if prelaunch.is_empty() {
-        let mut parts = command.split_whitespace();
+        let parts = split_command(command);
+        let mut parts = parts.iter().map(String::as_str);
         let program = parts.next().unwrap_or(command);
         let mut cmd = CommandBuilder::new(program);
         for arg in parts {
@@ -357,76 +395,4 @@ pub fn kill_all_sessions() {
         let _ = session.killer.wait();
     }
     buffers().clear();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::launch_script;
-
-    #[test]
-    fn un_solo_paso_precede_al_agente() {
-        let script = launch_script("claude", &["conda activate ml".into()]);
-        assert!(script.starts_with("conda activate ml && "), "{script}");
-        assert!(script.ends_with("claude"), "{script}");
-    }
-
-    #[test]
-    fn los_pasos_conservan_el_orden() {
-        // El orden es semántico: `nvm use` tiene que correr antes de nada que dependa de
-        // npm, y el venv antes de un export que use una ruta suya.
-        let script = launch_script(
-            "codex",
-            &["nvm use 18".into(), "source .venv/bin/activate".into()],
-        );
-        let nvm = script.find("nvm use 18").unwrap();
-        let venv = script.find("source .venv").unwrap();
-        let agente = script.find("codex").unwrap();
-        assert!(nvm < venv && venv < agente, "{script}");
-    }
-
-    #[test]
-    fn los_pasos_se_encadenan_con_and_para_que_un_fallo_no_lance_el_agente() {
-        let script = launch_script("claude", &["a".into(), "b".into()]);
-        assert_eq!(script.matches("&&").count(), 2, "{script}");
-        assert!(!script.contains(';'), "un `;` dejaría arrancar el agente igual: {script}");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn en_unix_el_agente_reemplaza_al_shell() {
-        // Sin `exec` el shell quedaría de padre y `pty_kill` apuntaría a él en vez de al
-        // agente.
-        assert!(launch_script("claude", &["x".into()]).contains("&& exec claude"));
-    }
-
-    #[test]
-    fn el_comando_de_reanudacion_llega_entero() {
-        // El `--resume <id>` lo arma el frontend antes de llegar acá; el envoltorio no
-        // puede partirlo.
-        let script = launch_script("claude --resume abc-123", &["nvm use".into()]);
-        assert!(script.ends_with("claude --resume abc-123"), "{script}");
-    }
-
-    /// Sin pre-comandos el spawn tiene que quedar IDÉNTICO al de siempre: nada de shells
-    /// de por medio. Es la garantía de que esta feature no puede romper a quien no la usa.
-    #[test]
-    fn sin_pasos_se_lanza_el_binario_directo_sin_shell() {
-        let cmd = super::build_launch("claude --resume abc", &[]);
-        let argv: Vec<String> =
-            cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
-        assert_eq!(argv, vec!["claude", "--resume", "abc"]);
-    }
-
-    /// Con pre-comandos, el comando entero viaja como UN argumento del shell. Eso también
-    /// hace que el `split_whitespace` de arriba no llegue a partirlo.
-    #[test]
-    fn con_pasos_el_comando_viaja_entero_como_argumento_del_shell() {
-        let cmd = super::build_launch("claude --resume abc", &["nvm use".into()]);
-        let argv: Vec<String> =
-            cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
-        let script = argv.last().expect("el script va último");
-        assert!(script.contains("nvm use"), "{script}");
-        assert!(script.ends_with("claude --resume abc"), "{script}");
-        assert!(argv.len() >= 2, "tendría que haber flags de shell antes del script: {argv:?}");
-    }
 }

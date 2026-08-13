@@ -54,7 +54,7 @@ fn source_binary() -> Option<PathBuf> {
 /// Directorio donde se instala. Se elige uno del usuario a propósito: `/usr/local/bin`
 /// pediría sudo en macOS moderno, y un botón de la UI no debería tener que escalar
 /// privilegios para algo así.
-fn target_dir() -> Option<PathBuf> {
+pub(super) fn target_dir() -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     #[cfg(windows)]
     {
@@ -78,7 +78,7 @@ fn dir_in_path(dir: &Path) -> bool {
     std::env::split_paths(&path).any(|p| p == dir)
 }
 
-fn is_installed(target: &Path, source: Option<&PathBuf>) -> bool {
+pub(super) fn is_installed(target: &Path, source: Option<&PathBuf>) -> bool {
     let Ok(meta) = target.symlink_metadata() else { return false };
 
     if meta.file_type().is_symlink() {
@@ -197,51 +197,4 @@ fn add_to_user_path(dir: &Path) -> Result<(), String> {
         ));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn target_is_a_user_directory_that_needs_no_admin() {
-        let dir = target_dir().expect("debería resolverse en cualquier sistema con HOME");
-        let home = dirs::home_dir().unwrap();
-        assert!(dir.starts_with(&home), "el destino tiene que estar dentro del home del usuario");
-    }
-
-    #[test]
-    fn a_symlink_pointing_elsewhere_is_not_considered_installed() {
-        let base = std::env::temp_dir().join(format!("cc-cli-test-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&base).unwrap();
-
-        let current = base.join("ccode-nuevo");
-        let old = base.join("ccode-viejo");
-        std::fs::write(&current, b"#!/bin/sh\n").unwrap();
-        std::fs::write(&old, b"#!/bin/sh\n").unwrap();
-
-        let link = base.join("link");
-        assert!(!is_installed(&link, Some(&current)), "sin nada en el destino, no está instalado");
-
-        symlink::symlink_file(&old, &link).unwrap();
-        assert!(
-            !is_installed(&link, Some(&current)),
-            "un symlink de una instalación anterior debe pedir reinstalación"
-        );
-
-        let _ = symlink::remove_symlink_auto(&link);
-        symlink::symlink_file(&current, &link).unwrap();
-        assert!(is_installed(&link, Some(&current)));
-
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn path_detection_reads_the_real_path_separator() {
-        let dir = std::env::temp_dir();
-        assert!(!dir_in_path(Path::new("/definitivamente/no/en/el/path")));
-        // No se afirma que `temp_dir` esté en el PATH (no lo está en general), solo que
-        // la función no explota con un PATH real.
-        let _ = dir_in_path(&dir);
-    }
 }

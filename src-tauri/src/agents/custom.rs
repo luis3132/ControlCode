@@ -17,13 +17,7 @@ use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-
-fn now_ts() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
-}
+use crate::util::now_ts;
 
 /// De dónde sale el id de sesión del archivo que la TUI acaba de crear.
 #[derive(Debug, Clone, PartialEq)]
@@ -35,7 +29,7 @@ pub enum SessionIdSource {
 }
 
 impl SessionIdSource {
-    fn parse(raw: &str) -> Self {
+    pub(super) fn parse(raw: &str) -> Self {
         match raw.split_once(':') {
             Some(("field", key)) if !key.trim().is_empty() => {
                 SessionIdSource::Field(key.trim().to_string())
@@ -251,23 +245,4 @@ pub struct LegacyCustomAgent {
     pub id: String,
     pub label: String,
     pub command: String,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn session_id_source_parses_both_forms() {
-        assert_eq!(SessionIdSource::parse("filename"), SessionIdSource::Filename);
-        assert_eq!(
-            SessionIdSource::parse("field:session_id"),
-            SessionIdSource::Field("session_id".to_string())
-        );
-        assert_eq!(SessionIdSource::parse("field: id "), SessionIdSource::Field("id".to_string()));
-        // Formas inválidas caen al default en vez de romper: el descubrimiento por nombre
-        // de archivo es el que funciona sin conocer nada del formato interno.
-        assert_eq!(SessionIdSource::parse("field:"), SessionIdSource::Filename);
-        assert_eq!(SessionIdSource::parse("cualquier cosa"), SessionIdSource::Filename);
-    }
 }

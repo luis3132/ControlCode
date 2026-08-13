@@ -1,0 +1,431 @@
+import { useEffect, useRef, useState } from "react";
+import { Terminal as XTerm } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
+import { useTheme } from "neogestify-ui-components";
+import "@xterm/xterm/css/xterm.css";
+
+import { isResumable } from "@/features/sessions/agentResume";
+import { registerCapabilityResponders } from "@/features/terminal/terminalCapabilities";
+import { installInputMarks } from "@/features/terminal/terminalMarks";
+import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
+import { consumePtyTransferring } from "@/features/tabs/ptyTransfer";
+import { awaitSkillSetup } from "@/features/skills/pendingSkillSetup";
+import { useAgentsStore } from "@/features/agents/store";
+import type { PrelaunchStep } from "@/features/prelaunch/types";
+import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
+import { accountEnv as accountEnvFor } from "@/features/accounts/ipc";
+import { resolvePrelaunch } from "@/features/prelaunch/ipc";
+import { reconcileTabSkills } from "@/features/skills/ipc";
+import { homeDir } from "@/shared/ipc/window";
+import { ptyAttach, ptyCreate, ptyKill, ptyResize, ptyWrite } from "./ipc";
+import { createFitter } from "./fit";
+import { StatusBadge, type TerminalStatus } from "./StatusBadge";
+import { LOOKBACK_S, startSessionDiscovery } from "./sessionDiscovery";
+import { MARK_LINE, MIN_CONTRAST, TERMINAL_THEMES } from "./theme";
+
+interface TerminalProps {
+  /** Id de la tab en el store — solo se usa para esperar (si aplica) a que sus symlinks
+   * de skills elegidas en el wizard terminen de crearse antes de lanzar el proceso. */
+  tabId?: string;
+  command?: string;
+  cwd?: string;
+  agentId?: string;
+  /** Si se pasa, no se lanza un proceso nuevo: se reconecta a este PTY ya vivo
+   * (p. ej. una tab movida desde otra ventana) y se reproduce su scrollback. */
+  attachPtyId?: number;
+  /** Scrollback persistido de una sesión anterior (proceso ya muerto, sin PTY vivo
+   * al que conectarse): se escribe antes de lanzar el proceso nuevo, a modo de historial. */
+  initialScrollback?: string;
+  /** Si esta terminal es la que el usuario está viendo ahora mismo. Al pasar a `true` se
+   * enfoca sola, para poder escribir sin un click extra. */
+  isActive?: boolean;
+  /** Momento (epoch en segundos) en que se abrió la tab. Es el piso temporal para buscar
+   * su sesión al RECONECTAR a un PTY ya vivo: ahí el proceso puede llevar horas corriendo,
+   * así que usar "ahora" como piso descartaría la sesión que se está buscando. */
+  openedAt?: number;
+  /** Session id ya conocido de la tab. Si viene, no hace falta salir a descubrirlo. */
+  knownSessionId?: string;
+  /** Variables de entorno extra para ESTE proceso, además de las que declare la TUI custom. */
+  env?: Record<string, string> | null;
+  /** Cuenta (perfil) de la TUI con la que correr. Sus variables se resuelven acá adentro,
+   *  justo antes de spawnear: si se resolvieran arriba, un render que llegue tarde lanzaría
+   *  el proceso con la cuenta del sistema y ya no habría vuelta atrás. */
+  accountId?: string;
+  /** Comandos a ejecutar antes del agente, sin resolver todavía (ver el store `prelaunch`).
+   *  Se resuelven acá adentro, justo antes de spawnear, por el mismo motivo que la cuenta. */
+  prelaunch?: PrelaunchStep[];
+  onReady?: (id: number) => void;
+  onExit?: (code: number) => void;
+  onSessionDiscovered?: (sessionId: string) => void;
+}
+
+
+/** Une los mapas de entorno, o `null` si no hay ninguno — que es lo que espera `pty_create`
+ *  para "no agregues nada". Un `{}` funcionaría igual, pero `null` deja el intent explícito
+ *  en el lado de Rust, donde el parámetro es `Option`. */
+function mergeEnv(
+  ...maps: Array<Record<string, string> | null | undefined>
+): Record<string, string> | null {
+  const merged = Object.assign({}, ...maps.filter(Boolean)) as Record<string, string>;
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
+export function Terminal({
+  tabId,
+  command = "bash",
+  cwd,
+  agentId,
+  attachPtyId,
+  initialScrollback,
+  isActive = false,
+  openedAt,
+  knownSessionId,
+  env,
+  accountId,
+  prelaunch,
+  onReady,
+  onExit,
+  onSessionDiscovered,
+}: TerminalProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const ptyIdRef = useRef<number | null>(null);
+  const termRef = useRef<XTerm | null>(null);
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<TerminalStatus>("connecting");
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+  // El efecto de montaje corre una sola vez (`[]`) y no debe re-crear la terminal al
+  // cambiar el tema — leerlo por ref evita meterlo en las dependencias y matar el PTY.
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    // ── 1. Inicializar xterm.js ──────────────────────────────
+    const term = new XTerm({
+      theme: TERMINAL_THEMES[themeRef.current],
+      minimumContrastRatio: MIN_CONTRAST[themeRef.current],
+      fontFamily: '"Cascadia Code", "JetBrains Mono", "Fira Code", monospace',
+      fontSize: 13,
+      lineHeight: 1,
+      cursorBlink: true,
+      cursorStyle: "bar",
+      scrollback: 5000,
+      allowTransparency: true,
+    });
+
+    const fitAddon = new FitAddon();
+    const webLinksAddon = new WebLinksAddon();
+
+    term.loadAddon(fitAddon);
+    term.loadAddon(webLinksAddon);
+    term.open(containerRef.current);
+    termRef.current = term;
+
+    // Las TUIs modernas preguntan qué sabe hacer la terminal y ESPERAN respuesta antes de
+    // dibujar. xterm.js no contesta varias de esas consultas, y sin respuesta OpenCode se
+    // queda mudo tras pasar a la pantalla alternativa — una terminal negra. Se registra
+    // antes de lanzar el proceso para no perder la primera tanda, que llega enseguida.
+    const disposeCapabilities = registerCapabilityResponders(
+      term,
+      (data) => {
+        if (ptyIdRef.current !== null) {
+          ptyWrite(ptyIdRef.current, data).catch(console.error);
+        }
+      },
+      TERMINAL_THEMES[themeRef.current]
+    );
+
+    // La barra de scroll de xterm se esconde sola; se la deja fija cuando hay historial
+    // que recorrer (ver terminalScrollbar.ts).
+    const disposeScrollbar = keepScrollbarVisible(term, containerRef.current);
+
+    // Marcas de corte en cada envío del usuario. Se lee la preferencia acá, al montar:
+    // cambiarla no reconfigura las terminales que ya están abiertas (ver TerminalSection).
+    const disposeMarks = useTerminalPrefsStore.getState().inputMarks
+      ? installInputMarks(term, { line: MARK_LINE[themeRef.current] })
+      : () => {};
+
+    // Ajuste de la grilla al contenedor real (ver `fit.ts`: el PTY nace con este tamaño).
+    const { fit: fitAndTrim, fitOnce } = createFitter(term, fitAddon, () => containerRef.current);
+
+    // ── 2. Crear la sesión PTY en Rust ───────────────────────
+    let unlistenData: UnlistenFn | null = null;
+    let unlistenExit: UnlistenFn | null = null;
+    let stopDiscovery: (() => void) | null = null;
+    let cancelled = false;
+
+    const pollSessionId = (resolvedCwd: string, startedAfter: number) => {
+      if (!agentId || !isResumable(agentId) || !onSessionDiscovered) return;
+      // Ya se sabe cuál es: no hay nada que descubrir y cada intento cuesta (para OpenCode,
+      // levantar un proceso que abre su base de datos entera).
+      if (knownSessionId) return;
+
+      stopDiscovery = startSessionDiscovery({
+        agentId,
+        cwd: resolvedCwd,
+        startedAfter,
+        // Con una cuenta alternativa los transcripts viven en SU carpeta, no en la del
+        // sistema: sin esto no se encontraría ninguna sesión y la tab se quedaría para
+        // siempre sin título ni posibilidad de reanudar.
+        accountId: accountId ?? null,
+        onFound: onSessionDiscovered,
+      });
+    };
+
+    const attachListeners = async (ptyId: number) => {
+      // ── 3. Escuchar stdout del PTY ──────────────────────
+      unlistenData = await listen<{ data: string }>(
+        `pty-data-${ptyId}`,
+        (event) => {
+          term.write(event.payload.data);
+        }
+      );
+
+      // ── 4. Escuchar salida del proceso ──────────────────
+      unlistenExit = await listen<{ code: number }>(
+        `pty-exit-${ptyId}`,
+        (event) => {
+          setStatus("exited");
+          term.write(
+            `\r\n\x1b[90m${t("terminal.exitCode", { code: event.payload.code })}\x1b[0m\r\n`
+          );
+          onExit?.(event.payload.code);
+        }
+      );
+    };
+
+    const initPty = async () => {
+      try {
+        if (attachPtyId != null) {
+          // Reconectar a un PTY que ya está vivo en otra ventana: nada de spawnear de nuevo.
+          const buffered = await ptyAttach(attachPtyId);
+          ptyIdRef.current = attachPtyId;
+          await fitOnce();
+          if (buffered) term.write(buffered);
+          setStatus("running");
+          onReady?.(attachPtyId);
+
+          // Reconectar NO cancela el descubrimiento. Antes esta rama devolvía sin llamar a
+          // `pollSessionId`, así que una tab arrastrada a otra ventana (o mergeada) dejaba
+          // de buscar su sesión para siempre: si todavía no se había resuelto en la ventana
+          // de origen, el session id se perdía y con él el "reabrir esta conversación".
+          // El piso temporal es cuándo se abrió la tab, no ahora: el proceso puede llevar
+          // horas vivo y su sesión ser mucho más vieja que esta reconexión.
+          const attachCwd: string = cwd ?? (await homeDir());
+          pollSessionId(attachCwd, openedAt ?? Math.floor(Date.now() / 1000));
+
+          await attachListeners(attachPtyId);
+          // La ventana a la que se reconecta puede tener un tamaño distinto al de la
+          // ventana donde el PTY nació (tear-off, merge entre ventanas) — sincronizarlo.
+          if (!cancelled) {
+            ptyResize(attachPtyId, term.cols, term.rows).catch(console.error);
+          }
+          return;
+        }
+
+        if (initialScrollback) term.write(initialScrollback);
+
+        // Si el wizard dejó un setup de skills pendiente para esta tab (symlinks
+        // todavía escribiéndose en su cwd), esperarlo antes de lanzar el proceso — si
+        // el agente arranca primero, algunos escanean su carpeta de skills solo al
+        // boot y nunca verían las que el usuario acaba de elegir.
+        // Lo que no se pudo montar se DICE. Antes esto se perdía en un `console.error` del
+        // webview y la tab arrancaba sin skills sin ninguna señal — que es exactamente el
+        // síntoma "se abrió sin ninguna" que había que diagnosticar a ciegas.
+        if (tabId) {
+          const skillErrors = await awaitSkillSetup(tabId);
+          for (const err of skillErrors) {
+            term.write(`\r\n\x1b[33m${t("terminal.skillSetupFailed", { error: err })}\x1b[0m\r\n`);
+          }
+        }
+        if (cancelled) return;
+
+        // Toda tab que arranca (nueva, restaurada o reabierta desde el historial) deja su
+        // carpeta de skills con exactamente las suyas: las de su workspace más las
+        // propias, y ninguna de otro workspace/tab que hubiera usado antes esa carpeta.
+        // Tiene que pasar ANTES de spawnear: varios agentes escanean sus skills una sola
+        // vez, al boot.
+        if (tabId) await reconcileTabSkills(tabId).catch(console.error);
+        if (cancelled) return;
+
+        await fitOnce();
+        if (cancelled) return;
+
+        const resolvedCwd: string = cwd ?? (await homeDir());
+        const startedAfter = Math.floor(Date.now() / 1000) - LOOKBACK_S;
+
+        // Si esta tab corre con una cuenta alternativa, sus variables se piden ahora: la
+        // cuenta pudo renombrarse o mudarse desde que la tab se guardó, y lo que importa es
+        // dónde vive AHORA. Si la cuenta ya no existe, se avisa y no se lanza nada — correr
+        // igual usaría la cuenta del sistema en silencio, que es lo contrario de lo pedido.
+        let accountEnv: Record<string, string> | null = null;
+        if (accountId) {
+          try {
+            accountEnv = await accountEnvFor(accountId);
+          } catch (e) {
+            term.write(`\r\n\x1b[31m${t("terminal.accountMissing", { error: e })}\x1b[0m\r\n`);
+            setStatus("exited");
+            return;
+          }
+        }
+
+        // La cadena se resuelve tan tarde como la cuenta, y por lo mismo: un preset pudo
+        // editarse o borrarse desde que la tab se guardó. Un preset que ya no existe
+        // ABORTA el lanzamiento — arrancar sin el paso pedido dejaría al agente corriendo
+        // en el entorno equivocado, que es exactamente lo que la feature evita.
+        let resolvedPrelaunch: string[] = [];
+        if (prelaunch && prelaunch.length > 0) {
+          try {
+            resolvedPrelaunch = await resolvePrelaunch(prelaunch);
+          } catch (e) {
+            term.write(`\r\n\x1b[31m${t("terminal.prelaunchError", { error: e })}\x1b[0m\r\n`);
+            setStatus("exited");
+            return;
+          }
+        }
+
+        const ptyId = await ptyCreate({
+          command,
+          cwd: resolvedCwd,
+          cols: term.cols,
+          rows: term.rows,
+          // Variables extra declaradas por la TUI custom, si esta tab corre una, más las
+          // que traiga esta terminal en particular (una cuenta alternativa apunta acá la
+          // variable de perfil de la TUI). Las de la terminal van últimas: son la decisión
+          // más específica, tomada para este proceso y no para la TUI en general.
+          env: mergeEnv(
+            agentId
+              ? useAgentsStore.getState().customAgents.find((a) => a.id === agentId)?.env
+              : undefined,
+            accountEnv,
+            env
+          ),
+          prelaunch: resolvedPrelaunch,
+        });
+        ptyIdRef.current = ptyId;
+        setStatus("running");
+        onReady?.(ptyId);
+        pollSessionId(resolvedCwd, startedAfter);
+        await attachListeners(ptyId);
+      } catch (err) {
+        term.write(`\r\n\x1b[31m${t("terminal.ptyError", { error: err })}\x1b[0m\r\n`);
+        setStatus("exited");
+      }
+    };
+
+    initPty();
+
+    // ── 5. Input del usuario → PTY ───────────────────────────
+    term.onData((data) => {
+      if (ptyIdRef.current !== null) {
+        ptyWrite(ptyIdRef.current, data).catch(console.error);
+      }
+    });
+
+    // ── 6. Resize automático ─────────────────────────────────
+    // Con debounce: arrastrar el borde de la ventana dispara el observer decenas de veces
+    // por segundo, y cada una hacía un `fit()` (que remide la celda y repinta todo) más un
+    // `pty_resize` por IPC. Ese torrente es lo que se ve como parpadeo/basura mientras se
+    // redimensiona; el tamaño que importa es el final, no los intermedios.
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    const applyFit = () => {
+      const el = containerRef.current;
+      // Un contenedor en 0×0 (la tab todavía no se pintó) haría que fit() calcule filas y
+      // columnas contra una celda sin medir, dejando el PTY con un tamaño absurdo que
+      // recién se corrige al siguiente resize — con el proceso ya dibujando encima.
+      if (!el || el.clientWidth === 0 || el.clientHeight === 0) return;
+      fitAndTrim();
+      if (ptyIdRef.current !== null) {
+        const { cols, rows } = term;
+        ptyResize(ptyIdRef.current, cols, rows).catch(console.error);
+      }
+    };
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => requestAnimationFrame(applyFit), 80);
+    });
+
+    resizeObserver.observe(containerRef.current);
+
+    // ── 7. Cleanup ───────────────────────────────────────────
+    return () => {
+      cancelled = true;
+      stopDiscovery?.();
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeObserver.disconnect();
+      disposeCapabilities();
+      disposeMarks();
+      disposeScrollbar();
+      unlistenData?.();
+      unlistenExit?.();
+      if (ptyIdRef.current !== null) {
+        if (!consumePtyTransferring(ptyIdRef.current)) {
+          ptyKill(ptyIdRef.current).catch(console.error);
+        }
+        ptyIdRef.current = null;
+      }
+      termRef.current = null;
+      term.dispose();
+    };
+  }, []); // Solo montar/desmontar una vez
+
+  // Cambiar de tema repinta la terminal en caliente. `options.theme` es reasignable, así
+  // que no hace falta recrear nada: el proceso y todo el scrollback siguen intactos, solo
+  // cambian los colores con los que se dibuja.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    term.options.theme = TERMINAL_THEMES[theme];
+    term.options.minimumContrastRatio = MIN_CONTRAST[theme];
+  }, [theme]);
+
+  // Foco automático al pasar a ser la terminal visible: cambiar de tab (o volver a
+  // /workspace) debería dejar el cursor listo para escribir, sin un click extra sobre el
+  // área negra.
+  //
+  // El rAF no es cosmético: cuando esto corre, el panel todavía tiene la `visibility` del
+  // render anterior, y `focus()` sobre un elemento oculto es un no-op silencioso en
+  // WebKitGTK. Esperar al frame siguiente garantiza que ya está visible.
+  useEffect(() => {
+    if (!isActive) return;
+    const frame = requestAnimationFrame(() => termRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [isActive]);
+
+  return (
+    <div className="relative flex flex-col h-full w-full">
+      <StatusBadge status={status} command={command} isDark={isDark} />
+
+      {/* Contenedor de xterm.
+          Sin `height: 100%`: con `flex: 1` dentro de un padre `flex-col` ya recibe el alto
+          disponible, y declarar las dos cosas hacía que el alto se resolviera por dos
+          caminos distintos (el algoritmo flex y el porcentaje contra el padre). En el
+          borde inferior eso se veía como filas cortadas o tapadas.
+
+          `background` igual al del tema de xterm: fit() calcula filas enteras, así que casi
+          siempre sobran unos píxeles abajo que no llegan a una fila completa. Antes esa
+          franja mostraba el fondo del panel y se leía como un glitch; ahora es del mismo
+          color que la terminal y desaparece. */}
+      <div
+        ref={containerRef}
+        style={{
+          flex: 1,
+          width: "100%",
+          minHeight: 0,
+          overflow: "hidden",
+          padding: "8px",
+          boxSizing: "border-box",
+          // Mismo fondo que la paleta activa: la franja sobrante de menos de una fila que
+          // queda abajo tiene que ser invisible en los dos temas, no solo en el oscuro.
+          background: TERMINAL_THEMES[theme].background,
+        }}
+      />
+    </div>
+  );
+}

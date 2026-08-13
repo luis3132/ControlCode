@@ -29,11 +29,11 @@ pub const DEFAULT_IDLE_SECS: u64 = 20;
 /// Un agente puede escupir cientos de líneas de error de un tirón (un stack, un build
 /// roto). Se emite un solo evento por ventana de tiempo, con las primeras líneas.
 const ERROR_COOLDOWN_SECS: i64 = 3;
-const ERROR_LINES_PER_EVENT: usize = 3;
+pub(crate) const ERROR_LINES_PER_EVENT: usize = 3;
 
 /// Tope de la cola. Si el orquestador no llama a `wait` durante mucho tiempo, se descartan
 /// los eventos más viejos: los recientes son los que describen el estado actual.
-const MAX_QUEUED_EVENTS: usize = 200;
+pub(crate) const MAX_QUEUED_EVENTS: usize = 200;
 
 /// Tope del fragmento de línea sin `\n` que se guarda entre chunks. Una TUI que dibuja
 /// una pantalla completa sin saltos de línea no debe hacer crecer esto sin límite.
@@ -92,7 +92,7 @@ pub fn now() -> i64 {
         .unwrap_or(0)
 }
 
-fn push_event(event: WatchEvent) {
+pub(crate) fn push_event(event: WatchEvent) {
     let mut q = queue();
     if q.len() >= MAX_QUEUED_EVENTS {
         q.pop_front();
@@ -153,7 +153,7 @@ pub fn remove_tab(tab_id: &str) -> bool {
 }
 
 #[cfg(test)]
-fn clear() {
+pub(crate) fn clear() {
     let mut map = watched();
     map.clear();
     ACTIVE.store(0, Ordering::Relaxed);
@@ -300,159 +300,4 @@ fn start_watchdog() {
             }
         });
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Los tests comparten el registro global (es estado de proceso, como el de PTYs), así
-    /// que corren en serie bajo este lock en vez de pisarse entre ellos.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn fresh() -> MutexGuard<'static, ()> {
-        let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        clear();
-        guard
-    }
-
-    #[test]
-    fn the_limit_is_what_stops_the_orchestrator_from_watching_everything() {
-        let _g = fresh();
-        assert!(add(1, "tab-a", DEFAULT_IDLE_SECS, 2).is_ok());
-        assert!(add(2, "tab-b", DEFAULT_IDLE_SECS, 2).is_ok());
-
-        let err = add(3, "tab-c", DEFAULT_IDLE_SECS, 2).unwrap_err();
-        assert!(err.contains("Límite"), "el error tiene que explicar el límite: {err}");
-        assert_eq!(count(), 2);
-
-        // Soltar una libera el slot.
-        assert!(remove_tab("tab-a"));
-        assert!(add(3, "tab-c", DEFAULT_IDLE_SECS, 2).is_ok());
-    }
-
-    #[test]
-    fn watching_the_same_tab_twice_is_rejected_instead_of_burning_a_slot() {
-        let _g = fresh();
-        add(1, "tab-a", DEFAULT_IDLE_SECS, 3).unwrap();
-        assert!(add(9, "tab-a", DEFAULT_IDLE_SECS, 3).is_err());
-        assert_eq!(count(), 1);
-    }
-
-    #[test]
-    fn an_error_line_produces_an_event_and_normal_output_does_not() {
-        let _g = fresh();
-        add(1, "tab-a", DEFAULT_IDLE_SECS, 3).unwrap();
-
-        observe(1, b"compilando...\ntodo bien\n");
-        assert!(wait(Duration::from_millis(10), 10).is_empty());
-
-        observe(1, b"ERROR: falta el modulo x\n");
-        let events = wait(Duration::from_millis(10), 10);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, "error");
-        assert_eq!(events[0].tab_id, "tab-a");
-        assert_eq!(events[0].lines, vec!["ERROR: falta el modulo x"]);
-    }
-
-    /// Un stack trace son cientos de líneas de error de golpe. Sin cooldown, cada una
-    /// sería un evento y el orquestador recibiría justo la avalancha que esta fase evita.
-    #[test]
-    fn a_burst_of_errors_collapses_into_a_single_event() {
-        let _g = fresh();
-        add(1, "tab-a", DEFAULT_IDLE_SECS, 3).unwrap();
-
-        for i in 0..50 {
-            observe(1, format!("ERROR numero {i}\n").as_bytes());
-        }
-        let events = wait(Duration::from_millis(10), 100);
-        assert_eq!(events.len(), 1);
-        assert!(events[0].lines.len() <= ERROR_LINES_PER_EVENT);
-    }
-
-    /// El PTY corta por tamaño de buffer, no por línea: "ERR" y "OR: x\n" llegan separados
-    /// y ninguno de los dos, por sí solo, parece un error.
-    #[test]
-    fn errors_split_across_chunks_are_still_detected() {
-        let _g = fresh();
-        add(1, "tab-a", DEFAULT_IDLE_SECS, 3).unwrap();
-
-        observe(1, b"ERR");
-        assert!(wait(Duration::from_millis(10), 10).is_empty());
-        observe(1, b"OR: se rompio\n");
-
-        let events = wait(Duration::from_millis(10), 10);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].lines, vec!["ERROR: se rompio"]);
-    }
-
-    #[test]
-    fn ansi_colored_errors_are_detected_too() {
-        let _g = fresh();
-        add(1, "tab-a", DEFAULT_IDLE_SECS, 3).unwrap();
-        observe(1, b"\x1b[31mError\x1b[0m: build roto\n");
-        let events = wait(Duration::from_millis(10), 10);
-        assert_eq!(events[0].lines, vec!["Error: build roto"]);
-    }
-
-    #[test]
-    fn exit_emits_an_event_and_frees_the_slot() {
-        let _g = fresh();
-        add(1, "tab-a", DEFAULT_IDLE_SECS, 3).unwrap();
-        note_exit(1, 130);
-
-        let events = wait(Duration::from_millis(10), 10);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, "exit");
-        assert_eq!(events[0].exit_code, Some(130));
-        assert_eq!(count(), 0, "una tab muerta no debe seguir ocupando un slot");
-    }
-
-    #[test]
-    fn nothing_is_observed_for_tabs_nobody_asked_about() {
-        let _g = fresh();
-        add(1, "tab-a", DEFAULT_IDLE_SECS, 3).unwrap();
-        observe(7, b"ERROR: de otra tab\n");
-        note_exit(7, 1);
-        assert!(wait(Duration::from_millis(10), 10).is_empty());
-    }
-
-    /// `wait` con la cola vacía tiene que devolver vacío al vencer el timeout, no colgarse.
-    #[test]
-    fn waiting_with_nothing_to_report_times_out_empty() {
-        let _g = fresh();
-        let started = std::time::Instant::now();
-        let events = wait(Duration::from_millis(50), 10);
-        assert!(events.is_empty());
-        assert!(started.elapsed() >= Duration::from_millis(45));
-    }
-
-    /// Los eventos se consumen: dos llamadas seguidas no devuelven lo mismo dos veces
-    /// (que es exactamente el desperdicio de contexto que produce el polling).
-    #[test]
-    fn events_are_drained_once() {
-        let _g = fresh();
-        add(1, "tab-a", DEFAULT_IDLE_SECS, 3).unwrap();
-        observe(1, b"ERROR: uno\n");
-
-        assert_eq!(wait(Duration::from_millis(10), 10).len(), 1);
-        assert!(wait(Duration::from_millis(10), 10).is_empty());
-    }
-
-    #[test]
-    fn the_queue_drops_the_oldest_events_instead_of_growing_forever() {
-        let _g = fresh();
-        for i in 0..(MAX_QUEUED_EVENTS + 20) {
-            push_event(WatchEvent {
-                tab_id: format!("t{i}"),
-                kind: "idle".into(),
-                at: 0,
-                lines: Vec::new(),
-                exit_code: None,
-            });
-        }
-        let events = wait(Duration::from_millis(10), 10_000);
-        assert_eq!(events.len(), MAX_QUEUED_EVENTS);
-        assert_eq!(events[0].tab_id, "t20", "se conservan los más recientes");
-    }
 }

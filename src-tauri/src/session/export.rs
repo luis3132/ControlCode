@@ -13,14 +13,14 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 /// Un turno de la conversación, ya normalizado.
-struct Turn {
-    role: String,
-    text: String,
+pub(super) struct Turn {
+    pub(super) role: String,
+    pub(super) text: String,
 }
 
 /// Rol declarado en una línea del JSONL, mirando las formas que usan los CLIs soportados:
 /// `{"role": "user"}` plano, o anidado bajo `message`/`payload`.
-fn role_of(v: &Value) -> Option<String> {
+pub(super) fn role_of(v: &Value) -> Option<String> {
     for path in [vec!["role"], vec!["message", "role"], vec!["payload", "role"]] {
         if let Some(found) = dig(v, &path).and_then(|c| c.as_str()) {
             return Some(found.to_string());
@@ -42,7 +42,7 @@ fn role_of(v: &Value) -> Option<String> {
 
 /// Camina una ruta de claves anidadas. Devuelve `None` si la ruta no existe — sin
 /// abortar la búsqueda de las OTRAS rutas que prueban los llamadores.
-fn dig<'a>(v: &'a Value, path: &[&str]) -> Option<&'a Value> {
+pub(super) fn dig<'a>(v: &'a Value, path: &[&str]) -> Option<&'a Value> {
     let mut cur = v;
     for key in path {
         cur = cur.get(key)?;
@@ -52,7 +52,7 @@ fn dig<'a>(v: &'a Value, path: &[&str]) -> Option<&'a Value> {
 
 /// Texto de un bloque `content`, que según el agente es un string plano o un array de
 /// bloques tipados (`text`, `input_text`, `output_text`).
-fn text_of_content(content: &Value) -> Option<String> {
+pub(super) fn text_of_content(content: &Value) -> Option<String> {
     if let Some(s) = content.as_str() {
         let trimmed = s.trim();
         return (!trimmed.is_empty()).then(|| trimmed.to_string());
@@ -80,7 +80,7 @@ fn text_of_content(content: &Value) -> Option<String> {
     (!joined.is_empty()).then(|| joined.join("\n\n"))
 }
 
-fn content_of(v: &Value) -> Option<String> {
+pub(super) fn content_of(v: &Value) -> Option<String> {
     for path in [vec!["content"], vec!["message", "content"], vec!["payload", "content"]] {
         if let Some(text) = dig(v, &path).and_then(text_of_content) {
             return Some(text);
@@ -94,7 +94,7 @@ fn content_of(v: &Value) -> Option<String> {
 /// Codex abre toda sesión con un `<environment_context>` (cwd, OS, política de sandbox) y,
 /// si hay AGENTS.md, un `<user_instructions>`. Van con `role: "user"`, así que sin filtrarlos
 /// el export empieza con dos bloques de XML que la persona nunca escribió.
-fn is_injected_context(text: &str) -> bool {
+pub(super) fn is_injected_context(text: &str) -> bool {
     let t = text.trim_start();
     t.starts_with("<environment_context>")
         || t.starts_with("<user_instructions>")
@@ -104,7 +104,7 @@ fn is_injected_context(text: &str) -> bool {
 /// Lee un archivo de sesión JSONL y devuelve los turnos de usuario y asistente en orden.
 /// Las líneas que no son mensajes (metadata, tool calls, deltas de streaming sin texto)
 /// se saltean solas al no tener rol + contenido textual.
-fn extract_transcript(path: &Path) -> Vec<Turn> {
+pub(super) fn extract_transcript(path: &Path) -> Vec<Turn> {
     let Ok(content) = std::fs::read_to_string(path) else { return Vec::new() };
     let mut turns: Vec<Turn> = Vec::new();
 
@@ -142,7 +142,7 @@ fn extract_transcript(path: &Path) -> Vec<Turn> {
 /// "role": … }, "parts": [ { "type": "text", "text": … } ] } ] }`. Solo interesan las
 /// partes de tipo `text`: el resto son pasos internos (`step-start`, `reasoning`, `tool`,
 /// `patch`) que no forman parte de la conversación que el usuario quiere exportar.
-fn opencode_transcript(session_id: &str, profile: Option<&str>) -> Vec<Turn> {
+pub(super) fn opencode_transcript(session_id: &str, profile: Option<&str>) -> Vec<Turn> {
     let mut command = std::process::Command::new("opencode");
     command.args(["export", session_id]).stdin(std::process::Stdio::null());
     // Misma variable con la que se lanzó la tab (ver `accounts`): la sesión de una cuenta
@@ -150,7 +150,9 @@ fn opencode_transcript(session_id: &str, profile: Option<&str>) -> Vec<Turn> {
     if let Some(dir) = profile {
         command.env("XDG_DATA_HOME", dir);
     }
-    let Ok(output) = command.output() else {
+    let Ok(output) =
+        crate::util::output_with_timeout(&mut command, std::time::Duration::from_secs(30))
+    else {
         return Vec::new();
     };
     if !output.status.success() {
@@ -161,7 +163,7 @@ fn opencode_transcript(session_id: &str, profile: Option<&str>) -> Vec<Turn> {
 
 /// Parseo puro del JSON que emite `opencode export`, separado del proceso para poder
 /// testearlo contra una muestra real sin depender de que OpenCode esté instalado.
-fn parse_opencode_export(json: &[u8]) -> Vec<Turn> {
+pub(super) fn parse_opencode_export(json: &[u8]) -> Vec<Turn> {
     let Ok(root) = serde_json::from_slice::<Value>(json) else { return Vec::new() };
     let Some(messages) = root.get("messages").and_then(|m| m.as_array()) else {
         return Vec::new();
@@ -203,7 +205,7 @@ fn parse_opencode_export(json: &[u8]) -> Vec<Turn> {
     turns
 }
 
-fn format_ts(unix_seconds: i64) -> String {
+pub(super) fn format_ts(unix_seconds: i64) -> String {
     // Sin dependencia de fechas en el backend: se emite ISO-8601 en UTC a mano, que es
     // inequívoco y ordenable. La UI ya muestra la fecha localizada por su cuenta.
     let days_since_epoch = unix_seconds.div_euclid(86_400);
@@ -229,7 +231,7 @@ fn format_ts(unix_seconds: i64) -> String {
     )
 }
 
-fn render_skills(skills: &[ArchivedSkill]) -> String {
+pub(super) fn render_skills(skills: &[ArchivedSkill]) -> String {
     if skills.is_empty() {
         return "_Ninguna_".to_string();
     }
@@ -240,7 +242,7 @@ fn render_skills(skills: &[ArchivedSkill]) -> String {
         .join(", ")
 }
 
-fn render_siblings(siblings: &[SiblingTab]) -> String {
+pub(super) fn render_siblings(siblings: &[SiblingTab]) -> String {
     if siblings.is_empty() {
         return "_Era la única tab abierta_\n".to_string();
     }
@@ -257,7 +259,7 @@ fn render_siblings(siblings: &[SiblingTab]) -> String {
     out
 }
 
-fn render(entry: &SessionHistoryEntry, workspace: Option<&str>, transcript: &[Turn]) -> String {
+pub(super) fn render(entry: &SessionHistoryEntry, workspace: Option<&str>, transcript: &[Turn]) -> String {
     let mut out = String::new();
 
     let _ = writeln!(out, "# {}", entry.title.as_deref().unwrap_or(&entry.agent_label));
@@ -361,195 +363,4 @@ pub fn export_session_markdown(
 ) -> Result<(), String> {
     let markdown = session_markdown(history_id, db)?;
     std::fs::write(&dest_path, markdown).map_err(|e| e.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Muestra recortada de `opencode export` real (v1.18.4): la conversación vive en
-    /// `messages[].parts[]`, y solo las partes `text` son conversación — `step-start`,
-    /// `reasoning`, `tool` y `patch` son pasos internos que no van al markdown.
-    const OPENCODE_EXPORT: &str = r#"{
-      "info": { "id": "ses_1", "title": "Refactor del parser" },
-      "messages": [
-        { "info": { "role": "user" },
-          "parts": [ { "type": "text", "text": "arregla el parser" },
-                     { "type": "file", "filename": "a.rs" } ] },
-        { "info": { "role": "assistant" },
-          "parts": [ { "type": "step-start" }, { "type": "reasoning", "text": "pensando" },
-                     { "type": "tool", "tool": "edit" }, { "type": "step-finish" } ] },
-        { "info": { "role": "assistant" },
-          "parts": [ { "type": "text", "text": "Listo, cambié el lexer." },
-                     { "type": "patch" } ] }
-      ]
-    }"#;
-
-    #[test]
-    fn opencode_export_keeps_only_the_conversation() {
-        let turns = parse_opencode_export(OPENCODE_EXPORT.as_bytes());
-
-        // El mensaje del medio es puro paso interno (sin ninguna parte `text`) y no genera
-        // un turno vacío; el siguiente del asistente sí, y no se fusiona con nada previo
-        // porque en el medio no quedó ningún turno de assistant.
-        assert_eq!(turns.len(), 2);
-        assert_eq!(turns[0].role, "user");
-        assert_eq!(turns[0].text, "arregla el parser");
-        assert_eq!(turns[1].role, "assistant");
-        assert_eq!(turns[1].text, "Listo, cambié el lexer.");
-    }
-
-    #[test]
-    fn opencode_export_survives_garbage() {
-        // Una instalación rota o una versión que cambie el formato devuelve vacío en vez de
-        // reventar: el export igual se genera, solo que sin transcripción.
-        assert!(parse_opencode_export(b"no soy json").is_empty());
-        assert!(parse_opencode_export(b"{}").is_empty());
-        assert!(parse_opencode_export(br#"{"messages":[]}"#).is_empty());
-    }
-
-    #[test]
-    fn transcript_reads_the_shapes_the_supported_clis_emit() {
-        let dir = std::env::temp_dir().join(format!("cc-export-test-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("s.jsonl");
-        std::fs::write(
-            &path,
-            concat!(
-                // Claude Code: mensaje anidado bajo `message`, contenido como bloques.
-                r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hola"}]}}"#, "\n",
-                // Línea de metadata sin rol: se saltea.
-                r#"{"type":"summary","summary":"algo"}"#, "\n",
-                // Codex: rol plano, contenido string.
-                r#"{"role":"assistant","content":"respuesta"}"#, "\n",
-                // Streaming: dos líneas del mismo rol se unen en un turno.
-                r#"{"role":"assistant","content":"continuada"}"#, "\n",
-                // Rol que no interesa (tool): se saltea.
-                r#"{"role":"tool","content":"salida de herramienta"}"#, "\n",
-                // JSON inválido: se saltea sin romper.
-                "no es json", "\n",
-            ),
-        ).unwrap();
-
-        let turns = extract_transcript(&path);
-        assert_eq!(turns.len(), 2);
-        assert_eq!(turns[0].role, "user");
-        assert_eq!(turns[0].text, "hola");
-        assert_eq!(turns[1].role, "assistant");
-        assert_eq!(turns[1].text, "respuesta\n\ncontinuada");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Gemini no escribe `role` en ningún lado: marca cada línea con `type: "user"|"gemini"`
-    /// y guarda el texto en `Part`s sin `type`. Con las dos cosas sin contemplar, el export
-    /// de una sesión de Gemini salía COMPLETAMENTE vacío.
-    #[test]
-    fn transcript_reads_gemini_sessions() {
-        let dir = std::env::temp_dir().join(format!("cc-export-gem-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("session-a.jsonl");
-        std::fs::write(
-            &path,
-            concat!(
-                // Cabecera: sin rol ni contenido, se saltea sola.
-                r#"{"sessionId":"ses-a","projectHash":"h","kind":"main"}"#, "\n",
-                r#"{"id":"m1","type":"user","content":[{"text":"arreglá el login"}]}"#, "\n",
-                // `gemini` es el rol del asistente, y un Part suelto (no lista) también vale.
-                r#"{"id":"m2","type":"gemini","content":{"text":"Listo, cambié el guard."}}"#, "\n",
-                // Un Part que no es texto (function call) no aporta turno.
-                r#"{"id":"m3","type":"gemini","content":[{"functionCall":{"name":"edit"}}]}"#, "\n",
-            ),
-        )
-        .unwrap();
-
-        let turns = extract_transcript(&path);
-        assert_eq!(turns.len(), 2);
-        assert_eq!(turns[0].role, "user");
-        assert_eq!(turns[0].text, "arreglá el login");
-        assert_eq!(turns[1].role, "assistant");
-        assert_eq!(turns[1].text, "Listo, cambié el guard.");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Claude Code también usa `type: "user"`, pero su rol real está en `message.role`. La
-    /// traducción de Gemini va última justamente para no pisarlo.
-    #[test]
-    fn gemini_role_mapping_does_not_hijack_other_agents() {
-        let claude = serde_json::json!({
-            "type": "user", "message": { "role": "user", "content": "hola" }
-        });
-        assert_eq!(role_of(&claude).as_deref(), Some("user"));
-
-        let codex = serde_json::json!({ "type": "response_item", "payload": { "role": "assistant" } });
-        assert_eq!(role_of(&codex).as_deref(), Some("assistant"));
-
-        let meta = serde_json::json!({ "type": "session_meta", "payload": { "id": "x" } });
-        assert_eq!(role_of(&meta), None);
-    }
-
-    /// Codex se inyecta contexto propio como si fuera el usuario; no es conversación.
-    #[test]
-    fn transcript_drops_the_context_codex_injects_as_the_user() {
-        let dir = std::env::temp_dir().join(format!("cc-export-cdx-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("rollout.jsonl");
-        std::fs::write(
-            &path,
-            concat!(
-                r#"{"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"<environment_context>\ncwd: /proj\n</environment_context>"}]}}"#, "\n",
-                r#"{"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"<user_instructions>usá tabs</user_instructions>"}]}}"#, "\n",
-                r#"{"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"arreglá el parser"}]}}"#, "\n",
-            ),
-        )
-        .unwrap();
-
-        let turns = extract_transcript(&path);
-        assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0].text, "arreglá el parser");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn timestamps_render_as_utc_iso() {
-        assert_eq!(format_ts(0), "1970-01-01 00:00:00 UTC");
-        assert_eq!(format_ts(1_700_000_000), "2023-11-14 22:13:20 UTC");
-    }
-
-    /// Sin transcripción legible el export no falla: sale la metadata y una nota.
-    #[test]
-    fn render_without_transcript_still_documents_the_session() {
-        let entry = SessionHistoryEntry {
-            id: "h1".into(),
-            workspace_id: "ws".into(),
-            agent_id: "claude-code".into(),
-            agent_label: "Claude Code".into(),
-            command: "claude".into(),
-            cwd: "/proj".into(),
-            title: Some("Mi sesión".into()),
-            session_id: None,
-            account_id: None,
-            prelaunch: Vec::new(),
-            skills: vec![ArchivedSkill {
-                id: "s1".into(),
-                name: "git-helper".into(),
-                scope: "tab".into(),
-            }],
-            sibling_tabs: vec![SiblingTab {
-                title: Some("Otra".into()),
-                agent_label: "Gemini CLI".into(),
-                cwd: "/proj/web".into(),
-            }],
-            opened_at: 0,
-            closed_at: 60,
-        };
-
-        let md = render(&entry, Some("Mi WS"), &[]);
-        assert!(md.starts_with("# Mi sesión"));
-        assert!(md.contains("`git-helper` (tab)"));
-        assert!(md.contains("Gemini CLI"));
-        assert!(md.contains("No se pudo leer la conversación"));
-    }
 }

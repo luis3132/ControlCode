@@ -20,12 +20,37 @@
 //! Requiere Node instalado. Cuando no está, el error lo dice con todas las letras en vez
 //! de dejar un "no se encontró el programa" del sistema operativo — ver [`ensure_npx`].
 
+use rusqlite::params;
 use std::path::{Path, PathBuf};
+use uuid::Uuid;
 use std::process::Command;
+
+use crate::database::DbConnection;
+use crate::skills::{install_skill_internal, SkillInfo};
+
+use crate::util::now_ts;
+
+use super::types::MarketplaceSkillEntry;
 
 /// Cuánto puede tardar `npx skills add` clonando el repo de origen antes de rendirse.
 /// La CLI clona el repo entero para sacar una sola skill, así que un repo grande con una
 /// conexión lenta necesita bastante más que un fetch normal.
+/// Plazos de cada llamada a la CLI. `add` clona el repo de origen entero, así que es la
+/// que puede tardar de verdad; `--version` tendría que ser inmediata.
+const NPX_VERSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const FIND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+const ADD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Un plazo vencido merece su propio mensaje: "Node no está instalado" mandaría a revisar
+/// algo que sí está.
+fn timeout_or(e: std::io::Error, ausente: &str) -> String {
+    if e.kind() == std::io::ErrorKind::TimedOut {
+        format!("`npx skills` no respondió a tiempo ({e}). Probá de nuevo o revisá tu conexión.")
+    } else {
+        ausente.to_string()
+    }
+}
+
 const CLONE_TIMEOUT_MS: &str = "180000";
 
 /// El identificador de Claude Code dentro de la CLI de skills — define en qué carpeta deja
@@ -108,7 +133,7 @@ fn with_env(cmd: &mut Command) {
 pub fn ensure_npx() -> Result<(), String> {
     let mut cmd = npx_command();
     with_env(&mut cmd);
-    match cmd.arg("--version").output() {
+    match crate::util::output_with_timeout(cmd.arg("--version"), NPX_VERSION_TIMEOUT) {
         Ok(out) if out.status.success() => Ok(()),
         // `npx` existe pero devolvió error: raro, pero es un entorno de Node roto, no uno
         // ausente — conviene decir cuál de las dos cosas es.
@@ -131,7 +156,7 @@ pub const NPX_MISSING: &str = "skills.sh necesita Node.js instalado: usa su CLI 
 /// La CLI dibuja spinners y colorea resultados; el parser necesita el texto pelado. Se
 /// implementa a mano en vez de sumar una dependencia: el subconjunto que hace falta —
 /// `ESC [ … letra` — se resuelve en unas pocas líneas.
-fn strip_ansi(raw: &str) -> String {
+pub(super) fn strip_ansi(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut chars = raw.chars();
     while let Some(c) = chars.next() {
@@ -165,7 +190,7 @@ fn strip_ansi(raw: &str) -> String {
 /// El ancla es la línea del link, no la del nombre: de ahí sale el `owner/repo/slug`
 /// completo y sin ambigüedad (un slug puede tener guiones, y el `@` del nombre no alcanza
 /// para separar si el repo tuviera uno). La línea de arriba solo aporta las instalaciones.
-fn parse_find_output(raw: &str) -> Vec<SkillsShHit> {
+pub(super) fn parse_find_output(raw: &str) -> Vec<SkillsShHit> {
     const LINK: &str = "https://skills.sh/";
     let clean = strip_ansi(raw);
     let lines: Vec<&str> = clean.lines().map(str::trim).collect();
@@ -221,7 +246,8 @@ pub fn search(query: &str, owner: Option<&str>) -> Result<Vec<SkillsShHit>, Stri
         cmd.args(["--owner", owner]);
     }
 
-    let out = cmd.output().map_err(|_| NPX_MISSING.to_string())?;
+    let out = crate::util::output_with_timeout(&mut cmd, FIND_TIMEOUT)
+        .map_err(|e| timeout_or(e, NPX_MISSING))?;
     if !out.status.success() {
         return Err(format!(
             "`npx skills find` falló: {}",
@@ -247,7 +273,8 @@ pub fn install_into(staging: &Path, target: &str) -> Result<PathBuf, String> {
     cmd.current_dir(staging);
     cmd.args(["-y", "skills", "add", target, "--agent", SKILLS_AGENT, "--yes", "--copy"]);
 
-    let out = cmd.output().map_err(|_| NPX_MISSING.to_string())?;
+    let out = crate::util::output_with_timeout(&mut cmd, ADD_TIMEOUT)
+        .map_err(|e| timeout_or(e, NPX_MISSING))?;
     if !out.status.success() {
         return Err(format!(
             "`npx skills add {target}` falló: {}",
@@ -269,9 +296,13 @@ pub fn install_into(staging: &Path, target: &str) -> Result<PathBuf, String> {
     })
 }
 
-/// Busca la carpeta instalada dentro de `.claude/skills/`. Se prefiere la que coincide con
-/// el slug pedido, pero si la CLI la nombró distinto y hay una sola, se toma esa.
-fn find_installed_skill(dir: &Path, slug: &str) -> Option<PathBuf> {
+/// Busca la carpeta instalada dentro de `.claude/skills/`.
+///
+/// Se prefiere la que coincide con el slug pedido; si la CLI la nombró distinto y hay
+/// **una sola**, se toma esa. Con varias no se adivina: `read_dir` no tiene orden
+/// garantizado, así que quedarse con la primera instalaba una skill al azar bajo el
+/// nombre de otra.
+pub(super) fn find_installed_skill(dir: &Path, slug: &str) -> Option<PathBuf> {
     let candidates: Vec<PathBuf> = std::fs::read_dir(dir)
         .ok()?
         .flatten()
@@ -282,135 +313,195 @@ fn find_installed_skill(dir: &Path, slug: &str) -> Option<PathBuf> {
     candidates
         .iter()
         .find(|p| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case(slug)))
-        .or_else(|| candidates.first())
+        .or_else(|| candidates.first().filter(|_| candidates.len() == 1))
         .cloned()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Valida el filtro por publicador de un registry `skillssh`. Vacío es válido y es el caso
+/// normal: significa buscar en todo el directorio.
+///
+/// Acepta que le peguen el link del perfil (`https://skills.sh/vercel-labs`) además del
+/// nombre pelado, por la misma razón que `normalize_github_location`: es lo que uno tiene
+/// en el portapapeles al venir de la web.
+pub(super) fn normalize_owner_filter(input: &str) -> Result<String, String> {
+    let raw = input.trim().trim_end_matches('/');
+    let raw = raw.split(['?', '#']).next().unwrap_or(raw);
+    let owner = raw
+        .rsplit('/')
+        .find(|s| !s.is_empty())
+        .filter(|s| !s.contains(".sh") && !s.contains("://"))
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
 
-    #[test]
-    fn el_parser_saca_las_skills_de_la_salida_real() {
-        // Salida textual de `npx skills find "react testing"`, con los colores que la CLI
-        // emite incluso redirigida.
-        let raw = "\u{1b}[38;5;102mInstall with\u{1b}[0m npx skills add <owner/repo@skill>\n\n\
-            \u{1b}[38;5;145mcallstack/react-native-testing-library@react-native-testing\u{1b}[0m \u{1b}[36m3.3K installs\u{1b}[0m\n\
-            \u{1b}[38;5;102m└ https://skills.sh/callstack/react-native-testing-library/react-native-testing\u{1b}[0m\n\n\
-            \u{1b}[38;5;145mgithub/awesome-copilot@react19-test-patterns\u{1b}[0m \u{1b}[36m1.1K installs\u{1b}[0m\n\
-            \u{1b}[38;5;102m└ https://skills.sh/github/awesome-copilot/react19-test-patterns\u{1b}[0m\n";
+    if owner.is_empty() {
+        return Ok(String::new());
+    }
+    // Mismas reglas que un usuario/organización de GitHub, que es de donde salen los
+    // publicadores del directorio.
+    let valido = owner.len() <= 39
+        && owner.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && !owner.starts_with('-')
+        && !owner.ends_with('-');
+    if !valido {
+        return Err(format!(
+            "'{owner}' no parece un publicador de skills.sh. Dejalo vacío para buscar en \
+             todo el directorio, o poné un usuario/organización de GitHub (ej. vercel-labs)."
+        ));
+    }
+    Ok(owner)
+}
 
-        let hits = parse_find_output(raw);
-        assert_eq!(hits.len(), 2);
-        assert_eq!(
-            hits[0],
-            SkillsShHit {
-                id: "callstack/react-native-testing-library/react-native-testing".into(),
-                source: "callstack/react-native-testing-library".into(),
-                slug: "react-native-testing".into(),
-                installs: Some("3.3K".into()),
+/// Convierte un resultado del directorio en una entrada de marketplace.
+///
+/// `folder_path` guarda el `owner/repo/slug` completo: es lo único que hace falta para
+/// volver a instalarla más tarde desde el cache, sin repetir la búsqueda.
+pub(super) fn skillssh_entry(
+    hit: SkillsShHit,
+    registry_id: &str,
+    registry_name: &str,
+) -> MarketplaceSkillEntry {
+    MarketplaceSkillEntry {
+        id: hit.id.clone(),
+        registry_id: registry_id.to_string(),
+        registry_name: registry_name.to_string(),
+        name: hit.slug.clone(),
+        // El directorio lista skills de MUCHOS publicadores bajo un mismo "repositorio",
+        // así que sin el autor dos entradas homónimas son indistinguibles en la grilla.
+        author: hit.source.split('/').next().map(str::to_string),
+        // El directorio no expone la descripción en la búsqueda — la única forma de
+        // tenerla sería bajar cada skill entera, que son decenas de megas por búsqueda.
+        // Se muestra el repo de origen, que es el dato que sí ayuda a elegir.
+        description: Some(hit.source.clone()),
+        categories: Vec::new(),
+        compatible_agents: Vec::new(),
+        folder_path: hit.id,
+        files: Vec::new(),
+        installs: hit.installs,
+    }
+}
+
+/// Busca en los repositorios `skillssh` habilitados y deja los resultados en su cache.
+///
+/// El marketplace no puede listar skills.sh como lista a los otros repos: el directorio
+/// tiene miles de skills y su CLI solo sabe buscar (no enumerar), así que la búsqueda es la
+/// forma de navegarlo. Se llama desde el buscador del marketplace antes de releer la lista.
+///
+/// Guardar en `cache_json` no es solo para mostrar: instalar necesita reencontrar la skill
+/// por id, y así lo último buscado sigue ahí al volver a la pantalla.
+#[tauri::command]
+pub async fn search_remote_registries(
+    query: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    search_remote_conn(&db, &query).await
+}
+
+/// El trabajo real de [`search_remote_registries`], sin la capa de Tauri, para poder
+/// ejercitarlo contra una base de prueba.
+pub async fn search_remote_conn(db: &DbConnection, query: &str) -> Result<(), String> {
+    let targets: Vec<(String, String, String)> = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, location FROM registries
+                 WHERE source_type = 'skillssh' AND enabled = 1 ORDER BY priority ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        rows
+    };
+    if targets.is_empty() {
+        return Ok(());
+    }
+
+    for (id, name, owner) in targets {
+        // La CLI es un proceso que bloquea; correrla en el hilo del runtime congelaría toda
+        // la app mientras busca.
+        let (q, owner_owned) = (query.to_string(), owner.clone());
+        let found = tauri::async_runtime::spawn_blocking(move || {
+            search(&q, Some(owner_owned.as_str()))
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+
+        let now = now_ts();
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        match found {
+            Ok(hits) => {
+                let entries: Vec<MarketplaceSkillEntry> = hits
+                    .into_iter()
+                    .map(|h| skillssh_entry(h, &id, &name))
+                    .collect();
+                let json = serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string());
+                conn.execute(
+                    "UPDATE registries SET cache_json = ?1, cache_error = NULL, last_fetched = ?2
+                     WHERE id = ?3",
+                    params![json, now, id],
+                )
+                .map_err(|e| e.to_string())?;
             }
-        );
-        assert_eq!(hits[1].source, "github/awesome-copilot");
-        assert_eq!(hits[1].installs.as_deref(), Some("1.1K"));
-    }
-
-    /// Lo que se le pasa a `add` es `owner/repo@slug`, no el id con barras.
-    #[test]
-    fn el_id_se_traduce_al_target_que_espera_la_cli() {
-        assert_eq!(
-            add_target("callstack/react-native-testing-library/react-native-testing").as_deref(),
-            Some("callstack/react-native-testing-library@react-native-testing")
-        );
-        // Un id incompleto no puede convertirse en un comando: mejor fallar que ejecutar
-        // `npx skills add` con algo que no identifica ninguna skill.
-        for bad in ["", "solo-slug", "owner/repo", "owner/repo/"] {
-            assert!(add_target(bad).is_none(), "debería fallar: {bad:?}");
+            // Un fallo de búsqueda no puede tumbar el resto del marketplace: queda anotado
+            // en el repositorio (la UI lo muestra ahí) y los demás siguen andando.
+            Err(e) => {
+                conn.execute(
+                    "UPDATE registries SET cache_error = ?1, last_fetched = ?2 WHERE id = ?3",
+                    params![e, now, id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
         }
     }
+    Ok(())
+}
 
-    /// La línea de encabezado del propio comando también contiene "skills.sh"; no debe
-    /// colarse como resultado. Lo mismo cualquier link que no sea de tres segmentos.
-    #[test]
-    fn el_parser_ignora_links_que_no_son_una_skill() {
-        let raw = "Browse at https://skills.sh/\n\
-            └ https://skills.sh/owner\n\
-            └ https://skills.sh/owner/repo\n\
-            └ https://skills.sh/a/b/c/d\n";
-        assert!(parse_find_output(raw).is_empty());
-    }
+/// "Refrescar" un repositorio de skills.sh no puede rebajar la lista completa —  no existe
+/// tal cosa sin su API privada. Lo que sí puede es comprobar que la herramienta con la que
+/// se lo consulta esté disponible, que es el único motivo real por el que esta fuente deja
+/// de funcionar en una máquina. Los resultados de la última búsqueda se conservan.
+/// `ensure_npx` arranca un proceso y espera: eso NO puede pasar en el hilo del runtime.
+/// Refrescar repositorios recorre todos en serie, así que dejar esta comprobación bloqueando
+/// congelaba un worker durante todo el arranque de Node — y la instalación de skills, que es
+/// async, quedaba encolada detrás sin motivo aparente. La búsqueda y la instalación ya salían
+/// del runtime con `spawn_blocking`; esto se me había escapado.
+pub(super) async fn refresh_skillssh(db: &DbConnection, id: &str) -> Result<Vec<MarketplaceSkillEntry>, String> {
+    tauri::async_runtime::spawn_blocking(ensure_npx)
+        .await
+        .map_err(|e| e.to_string())??;
 
-    #[test]
-    fn una_skill_sin_instalaciones_igual_se_lista() {
-        let raw = "someone/repo@nueva\n└ https://skills.sh/someone/repo/nueva\n";
-        let hits = parse_find_output(raw);
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].installs, None);
-    }
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let cache: Option<String> = conn
+        .query_row("SELECT cache_json FROM registries WHERE id = ?1", [id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    Ok(cache.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default())
+}
 
-    #[test]
-    fn strip_ansi_deja_solo_el_texto() {
-        assert_eq!(strip_ansi("\u{1b}[36mhola\u{1b}[0m"), "hola");
-        assert_eq!(strip_ansi("a\u{1b}[1G\u{1b}[Jb"), "ab");
-        assert_eq!(strip_ansi("sin escapes"), "sin escapes");
-    }
+/// Instala una skill del directorio: la CLI la deja en una carpeta temporal nuestra y de
+/// ahí sigue por el mismo camino que cualquier otra fuente.
+pub(super) async fn install_from_skillssh(
+    entry: &MarketplaceSkillEntry,
+    origin: crate::skills::SkillOrigin<'_>,
+    db: &DbConnection,
+) -> Result<SkillInfo, String> {
+    let target = add_target(&entry.folder_path)
+        .ok_or_else(|| format!("Identificador de skill inesperado: {}", entry.folder_path))?;
 
-    #[test]
-    fn una_busqueda_demasiado_corta_no_llega_a_ejecutar_nada() {
-        // El servicio exige dos caracteres; devolver vacío sin lanzar el proceso es la
-        // diferencia entre no hacer nada y arrancar un `npx` por cada tecla.
-        assert_eq!(search("a", None).unwrap(), Vec::new());
-        assert_eq!(search("   ", None).unwrap(), Vec::new());
-    }
+    let staging = std::env::temp_dir().join(format!("controlcode-skillssh-{}", Uuid::new_v4()));
+    let staged = {
+        let staging = staging.clone();
+        tauri::async_runtime::spawn_blocking(move || install_into(&staging, &target))
+            .await
+            .map_err(|e| e.to_string())?
+    };
 
-    /// Contrato real con la CLI: busca e instala de verdad.
-    ///
-    /// Va con `#[ignore]` porque necesita red y Node instalado — no puede correr en la
-    /// suite normal. Es la única prueba que detecta que `npx skills` cambió el formato de
-    /// su salida o el nombre de sus flags, así que conviene correrla al tocar este módulo:
-    ///
-    /// ```text
-    /// cargo test --lib skillssh -- --ignored --nocapture
-    /// ```
-    #[test]
-    #[ignore = "necesita red y Node.js instalado"]
-    fn e2e_la_cli_responde_como_espera_el_parser() {
-        ensure_npx().expect("npx tiene que estar disponible para esta prueba");
+    let result = staged.and_then(|dir| {
+        install_skill_internal(&dir.join("SKILL.md").to_string_lossy(), None, Some(origin), db)
+    });
 
-        let hits = search("react testing", None).expect("la búsqueda debe funcionar");
-        assert!(!hits.is_empty(), "el directorio tiene que devolver algo para 'react testing'");
-        for h in &hits {
-            assert_eq!(h.id.split('/').count(), 3, "id mal parseado: {}", h.id);
-            assert!(add_target(&h.id).is_some(), "id no instalable: {}", h.id);
-        }
-
-        // Un publicador que no existe no es un error: es una búsqueda sin resultados.
-        assert!(search("react testing", Some("no-existe-este-publicador-xyz")).unwrap().is_empty());
-
-        let tmp = std::env::temp_dir().join(format!("cc-skillssh-e2e-{}", uuid::Uuid::new_v4()));
-        let dir = install_into(&tmp, "anthropics/skills@webapp-testing").expect("debe instalar");
-        assert!(dir.join("SKILL.md").is_file(), "la skill instalada necesita su SKILL.md");
-        // `--copy` tiene que dejar archivos reales: la carpeta temporal se borra enseguida.
-        assert!(!dir.join("SKILL.md").symlink_metadata().unwrap().file_type().is_symlink());
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn se_elige_la_carpeta_que_coincide_con_el_slug() {
-        let tmp = std::env::temp_dir().join(format!("cc-skillssh-{}", uuid::Uuid::new_v4()));
-        for name in ["otra", "buscada"] {
-            let dir = tmp.join(name);
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("SKILL.md"), "---\nname: x\n---\n").unwrap();
-        }
-        // Sin SKILL.md no es una skill instalada, aunque la carpeta exista.
-        std::fs::create_dir_all(tmp.join("vacia")).unwrap();
-
-        let found = find_installed_skill(&tmp, "buscada").unwrap();
-        assert_eq!(found.file_name().unwrap(), "buscada");
-        assert!(find_installed_skill(&tmp, "inexistente").is_some(), "cae a la única/primera");
-        assert!(find_installed_skill(&tmp.join("nada"), "x").is_none());
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
+    let _ = std::fs::remove_dir_all(&staging);
+    result
 }

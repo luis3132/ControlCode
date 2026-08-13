@@ -11,11 +11,11 @@ pub struct SessionTitleResult {
     pub source: String,
 }
 
-fn fallback_result(fallback: &str) -> SessionTitleResult {
+pub(super) fn fallback_result(fallback: &str) -> SessionTitleResult {
     SessionTitleResult { title: fallback.to_string(), source: "fallback".to_string() }
 }
 
-fn truncate(s: &str, max: usize) -> String {
+pub(super) fn truncate(s: &str, max: usize) -> String {
     let trimmed = s.trim();
     if trimmed.chars().count() <= max {
         trimmed.to_string()
@@ -24,13 +24,13 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-fn mtime_secs(path: &Path) -> Option<i64> {
+pub(super) fn mtime_secs(path: &Path) -> Option<i64> {
     let meta = fs::metadata(path).ok()?;
     let modified = meta.modified().ok()?;
     Some(modified.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64)
 }
 
-fn collect_files(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
+pub(super) fn collect_files(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -42,7 +42,7 @@ fn collect_files(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn newest_matching(
+pub(super) fn newest_matching(
     candidates: &[PathBuf],
     after: Option<i64>,
     content_hint: Option<&str>,
@@ -84,7 +84,7 @@ fn newest_matching(
 /// y el cwd de la sesión, y esos archivos crecen con la conversación entera (tool calls,
 /// diffs, salidas de comandos). `read_to_string` sobre TODOS los rollouts del sistema, en
 /// cada intento de descubrimiento, es justamente el I/O que hay que evitar.
-fn first_line_json(path: &Path) -> Option<Value> {
+pub(super) fn first_line_json(path: &Path) -> Option<Value> {
     let file = fs::File::open(path).ok()?;
     let mut line = String::new();
     BufReader::new(file).read_line(&mut line).ok()?;
@@ -95,7 +95,7 @@ fn first_line_json(path: &Path) -> Option<Value> {
 ///
 /// Variante de `newest_matching` para los agentes cuyo filtro NO es "el cwd aparece en
 /// algún lado del archivo" sino una condición que se puede decidir leyendo solo metadata.
-fn newest_where(
+pub(super) fn newest_where(
     candidates: &[PathBuf],
     after: Option<i64>,
     keep: impl Fn(&Path) -> bool,
@@ -115,7 +115,7 @@ fn newest_where(
         .map(|(p, _)| p)
 }
 
-fn find_string_field(path: &Path, candidates: &[&str]) -> Option<String> {
+pub(super) fn find_string_field(path: &Path, candidates: &[&str]) -> Option<String> {
     let content = fs::read_to_string(path).ok()?;
     for line in content.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
@@ -138,7 +138,7 @@ fn find_string_field(path: &Path, candidates: &[&str]) -> Option<String> {
 /// una lista. Los bloques de Claude/Codex vienen tipados (`text`/`input_text`/`output_text`);
 /// los `Part` de Gemini NO tienen `type`, solo `text` — sin contemplarlos, el título de una
 /// sesión de Gemini nunca sale del primer mensaje.
-fn extract_text_block(content: &Value) -> Option<String> {
+pub(super) fn extract_text_block(content: &Value) -> Option<String> {
     fn text_of_block(b: &Value) -> Option<String> {
         match b.get("type").and_then(|t| t.as_str()) {
             Some("text") | Some("input_text") | Some("output_text") => {
@@ -174,7 +174,7 @@ fn extract_text_block(content: &Value) -> Option<String> {
 /// que la sesión nunca se descubría. Esas tabs quedaban sin id de sesión —sin título real,
 /// sin reanudar al reabrirlas y sin poder actualizar su entrada del historial— y desde
 /// afuera se veía como "la app no guarda las sesiones".
-fn claude_project_slug(cwd: &str) -> String {
+pub(super) fn claude_project_slug(cwd: &str) -> String {
     cwd.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
@@ -184,7 +184,7 @@ fn claude_project_slug(cwd: &str) -> String {
 /// Con una cuenta alternativa, TODO lo de Claude Code vive ahí adentro — incluidos los
 /// transcripts — así que buscar en `~/.claude` daría siempre "sin sesión": ni título ni
 /// resume. `None` = la cuenta del sistema.
-fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
+pub(super) fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
     let root = match profile {
         Some(dir) => dir.to_path_buf(),
         None => dirs::home_dir().unwrap_or_default().join(".claude"),
@@ -203,7 +203,7 @@ fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
     dir
 }
 
-fn claude_session_file(
+pub(super) fn claude_session_file(
     cwd: &str,
     session_id: Option<&str>,
     after: Option<i64>,
@@ -221,7 +221,7 @@ fn claude_session_file(
     newest_matching(&files, after, None)
 }
 
-fn claude_title(path: &Path, fallback: &str) -> SessionTitleResult {
+pub(super) fn claude_title(path: &Path, fallback: &str) -> SessionTitleResult {
     let Ok(content) = fs::read_to_string(path) else { return fallback_result(fallback) };
     let mut first_user_msg: Option<String> = None;
 
@@ -270,12 +270,12 @@ fn claude_title(path: &Path, fallback: &str) -> SessionTitleResult {
 //   3. Leía el contenido completo de todos los archivos de sesión del sistema en cada
 //      intento de descubrimiento (cada 3s), no solo los de este proyecto.
 
-fn gemini_home() -> PathBuf {
+pub(super) fn gemini_home() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".gemini")
 }
 
 /// Carpeta que Gemini le asignó a este cwd, o `None` si nunca abrió una sesión acá.
-fn gemini_project_dir(home: &Path, cwd: &str) -> Option<PathBuf> {
+pub(super) fn gemini_project_dir(home: &Path, cwd: &str) -> Option<PathBuf> {
     let tmp = home.join("tmp");
 
     // 1) El registro, que es el mapa autoritativo proyecto → slug.
@@ -305,12 +305,12 @@ fn gemini_project_dir(home: &Path, cwd: &str) -> Option<PathBuf> {
 }
 
 /// Metadata de la primera línea de un archivo de chat.
-struct GeminiMeta {
-    session_id: Option<String>,
-    kind: Option<String>,
+pub(super) struct GeminiMeta {
+    pub(super) session_id: Option<String>,
+    pub(super) kind: Option<String>,
 }
 
-fn gemini_meta(path: &Path) -> Option<GeminiMeta> {
+pub(super) fn gemini_meta(path: &Path) -> Option<GeminiMeta> {
     let v = first_line_json(path)?;
     // `sessionId` es obligatorio en la cabecera; si no está, esta no es una cabecera.
     let session_id = v.get("sessionId").and_then(|s| s.as_str()).map(String::from)?;
@@ -323,14 +323,14 @@ fn gemini_meta(path: &Path) -> Option<GeminiMeta> {
 /// Una sesión de sub-agente no es la conversación de la tab: reanudarla con `--resume`
 /// no devuelve al usuario a su charla. `kind` ausente se trata como principal, que es el
 /// comportamiento de las versiones que todavía no escribían el campo.
-fn gemini_is_main_session(path: &Path) -> bool {
+pub(super) fn gemini_is_main_session(path: &Path) -> bool {
     match gemini_meta(path) {
         Some(m) => m.kind.as_deref() != Some("subagent"),
         None => false,
     }
 }
 
-fn gemini_chat_files(home: &Path, cwd: &str) -> Vec<PathBuf> {
+pub(super) fn gemini_chat_files(home: &Path, cwd: &str) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Some(dir) = gemini_project_dir(home, cwd) {
         collect_files(&dir.join("chats"), "jsonl", &mut files);
@@ -338,11 +338,11 @@ fn gemini_chat_files(home: &Path, cwd: &str) -> Vec<PathBuf> {
     files
 }
 
-fn gemini_session_file(cwd: &str, after: Option<i64>) -> Option<PathBuf> {
+pub(super) fn gemini_session_file(cwd: &str, after: Option<i64>) -> Option<PathBuf> {
     gemini_session_file_in(&gemini_home(), cwd, after)
 }
 
-fn gemini_session_file_in(home: &Path, cwd: &str, after: Option<i64>) -> Option<PathBuf> {
+pub(super) fn gemini_session_file_in(home: &Path, cwd: &str, after: Option<i64>) -> Option<PathBuf> {
     let files = gemini_chat_files(home, cwd);
     if !files.is_empty() {
         return newest_where(&files, after, gemini_is_main_session);
@@ -357,13 +357,13 @@ fn gemini_session_file_in(home: &Path, cwd: &str, after: Option<i64>) -> Option<
     newest_matching(&all, after, Some(&format!("\"{cwd}\"")))
 }
 
-fn gemini_session_file_by_id(home: &Path, cwd: &str, session_id: &str) -> Option<PathBuf> {
+pub(super) fn gemini_session_file_by_id(home: &Path, cwd: &str, session_id: &str) -> Option<PathBuf> {
     gemini_chat_files(home, cwd)
         .into_iter()
         .find(|p| gemini_meta(p).and_then(|m| m.session_id).as_deref() == Some(session_id))
 }
 
-fn gemini_title(path: &Path, fallback: &str) -> SessionTitleResult {
+pub(super) fn gemini_title(path: &Path, fallback: &str) -> SessionTitleResult {
     let Ok(content) = fs::read_to_string(path) else { return fallback_result(fallback) };
     let mut first_user_msg: Option<String> = None;
 
@@ -408,7 +408,7 @@ fn gemini_title(path: &Path, fallback: &str) -> SessionTitleResult {
 // session id de OTRO proyecto y reanudar la conversación equivocada. Comparar `payload.cwd`
 // como ruta, y no como substring, elimina las dos cosas.
 
-fn codex_root(profile: Option<&Path>) -> PathBuf {
+pub(super) fn codex_root(profile: Option<&Path>) -> PathBuf {
     if let Some(dir) = profile {
         return dir.join("sessions");
     }
@@ -422,12 +422,12 @@ fn codex_root(profile: Option<&Path>) -> PathBuf {
 
 /// Cabecera `session_meta` de un rollout: lo que hace falta para identificar la sesión sin
 /// leer la conversación. `None` si el archivo no arranca con una cabecera reconocible.
-struct CodexMeta {
-    id: Option<String>,
-    cwd: PathBuf,
+pub(super) struct CodexMeta {
+    pub(super) id: Option<String>,
+    pub(super) cwd: PathBuf,
 }
 
-fn codex_meta(path: &Path) -> Option<CodexMeta> {
+pub(super) fn codex_meta(path: &Path) -> Option<CodexMeta> {
     let v = first_line_json(path)?;
     if v.get("type").and_then(|t| t.as_str()) != Some("session_meta") {
         return None;
@@ -439,30 +439,30 @@ fn codex_meta(path: &Path) -> Option<CodexMeta> {
     })
 }
 
-fn codex_rollouts_in(root: &Path) -> Vec<PathBuf> {
+pub(super) fn codex_rollouts_in(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_files(root, "jsonl", &mut files);
     files
 }
 
-fn codex_rollouts(profile: Option<&Path>) -> Vec<PathBuf> {
+pub(super) fn codex_rollouts(profile: Option<&Path>) -> Vec<PathBuf> {
     codex_rollouts_in(&codex_root(profile))
 }
 
 /// Rollout de la sesión con ESTE id exacto. Se prefiere a "el más nuevo del cwd" cuando el
 /// id se conoce: con dos tabs de Codex abiertas en la misma carpeta, "el más nuevo" es el de
 /// la otra tab y los títulos quedarían cruzados.
-fn codex_session_file_by_id(session_id: &str, profile: Option<&Path>) -> Option<PathBuf> {
+pub(super) fn codex_session_file_by_id(session_id: &str, profile: Option<&Path>) -> Option<PathBuf> {
     codex_rollouts(profile)
         .into_iter()
         .find(|p| codex_meta(p).and_then(|m| m.id).as_deref() == Some(session_id))
 }
 
-fn codex_session_file(cwd: &str, after: Option<i64>, profile: Option<&Path>) -> Option<PathBuf> {
+pub(super) fn codex_session_file(cwd: &str, after: Option<i64>, profile: Option<&Path>) -> Option<PathBuf> {
     codex_session_file_in(&codex_root(profile), cwd, after)
 }
 
-fn codex_session_file_in(root: &Path, cwd: &str, after: Option<i64>) -> Option<PathBuf> {
+pub(super) fn codex_session_file_in(root: &Path, cwd: &str, after: Option<i64>) -> Option<PathBuf> {
     let files = codex_rollouts_in(root);
     if let Some(found) =
         newest_where(&files, after, |p| codex_meta(p).is_some_and(|m| m.cwd == Path::new(cwd)))
@@ -490,14 +490,14 @@ fn codex_session_file_in(root: &Path, cwd: &str, after: Option<i64>) -> Option<P
 /// (`<environment_context>` con el cwd/OS/sandbox, `<user_instructions>` con el AGENTS.md).
 /// Eso no lo escribió la persona: como título de tab sería siempre el mismo bloque de XML,
 /// y en el export ensuciaría el arranque de la conversación.
-fn codex_is_synthetic(text: &str) -> bool {
+pub(super) fn codex_is_synthetic(text: &str) -> bool {
     let t = text.trim_start();
     t.starts_with("<environment_context>")
         || t.starts_with("<user_instructions>")
         || t.starts_with("## My environment")
 }
 
-fn codex_title(path: &Path, fallback: &str) -> SessionTitleResult {
+pub(super) fn codex_title(path: &Path, fallback: &str) -> SessionTitleResult {
     let Ok(content) = fs::read_to_string(path) else { return fallback_result(fallback) };
 
     for line in content.lines() {
@@ -563,14 +563,14 @@ fn codex_title(path: &Path, fallback: &str) -> SessionTitleResult {
 const OPENCODE_CLOCK_SKEW_S: i64 = 5;
 
 #[derive(serde::Deserialize)]
-struct OpencodeSession {
-    id: String,
+pub(super) struct OpencodeSession {
+    pub(super) id: String,
     #[serde(default)]
-    title: String,
+    pub(super) title: String,
     #[serde(default)]
-    directory: String,
+    pub(super) directory: String,
     #[serde(default)]
-    created: i64,
+    pub(super) created: i64,
 }
 
 /// Sesiones de OpenCode para un cwd, de la más reciente a la más vieja.
@@ -588,7 +588,12 @@ struct OpencodeSession {
 /// la sesión" es indistinguible de "opencode no está en el PATH del proceso de la app",
 /// que es un caso real cuando la app se lanza desde el menú del escritorio y no desde una
 /// terminal (el PATH del launcher no incluye `~/.opencode/bin`).
-fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<OpencodeSession> {
+/// Cuánto se espera a `opencode` antes de darlo por colgado. Generoso frente a lo que
+/// tarda de verdad (~1s medido) y muy por debajo de lo que un usuario tolera esperando a
+/// que cierre una ventana.
+const OPENCODE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+pub(super) fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<OpencodeSession> {
     let mut command = std::process::Command::new("opencode");
     command
         .args(["session", "list", "--format", "json", "-n", "50"])
@@ -599,8 +604,9 @@ fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<OpencodeSession> 
     if let Some(dir) = profile {
         command.env("XDG_DATA_HOME", dir);
     }
-    let output = match command.output()
-    {
+    // Con plazo: esta función corre en el camino de cerrar una tab, y un `opencode`
+    // colgado no puede dejar a la app esperándolo para siempre.
+    let output = match crate::util::output_with_timeout(&mut command, OPENCODE_TIMEOUT) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("[opencode] no se pudo ejecutar `opencode session list`: {e}");
@@ -637,7 +643,7 @@ fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<OpencodeSession> 
 }
 
 /// Sesión más reciente del cwd, opcionalmente creada después de `after` (en segundos).
-fn opencode_session(cwd: &str, after: Option<i64>, profile: Option<&Path>) -> Option<OpencodeSession> {
+pub(super) fn opencode_session(cwd: &str, after: Option<i64>, profile: Option<&Path>) -> Option<OpencodeSession> {
     let sessions = opencode_sessions(cwd, profile);
     let found = sessions.into_iter().find(|s| match after {
         // `created` viene en MILISEGUNDOS; el resto del módulo trabaja en segundos.
@@ -656,7 +662,7 @@ fn opencode_session(cwd: &str, after: Option<i64>, profile: Option<&Path>) -> Op
 /// título real. Ese placeholder no le dice nada al usuario en la barra de tabs, así que se
 /// trata como "todavía no hay título" y se deja el fallback (el comando se reintenta más
 /// adelante y para entonces suele estar el bueno).
-fn opencode_is_placeholder_title(title: &str) -> bool {
+pub(super) fn opencode_is_placeholder_title(title: &str) -> bool {
     title.trim_start().starts_with("New session -")
 }
 
@@ -681,7 +687,7 @@ fn opencode_is_placeholder_title(title: &str) -> bool {
 const KIMI_CWD_FIELDS: &[&str] =
     &["workDir", "workingDirectory", "cwd", "directory", "projectRoot", "work_dir", "root"];
 
-fn kimi_root() -> PathBuf {
+pub(super) fn kimi_root() -> PathBuf {
     let home = std::env::var_os("KIMI_CODE_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".kimi-code"));
@@ -691,11 +697,11 @@ fn kimi_root() -> PathBuf {
 /// Carpetas de sesión: los nietos de `sessions/` que tengan un `state.json`.
 /// Se camina en dos niveles exactos en vez de recursivamente porque adentro de cada sesión
 /// hay muchos más `.json` (`upcoming-goals.json`, `agents/*/plans/*`) que no son sesiones.
-fn kimi_session_dirs() -> Vec<PathBuf> {
+pub(super) fn kimi_session_dirs() -> Vec<PathBuf> {
     kimi_session_dirs_in(&kimi_root())
 }
 
-fn kimi_session_dirs_in(root: &Path) -> Vec<PathBuf> {
+pub(super) fn kimi_session_dirs_in(root: &Path) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     let Ok(buckets) = fs::read_dir(root) else { return dirs };
     for bucket in buckets.flatten() {
@@ -710,12 +716,12 @@ fn kimi_session_dirs_in(root: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-fn kimi_state(dir: &Path) -> Option<Value> {
+pub(super) fn kimi_state(dir: &Path) -> Option<Value> {
     serde_json::from_str(&fs::read_to_string(dir.join("state.json")).ok()?).ok()
 }
 
 /// El id de la sesión es el nombre de su carpeta — que es lo que espera `kimi --session`.
-fn kimi_session_id(dir: &Path) -> Option<String> {
+pub(super) fn kimi_session_id(dir: &Path) -> Option<String> {
     dir.file_name().map(|s| s.to_string_lossy().to_string())
 }
 
@@ -725,7 +731,7 @@ fn kimi_session_id(dir: &Path) -> Option<String> {
 /// sin enumerarlos todos, así que no está garantizado que el cwd esté ahí. Devolver `None`
 /// cuando no aparece es deliberado: el llamador entonces NO filtra por cwd en vez de
 /// filtrar con un criterio inventado y quedarse sin resultados.
-fn kimi_declared_cwd(state: &Value) -> Option<PathBuf> {
+pub(super) fn kimi_declared_cwd(state: &Value) -> Option<PathBuf> {
     KIMI_CWD_FIELDS
         .iter()
         .find_map(|k| state.get(*k).and_then(|v| v.as_str()))
@@ -737,11 +743,11 @@ fn kimi_declared_cwd(state: &Value) -> Option<PathBuf> {
 /// El orden es por mtime del `state.json` (se reescribe en cada turno). Cuando el cwd no se
 /// puede confirmar, el piso `after` — el arranque de ESTA tab — es lo único que separa esta
 /// sesión de la de otra tab, igual que con las TUIs custom.
-fn kimi_session_dir(cwd: Option<&str>, after: Option<i64>) -> Option<PathBuf> {
+pub(super) fn kimi_session_dir(cwd: Option<&str>, after: Option<i64>) -> Option<PathBuf> {
     kimi_session_dir_in(&kimi_root(), cwd, after)
 }
 
-fn kimi_session_dir_in(root: &Path, cwd: Option<&str>, after: Option<i64>) -> Option<PathBuf> {
+pub(super) fn kimi_session_dir_in(root: &Path, cwd: Option<&str>, after: Option<i64>) -> Option<PathBuf> {
     let states: Vec<PathBuf> =
         kimi_session_dirs_in(root).into_iter().map(|d| d.join("state.json")).collect();
 
@@ -758,13 +764,13 @@ fn kimi_session_dir_in(root: &Path, cwd: Option<&str>, after: Option<i64>) -> Op
         .and_then(|p| p.parent().map(Path::to_path_buf))
 }
 
-fn kimi_session_dir_by_id(session_id: &str) -> Option<PathBuf> {
+pub(super) fn kimi_session_dir_by_id(session_id: &str) -> Option<PathBuf> {
     kimi_session_dirs().into_iter().find(|d| kimi_session_id(d).as_deref() == Some(session_id))
 }
 
 /// `agents/main/wire.jsonl` es el stream del agente principal — la conversación. Los
 /// `agents/agent-N/` son sub-agentes y no van al export.
-fn kimi_wire_file(dir: &Path) -> Option<PathBuf> {
+pub(super) fn kimi_wire_file(dir: &Path) -> Option<PathBuf> {
     let wire = dir.join("agents/main/wire.jsonl");
     wire.is_file().then_some(wire)
 }
@@ -772,7 +778,7 @@ fn kimi_wire_file(dir: &Path) -> Option<PathBuf> {
 /// Título de una sesión de Kimi. A diferencia del resto de los agentes no hay que deducirlo
 /// del primer mensaje: Kimi lo guarda en `state.json` (y el usuario puede fijarlo a mano con
 /// `/title`). `lastPrompt` es el respaldo cuando todavía no le puso título.
-fn kimi_title(dir: &Path, fallback: &str) -> SessionTitleResult {
+pub(super) fn kimi_title(dir: &Path, fallback: &str) -> SessionTitleResult {
     let Some(state) = kimi_state(dir) else { return fallback_result(fallback) };
 
     for (key, source) in [("title", "summary"), ("lastPrompt", "first_message")] {
@@ -793,7 +799,7 @@ fn kimi_title(dir: &Path, fallback: &str) -> SessionTitleResult {
 /// genérica de saber cómo esa TUI mapea un proyecto a una carpeta — así que el filtro por
 /// `after` (el momento en que arrancó ESTE proceso) es lo único que evita agarrar la
 /// sesión de otra tab. Por eso `get_session_title` no lo usa sin un `after`.
-fn custom_session_file(agent: &crate::agents::CustomAgent, after: Option<i64>) -> Option<PathBuf> {
+pub(super) fn custom_session_file(agent: &crate::agents::CustomAgent, after: Option<i64>) -> Option<PathBuf> {
     let root = agent.resolved_sessions_dir()?;
     let mut files = Vec::new();
     collect_files(&root, "jsonl", &mut files);
@@ -803,7 +809,7 @@ fn custom_session_file(agent: &crate::agents::CustomAgent, after: Option<i64>) -
 
 /// Archivo de la sesión con ESTE id exacto, ya sea porque el id es el nombre del archivo
 /// o porque aparece adentro. Recorre la carpeta declarada; devuelve `None` si no aparece.
-fn custom_session_file_by_id(
+pub(super) fn custom_session_file_by_id(
     agent: &crate::agents::CustomAgent,
     session_id: &str,
 ) -> Option<PathBuf> {
@@ -814,7 +820,7 @@ fn custom_session_file_by_id(
     files.into_iter().find(|p| custom_session_id(agent, p).as_deref() == Some(session_id))
 }
 
-fn custom_session_id(agent: &crate::agents::CustomAgent, path: &Path) -> Option<String> {
+pub(super) fn custom_session_id(agent: &crate::agents::CustomAgent, path: &Path) -> Option<String> {
     match agent.session_id_source() {
         crate::agents::SessionIdSource::Filename => {
             path.file_stem().map(|s| s.to_string_lossy().to_string())
@@ -826,7 +832,7 @@ fn custom_session_id(agent: &crate::agents::CustomAgent, path: &Path) -> Option<
 /// Título de una sesión de TUI custom: se reusa la heurística genérica de "primer mensaje
 /// del usuario" que ya sirve para Codex, porque cubre las formas JSONL más comunes
 /// (`role: user` + `content` string o bloques de texto) sin conocer el formato exacto.
-fn custom_title(path: &Path, fallback: &str) -> SessionTitleResult {
+pub(super) fn custom_title(path: &Path, fallback: &str) -> SessionTitleResult {
     codex_title(path, fallback)
 }
 
@@ -1063,331 +1069,5 @@ pub(crate) fn get_session_title_sync(
                 None => fallback_result(&fallback),
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Con una cuenta alternativa, los transcripts NO están en `~/.claude`: viven dentro
-    /// del directorio de la cuenta (verificado: un `CLAUDE_CONFIG_DIR` nuevo se inicializa
-    /// autocontenido). Buscar en el home daría "sin sesión" para toda tab con cuenta
-    /// propia — ni título ni reanudación.
-    #[test]
-    fn claude_looks_for_transcripts_inside_the_account_profile() {
-        let dir = claude_project_dir("/home/u/proj", Some(Path::new("/perfiles/trabajo")));
-        assert_eq!(dir, PathBuf::from("/perfiles/trabajo/projects/-home-u-proj"));
-    }
-
-    #[test]
-    fn claude_without_account_uses_the_system_profile() {
-        let dir = claude_project_dir("/home/u/proj", None);
-        assert!(dir.ends_with(".claude/projects/-home-u-proj"), "{dir:?}");
-    }
-
-    /// El bug que dejaba sin sesión a proyectos enteros: la ruta con un espacio se traducía
-    /// a una carpeta inexistente, así que no se descubría nada. Verificado contra las
-    /// carpetas reales de una instalación de Claude Code.
-    #[test]
-    fn the_project_slug_replaces_everything_that_is_not_alphanumeric() {
-        assert_eq!(
-            claude_project_slug("/home/luis/Documents/proyecto wallet/pruebas/wallet"),
-            "-home-luis-Documents-proyecto-wallet-pruebas-wallet"
-        );
-        assert_eq!(
-            claude_project_slug("/home/u/mi_proyecto.v2"),
-            "-home-u-mi-proyecto-v2"
-        );
-    }
-
-    /// Las rutas sin caracteres raros dan lo mismo con la regla vieja y con la nueva — por
-    /// eso el bug pasó desapercibido tanto tiempo.
-    #[test]
-    fn plain_paths_are_unaffected_by_the_slug_rule() {
-        let cwd = "/home/luis/Documents/XD/ControlCode";
-        assert_eq!(claude_project_slug(cwd), cwd.replace('/', "-"));
-    }
-
-    /// Ninguno de los dos CLIs está instalado en la máquina de desarrollo, así que estos
-    /// tests son la única verificación posible: reproducen en disco el layout documentado
-    /// de cada uno y comprueban que el código lo lee. No prueban que la documentación sea
-    /// fiel al binario — eso solo lo confirma un Codex/Kimi real.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new() -> Self {
-            let p = std::env::temp_dir().join(format!("cc-title-{}", uuid::Uuid::new_v4()));
-            fs::create_dir_all(&p).unwrap();
-            TempDir(p)
-        }
-        fn write(&self, rel: &str, body: &str) -> PathBuf {
-            let path = self.0.join(rel);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(&path, body).unwrap();
-            path
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    /// Cabecera real de un rollout de Codex, tal como la documenta el formato:
-    /// `{timestamp, type: "session_meta", payload: {id, cwd, …}}`.
-    fn codex_rollout(id: &str, cwd: &str, body: &str) -> String {
-        format!(
-            "{}\n{}",
-            serde_json::json!({
-                "timestamp": "2026-08-03T10:00:00Z",
-                "type": "session_meta",
-                "payload": { "id": id, "cwd": cwd, "source": "cli", "cli_version": "0.55.0" }
-            }),
-            body
-        )
-    }
-
-    #[test]
-    fn codex_reads_id_and_cwd_from_the_session_meta_header() {
-        let d = TempDir::new();
-        let path = d.write("2026/08/03/rollout-a.jsonl", &codex_rollout("sess-a", "/proj", ""));
-
-        let meta = codex_meta(&path).expect("la cabecera documentada debe parsearse");
-        assert_eq!(meta.id.as_deref(), Some("sess-a"));
-        assert_eq!(meta.cwd, Path::new("/proj"));
-    }
-
-    /// La regresión que motivó el cambio: el filtro anterior era `contenido.contains(cwd)`,
-    /// y `/proj` está contenido en `/proj2`, así que una tab de `/proj` podía adoptar el
-    /// session id de `/proj2` y reanudar la conversación de otro proyecto.
-    #[test]
-    fn codex_does_not_confuse_a_cwd_with_another_that_has_it_as_prefix() {
-        let d = TempDir::new();
-        d.write("2026/08/03/rollout-otro.jsonl", &codex_rollout("sess-otro", "/proj2", ""));
-
-        assert_eq!(codex_session_file_in(&d.0, "/proj", None), None);
-
-        let mine = d.write("2026/08/03/rollout-mio.jsonl", &codex_rollout("sess-mio", "/proj", ""));
-        assert_eq!(codex_session_file_in(&d.0, "/proj", None), Some(mine));
-    }
-
-    #[test]
-    fn codex_finds_a_rollout_by_its_exact_session_id() {
-        let d = TempDir::new();
-        d.write("2026/08/03/a.jsonl", &codex_rollout("sess-a", "/proj", ""));
-        let b = d.write("2026/08/03/b.jsonl", &codex_rollout("sess-b", "/proj", ""));
-
-        // Se busca por id y no por "el más nuevo del cwd": con dos tabs en la misma carpeta
-        // el más nuevo es el de la otra tab.
-        let found = codex_rollouts_in(&d.0)
-            .into_iter()
-            .find(|p| codex_meta(p).and_then(|m| m.id).as_deref() == Some("sess-b"));
-        assert_eq!(found, Some(b));
-    }
-
-    /// Codex se inyecta contexto propio con `role: "user"` al abrir la sesión. Si eso contara
-    /// como "primer mensaje", TODAS las tabs de Codex se llamarían `<environment_context>`.
-    #[test]
-    fn codex_title_skips_the_context_codex_injects_as_the_user() {
-        let d = TempDir::new();
-        let body = concat!(
-            r#"{"timestamp":"t","type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"<environment_context>\n  cwd: /proj\n</environment_context>"}]}}"#,
-            "\n",
-            r#"{"timestamp":"t","type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"<user_instructions>usá tabs</user_instructions>"}]}}"#,
-            "\n",
-            r#"{"timestamp":"t","type":"event_msg","payload":{"type":"user_message","message":"arreglá el parser"}}"#,
-        );
-        let path = d.write("r.jsonl", &codex_rollout("sess-a", "/proj", body));
-
-        let result = codex_title(&path, "sin título");
-        assert_eq!(result.title, "arreglá el parser");
-        assert_eq!(result.source, "first_message");
-    }
-
-    #[test]
-    fn codex_falls_back_to_the_fallback_when_there_is_no_real_message() {
-        let d = TempDir::new();
-        let path = d.write("r.jsonl", &codex_rollout("sess-a", "/proj", ""));
-        assert_eq!(codex_title(&path, "sin título").title, "sin título");
-    }
-
-    // ── Kimi Code ────────────────────────────────────────────────────
-
-    /// Layout documentado: `sessions/<workDirKey>/<sessionId>/state.json`.
-    #[test]
-    fn kimi_discovers_the_session_id_from_the_directory_name() {
-        let d = TempDir::new();
-        d.write(
-            "wd_proj_0123456789ab/ses-42/state.json",
-            r#"{"title":"Refactor del parser","workDir":"/proj"}"#,
-        );
-
-        let dir = kimi_session_dir_in(&d.0, Some("/proj"), None).expect("debe encontrarla");
-        assert_eq!(kimi_session_id(&dir).as_deref(), Some("ses-42"));
-        assert_eq!(kimi_title(&dir, "sin título").title, "Refactor del parser");
-    }
-
-    /// El id es el nombre de la carpeta, no un campo: es lo que espera `kimi --session <id>`.
-    #[test]
-    fn kimi_filters_by_declared_cwd_when_state_declares_one() {
-        let d = TempDir::new();
-        d.write("wd_a_1/ses-a/state.json", r#"{"title":"A","workDir":"/otro"}"#);
-        d.write("wd_b_2/ses-b/state.json", r#"{"title":"B","workDir":"/proj"}"#);
-
-        let dir = kimi_session_dir_in(&d.0, Some("/proj"), None).unwrap();
-        assert_eq!(kimi_session_id(&dir).as_deref(), Some("ses-b"));
-    }
-
-    /// La doc no garantiza que `state.json` traiga el cwd. Cuando no lo trae, el filtro por
-    /// cwd no debe descartar la sesión — si lo hiciera, Kimi quedaría igual de roto que antes.
-    #[test]
-    fn kimi_keeps_sessions_that_do_not_declare_a_cwd() {
-        let d = TempDir::new();
-        d.write("wd_x_1/ses-x/state.json", r#"{"title":"Sin cwd"}"#);
-
-        let dir = kimi_session_dir_in(&d.0, Some("/proj"), None).expect("no se debe descartar");
-        assert_eq!(kimi_session_id(&dir).as_deref(), Some("ses-x"));
-    }
-
-    #[test]
-    fn kimi_uses_last_prompt_when_there_is_no_title_yet() {
-        let d = TempDir::new();
-        d.write("wd_x_1/ses-x/state.json", r#"{"title":"","lastPrompt":"corré los tests"}"#);
-        let dir = kimi_session_dir_in(&d.0, None, None).unwrap();
-
-        let result = kimi_title(&dir, "sin título");
-        assert_eq!(result.title, "corré los tests");
-        assert_eq!(result.source, "first_message");
-    }
-
-    /// Adentro de una sesión hay varios `.json` que NO son sesiones (`upcoming-goals.json`,
-    /// planes de agentes). Solo cuenta como sesión la carpeta con `state.json` propio.
-    #[test]
-    fn kimi_ignores_files_that_are_not_session_state() {
-        let d = TempDir::new();
-        d.write("wd_x_1/ses-x/state.json", r#"{"title":"Real"}"#);
-        d.write("wd_x_1/ses-x/upcoming-goals.json", r#"{"goals":[]}"#);
-        d.write("wd_x_1/ses-x/agents/main/plans/p1.json", r#"{"plan":"algo"}"#);
-
-        assert_eq!(kimi_session_dirs_in(&d.0).len(), 1);
-    }
-
-    #[test]
-    fn kimi_points_the_transcript_at_the_main_agent_wire() {
-        let d = TempDir::new();
-        d.write("wd_x_1/ses-x/state.json", r#"{"title":"Real"}"#);
-        let wire = d.write("wd_x_1/ses-x/agents/main/wire.jsonl", "");
-        d.write("wd_x_1/ses-x/agents/agent-0/wire.jsonl", "");
-
-        let dir = kimi_session_dir_in(&d.0, None, None).unwrap();
-        assert_eq!(kimi_wire_file(&dir), Some(wire));
-    }
-
-    #[test]
-    fn kimi_survives_a_missing_or_broken_home() {
-        let d = TempDir::new();
-        assert!(kimi_session_dirs_in(&d.0.join("no-existe")).is_empty());
-
-        d.write("wd_x_1/ses-x/state.json", "no soy json");
-        let dir = kimi_session_dir_in(&d.0, None, None).unwrap();
-        assert_eq!(kimi_title(&dir, "sin título").title, "sin título");
-    }
-
-    // ── Gemini CLI ───────────────────────────────────────────────────
-
-    /// Cabecera real de un archivo de chat de Gemini + una línea de mensaje.
-    fn gemini_chat(session_id: &str, kind: &str, body: &str) -> String {
-        format!(
-            "{}\n{}",
-            serde_json::json!({
-                "sessionId": session_id, "projectHash": "h",
-                "startTime": "2026-08-03T10:00:00Z", "lastUpdated": "2026-08-03T10:05:00Z",
-                "kind": kind
-            }),
-            body
-        )
-    }
-
-    /// El slug de la carpeta es asignado por el registro de Gemini y NO se puede derivar del
-    /// cwd (`mi-proyecto`, `mi-proyecto-1` si choca), así que hay que consultarlo.
-    #[test]
-    fn gemini_resolves_the_project_dir_through_the_registry() {
-        let d = TempDir::new();
-        d.write("projects.json", r#"{"projects":{"/home/u/proj":"proj-1"}}"#);
-        let chat = d.write("tmp/proj-1/chats/session-a.jsonl", &gemini_chat("ses-a", "main", ""));
-
-        assert_eq!(gemini_session_file_in(&d.0, "/home/u/proj", None), Some(chat));
-    }
-
-    /// Si el registro no ayuda (versión vieja, archivo corrupto), quedan los marcadores
-    /// `.project_root` que Gemini escribe en cada carpeta de proyecto.
-    #[test]
-    fn gemini_falls_back_to_the_project_root_markers() {
-        let d = TempDir::new();
-        d.write("tmp/proj-1/.project_root", "/home/u/proj\n");
-        let chat = d.write("tmp/proj-1/chats/session-a.jsonl", &gemini_chat("ses-a", "main", ""));
-
-        assert_eq!(gemini_session_file_in(&d.0, "/home/u/proj", None), Some(chat));
-    }
-
-    /// Regresión: el filtro anterior era `contenido.contains(cwd)` sobre TODO `~/.gemini/tmp`,
-    /// y `/home/u/proj` está contenido en `/home/u/proj2`.
-    #[test]
-    fn gemini_does_not_pick_up_another_projects_session() {
-        let d = TempDir::new();
-        d.write("projects.json", r#"{"projects":{"/home/u/proj":"proj","/home/u/proj2":"proj2"}}"#);
-        d.write("tmp/proj2/chats/session-otro.jsonl", &gemini_chat("ses-otro", "main", ""));
-        let mine = d.write("tmp/proj/chats/session-mio.jsonl", &gemini_chat("ses-mio", "main", ""));
-
-        assert_eq!(gemini_session_file_in(&d.0, "/home/u/proj", None), Some(mine));
-    }
-
-    /// Los sub-agentes escriben su propio archivo en la misma carpeta `chats/`. Si la tab
-    /// adopta el id de un sub-agente, `--resume <id>` no devuelve a la conversación real.
-    #[test]
-    fn gemini_ignores_subagent_sessions() {
-        let d = TempDir::new();
-        d.write("tmp/proj/.project_root", "/home/u/proj");
-        let main = d.write("tmp/proj/chats/session-main.jsonl", &gemini_chat("ses-main", "main", ""));
-        // Se escribe después para que sea el más nuevo por mtime: sin el filtro, ganaría.
-        d.write("tmp/proj/chats/session-sub.jsonl", &gemini_chat("ses-sub", "subagent", ""));
-
-        assert_eq!(gemini_session_file_in(&d.0, "/home/u/proj", None), Some(main));
-    }
-
-    #[test]
-    fn gemini_reads_the_session_id_from_the_header() {
-        let d = TempDir::new();
-        let chat = d.write("c.jsonl", &gemini_chat("ses-42", "main", ""));
-        assert_eq!(gemini_meta(&chat).unwrap().session_id.as_deref(), Some("ses-42"));
-    }
-
-    /// El contenido de Gemini es un `Part[]` sin campo `type` — antes solo se leía el caso
-    /// `content` string pelado, así que el título nunca salía del primer mensaje.
-    #[test]
-    fn gemini_title_reads_part_list_content() {
-        let d = TempDir::new();
-        let body = r#"{"id":"m1","type":"user","content":[{"text":"arreglá el login"}]}"#;
-        let chat = d.write("c.jsonl", &gemini_chat("ses-a", "main", body));
-
-        let result = gemini_title(&chat, "sin título");
-        assert_eq!(result.title, "arreglá el login");
-        assert_eq!(result.source, "first_message");
-    }
-
-    #[test]
-    fn gemini_title_prefers_the_summary() {
-        let d = TempDir::new();
-        let body = concat!(
-            r#"{"id":"m1","type":"user","content":[{"text":"arreglá el login"}]}"#, "\n",
-            r#"{"$set":{"summary":"Arreglo del login"}}"#,
-        );
-        let chat = d.write("c.jsonl", &gemini_chat("ses-a", "main", body));
-
-        let result = gemini_title(&chat, "sin título");
-        assert_eq!(result.title, "Arreglo del login");
-        assert_eq!(result.source, "summary");
     }
 }

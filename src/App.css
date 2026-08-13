@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* OJO: la ruta es relativa a ESTE archivo, no a la raíz del proyecto. Por eso el CSS vive
+   en `src/` y no dentro de `app/`: al moverlo una carpeta más abajo, este `@source` pasó a
+   apuntar a `src/node_modules/…` (inexistente), Tailwind dejó de escanear la librería y no
+   generó ninguna de sus clases — los botones quedaron con el borde por defecto y el wizard
+   entero sin estilos. El CSS bajó de 124.88 kB a 66.38 kB sin que nada fallara. */
 @source "../node_modules/neogestify-ui-components/src";
 
 @variant dark (&:where(.dark, .dark *)) {}
@@ -174,4 +179,31 @@ html:not(.dark) .cc-term-scrollable .xterm-scrollable-element > .scrollbar {
 @keyframes cc-indeterminate {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(300%); }
+}
+
+/* ── Modales montados dentro de una vista (ver `ViewModal`) ───────────────────
+   El modal de la librería es `fixed inset-0` con el panel en `max-w-*`/`max-h-[90vh]`:
+   medidas contra el VIEWPORT. Dentro de `#cc-view-overlay` el `fixed` ya se resuelve
+   contra el área de contenido, pero esas medidas seguirían siendo las de la ventana entera
+   —y desbordarían el área—, así que acá se pasan a "todo el contenedor".
+
+   Resultado: el modal ocupa exactamente la vista, sin taparle al usuario las tabs. */
+#cc-view-overlay > * {
+  /* El contenedor no intercepta clicks (está siempre montado); el modal sí. */
+  pointer-events: auto;
+}
+
+/* Solo los que piden ocupar la vista entera (`<ViewModal fill>`): un modal chico
+   estirado a pantalla completa se ve absurdo. */
+#cc-view-overlay .cc-modal-fill dialog {
+  padding: 0;
+}
+
+#cc-view-overlay .cc-modal-fill dialog > article {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  max-height: 100%;
+  /* Pegado a los bordes de la vista, las esquinas redondeadas se ven cortadas. */
+  border-radius: 0;
 }
