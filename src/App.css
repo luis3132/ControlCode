@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* OJO: la ruta es relativa a ESTE archivo, no a la raíz del proyecto. Por eso el CSS vive
+   en `src/` y no dentro de `app/`: al moverlo una carpeta más abajo, este `@source` pasó a
+   apuntar a `src/node_modules/…` (inexistente), Tailwind dejó de escanear la librería y no
+   generó ninguna de sus clases — los botones quedaron con el borde por defecto y el wizard
+   entero sin estilos. El CSS bajó de 124.88 kB a 66.38 kB sin que nada fallara. */
 @source "../node_modules/neogestify-ui-components/src";
 
 @variant dark (&:where(.dark, .dark *)) {}
