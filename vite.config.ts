@@ -1,3 +1,5 @@
+import { fileURLToPath, URL } from "node:url";
+
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -12,6 +14,13 @@ const isDebugBuild = !!process.env.TAURI_ENV_DEBUG;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
+
+  // `@/` apunta a `src/`. Con carpetas por feature, los imports relativos entre features
+  // (`../../../features/skills/store`) son ilegibles y se rompen al mover un archivo; el
+  // alias los deja estables y dice de qué feature viene cada cosa.
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

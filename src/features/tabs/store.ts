@@ -1,0 +1,178 @@
+import { create } from "zustand";
+import type { PrelaunchStep } from "@/features/prelaunch/store";
+
+export const DEFAULT_WORKSPACE_ID = "default";
+
+export type AgentId = string;
+
+export interface AgentInfo {
+  id: AgentId;
+  label: string;
+  command: string;
+  available: boolean;
+  version?: string;
+  isCustom?: boolean;
+}
+
+export interface Tab {
+  id: string;
+  title: string;
+  titleIsCustom?: boolean;
+  cwd: string;
+  agentId: AgentId;
+  agentLabel: string;
+  command: string;
+  ptyId: number | null;
+  sessionId?: string;
+  scrollback?: string;
+  /** Entrada de `session_history` de la que salió esta tab (reabierta desde Sesiones).
+   *  Es lo que hace que al volver a cerrarla se ACTUALICE esa entrada del historial en
+   *  vez de crear una nueva. */
+  historyId?: string;
+  /** Cuenta (perfil) de la TUI con la que corre esta tab. Ausente = la del sistema.
+   *  Se guarda el id y no las variables ya resueltas: si la cuenta se renombra o se muda
+   *  de carpeta, la tab restaurada sigue apuntando a la cuenta correcta. */
+  accountId?: string;
+  /** Comandos que corren antes del agente (ver el store `prelaunch`). Se guardan las
+   *  referencias a los presets y no su texto, así editar uno alcanza a las tabs guardadas. */
+  prelaunch?: PrelaunchStep[];
+  /** Unix seconds — cuándo se abrió esta tab por primera vez (no se toca en autosaves). */
+  openedAt: number;
+}
+
+interface TabsState {
+  tabs: Tab[];
+  activeTabId: string | null;
+  detectedAgents: AgentInfo[];
+  sidebarCollapsed: boolean;
+  /** Workspace (layout guardado de ventanas/tabs) al que pertenece ESTA ventana. */
+  workspaceId: string;
+  hydrated: boolean;
+
+  addTab: (params: {
+    cwd: string;
+    agent: AgentInfo;
+    title?: string;
+    titleIsCustom?: boolean;
+    ptyId?: number | null;
+    sessionId?: string;
+    historyId?: string;
+    accountId?: string;
+    prelaunch?: PrelaunchStep[];
+  }) => string;
+  closeTab: (id: string) => void;
+  activateTab: (id: string) => void;
+  renameTab: (id: string, title: string) => void;
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
+  setPtyId: (tabId: string, ptyId: number) => void;
+  setSessionId: (tabId: string, sessionId: string) => void;
+  updateTab: (tabId: string, patch: Partial<Tab>) => void;
+  setDetectedAgents: (agents: AgentInfo[]) => void;
+  toggleSidebar: () => void;
+  setWorkspaceId: (workspaceId: string) => void;
+  hydrateFromBackend: (tabs: Tab[], workspaceId?: string) => void;
+  setHydrated: (hydrated: boolean) => void;
+}
+
+function baseName(path: string): string {
+  return path.split("/").filter(Boolean).pop() ?? path;
+}
+
+export const useTabsStore = create<TabsState>((set) => ({
+  tabs: [],
+  activeTabId: null,
+  // bash siempre disponible como fallback mientras detect_agents carga
+  detectedAgents: [{ id: "bash", label: "Terminal (bash)", command: "bash", available: true }],
+  sidebarCollapsed: false,
+  workspaceId: DEFAULT_WORKSPACE_ID,
+  hydrated: false,
+
+  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId, historyId, accountId, prelaunch }) => {
+    const id = crypto.randomUUID();
+    const computedTitle =
+      title ??
+      (agent.id === "bash" ? baseName(cwd) : `${agent.label} — ${baseName(cwd)}`);
+    set((state) => ({
+      tabs: [
+        ...state.tabs,
+        {
+          id,
+          title: computedTitle,
+          titleIsCustom,
+          cwd,
+          agentId: agent.id,
+          agentLabel: agent.label,
+          command: agent.command,
+          ptyId: ptyId ?? null,
+          sessionId,
+          historyId,
+          accountId,
+          prelaunch,
+          openedAt: Math.floor(Date.now() / 1000),
+        },
+      ],
+      activeTabId: id,
+    }));
+    return id;
+  },
+
+  closeTab: (id) =>
+    set((state) => {
+      const idx = state.tabs.findIndex((t) => t.id === id);
+      const next = state.tabs.filter((t) => t.id !== id);
+      let nextActive = state.activeTabId;
+      if (state.activeTabId === id) {
+        nextActive = next[Math.max(0, idx - 1)]?.id ?? next[0]?.id ?? null;
+      }
+      return { tabs: next, activeTabId: nextActive };
+    }),
+
+  activateTab: (id) => set({ activeTabId: id }),
+
+  renameTab: (id, title) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) => (t.id === id ? { ...t, title, titleIsCustom: true } : t)),
+    })),
+
+  reorderTabs: (fromIndex, toIndex) =>
+    set((state) => {
+      const tabs = [...state.tabs];
+      const [moved] = tabs.splice(fromIndex, 1);
+      tabs.splice(toIndex, 0, moved);
+      return { tabs };
+    }),
+
+  setPtyId: (tabId, ptyId) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, ptyId } : t)),
+    })),
+
+  setSessionId: (tabId, sessionId) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, sessionId } : t)),
+    })),
+
+  updateTab: (tabId, patch) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, ...patch } : t)),
+    })),
+
+  setDetectedAgents: (agents) => set({ detectedAgents: agents }),
+
+  toggleSidebar: () =>
+    set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+
+  setWorkspaceId: (workspaceId) => set({ workspaceId }),
+
+  hydrateFromBackend: (tabs, workspaceId) =>
+    set((state) => {
+      const base = workspaceId ? { workspaceId } : {};
+      if (state.tabs.length === 0) {
+        return { ...base, tabs, activeTabId: tabs[0]?.id ?? null };
+      }
+      // Ya hay tabs en memoria (flujo cc-detach/cc-receive-tab) — anexar sin pisarlas.
+      return { ...base, tabs: [...tabs, ...state.tabs] };
+    }),
+
+  setHydrated: (hydrated) => set({ hydrated }),
+}));
