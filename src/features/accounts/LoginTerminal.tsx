@@ -25,7 +25,8 @@ interface LoginTerminalProps {
  */
 export function LoginTerminal({ account }: LoginTerminalProps) {
   const { t } = useTranslation();
-  const { envFor, load } = useAccountsStore();
+  const envFor = useAccountsStore((s) => s.envFor);
+  const load = useAccountsStore((s) => s.load);
   const [env, setEnv] = useState<Record<string, string> | null>(null);
   const [error, setError] = useState("");
 

@@ -4,8 +4,8 @@ import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 
 export function TerminalSection() {
   const { t } = useTranslation();
-  const { inputMarks, setInputMarks } = useTerminalPrefsStore();
-
+  const inputMarks = useTerminalPrefsStore((s) => s.inputMarks);
+  const setInputMarks = useTerminalPrefsStore((s) => s.setInputMarks);
   return (
     <section className="bg-linear-to-br from-white to-gray-50
       dark:from-gray-800 dark:to-gray-900

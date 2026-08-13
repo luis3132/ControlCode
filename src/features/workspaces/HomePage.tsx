@@ -24,9 +24,13 @@ import { homeDir } from "@/shared/ipc/window";
 export function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { addTab, detectedAgents, workspaceId } = useTabsStore();
-  const { customAgents } = useAgentsStore();
-  const { workspaces, loadWorkspaces, focusIfOpen } = useWorkspacesStore();
+  const addTab = useTabsStore((s) => s.addTab);
+  const detectedAgents = useTabsStore((s) => s.detectedAgents);
+  const workspaceId = useTabsStore((s) => s.workspaceId);
+  const customAgents = useAgentsStore((s) => s.customAgents);
+  const workspaces = useWorkspacesStore((s) => s.workspaces);
+  const loadWorkspaces = useWorkspacesStore((s) => s.loadWorkspaces);
+  const focusIfOpen = useWorkspacesStore((s) => s.focusIfOpen);
   const [selectedCwd, setSelectedCwd] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);

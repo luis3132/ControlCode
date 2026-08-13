@@ -6,7 +6,10 @@ import { buildResumeCommand, isResumable } from "@/features/sessions/agentResume
 
 export function TerminalPanel() {
   const { t } = useTranslation();
-  const { tabs, activeTabId, setPtyId, setSessionId } = useTabsStore();
+  const tabs = useTabsStore((s) => s.tabs);
+  const activeTabId = useTabsStore((s) => s.activeTabId);
+  const setPtyId = useTabsStore((s) => s.setPtyId);
+  const setSessionId = useTabsStore((s) => s.setSessionId);
   // El panel sigue montado (para no matar los PTYs) pero oculto fuera de /workspace, así
   // que "ser la tab activa" no alcanza para enfocar: en Skills o Settings el foco tiene que
   // quedarse en esa página, no robárselo una terminal invisible.

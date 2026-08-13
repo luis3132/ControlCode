@@ -30,8 +30,15 @@ interface ContextMenuState {
 
 export function TabBar() {
   const { t } = useTranslation();
-  const { tabs, activeTabId, activateTab, closeTab, renameTab, reorderTabs, addTab, updateTab, workspaceId } =
-    useTabsStore();
+  const tabs = useTabsStore((s) => s.tabs);
+  const activeTabId = useTabsStore((s) => s.activeTabId);
+  const activateTab = useTabsStore((s) => s.activateTab);
+  const closeTab = useTabsStore((s) => s.closeTab);
+  const renameTab = useTabsStore((s) => s.renameTab);
+  const reorderTabs = useTabsStore((s) => s.reorderTabs);
+  const addTab = useTabsStore((s) => s.addTab);
+  const updateTab = useTabsStore((s) => s.updateTab);
+  const workspaceId = useTabsStore((s) => s.workspaceId);
   const navigate = useNavigate();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);

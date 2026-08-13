@@ -41,7 +41,13 @@ function toFrontendTab(row: RestoredTabRow): Tab {
 }
 
 export function AppShell() {
-  const { tabs, setDetectedAgents, addTab, activateTab, hydrateFromBackend, setHydrated, setWorkspaceId } = useTabsStore();
+  const tabs = useTabsStore((s) => s.tabs);
+  const setDetectedAgents = useTabsStore((s) => s.setDetectedAgents);
+  const addTab = useTabsStore((s) => s.addTab);
+  const activateTab = useTabsStore((s) => s.activateTab);
+  const hydrateFromBackend = useTabsStore((s) => s.hydrateFromBackend);
+  const setHydrated = useTabsStore((s) => s.setHydrated);
+  const setWorkspaceId = useTabsStore((s) => s.setWorkspaceId);
   const location = useLocation();
   const navigate = useNavigate();
   const isWorkspace = location.pathname === "/workspace";

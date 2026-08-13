@@ -24,8 +24,9 @@ interface AccountPickerStepProps {
  */
 export function AccountPickerStep({ agentId, value, onChange }: AccountPickerStepProps) {
   const { t } = useTranslation();
-  const { accounts, loaded, load } = useAccountsStore();
-
+  const accounts = useAccountsStore((s) => s.accounts);
+  const loaded = useAccountsStore((s) => s.loaded);
+  const load = useAccountsStore((s) => s.load);
   useEffect(() => { if (!loaded) load().catch(console.error); }, [loaded, load]);
 
   const forAgent = useMemo(

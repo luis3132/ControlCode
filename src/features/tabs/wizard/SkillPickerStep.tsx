@@ -22,7 +22,8 @@ interface SkillPickerStepProps {
  * su carpeta de skills al boot, así que adjuntar después de lanzado no sirve. */
 export function SkillPickerStep({ agentId, selected, onChange }: SkillPickerStepProps) {
   const { t } = useTranslation();
-  const { skills, loadSkills } = useSkillsStore();
+  const skills = useSkillsStore((s) => s.skills);
+  const loadSkills = useSkillsStore((s) => s.loadSkills);
   const [query, setQuery] = useState("");
 
   useEffect(() => {

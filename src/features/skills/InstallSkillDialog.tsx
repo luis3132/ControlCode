@@ -16,7 +16,8 @@ const parseList = (v: string): string[] =>
 
 export function InstallSkillDialog({ onClose }: InstallSkillDialogProps) {
   const { t } = useTranslation();
-  const { previewSkill, installSkill } = useSkillsStore();
+  const previewSkill = useSkillsStore((s) => s.previewSkill);
+  const installSkill = useSkillsStore((s) => s.installSkill);
   const [step, setStep] = useState<Step>("file");
   const [file, setFile] = useState("");
   const [missing, setMissing] = useState<string[]>([]);

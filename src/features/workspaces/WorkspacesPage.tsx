@@ -25,7 +25,11 @@ function formatRelative(unixSeconds: number, t: (key: string, opts?: Record<stri
 
 export function WorkspacesPage() {
   const { t } = useTranslation();
-  const { workspaces, loadWorkspaces, renameWorkspace, deleteWorkspace, focusIfOpen } = useWorkspacesStore();
+  const workspaces = useWorkspacesStore((s) => s.workspaces);
+  const loadWorkspaces = useWorkspacesStore((s) => s.loadWorkspaces);
+  const renameWorkspace = useWorkspacesStore((s) => s.renameWorkspace);
+  const deleteWorkspace = useWorkspacesStore((s) => s.deleteWorkspace);
+  const focusIfOpen = useWorkspacesStore((s) => s.focusIfOpen);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [error, setError] = useState<string | null>(null);

@@ -13,10 +13,17 @@ import { RegistryFilterSidebar, type RegistryFilter } from "./RegistryFilterSide
 
 export function MarketplacePage() {
   const { t } = useTranslation();
-  const {
-    registries, skills, loading, searchingRemote, installingKey, refreshingId,
-    loadRegistries, loadSkills, searchRemote, installSkill, refreshRegistry,
-  } = useMarketplaceStore();
+  const registries = useMarketplaceStore((s) => s.registries);
+  const skills = useMarketplaceStore((s) => s.skills);
+  const loading = useMarketplaceStore((s) => s.loading);
+  const searchingRemote = useMarketplaceStore((s) => s.searchingRemote);
+  const installingKey = useMarketplaceStore((s) => s.installingKey);
+  const refreshingId = useMarketplaceStore((s) => s.refreshingId);
+  const loadRegistries = useMarketplaceStore((s) => s.loadRegistries);
+  const loadSkills = useMarketplaceStore((s) => s.loadSkills);
+  const searchRemote = useMarketplaceStore((s) => s.searchRemote);
+  const installSkill = useMarketplaceStore((s) => s.installSkill);
+  const refreshRegistry = useMarketplaceStore((s) => s.refreshRegistry);
   const [query, setQuery] = useState("");
   const [selectedRegistry, setSelectedRegistry] = useState<RegistryFilter>(null);
   const [error, setError] = useState<string | null>(null);

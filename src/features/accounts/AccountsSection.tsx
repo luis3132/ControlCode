@@ -91,7 +91,11 @@ function AccountRow({
  */
 export function AccountsSection() {
   const { t } = useTranslation();
-  const { accounts, capable, loaded, load, remove } = useAccountsStore();
+  const accounts = useAccountsStore((s) => s.accounts);
+  const capable = useAccountsStore((s) => s.capable);
+  const loaded = useAccountsStore((s) => s.loaded);
+  const load = useAccountsStore((s) => s.load);
+  const remove = useAccountsStore((s) => s.remove);
   const [agentId, setAgentId] = useState("");
   const [adding, setAdding] = useState(false);
   const [loginFor, setLoginFor] = useState<AgentAccount | null>(null);

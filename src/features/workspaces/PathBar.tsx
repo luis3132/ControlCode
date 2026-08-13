@@ -2,7 +2,8 @@ import { FolderIcon } from "neogestify-ui-components";
 import { useTabsStore } from "@/features/tabs/store";
 
 export function PathBar() {
-  const { tabs, activeTabId } = useTabsStore();
+  const tabs = useTabsStore((s) => s.tabs);
+  const activeTabId = useTabsStore((s) => s.activeTabId);
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
   return (

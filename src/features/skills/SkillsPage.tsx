@@ -14,7 +14,11 @@ import { PageHeader } from "@/shared/ui/PageHeader";
 export function SkillsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { skills, loadSkills, detachSkill, checkHealth, brokenSymlinks } = useSkillsStore();
+  const skills = useSkillsStore((s) => s.skills);
+  const loadSkills = useSkillsStore((s) => s.loadSkills);
+  const detachSkill = useSkillsStore((s) => s.detachSkill);
+  const checkHealth = useSkillsStore((s) => s.checkHealth);
+  const brokenSymlinks = useSkillsStore((s) => s.brokenSymlinks);
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [installOpen, setInstallOpen] = useState(false);

@@ -23,8 +23,10 @@ interface AddAccountDialogProps {
  */
 export function AddAccountDialog({ agentId: initialAgentId, onClose }: AddAccountDialogProps) {
   const { t } = useTranslation();
-  const { capable, accounts, create, load } = useAccountsStore();
-
+  const capable = useAccountsStore((s) => s.capable);
+  const accounts = useAccountsStore((s) => s.accounts);
+  const create = useAccountsStore((s) => s.create);
+  const load = useAccountsStore((s) => s.load);
   const installed = useMemo(() => capable.filter((c) => c.installed), [capable]);
   const [agentId, setAgentId] = useState(
     initialAgentId && installed.some((c) => c.agentId === initialAgentId)

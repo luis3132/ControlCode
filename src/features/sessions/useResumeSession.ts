@@ -28,9 +28,10 @@ export interface PendingResume {
 export function useResumeSession() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { checkSessionSkills, restoreSessionSkills } = useSessionsStore();
-  const { workspaceId, addTab } = useTabsStore();
-
+  const checkSessionSkills = useSessionsStore((s) => s.checkSessionSkills);
+  const restoreSessionSkills = useSessionsStore((s) => s.restoreSessionSkills);
+  const workspaceId = useTabsStore((s) => s.workspaceId);
+  const addTab = useTabsStore((s) => s.addTab);
   /** Sesión con skills faltantes: se avisa antes de abrirla. */
   const [pendingResume, setPendingResume] = useState<PendingResume | null>(null);
   /** Sesión abierta desde "reanudar con opciones": el usuario elige el set de skills. */

@@ -26,7 +26,9 @@ interface PrelaunchChainProps {
  */
 export function PrelaunchChain({ value, onChange, agentCommand }: PrelaunchChainProps) {
   const { t } = useTranslation();
-  const { presets, loaded, load } = usePrelaunchStore();
+  const presets = usePrelaunchStore((s) => s.presets);
+  const loaded = usePrelaunchStore((s) => s.loaded);
+  const load = usePrelaunchStore((s) => s.load);
   const [draft, setDraft] = useState("");
 
   useEffect(() => { if (!loaded) load().catch(console.error); }, [loaded, load]);

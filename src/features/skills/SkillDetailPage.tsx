@@ -9,7 +9,8 @@ import { PageHeader } from "@/shared/ui/PageHeader";
 export function SkillDetailPage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
-  const { getSkillDetail, updateSkillContent } = useSkillsStore();
+  const getSkillDetail = useSkillsStore((s) => s.getSkillDetail);
+  const updateSkillContent = useSkillsStore((s) => s.updateSkillContent);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [meta, setMeta] = useState<{

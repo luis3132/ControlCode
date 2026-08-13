@@ -58,7 +58,8 @@ interface SessionRowProps {
 
 export function SessionRow({ entry, workspaceId, onResume, onResumeWithSkills }: SessionRowProps) {
   const { t } = useTranslation();
-  const { deleteSession, exportSession } = useSessionsStore();
+  const deleteSession = useSessionsStore((s) => s.deleteSession);
+  const exportSession = useSessionsStore((s) => s.exportSession);
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
 

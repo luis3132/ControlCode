@@ -29,8 +29,8 @@ interface NewTabWizardProps {
 
 export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) {
   const { t } = useTranslation();
-  const { detectedAgents } = useTabsStore();
-  const { customAgents } = useAgentsStore();
+  const detectedAgents = useTabsStore((s) => s.detectedAgents);
+  const customAgents = useAgentsStore((s) => s.customAgents);
   const [step, setStep] = useState<Step>("folder");
   const [selectedCwd, setSelectedCwd] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);

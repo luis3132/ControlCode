@@ -22,7 +22,8 @@ interface RemoveRegistryDialogProps {
  */
 export function RemoveRegistryDialog({ registry, onClose }: RemoveRegistryDialogProps) {
   const { t } = useTranslation();
-  const { removeRegistry, registrySkills } = useMarketplaceStore();
+  const removeRegistry = useMarketplaceStore((s) => s.removeRegistry);
+  const registrySkills = useMarketplaceStore((s) => s.registrySkills);
   const loadInstalledSkills = useSkillsStore((s) => s.loadSkills);
 
   const [affected, setAffected] = useState<SkillSummary[] | null>(null);

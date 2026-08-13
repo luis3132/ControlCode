@@ -21,7 +21,8 @@ import { useResumeSession } from "./useResumeSession";
 
 export function SessionsPage() {
   const { t } = useTranslation();
-  const { history, loadHistory } = useSessionsStore();
+  const history = useSessionsStore((s) => s.history);
+  const loadHistory = useSessionsStore((s) => s.loadHistory);
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const {
     pendingResume,

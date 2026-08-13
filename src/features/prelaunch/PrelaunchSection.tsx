@@ -81,7 +81,11 @@ function PresetForm({
  */
 export function PrelaunchSection() {
   const { t } = useTranslation();
-  const { presets, loaded, load, save, remove } = usePrelaunchStore();
+  const presets = usePrelaunchStore((s) => s.presets);
+  const loaded = usePrelaunchStore((s) => s.loaded);
+  const load = usePrelaunchStore((s) => s.load);
+  const save = usePrelaunchStore((s) => s.save);
+  const remove = usePrelaunchStore((s) => s.remove);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => { if (!loaded) load().catch(console.error); }, [loaded, load]);

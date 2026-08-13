@@ -56,8 +56,13 @@ const CARD = `bg-linear-to-br from-white to-gray-50
 
 export function SettingsPage() {
   const { t } = useTranslation();
-  const { customAgents, loadCustomAgents, saveCustomAgent, removeCustomAgent } = useAgentsStore();
-  const { skillsDir, loadSkillsDir, setSkillsDir } = useSkillsStore();
+  const customAgents = useAgentsStore((s) => s.customAgents);
+  const loadCustomAgents = useAgentsStore((s) => s.loadCustomAgents);
+  const saveCustomAgent = useAgentsStore((s) => s.saveCustomAgent);
+  const removeCustomAgent = useAgentsStore((s) => s.removeCustomAgent);
+  const skillsDir = useSkillsStore((s) => s.skillsDir);
+  const loadSkillsDir = useSkillsStore((s) => s.loadSkillsDir);
+  const setSkillsDir = useSkillsStore((s) => s.setSkillsDir);
   /** Id de la TUI que se está editando en línea; `null` = solo el formulario de alta. */
   const [editingId, setEditingId] = useState<string | null>(null);
 

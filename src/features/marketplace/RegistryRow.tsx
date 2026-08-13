@@ -23,7 +23,10 @@ interface RegistryRowProps {
 
 export function RegistryRow({ registry: r }: RegistryRowProps) {
   const { t } = useTranslation();
-  const { refreshingId, refreshRegistry, setRegistryEnabled, renameRegistry } = useMarketplaceStore();
+  const refreshingId = useMarketplaceStore((s) => s.refreshingId);
+  const refreshRegistry = useMarketplaceStore((s) => s.refreshRegistry);
+  const setRegistryEnabled = useMarketplaceStore((s) => s.setRegistryEnabled);
+  const renameRegistry = useMarketplaceStore((s) => s.renameRegistry);
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState(r.name);
   const inputRef = useRef<HTMLInputElement>(null);

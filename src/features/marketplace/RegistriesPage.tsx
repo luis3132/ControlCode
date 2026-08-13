@@ -20,7 +20,10 @@ import { PageHeader } from "@/shared/ui/PageHeader";
 export function RegistriesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { registries, loadRegistries, loadSkills, refreshAll } = useMarketplaceStore();
+  const registries = useMarketplaceStore((s) => s.registries);
+  const loadRegistries = useMarketplaceStore((s) => s.loadRegistries);
+  const loadSkills = useMarketplaceStore((s) => s.loadSkills);
+  const refreshAll = useMarketplaceStore((s) => s.refreshAll);
   const [addOpen, setAddOpen] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
 
