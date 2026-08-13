@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AnimateSpin, Button, Input, Modal, TextArea } from "neogestify-ui-components";
+import { AnimateSpin, Button, Input, TextArea } from "neogestify-ui-components";
+
+import { ViewModal } from "@/shared/ui/ViewModal";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { useSkillsStore } from "@/features/skills/store";
@@ -70,10 +72,11 @@ export function SkillBuilderDialog({
   };
 
   return (
-    <Modal
+    <ViewModal
       title={t("skills.builder.title")}
       onClose={onClose}
-      size="lg"
+      // Ocupa la vista entera: es un editor, no una confirmación de dos líneas.
+      fill
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
@@ -90,7 +93,7 @@ export function SkillBuilderDialog({
         </>
       }
     >
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4 h-full">
         <p className="text-sm text-gray-500 dark:text-gray-400">{t("skills.builder.subtitle")}</p>
 
         <Input
@@ -142,7 +145,9 @@ export function SkillBuilderDialog({
           </span>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        {/* El editor se queda con el alto que sobra: es lo que el usuario vino a
+            escribir, y un alto fijo desperdiciaría la vista entera que ahora ocupa. */}
+        <div className="flex flex-col gap-1.5 flex-1 min-h-0">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
             {t("skills.builder.body")}
           </span>
@@ -151,13 +156,12 @@ export function SkillBuilderDialog({
             onChange={(e) => setBody(e.target.value)}
             placeholder={t("skills.builder.bodyPlaceholder")}
             variant="outline"
-            autoResize
-            className="font-mono text-sm min-h-[30vh]"
+            className="font-mono text-sm h-full min-h-[12rem]"
           />
         </div>
 
         {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
       </div>
-    </Modal>
+    </ViewModal>
   );
 }

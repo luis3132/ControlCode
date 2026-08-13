@@ -10,6 +10,7 @@ import { TabBar } from "@/features/tabs/TabBar";
 import { PathBar } from "@/features/workspaces/PathBar";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { ResizeHandles } from "@/app/ResizeHandles";
+import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
 import { AppExitListener } from "@/app/AppExitListener";
 import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
@@ -215,6 +216,19 @@ export function AppShell() {
             <Outlet />
           </div>
         )}
+
+        {/* Donde se montan los modales de las vistas (ver `ViewModal`). Va acá dentro y no
+            en el body para que queden ENCERRADOS en el área de contenido: un modal de una
+            página no tiene por qué tapar la barra de título ni la de tabs, que son la
+            forma de salir de donde estás.
+
+            El `transform` no es decorativo: hace que el `position: fixed` del modal se
+            resuelva contra este contenedor en vez de contra la ventana. */}
+        <div
+          id={VIEW_OVERLAY_ID}
+          className="absolute inset-0 z-20 pointer-events-none"
+          style={{ transform: "translateZ(0)" }}
+        />
       </div>
     </div>
   );
