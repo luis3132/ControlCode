@@ -13,6 +13,7 @@ import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection
 import { AccountsSection } from "@/features/accounts/AccountsSection";
 import { PrelaunchSection } from "@/features/prelaunch/PrelaunchSection";
 import { TerminalSection } from "@/features/terminal/TerminalSection";
+import { ShortcutsSection } from "@/features/settings/ShortcutsSection";
 import { SettingsNav, type SettingsSectionRef } from "@/features/settings/SettingsNav";
 
 /** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
@@ -76,6 +77,7 @@ export function SettingsPage() {
   const sections: SettingsSectionRef[] = useMemo(
     () => [
       { id: "appearance", label: t("settings.appearance") },
+      { id: "shortcuts", label: t("settings.shortcuts") },
       { id: "terminal", label: t("settings.terminal") },
       { id: "skills-dir", label: t("settings.skillsDir") },
       { id: "tuis", label: t("settings.tuis") },
@@ -157,6 +159,10 @@ export function SettingsPage() {
                   </div>
                 </div>
               </section>
+            </Section>
+
+            <Section id="shortcuts">
+              <ShortcutsSection />
             </Section>
 
             <Section id="terminal">

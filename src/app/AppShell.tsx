@@ -10,6 +10,7 @@ import { TabBar } from "@/features/tabs/TabBar";
 import { PathBar } from "@/features/workspaces/PathBar";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { ResizeHandles } from "@/app/ResizeHandles";
+import { useGlobalShortcuts } from "@/app/useGlobalShortcuts";
 import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
 import { AppExitListener } from "@/app/AppExitListener";
 import { useAgentsStore } from "@/features/agents/store";
@@ -53,6 +54,8 @@ export function AppShell() {
   const navigate = useNavigate();
   const isWorkspace = location.pathname === "/workspace";
   const [isMaximized, setIsMaximized] = useState(false);
+
+  useGlobalShortcuts();
 
   useEffect(() => {
     detectAgents().then(setDetectedAgents);

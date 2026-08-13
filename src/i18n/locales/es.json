@@ -387,5 +387,10 @@
   "skills.detail.saveAsCopy": "Guardar como copia local",
   "skills.detail.fromRegistryNote": "Esta skill vino de {{registry}}. Al guardarla se crea una copia tuya y la original queda intacta, recibiendo las actualizaciones del repositorio.",
   "skills.builder.section.details": "La ficha",
-  "skills.builder.bodyHint": "Lo que el agente lee cuando la usa"
+  "skills.builder.bodyHint": "Lo que el agente lee cuando la usa",
+  "shortcuts.nextTab": "Tab siguiente",
+  "shortcuts.prevTab": "Tab anterior",
+  "settings.shortcuts": "Atajos de teclado",
+  "settings.shortcuts.desc": "Para moverte sin soltar el teclado. El atajo de una sección también te devuelve a la terminal si ya estás en ella.",
+  "settings.shortcuts.terminalNote": "Estos atajos se atienden antes que la terminal, así que dentro de un agente dejan de funcionar como teclas de edición: Ctrl+M era Enter, Ctrl+H era Retroceso, y Ctrl+E y Ctrl+K movían el cursor. Enter y Retroceso tienen su propia tecla y siguen funcionando."
 }
