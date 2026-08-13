@@ -69,12 +69,21 @@ AGENTES, CUENTAS Y SKILLS
   skill search <texto>                        Busca en TODOS los repos, skills.sh incluido
                                               (tarda: el directorio se consulta por npx)
   skill install <nombre>                      Instala desde los repos habilitados
+  skill show <nombre|id>                      Metadata + contenido del SKILL.md
+  skill new <nombre>                          Crea una skill propia (origen local)
+             [--description ...] [--categories a,b] [--agents a,b]
+             [--file <ruta> | --content \"...\"]
+  skill edit <nombre|id>                      Guarda contenido nuevo
+             [--file <ruta> | --content \"...\"] [--name <nuevo>] [--copy]
 
 OTROS
   app status                                  Versión y estado de la app
   --json-args '{...}'                         Pasa argumentos crudos en JSON
 
 `agents`, `accounts` y `skills` son atajos de `agent list`, `account list` y `skill list`.
+Editar una skill que vino de un repositorio NO la pisa: guarda una copia de origen local y
+deja la original recibiendo actualizaciones. `--copy` fuerza esa copia también para una
+skill propia. `--file` se lee desde el directorio donde corrés el comando.
 Sin --account, la tab usa la cuenta principal (la de siempre).
 --pre se repite sin límite y sus valores corren EN EL ORDEN ESCRITO; si uno falla, el
 agente no arranca. Cada valor puede ser el nombre de un guardado o un comando literal:
@@ -128,6 +137,17 @@ fn main() -> ExitCode {
         }
     };
 
+    // `--file` se resuelve ACÁ y viaja como `--content`: el archivo es relativo al cwd de
+    // quien escribió el comando, no al de la app, y la app puede estar corriendo desde
+    // cualquier otro lado. Además evita que el backend tenga que abrir rutas arbitrarias.
+    let parsed = match inline_file(parsed) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+
     match send(&command, parsed) {
         Ok(response) => {
             let body = if response.ok {
@@ -169,6 +189,9 @@ fn shortcut(word: &str) -> Option<&'static str> {
 fn positionals(command: &str) -> &'static [&'static str] {
     match command {
         "skill.install" => &["skill"],
+        "skill.show" | "skill.edit" => &["skill"],
+        // `ccode skill new mi-skill` en vez de `--name mi-skill`.
+        "skill.new" => &["name"],
         // `ccode skill search react` en vez de `--query react`.
         "skill.search" => &["query"],
         // El texto va segundo: `ccode tab send <id> "corré los tests"`.
@@ -278,9 +301,29 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
     Ok(Value::Object(map))
 }
 
+/// Reemplaza `--file <ruta>` por el contenido del archivo, en `content`.
+///
+/// Los dos no se pueden combinar: si vinieran juntos habría que elegir cuál gana, y
+/// cualquier elección sería una sorpresa para quien mandó el otro.
+fn inline_file(args: Value) -> Result<Value, String> {
+    let Value::Object(mut map) = args else { return Ok(args) };
+    let Some(file) = map.remove("file") else { return Ok(Value::Object(map)) };
+    let Some(path) = file.as_str() else {
+        return Err("--file necesita una ruta".to_string());
+    };
+    if map.contains_key("content") {
+        return Err("Usá --file o --content, no los dos".to_string());
+    }
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("No se pudo leer {path}: {e}"))?;
+    map.insert("content".to_string(), Value::String(content));
+    Ok(Value::Object(map))
+}
+
 fn value_for(key: &str, raw: &str) -> Value {
     match key {
-        "skills" => Value::Array(
+        // Mismo trato que `--skills`: listas cortas separadas por coma.
+        "skills" | "categories" | "agents" => Value::Array(
             raw.split(',')
                 .map(str::trim)
                 .filter(|s| !s.is_empty())

@@ -15,7 +15,7 @@ use tauri::AppHandle;
 use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
 use super::shared::bridge_call;
-use super::skills::{skill_install, skill_list, skill_search};
+use super::skills::{skill_edit, skill_install, skill_list, skill_new, skill_search, skill_show};
 use super::tabs::{tab_create, tab_list, tab_output, tab_send};
 use super::watch::{watch_add, watch_list, watch_remove, watch_wait};
 use super::windows::{window_create, window_list};
@@ -44,6 +44,9 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "skill.list" => skill_list(app),
         "skill.search" => skill_search(app, args),
         "skill.install" => skill_install(app, args),
+        "skill.show" => skill_show(app, args),
+        "skill.new" => skill_new(app, args),
+        "skill.edit" => skill_edit(app, args),
         "app.status" => app_status(app),
         other => Err(format!("Comando desconocido: {other}")),
     };

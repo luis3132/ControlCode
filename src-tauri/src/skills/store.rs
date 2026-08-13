@@ -110,13 +110,23 @@ pub fn update_skill_content(
     db: tauri::State<DbConnection>,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
+    update_skill_content_inner(&conn, &skill_id, &content)
+}
+
+/// El guardado en sí, sobre una conexión ya tomada — lo reusa `authoring::fork_skill`,
+/// que crea la copia y le escribe el contenido nuevo en la misma operación.
+pub(super) fn update_skill_content_inner(
+    conn: &rusqlite::Connection,
+    skill_id: &str,
+    content: &str,
+) -> Result<(), String> {
     let source_path: String = conn
-        .query_row("SELECT source_path FROM skills WHERE id = ?1", [&skill_id], |r| r.get(0))
+        .query_row("SELECT source_path FROM skills WHERE id = ?1", [skill_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
 
-    std::fs::write(Path::new(&source_path).join("SKILL.md"), &content).map_err(|e| e.to_string())?;
+    std::fs::write(Path::new(&source_path).join("SKILL.md"), content).map_err(|e| e.to_string())?;
 
-    let meta = parse_frontmatter(&content);
+    let meta = parse_frontmatter(content);
     let now = now_ts();
     conn.execute(
         "UPDATE skills SET name = COALESCE(?1, name), description = ?2, version = ?3,
@@ -207,6 +217,11 @@ pub fn registry_skills(
         .filter_map(|r| r.ok())
         .collect();
     Ok(rows)
+}
+
+/// El SKILL.md de una copia instalada, tal cual está en disco.
+pub(super) fn skill_content(source_path: &str) -> Result<String, String> {
+    std::fs::read_to_string(Path::new(source_path).join("SKILL.md")).map_err(|e| e.to_string())
 }
 
 /// Vincula las skills instaladas que todavía no saben de qué ENTRADA del repositorio

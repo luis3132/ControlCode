@@ -74,6 +74,8 @@ pub fn run() {
             crate::skills::set_skills_dir,
             crate::skills::preview_skill_metadata,
             crate::skills::install_skill,
+            crate::skills::create_skill,
+            crate::skills::fork_skill,
             crate::skills::list_skills,
             crate::skills::get_skill_detail,
             crate::skills::update_skill_content,

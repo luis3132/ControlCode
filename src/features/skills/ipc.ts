@@ -18,6 +18,32 @@ export const previewSkill = (sourceFile: string) =>
 export const installSkill = (sourceFile: string, overrides?: SkillFrontmatterInput) =>
   invoke<SkillSummary>("install_skill", { sourceFile, overrides: overrides ?? null });
 
+/** Lo que manda el constructor: la metadata más el cuerpo del SKILL.md. */
+export interface SkillDraft {
+  meta: SkillFrontmatterInput;
+  /** El markdown de abajo del frontmatter: las instrucciones para el agente. */
+  body: string;
+}
+
+/** Crea una skill propia, de origen local. */
+export const createSkill = (draft: SkillDraft) => invoke<SkillSummary>("create_skill", { draft });
+
+/**
+ * Guarda una skill como una COPIA nueva de origen local.
+ *
+ * Es lo que pasa al editar una que vino de un repositorio: esa copia es un reflejo de lo
+ * que el repo publica y se reemplaza entera al reinstalarla, así que guardar encima
+ * perdería el trabajo del usuario en la primera actualización.
+ *
+ * `name` vacío = el nombre de la original con sufijo. `content` vacío = copiar sin editar.
+ */
+export const forkSkill = (skillId: string, name?: string, content?: string) =>
+  invoke<SkillSummary>("fork_skill", {
+    skillId,
+    name: name ?? null,
+    content: content ?? null,
+  });
+
 export const skillDetail = (skillId: string) =>
   invoke<SkillSummary & { content: string }>("get_skill_detail", { skillId });
 

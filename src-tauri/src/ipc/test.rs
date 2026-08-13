@@ -245,3 +245,72 @@ fn un_nombre_sin_homonimas_se_resuelve_derecho() {
     let una = vec![skill("aaa", "testing", Some("anthropics"), None)];
     assert_eq!(match_skill_ids(&una, &["TESTING".to_string()]).unwrap(), vec!["aaa"]);
 }
+
+// ── El contrato entre `ccode` y el despachador ──────────────────
+
+/// Los comandos que el binario `ccode` sabe nombrar, sacados de sus propias tablas.
+fn cli_commands() -> Vec<String> {
+    let src = include_str!("../bin/cli.rs");
+    let mut out = Vec::new();
+    // `shortcut()`: `"skills" => Some("skill.list"),`
+    for cap in src.split("Some(\"").skip(1) {
+        if let Some(cmd) = cap.split('"').next() {
+            if cmd.contains('.') {
+                out.push(cmd.to_string());
+            }
+        }
+    }
+    // `positionals()`: `"skill.show" | "skill.edit" => &["skill"],`
+    for line in src.lines() {
+        let line = line.trim();
+        if !line.contains("=> &[") {
+            continue;
+        }
+        for part in line.split("=>").next().unwrap_or("").split('|') {
+            let name = part.trim().trim_matches(|c| c == '"' || c == ' ');
+            if name.contains('.') {
+                out.push(name.to_string());
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Los comandos que el despachador atiende, sacados de su `match`.
+fn dispatched_commands() -> Vec<String> {
+    include_str!("commands/dispatch.rs")
+        .lines()
+        .filter_map(|l| {
+            let l = l.trim();
+            let rest = l.strip_prefix('"')?;
+            let (name, tail) = rest.split_once('"')?;
+            tail.trim_start().starts_with("=>").then(|| name.to_string())
+        })
+        .filter(|c| c.contains('.'))
+        .collect()
+}
+
+/// Que `ccode` nombre un comando que el backend ya no atiende no rompe nada en compilación
+/// —son dos tablas de strings, en archivos distintos— y solo se nota cuando alguien lo
+/// ejecuta y recibe "Comando desconocido". Este test es lo que ata las dos puntas.
+#[test]
+fn todo_lo_que_la_cli_sabe_nombrar_lo_atiende_el_despachador() {
+    let dispatched = dispatched_commands();
+    assert!(dispatched.len() > 15, "no se pudieron leer los comandos del despachador");
+
+    let huerfanos: Vec<String> =
+        cli_commands().into_iter().filter(|c| !dispatched.contains(c)).collect();
+    assert!(huerfanos.is_empty(), "la CLI ofrece comandos que nadie atiende: {huerfanos:?}");
+}
+
+/// Y la contracara: un comando del backend que la ayuda de `ccode` no menciona es un
+/// comando que nadie va a encontrar.
+#[test]
+fn la_ayuda_de_la_cli_menciona_los_comandos_de_skills() {
+    let src = include_str!("../bin/cli.rs");
+    for verbo in ["skill show", "skill new", "skill edit", "skill install", "skill search"] {
+        assert!(src.contains(verbo), "la ayuda no menciona '{verbo}'");
+    }
+}

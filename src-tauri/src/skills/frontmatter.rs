@@ -66,3 +66,15 @@ pub(super) fn render_skill_md(meta: &SkillFrontmatter, body: &str) -> String {
     let yaml = serde_yaml::to_string(meta).unwrap_or_default();
     format!("---\n{yaml}---\n{body}")
 }
+
+/// Devuelve el mismo SKILL.md con otro `name`, conservando el resto del frontmatter y el
+/// cuerpo intactos.
+///
+/// El nombre vive DENTRO del archivo, así que renombrar una skill es reescribir su
+/// frontmatter — no basta con cambiar la fila de la base: al releerla del disco (una
+/// reinstalación, un refresco) volvería el nombre viejo.
+pub(crate) fn rename_in_content(content: &str, name: &str) -> String {
+    let (mut meta, body) = split_frontmatter(content);
+    meta.name = Some(name.to_string());
+    render_skill_md(&meta, &body)
+}

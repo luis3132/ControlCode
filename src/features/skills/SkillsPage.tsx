@@ -9,6 +9,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { InstallSkillDialog } from "@/features/skills/InstallSkillDialog";
 import { DeleteSkillDialog } from "@/features/skills/DeleteSkillDialog";
 import { AttachSkillDialog } from "@/features/skills/AttachSkillDialog";
+import { SkillBuilderDialog } from "@/features/skills/SkillBuilderDialog";
 import { PageHeader } from "@/shared/ui/PageHeader";
 
 export function SkillsPage() {
@@ -22,6 +23,7 @@ export function SkillsPage() {
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [installOpen, setInstallOpen] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SkillSummary | null>(null);
   const [attachTarget, setAttachTarget] = useState<SkillSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,10 +59,18 @@ export function SkillsPage() {
           title={t("skills.manage.title")}
           subtitle={t("skills.manage.subtitle")}
           action={
+            <div className="flex items-center gap-2">
+            {/* Crear la propia va PRIMERO y en secundario: instalar es lo más frecuente,
+                pero escribir una skill es lo que la mayoría no descubre que puede hacer. */}
+            <Button variant="outline" onClick={() => setBuilderOpen(true)} className="flex items-center gap-1.5 !text-sm w-fit">
+              <AddIcon className="w-4 h-4" />
+              {t("skills.builder.new")}
+            </Button>
             <Button variant="primary" onClick={() => setInstallOpen(true)} className="flex items-center gap-1.5 !text-sm w-fit">
               <AddIcon className="w-4 h-4" />
               {t("skills.install.btn")}
             </Button>
+            </div>
           }
         />
 
@@ -283,6 +293,16 @@ export function SkillsPage() {
         )}
       </div>
 
+      {builderOpen && (
+        <SkillBuilderDialog
+          onClose={() => setBuilderOpen(false)}
+          onCreated={(skill) => {
+            setBuilderOpen(false);
+            // Se abre en el detalle: recién creada, lo siguiente es escribirla.
+            navigate(`/skills/${skill.id}`);
+          }}
+        />
+      )}
       {installOpen && <InstallSkillDialog onClose={() => setInstallOpen(false)} />}
       {deleteTarget && <DeleteSkillDialog skill={deleteTarget} onClose={() => setDeleteTarget(null)} />}
       {attachTarget && <AttachSkillDialog skill={attachTarget} onClose={() => setAttachTarget(null)} />}

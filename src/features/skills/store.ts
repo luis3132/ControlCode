@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import * as ipc from "./ipc";
+import type { SkillDraft } from "./ipc";
 import type {
   SkillFrontmatterInput,
   SkillPreview,
@@ -16,6 +17,10 @@ interface SkillsState {
   loadSkills: () => Promise<void>;
   previewSkill: (sourceFile: string) => Promise<SkillPreview>;
   installSkill: (sourceFile: string, overrides?: SkillFrontmatterInput) => Promise<SkillSummary>;
+  /** Crea una skill propia desde el constructor. */
+  createSkill: (draft: SkillDraft) => Promise<SkillSummary>;
+  /** Guarda una skill como copia nueva de origen local (ver `ipc.forkSkill`). */
+  forkSkill: (skillId: string, name?: string, content?: string) => Promise<SkillSummary>;
   getSkillDetail: (id: string) => Promise<SkillSummary & { content: string }>;
   updateSkillContent: (id: string, content: string) => Promise<void>;
   deleteSkill: (id: string) => Promise<void>;
@@ -50,6 +55,18 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     const skill = await ipc.installSkill(sourceFile, overrides);
     await get().loadSkills();
     return skill;
+  },
+
+  createSkill: async (draft) => {
+    const skill = await ipc.createSkill(draft);
+    await get().loadSkills();
+    return skill;
+  },
+
+  forkSkill: async (skillId, name, content) => {
+    const copy = await ipc.forkSkill(skillId, name, content);
+    await get().loadSkills();
+    return copy;
   },
 
   getSkillDetail: async (id) => {

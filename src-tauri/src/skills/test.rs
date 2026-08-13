@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::database::{db_mark_window_closed, DbConnection};
 
+use super::authoring::{create_skill, fork_skill, SkillDraft};
 use super::bundled::{decide, ensure_one, Action, Provisioned, BUNDLED};
 use super::files::{scan_skill_file, slug_from_source_path};
 use super::*;
@@ -1372,4 +1373,154 @@ fn count(db: &DbConnection, sql: &str) -> i64 {
 
 fn count_skills(db: &DbConnection) -> i64 {
     count(db, "SELECT COUNT(*) FROM skills")
+}
+
+// ── Crear y editar skills propias ────────────────────────────────
+
+fn state_for(db: DbConnection) -> tauri::App<tauri::test::MockRuntime> {
+    let app = tauri::test::mock_app();
+    app.manage(db);
+    app
+}
+
+/// El constructor: una skill escrita por el usuario queda instalada, de origen local y
+/// con su frontmatter bien armado (que es lo que el agente después lee).
+#[test]
+fn el_constructor_crea_una_skill_de_origen_local() {
+    let (db, _ws, _tab, _cwd, skills_dir) = setup();
+    let app = state_for(db);
+    let state = app.state::<DbConnection>();
+
+    let creada = create_skill(
+        SkillDraft {
+            meta: SkillFrontmatterInput {
+                name: Some("mi-skill".into()),
+                description: Some("hace lo mío".into()),
+                version: Some("1.0.0".into()),
+                categories: vec!["git".into()],
+                compatible_agents: vec!["claude-code".into()],
+                compatible_versions: HashMap::new(),
+                author: Some("luis".into()),
+                license: None,
+                homepage: None,
+            },
+            body: "# Instrucciones\n\nHacé esto.\n".into(),
+        },
+        state.clone(),
+    )
+    .expect("crear");
+
+    assert_eq!(creada.name, "mi-skill");
+    assert_eq!(creada.registry_id, None, "es del usuario, no de ningún repo");
+    assert_eq!(creada.origin_skill_id, None);
+    assert_eq!(creada.author.as_deref(), Some("luis"));
+    assert!(
+        Path::new(&creada.source_path).starts_with(skills_dir.join("local")),
+        "va al bucket local: {}",
+        creada.source_path
+    );
+
+    let md = std::fs::read_to_string(Path::new(&creada.source_path).join("SKILL.md")).unwrap();
+    assert!(md.starts_with("---\n"), "el frontmatter tiene que estar armado: {md}");
+    assert!(md.contains("name: mi-skill"));
+    assert!(md.contains("Hacé esto."), "el cuerpo se conserva");
+}
+
+/// Sin nombre no hay skill: el frontmatter sin `name` deja una skill que el agente no
+/// puede nombrar y la app titula con el nombre de la carpeta.
+#[test]
+fn el_constructor_exige_un_nombre() {
+    let (db, _ws, _tab, _cwd, _dir) = setup();
+    let app = state_for(db);
+    let state = app.state::<DbConnection>();
+
+    let err = create_skill(
+        SkillDraft {
+            meta: SkillFrontmatterInput {
+                name: Some("   ".into()),
+                description: None,
+                version: None,
+                categories: Vec::new(),
+                compatible_agents: Vec::new(),
+                compatible_versions: HashMap::new(),
+                author: None,
+                license: None,
+                homepage: None,
+            },
+            body: String::new(),
+        },
+        state,
+    )
+    .unwrap_err();
+    assert!(err.contains("nombre"), "{err}");
+}
+
+/// Editar una skill que vino de un repositorio no puede pisarla: la copia del repo se
+/// reemplaza entera al reinstalarla, así que ahí el trabajo del usuario se perdería.
+#[test]
+fn editar_una_skill_de_repo_deja_la_original_intacta() {
+    let (db, _ws, _tab, _cwd, skills_dir) = setup();
+    let app = state_for(db);
+    let state = app.state::<DbConnection>();
+
+    let src = temp_dir("del-repo");
+    write_named_skill(&src, "testing", "la del repositorio");
+    let original = install_skill_internal(
+        &src.join("SKILL.md").to_string_lossy(),
+        None,
+        Some(SkillOrigin {
+            registry_id: "reg-a",
+            registry_name: "anthropics/skills",
+            skill_id: "testing",
+        }),
+        &state,
+    )
+    .expect("instalar");
+
+    let copia = fork_skill(
+        original.id.clone(),
+        None,
+        Some("---\nname: testing\n---\nmis cambios\n".into()),
+        state.clone(),
+    )
+    .expect("forkear");
+
+    assert_ne!(copia.id, original.id);
+    assert_eq!(copia.registry_id, None, "la copia es del usuario");
+    assert_eq!(copia.name, "testing-local", "sin nombre elegido, sufijo automático");
+    assert_ne!(copia.source_path, original.source_path, "carpetas distintas");
+
+    let en_la_copia =
+        std::fs::read_to_string(Path::new(&copia.source_path).join("SKILL.md")).unwrap();
+    assert!(en_la_copia.contains("mis cambios"));
+
+    let en_la_original =
+        std::fs::read_to_string(Path::new(&original.source_path).join("SKILL.md")).unwrap();
+    assert!(
+        en_la_original.contains("la del repositorio") && !en_la_original.contains("mis cambios"),
+        "la del repo no se tocó: {en_la_original}"
+    );
+    assert!(skills_dir.join("local").is_dir(), "la copia vive en el bucket local");
+}
+
+/// Con un nombre elegido, manda ese — y queda escrito en el frontmatter, no solo en la
+/// fila: si no, releer el archivo del disco devolvería el nombre viejo.
+#[test]
+fn la_copia_puede_llevar_el_nombre_que_elija_el_usuario() {
+    let (db, _ws, _tab, _cwd, _dir) = setup();
+    let app = state_for(db);
+    let state = app.state::<DbConnection>();
+
+    let src = temp_dir("para-renombrar");
+    write_named_skill(&src, "testing", "cuerpo");
+    let original =
+        install_skill_internal(&src.join("SKILL.md").to_string_lossy(), None, None, &state)
+            .expect("instalar");
+
+    let copia = fork_skill(original.id, Some("testing-de-luis".into()), None, state)
+        .expect("forkear");
+
+    assert_eq!(copia.name, "testing-de-luis");
+    let md = std::fs::read_to_string(Path::new(&copia.source_path).join("SKILL.md")).unwrap();
+    assert!(md.contains("name: testing-de-luis"), "el nombre va DENTRO del archivo: {md}");
 }
