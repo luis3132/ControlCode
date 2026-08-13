@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::util::now_ts;
 use crate::database::models::{
-    row_to_tab, row_to_window, RestoredWindowState, WindowRow, WindowStatePayload,
+    row_to_tab, row_to_window, RestoredWindowState, WindowStatePayload,
 };
 use crate::database::DbConnection;
 
@@ -282,25 +282,6 @@ pub fn db_get_window_workspace(
     )
     .optional()
     .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn db_get_open_window_labels(db: tauri::State<DbConnection>) -> Result<Vec<WindowRow>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, label, workspace_id, pos_x, pos_y, width, height, monitor, is_open, last_active
-             FROM windows WHERE is_open = 1",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let windows = stmt
-        .query_map([], row_to_window)
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    Ok(windows)
 }
 
 /// Marca una ventana como cerrada (is_open = 0) sin borrar su fila. Es el comportamiento

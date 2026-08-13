@@ -88,12 +88,6 @@ pub fn list_skills(db: tauri::State<DbConnection>) -> Result<Vec<SkillWithUsage>
 }
 
 #[tauri::command]
-pub fn list_skill_usage(skill_id: String, db: tauri::State<DbConnection>) -> Result<Vec<SkillUsageEntry>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    fetch_usage_for_skill(&conn, &skill_id)
-}
-
-#[tauri::command]
 pub fn get_skill_detail(skill_id: String, db: tauri::State<DbConnection>) -> Result<SkillDetail, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let query = format!("SELECT {SKILL_COLUMNS} FROM skills WHERE id = ?1");

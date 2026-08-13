@@ -321,24 +321,6 @@ pub fn mark_window_open(db: &DbConnection, window_id: &str) -> Result<(), String
     Ok(())
 }
 
-/// Marca como cerradas (is_open = 0) todas las ventanas de un workspace.
-/// Usado cuando el usuario elige "cerrar las actuales" al cambiar de workspace.
-#[tauri::command]
-pub fn db_close_workspace_windows(
-    workspace_id: String,
-    db: tauri::State<DbConnection>,
-) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let affected_dirs = crate::skills::link_dirs_of_workspace(&conn, &workspace_id);
-    conn.execute(
-        "UPDATE windows SET is_open = 0 WHERE workspace_id = ?1",
-        [&workspace_id],
-    )
-    .map_err(|e| e.to_string())?;
-    crate::skills::reconcile_link_dirs(&conn, &affected_dirs);
-    Ok(())
-}
-
 #[tauri::command]
 pub fn db_rename_workspace(
     workspace_id: String,

@@ -24,6 +24,10 @@ interface TabsState {
     historyId?: string;
     accountId?: string;
     prelaunch?: PrelaunchStep[];
+    /** Solo al MOVER una tab entre ventanas: conserva cuándo se abrió de verdad. Es el
+     *  piso temporal del descubrimiento de sesión, así que ponerle "ahora" descarta el
+     *  transcript de un proceso que puede llevar horas vivo. */
+    openedAt?: number;
   }) => string;
   closeTab: (id: string) => void;
   activateTab: (id: string) => void;
@@ -52,7 +56,7 @@ export const useTabsStore = create<TabsState>((set) => ({
   workspaceId: DEFAULT_WORKSPACE_ID,
   hydrated: false,
 
-  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId, historyId, accountId, prelaunch }) => {
+  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId, historyId, accountId, prelaunch, openedAt }) => {
     const id = crypto.randomUUID();
     const computedTitle =
       title ??
@@ -73,7 +77,7 @@ export const useTabsStore = create<TabsState>((set) => ({
           historyId,
           accountId,
           prelaunch,
-          openedAt: Math.floor(Date.now() / 1000),
+          openedAt: openedAt ?? Math.floor(Date.now() / 1000),
         },
       ],
       activeTabId: id,

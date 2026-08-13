@@ -25,7 +25,6 @@ pub fn run() {
             crate::database::db_list_workspaces,
             crate::database::db_save_workspace,
             crate::database::db_get_workspace_windows,
-            crate::database::db_close_workspace_windows,
             crate::database::db_rename_workspace,
             crate::database::db_delete_workspace,
             crate::database::db_get_workspace,
@@ -36,13 +35,7 @@ pub fn run() {
             // Persistencia SQLite — ventanas y tabs
             crate::database::db_save_window_state,
             crate::database::db_load_window_state,
-            crate::database::db_get_open_window_labels,
             crate::database::db_mark_window_closed,
-            // Sesiones tmux
-            crate::session::tmux_check,
-            crate::session::tmux_create_session,
-            crate::session::tmux_list_sessions,
-            crate::session::tmux_kill_session,
             // Continuidad de sesión real (resume) y títulos
             crate::session::discover_session_id,
             crate::session::get_session_title,
@@ -82,7 +75,6 @@ pub fn run() {
             crate::skills::preview_skill_metadata,
             crate::skills::install_skill,
             crate::skills::list_skills,
-            crate::skills::list_skill_usage,
             crate::skills::get_skill_detail,
             crate::skills::update_skill_content,
             crate::skills::delete_skill,
@@ -111,7 +103,6 @@ pub fn run() {
             crate::marketplace::rename_registry,
             crate::marketplace::remove_registry,
             crate::marketplace::set_registry_enabled,
-            crate::marketplace::reorder_registries,
             crate::marketplace::refresh_registry,
             crate::marketplace::list_marketplace_skills,
             crate::marketplace::search_remote_registries,

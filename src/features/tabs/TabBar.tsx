@@ -14,12 +14,12 @@ import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { AddIcon } from "neogestify-ui-components";
 import {
   allWindowBounds,
-  broadcastEvent,
   cursorPosition,
   openNewWindow,
   windowLabels,
 } from "@/shared/ipc/window";
 import { windowWorkspace } from "./ipc";
+import { sendTab, waitForWindow } from "./transfer";
 
 interface ContextMenuState {
   tabId: string;
@@ -102,24 +102,20 @@ export function TabBar() {
     // lo referencie, invisible para el autosave de cualquier ventana.
     try {
       if (mergeTarget) {
-        // Merge: enviar tab (con su PTY vivo) a la otra ventana vía evento Tauri
-        await broadcastEvent("cc-receive-tab", JSON.stringify({
-            targetLabel: mergeTarget,
-            cwd: tab.cwd, command: tab.command, agentId: tab.agentId,
-            agentLabel: tab.agentLabel, title: tab.title, sessionId: tab.sessionId,
-            ptyId: tab.ptyId, accountId: tab.accountId,
-          }));
+        // Merge: la tab (con su PTY vivo) viaja entera a la otra ventana.
+        await sendTab({ targetLabel: mergeTarget, tab, workspaceId });
       } else {
-        // Fuera de cualquier ventana → nueva ventana, llevándose el mismo PTY. Hereda el
-        // workspace de ESTA ventana (misma handoff key que usa TopBar para "Nueva ventana")
-        // para que la tab destacada no quede huérfana en el bucket "default".
-        localStorage.setItem("cc-detach", JSON.stringify({
-          cwd: tab.cwd, command: tab.command, agentId: tab.agentId,
-          agentLabel: tab.agentLabel, title: tab.title, sessionId: tab.sessionId,
-          ptyId: tab.ptyId, accountId: tab.accountId,
-        }));
-        localStorage.setItem("cc-new-window-workspace", workspaceId);
-        await openNewWindow(`cc-window-${Date.now()}`);
+        // Fuera de cualquier ventana → ventana nueva, llevándose el mismo PTY. Se espera a
+        // que esté escuchando antes de mandarle la tab: el evento es efímero y mandarlo
+        // apenas vuelve `open_new_window` lo perdería.
+        const label = `cc-window-${Date.now()}`;
+        await openNewWindow(label);
+        if (!(await waitForWindow(label))) {
+          throw new Error(`la ventana ${label} no respondió a tiempo`);
+        }
+        // La ventana nueva está vacía, así que adopta el workspace de esta: si no, la tab
+        // destacada quedaría huérfana en el bucket `default`.
+        await sendTab({ targetLabel: label, tab, workspaceId });
       }
     } catch (err) {
       console.error("No se pudo mover la tab a otra ventana, se conserva en el origen", err);
@@ -162,17 +158,7 @@ export function TabBar() {
     const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
     try {
-      await broadcastEvent("cc-receive-tab", JSON.stringify({
-          targetLabel,
-          cwd: tab.cwd,
-          command: tab.command,
-          agentId: tab.agentId,
-          agentLabel: tab.agentLabel,
-          title: tab.title,
-          sessionId: tab.sessionId,
-          ptyId: tab.ptyId,
-          accountId: tab.accountId,
-        }));
+      await sendTab({ targetLabel, tab, workspaceId });
     } catch (err) {
       console.error("No se pudo mover la tab a otra ventana, se conserva en el origen", err);
       return;

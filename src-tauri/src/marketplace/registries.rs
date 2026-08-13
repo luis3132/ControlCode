@@ -158,21 +158,6 @@ pub fn rename_registry(id: String, name: String, db: tauri::State<DbConnection>)
     Ok(())
 }
 
-/// Reordena prioridades a partir del orden final de ids que manda el frontend
-/// (drag-and-drop de la lista de repos en la vista de gestión).
-#[tauri::command]
-pub fn reorder_registries(ids: Vec<String>, db: tauri::State<DbConnection>) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    for (i, id) in ids.iter().enumerate() {
-        conn.execute(
-            "UPDATE registries SET priority = ?1 WHERE id = ?2",
-            params![i as i32, id],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn refresh_registry(
     id: String,

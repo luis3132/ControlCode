@@ -29,6 +29,7 @@ import {
   liveWindowCount,
 } from "@/features/workspaces/ipc";
 import { closeAndForgetWindow, openNewWindow } from "@/shared/ipc/window";
+import { newWindowWorkspaceKey } from "@/features/tabs/transfer";
 
 const NAV_ITEMS = [
   { id: "home", Icon: HomeIcon, labelKey: "sidebar.home", path: "/" },
@@ -109,8 +110,11 @@ export function TopBar() {
   // la nueva ventana queda agrupada con ella la próxima vez que se guarde.
   const handleNewWindow = async () => {
     setMenuOpen(false);
-    localStorage.setItem("cc-new-window-workspace", workspaceId);
-    await openNewWindow(`cc-window-${Date.now()}`).catch(console.error);
+    const label = `cc-window-${Date.now()}`;
+    // La clave lleva el label del destinatario: sin eso, dos ventanas abriéndose a la vez
+    // compiten por el mismo valor y una se queda sin su workspace.
+    localStorage.setItem(newWindowWorkspaceKey(label), workspaceId);
+    await openNewWindow(label).catch(console.error);
   };
 
   // El bucket "default" nunca se guarda con nombre: "Nuevo workspace" simplemente lo

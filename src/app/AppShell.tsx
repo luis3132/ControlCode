@@ -4,7 +4,6 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabsStore } from "@/features/tabs/store";
 import type { Tab } from "@/features/tabs/types";
-import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { initTabsPersistence } from "@/features/tabs/persistence";
 import { TopBar } from "@/app/TopBar";
 import { TabBar } from "@/features/tabs/TabBar";
@@ -15,23 +14,12 @@ import { AppExitListener } from "@/app/AppExitListener";
 import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
 import { detectAgents } from "@/features/agents/ipc";
-import { loadWindowState } from "@/features/tabs/ipc";
-
-interface RestoredTabRow {
-  id: string;
-  title: string | null;
-  titleIsCustom: boolean;
-  agentId: string;
-  agentLabel: string;
-  command: string;
-  cwd: string;
-  sessionId: string | null;
-  scrollback: string | null;
-  historyId: string | null;
-  accountId: string | null;
-  prelaunch: PrelaunchStep[] | null;
-  openedAt: number;
-}
+import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
+import {
+  announceWindowReady,
+  newWindowWorkspaceKey,
+  onTabReceived,
+} from "@/features/tabs/transfer";
 
 function toFrontendTab(row: RestoredTabRow): Tab {
   return {
@@ -105,9 +93,10 @@ export function AppShell() {
           // Ventana genuinamente nueva (sin fila en la DB todavía): si el menú "Nueva
           // ventana"/"Nuevo workspace" del TopBar dejó un workspaceId destino, adoptarlo
           // antes de que arranque el autosave (si no, esta ventana quedaría en "default").
-          const handoff = localStorage.getItem("cc-new-window-workspace");
+          const key = newWindowWorkspaceKey(myLabel);
+          const handoff = localStorage.getItem(key);
           if (handoff) {
-            localStorage.removeItem("cc-new-window-workspace");
+            localStorage.removeItem(key);
             setWorkspaceId(handoff);
           }
         }
@@ -126,44 +115,42 @@ export function AppShell() {
       });
   }, []);
 
-  // Recoger tab arrastrado fuera de esta ventana (nueva ventana vacía que abre cc-detach)
-  useEffect(() => {
-    const raw = localStorage.getItem("cc-detach");
-    if (!raw) return;
-    localStorage.removeItem("cc-detach");
-    try {
-      const { cwd, command, agentId, agentLabel, title, sessionId, ptyId, accountId } = JSON.parse(raw);
-      addTab({
-        cwd,
-        agent: { id: agentId, label: agentLabel ?? title, command, available: true },
-        title,
-        sessionId: sessionId ?? undefined,
-        ptyId: ptyId ?? null,
-        accountId: accountId ?? undefined,
-      });
-      navigate("/workspace");
-    } catch { /* ignore malformed data */ }
-  }, []);
-
-  // Escuchar transferencias de tabs desde otras ventanas (clic derecho → Mover a ventana)
+  // Recibir una tab de otra ventana: por arrastre fuera de la ventana (que crea esta) o
+  // por "Mover a ventana" del menú contextual. Llega ENTERA — ver `transfer.ts`.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    listen<string>("cc-receive-tab", async (event) => {
-      try {
-        const data = JSON.parse(event.payload);
-        const myLabel = getCurrentWindow().label;
-        if (data.targetLabel !== myLabel) return;
-        addTab({
-          cwd: data.cwd,
-          agent: { id: data.agentId, label: data.agentLabel ?? data.title, command: data.command, available: true },
-          title: data.title,
-          sessionId: data.sessionId ?? undefined,
-          ptyId: data.ptyId ?? null,
-          accountId: data.accountId ?? undefined,
-        });
-        navigate("/workspace");
-      } catch { /* ignore */ }
+    const myLabel = getCurrentWindow().label;
+
+    onTabReceived(({ targetLabel, tab, workspaceId }) => {
+      if (targetLabel !== myLabel) return;
+      // Una ventana vacía es la que acaba de crear este arrastre: adopta el workspace del
+      // origen para que la tab no quede huérfana en el bucket `default`. Una que ya tiene
+      // tabs conserva el suyo (el merge entre workspaces distintos ya se rechazó antes).
+      if (useTabsStore.getState().tabs.length === 0) setWorkspaceId(workspaceId);
+      addTab({
+        cwd: tab.cwd,
+        agent: {
+          id: tab.agentId,
+          label: tab.agentLabel,
+          command: tab.command,
+          available: true,
+        },
+        title: tab.title,
+        titleIsCustom: tab.titleIsCustom,
+        ptyId: tab.ptyId,
+        sessionId: tab.sessionId,
+        historyId: tab.historyId,
+        accountId: tab.accountId,
+        prelaunch: tab.prelaunch,
+        openedAt: tab.openedAt,
+      });
+      navigate("/workspace");
     }).then((fn) => { unlisten = fn; });
+
+    // Recién ahora esta ventana puede recibir tabs. Quien la creó está esperando este
+    // aviso para mandarle la suya (ver `waitForWindow`).
+    announceWindowReady(myLabel).catch(console.error);
+
     return () => unlisten?.();
   }, []);
 
