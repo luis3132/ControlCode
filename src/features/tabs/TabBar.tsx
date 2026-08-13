@@ -1,6 +1,5 @@
 import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTranslation } from "react-i18next";
 import { useTabsStore } from "@/features/tabs/store";
@@ -13,6 +12,14 @@ import { flushPendingSave } from "@/features/tabs/persistence";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { AddIcon } from "neogestify-ui-components";
+import {
+  allWindowBounds,
+  broadcastEvent,
+  cursorPosition,
+  openNewWindow,
+  windowLabels,
+} from "@/shared/ipc/window";
+import { windowWorkspace } from "./ipc";
 
 interface ContextMenuState {
   tabId: string;
@@ -59,16 +66,14 @@ export function TabBar() {
     if (!tab) { setDraggedIndex(null); setDragOverIndex(null); return; }
 
     // Coordenadas absolutas del cursor en píxeles físicos (funciona en Wayland)
-    const [physX, physY] = await invoke<[number, number]>("get_cursor_position");
+    const [physX, physY] = await cursorPosition();
 
     // TopBar (h-10 = 40px lógicos) + TabBar (h-9 = 36px lógicos) = 76px lógicos → físicos
     const scale = window.devicePixelRatio ?? 1;
     const TAB_BAR_PHYSICAL = Math.round(76 * scale);
 
     // Buscar si el cursor cayó sobre el TabBar de otra ventana
-    const bounds = await invoke<Record<string, [number, number, number, number]>>(
-      "get_all_window_bounds"
-    );
+    const bounds = await allWindowBounds();
     const myLabel = getCurrentWindow().label;
     let mergeTarget: string | null = null;
 
@@ -85,9 +90,7 @@ export function TabBar() {
       // destino pertenece a otro workspace, no se hace merge, pero el drop sigue siendo
       // un detach válido: cae al mismo camino de "nueva ventana" de abajo en vez de no
       // hacer nada (que dejaba la tab sin ningún destino).
-      const targetWorkspaceId = await invoke<string | null>("db_get_window_workspace", {
-        label: mergeTarget,
-      }).catch(() => null);
+      const targetWorkspaceId = await windowWorkspace(mergeTarget).catch(() => null);
       if (targetWorkspaceId !== null && targetWorkspaceId !== workspaceId) {
         mergeTarget = null;
       }
@@ -100,15 +103,12 @@ export function TabBar() {
     try {
       if (mergeTarget) {
         // Merge: enviar tab (con su PTY vivo) a la otra ventana vía evento Tauri
-        await invoke("broadcast_event", {
-          event: "cc-receive-tab",
-          payload: JSON.stringify({
+        await broadcastEvent("cc-receive-tab", JSON.stringify({
             targetLabel: mergeTarget,
             cwd: tab.cwd, command: tab.command, agentId: tab.agentId,
             agentLabel: tab.agentLabel, title: tab.title, sessionId: tab.sessionId,
             ptyId: tab.ptyId, accountId: tab.accountId,
-          }),
-        });
+          }));
       } else {
         // Fuera de cualquier ventana → nueva ventana, llevándose el mismo PTY. Hereda el
         // workspace de ESTA ventana (misma handoff key que usa TopBar para "Nueva ventana")
@@ -119,7 +119,7 @@ export function TabBar() {
           ptyId: tab.ptyId, accountId: tab.accountId,
         }));
         localStorage.setItem("cc-new-window-workspace", workspaceId);
-        await invoke("open_new_window", { label: `cc-window-${Date.now()}` });
+        await openNewWindow(`cc-window-${Date.now()}`);
       }
     } catch (err) {
       console.error("No se pudo mover la tab a otra ventana, se conserva en el origen", err);
@@ -152,7 +152,7 @@ export function TabBar() {
   };
 
   const handleContextMenu = async (e: React.MouseEvent, tabId: string) => {
-    const allLabels = await invoke<string[]>("get_window_labels");
+    const allLabels = await windowLabels();
     const myLabel = getCurrentWindow().label;
     const others = allLabels.filter((l) => l !== myLabel);
     setContextMenu({ tabId, x: e.clientX, y: e.clientY, otherWindows: others });
@@ -162,9 +162,7 @@ export function TabBar() {
     const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
     try {
-      await invoke("broadcast_event", {
-        event: "cc-receive-tab",
-        payload: JSON.stringify({
+      await broadcastEvent("cc-receive-tab", JSON.stringify({
           targetLabel,
           cwd: tab.cwd,
           command: tab.command,
@@ -174,8 +172,7 @@ export function TabBar() {
           sessionId: tab.sessionId,
           ptyId: tab.ptyId,
           accountId: tab.accountId,
-        }),
-      });
+        }));
     } catch (err) {
       console.error("No se pudo mover la tab a otra ventana, se conserva en el origen", err);
       return;

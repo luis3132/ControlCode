@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button, ThemeToggle } from "neogestify-ui-components";
@@ -15,12 +14,20 @@ import {
   AddIcon,
   BoxIcon,
 } from "neogestify-ui-components";
-import { useTabsStore, DEFAULT_WORKSPACE_ID } from "@/features/tabs/store";
+import { useTabsStore } from "@/features/tabs/store";
+import { DEFAULT_WORKSPACE_ID } from "@/features/tabs/types";
 import { useWorkspacesStore } from "@/features/workspaces/store";
 import { SaveWorkspaceDialog } from "@/features/workspaces/SaveWorkspaceDialog";
 import { ResetDefaultDialog } from "@/features/workspaces/ResetDefaultDialog";
 import { ExitConfirmDialog } from "@/app/ExitConfirmDialog";
 import { OrchestratorIndicator } from "@/features/orchestrator/OrchestratorIndicator";
+import {
+  closeWorkspaceWindows,
+  defaultWorkspaceHasContent,
+  getWorkspace,
+  liveWindowCount,
+} from "@/features/workspaces/ipc";
+import { closeAndForgetWindow, openNewWindow } from "@/shared/ipc/window";
 
 const NAV_ITEMS = [
   { id: "home", Icon: HomeIcon, labelKey: "sidebar.home", path: "/" },
@@ -81,7 +88,7 @@ export function TopBar() {
   // resolución del valor viejo puede llegar después de la del nuevo y pisarlo.
   useEffect(() => {
     let stale = false;
-    invoke<{ name: string }>("db_get_workspace", { workspaceId })
+    getWorkspace(workspaceId)
       .then((ws) => { if (!stale) setWorkspaceName(ws.name); })
       .catch(() => { if (!stale) setWorkspaceName(null); });
     return () => { stale = true; };
@@ -95,7 +102,7 @@ export function TopBar() {
   useEffect(() => {
     let stale = false;
     const refresh = () =>
-      invoke<number>("live_workspace_window_count", { workspaceId })
+      liveWindowCount(workspaceId)
         .then((count) => { if (!stale) setWorkspaceWindowCount(count); })
         .catch(() => { if (!stale) setWorkspaceWindowCount(1); });
 
@@ -114,7 +121,7 @@ export function TopBar() {
     if (workspaceWindowCount > 1) {
       setExitWindowCount(workspaceWindowCount);
     } else {
-      invoke("close_and_forget_window", { label: getCurrentWindow().label }).catch(console.error);
+      closeAndForgetWindow(getCurrentWindow().label).catch(console.error);
     }
   };
 
@@ -133,7 +140,7 @@ export function TopBar() {
   const handleNewWindow = async () => {
     setMenuOpen(false);
     localStorage.setItem("cc-new-window-workspace", workspaceId);
-    await invoke("open_new_window", { label: `cc-window-${Date.now()}` }).catch(console.error);
+    await openNewWindow(`cc-window-${Date.now()}`).catch(console.error);
   };
 
   // El bucket "default" nunca se guarda con nombre: "Nuevo workspace" simplemente lo
@@ -142,7 +149,7 @@ export function TopBar() {
   // se resetea directo sin molestar.
   const handleNewWorkspace = async () => {
     setMenuOpen(false);
-    const hasContent = await invoke<boolean>("default_workspace_has_content").catch(() => false);
+    const hasContent = await defaultWorkspaceHasContent().catch(() => false);
     if (hasContent) {
       setShowResetWarning(true);
     } else {
@@ -346,10 +353,10 @@ export function TopBar() {
           title={t("workspace.closeAll.title")}
           body={t("workspace.closeAll.body", { count: exitWindowCount })}
           onCancel={() => setExitWindowCount(null)}
-          onCloseAll={() => invoke("close_workspace_windows", { workspaceId }).catch(console.error)}
+          onCloseAll={() => closeWorkspaceWindows(workspaceId).catch(console.error)}
           onCloseCurrent={() => {
             setExitWindowCount(null);
-            invoke("close_and_forget_window", { label: getCurrentWindow().label }).catch(console.error);
+            closeAndForgetWindow(getCurrentWindow().label).catch(console.error);
           }}
         />
       )}

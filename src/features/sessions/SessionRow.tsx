@@ -10,7 +10,8 @@ import {
   ChevronDownIcon,
   StackIcon,
 } from "neogestify-ui-components";
-import { SessionHistoryEntry, useSessionsStore } from "@/features/sessions/store";
+import { useSessionsStore } from "@/features/sessions/store";
+import type { SessionHistoryEntry } from "@/features/sessions/types";
 import { useAccountsStore } from "@/features/accounts/store";
 import { agentIcon } from "@/features/agents/agentIcons";
 

@@ -1,56 +1,6 @@
 import { create } from "zustand";
-import type { PrelaunchStep } from "@/features/prelaunch/store";
-import { invoke } from "@tauri-apps/api/core";
-
-/** Skill tal como estaba activa en la tab al cerrarla (se congela en el historial). */
-export interface ArchivedSkill {
-  id: string;
-  name: string;
-  scope: "tab" | "workspace";
-}
-
-/** Dónde volver a bajar una skill que ya no está instalada. */
-export interface SkillSource {
-  registryId: string;
-  registryName: string;
-  marketplaceSkillId: string;
-}
-
-/** Estado actual de una de las skills que tenía una sesión archivada. */
-export interface SessionSkillStatus {
-  name: string;
-  scope: "tab" | "workspace";
-  /** `null` = ya no está instalada. */
-  installedSkillId: string | null;
-  /** Presente solo si falta Y algún repo habilitado la ofrece. */
-  availableFrom: SkillSource | null;
-}
-
-/** Otra tab que estaba abierta en el workspace cuando esta sesión se cerró. */
-export interface SiblingTab {
-  title: string | null;
-  agentLabel: string;
-  cwd: string;
-}
-
-export interface SessionHistoryEntry {
-  id: string;
-  workspaceId: string;
-  agentId: string;
-  agentLabel: string;
-  command: string;
-  cwd: string;
-  title: string | null;
-  sessionId: string | null;
-  skills: ArchivedSkill[];
-  siblingTabs: SiblingTab[];
-  /** Cuenta de la TUI con la que corría; `null` = la principal (la del sistema). */
-  accountId: string | null;
-  /** Cadena de pre-lanzamiento con la que se abrió (ver el store `prelaunch`). */
-  prelaunch: PrelaunchStep[];
-  openedAt: number;
-  closedAt: number;
-}
+import * as ipc from "./ipc";
+import type { SessionHistoryEntry, SessionSkillStatus } from "./types";
 
 interface SessionsState {
   history: SessionHistoryEntry[];
@@ -74,7 +24,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   loadHistory: async (workspaceId) => {
     set({ loading: true });
     try {
-      const rows = await invoke<SessionHistoryEntry[]>("db_list_session_history", { workspaceId });
+      const rows = await ipc.listHistory(workspaceId);
       set({ history: rows });
     } finally {
       set({ loading: false });
@@ -82,18 +32,18 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   },
 
   checkSessionSkills: async (historyId) =>
-    invoke<SessionSkillStatus[]>("check_session_skills", { historyId }),
+    ipc.checkSessionSkills(historyId),
 
   restoreSessionSkills: async (historyId, workspaceId, tabId) =>
-    invoke<string[]>("restore_session_skills", { historyId, workspaceId, tabId }),
+    ipc.restoreSessionSkills(historyId, workspaceId, tabId),
 
   deleteSession: async (historyId, workspaceId) => {
-    await invoke("db_delete_session_history", { historyId });
+    await ipc.deleteHistoryEntry(historyId);
     await get().loadHistory(workspaceId);
   },
 
-  sessionMarkdown: async (historyId) => invoke<string>("session_markdown", { historyId }),
+  sessionMarkdown: async (historyId) => ipc.sessionMarkdown(historyId),
 
   exportSession: async (historyId, destPath) =>
-    invoke("export_session_markdown", { historyId, destPath }),
+    ipc.exportSessionMarkdown(historyId, destPath),
 }));

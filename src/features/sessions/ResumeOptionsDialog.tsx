@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Modal, InfoIcon } from "neogestify-ui-components";
-import { SessionHistoryEntry, SessionSkillStatus } from "@/features/sessions/store";
+import type { SessionHistoryEntry, SessionSkillStatus } from "@/features/sessions/types";
 import { SkillPickerStep } from "@/features/tabs/wizard/SkillPickerStep";
 import { PrelaunchChain } from "@/features/prelaunch/PrelaunchChain";
-import type { PrelaunchStep } from "@/features/prelaunch/store";
+import type { PrelaunchStep } from "@/features/prelaunch/types";
 
 export interface ResumeChoice {
   /** Skills con las que montar la tab (ids ya instalados). */

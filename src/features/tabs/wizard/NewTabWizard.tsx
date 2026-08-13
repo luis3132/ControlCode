@@ -6,9 +6,10 @@ import { AgentPickerStep } from "@/features/tabs/wizard/AgentPickerStep";
 import { SkillPickerStep } from "@/features/tabs/wizard/SkillPickerStep";
 import { AccountPickerStep } from "@/features/tabs/wizard/AccountPickerStep";
 import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
-import type { PrelaunchStep } from "@/features/prelaunch/store";
-import { AgentInfo, useTabsStore } from "@/features/tabs/store";
-import { useSettingsStore } from "@/features/agents/store";
+import type { PrelaunchStep } from "@/features/prelaunch/types";
+import { useTabsStore } from "@/features/tabs/store";
+import type { AgentInfo } from "@/features/tabs/types";
+import { useAgentsStore } from "@/features/agents/store";
 
 type Step = "folder" | "agent" | "skills";
 
@@ -29,7 +30,7 @@ interface NewTabWizardProps {
 export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) {
   const { t } = useTranslation();
   const { detectedAgents } = useTabsStore();
-  const { customAgents } = useSettingsStore();
+  const { customAgents } = useAgentsStore();
   const [step, setStep] = useState<Step>("folder");
   const [selectedCwd, setSelectedCwd] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);

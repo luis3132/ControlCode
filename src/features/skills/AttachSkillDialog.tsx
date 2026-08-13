@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Modal, Select } from "neogestify-ui-components";
-import { useSkillsStore, SkillSummary } from "@/features/skills/store";
+import { useSkillsStore } from "@/features/skills/store";
+import type { SkillSummary } from "@/features/skills/types";
 import { useTabsStore } from "@/features/tabs/store";
 
 interface AttachSkillDialogProps {

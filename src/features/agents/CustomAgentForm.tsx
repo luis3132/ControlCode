@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Select } from "neogestify-ui-components";
 import { AddIcon, TrashIcon, ChevronDownIcon } from "neogestify-ui-components";
-import { CustomAgentDraft, emptyCustomAgent } from "@/features/agents/store";
+import type { CustomAgentDraft } from "@/features/agents/types";
+import { emptyCustomAgent } from "@/features/agents/types";
 
 interface CustomAgentFormProps {
   /** Draft inicial; `emptyCustomAgent()` para el alta. */

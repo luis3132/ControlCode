@@ -1,20 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ClockIcon, FolderIcon, ChevronDownIcon } from "neogestify-ui-components";
-import {
-  SessionHistoryEntry,
-  SessionSkillStatus,
-  useSessionsStore,
-} from "@/features/sessions/store";
+import { useSessionsStore } from "@/features/sessions/store";
+import type { SessionHistoryEntry, SessionSkillStatus } from "@/features/sessions/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { useAccountsStore } from "@/features/accounts/store";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { MissingSkillsDialog } from "@/features/sessions/MissingSkillsDialog";
 import { ResumeOptionsDialog } from "@/features/sessions/ResumeOptionsDialog";
-import type { PrelaunchStep } from "@/features/prelaunch/store";
+import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { SessionRow } from "@/features/sessions/SessionRow";
 import {
   EMPTY_FILTERS,
@@ -26,11 +22,8 @@ import {
 import { flushPendingSave } from "@/features/tabs/persistence";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
-
-interface OpenTabLocation {
-  windowLabel: string;
-  tabId: string;
-}
+import { broadcastEvent, focusWindow } from "@/shared/ipc/window";
+import * as ipc from "./ipc";
 
 /** Sesión que el usuario quiso reabrir pero quedó esperando la decisión sobre skills. */
 interface PendingResume {
@@ -94,18 +87,20 @@ export function SessionsPage() {
    * de una sesión que ya estaba en pantalla.
    */
   const focusIfAlreadyOpen = async (entry: SessionHistoryEntry): Promise<boolean> => {
-    const location = await invoke<OpenTabLocation | null>("find_open_tab_for_session", {
-      sessionId: entry.sessionId,
-      historyId: entry.id,
-      workspaceId,
-    }).catch(() => null);
+    const location = await ipc
+      .findOpenTabForSession({
+        sessionId: entry.sessionId,
+        historyId: entry.id,
+        workspaceId,
+      })
+      .catch(() => null);
     if (!location) return false;
 
-    await invoke("focus_window", { label: location.windowLabel }).catch(console.error);
-    await invoke("broadcast_event", {
-      event: "cc-focus-tab",
-      payload: JSON.stringify({ targetLabel: location.windowLabel, tabId: location.tabId }),
-    }).catch(console.error);
+    await focusWindow(location.windowLabel).catch(console.error);
+    await broadcastEvent(
+      "cc-focus-tab",
+      JSON.stringify({ targetLabel: location.windowLabel, tabId: location.tabId })
+    ).catch(console.error);
     return true;
   };
 

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDownIcon } from "neogestify-ui-components";
 import { PrelaunchChain } from "@/features/prelaunch/PrelaunchChain";
-import type { PrelaunchStep } from "@/features/prelaunch/store";
+import type { PrelaunchStep } from "@/features/prelaunch/types";
 
 interface AdvancedOptionsProps {
   agentCommand: string;

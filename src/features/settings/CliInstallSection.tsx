@@ -1,18 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { Button } from "neogestify-ui-components";
 import { AnimateSpin, CheckCircleIcon, InfoIcon } from "neogestify-ui-components";
-
-/** Ver `ipc/install.rs`. */
-interface CliInstallStatus {
-  installed: boolean;
-  targetPath: string;
-  sourcePath: string | null;
-  dirInPath: boolean;
-  targetDir: string;
-  method: "symlink" | "copy";
-}
+import { cliInstallStatus, installCli, uninstallCli, type CliInstallStatus } from "./ipc";
 
 /**
  * Instala la CLI `ccode` en el PATH del usuario.
@@ -29,7 +19,7 @@ export function CliInstallSection() {
 
   const refresh = useCallback(async () => {
     try {
-      setStatus(await invoke<CliInstallStatus>("cli_install_status"));
+      setStatus(await cliInstallStatus());
     } catch (e) {
       setError(String(e));
     }
@@ -37,11 +27,11 @@ export function CliInstallSection() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const run = async (command: "install_cli" | "uninstall_cli") => {
+  const run = async (action: () => Promise<CliInstallStatus>) => {
     setBusy(true);
     setError("");
     try {
-      setStatus(await invoke<CliInstallStatus>(command));
+      setStatus(await action());
     } catch (e) {
       setError(String(e));
     } finally {
@@ -124,7 +114,7 @@ export function CliInstallSection() {
             <Button
               variant="primary"
               disabled={busy || !status.sourcePath}
-              onClick={() => run("install_cli")}
+              onClick={() => run(installCli)}
               className="!text-sm"
               leftIcon={busy ? <AnimateSpin className="w-4 h-4" /> : undefined}
             >
@@ -134,7 +124,7 @@ export function CliInstallSection() {
               <Button
                 variant="outline"
                 disabled={busy}
-                onClick={() => run("uninstall_cli")}
+                onClick={() => run(uninstallCli)}
                 className="!text-sm"
               >
                 {t("settings.cli.uninstall")}

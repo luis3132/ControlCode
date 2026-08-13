@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AgentInfo, Tab, useTabsStore } from "@/features/tabs/store";
-import type { PrelaunchStep } from "@/features/prelaunch/store";
+import { useTabsStore } from "@/features/tabs/store";
+import type { Tab } from "@/features/tabs/types";
+import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { initTabsPersistence } from "@/features/tabs/persistence";
 import { TopBar } from "@/app/TopBar";
 import { TabBar } from "@/features/tabs/TabBar";
@@ -12,8 +12,10 @@ import { PathBar } from "@/features/workspaces/PathBar";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { ResizeHandles } from "@/app/ResizeHandles";
 import { AppExitListener } from "@/app/AppExitListener";
-import { useSettingsStore } from "@/features/agents/store";
+import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
+import { detectAgents } from "@/features/agents/ipc";
+import { loadWindowState } from "@/features/tabs/ipc";
 
 interface RestoredTabRow {
   id: string;
@@ -29,11 +31,6 @@ interface RestoredTabRow {
   accountId: string | null;
   prelaunch: PrelaunchStep[] | null;
   openedAt: number;
-}
-
-interface RestoredWindowState {
-  window: { workspaceId: string };
-  tabs: RestoredTabRow[];
 }
 
 function toFrontendTab(row: RestoredTabRow): Tab {
@@ -63,10 +60,10 @@ export function AppShell() {
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
-    invoke<AgentInfo[]>("detect_agents").then(setDetectedAgents);
+    detectAgents().then(setDetectedAgents);
     // Las TUIs custom viven en SQLite (el backend también las consulta), así que hay que
     // traerlas explícitamente en cada ventana en vez de que se rehidraten solas.
-    useSettingsStore.getState().loadCustomAgents().catch(console.error);
+    useAgentsStore.getState().loadCustomAgents().catch(console.error);
   }, []);
 
   // Puente de la CLI `ccode`: esta ventana queda disponible para atender los comandos
@@ -92,7 +89,7 @@ export function AppShell() {
   useEffect(() => {
     initTabsPersistence();
     const myLabel = getCurrentWindow().label;
-    invoke<RestoredWindowState | null>("db_load_window_state", { label: myLabel })
+    loadWindowState(myLabel)
       .then((restored) => {
         if (restored) {
           // Ya existe una fila para esta ventana en la DB (con o sin tabs — ej. la

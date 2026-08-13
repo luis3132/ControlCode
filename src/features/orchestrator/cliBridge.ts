@@ -1,11 +1,11 @@
-import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabsStore } from "@/features/tabs/store";
-import type { PrelaunchStep } from "@/features/prelaunch/store";
-import { useSettingsStore } from "@/features/agents/store";
+import type { PrelaunchStep } from "@/features/prelaunch/types";
+import { useAgentsStore } from "@/features/agents/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
+import { respondToCli } from "./ipc";
 
 /**
  * Lado frontend del puente de la CLI (ver `ipc/bridge.rs`).
@@ -44,7 +44,7 @@ function canonical(value: string): string {
 /** Resuelve el agente pedido contra los detectados + las TUIs custom del usuario. */
 function resolveAgent(requested: string) {
   const { detectedAgents } = useTabsStore.getState();
-  const { customAgents } = useSettingsStore.getState();
+  const { customAgents } = useAgentsStore.getState();
   const wanted = canonical(requested);
 
   const detected = detectedAgents.find(
@@ -72,7 +72,7 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
     // Se listan también las custom: son justo las que nadie puede adivinar.
     const known = [
       ...useTabsStore.getState().detectedAgents.map((a) => a.id),
-      ...useSettingsStore.getState().customAgents.map((a) => a.id),
+      ...useAgentsStore.getState().customAgents.map((a) => a.id),
     ].join(", ");
     throw new Error(`Agente desconocido '${agentId}'. Disponibles: ${known}`);
   }
@@ -142,15 +142,15 @@ export function initCliBridge(): () => void {
 
     try {
       const data = await handle(command, args ?? {});
-      await invoke("cli_respond", { requestId, data, error: null });
+      await respondToCli(requestId, data, null);
     } catch (e) {
       // El error viaja como dato, no como excepción: la CLI tiene que poder imprimir un
       // motivo legible en vez de un timeout.
-      await invoke("cli_respond", {
+      await respondToCli(
         requestId,
-        data: null,
-        error: e instanceof Error ? e.message : String(e),
-      }).catch(console.error);
+        null,
+        e instanceof Error ? e.message : String(e)
+      ).catch(console.error);
     }
   }).then((fn) => {
     if (disposed) fn();

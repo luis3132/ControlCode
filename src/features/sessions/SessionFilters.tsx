@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Input, Select } from "neogestify-ui-components";
 import { SearchIcon, CloseIcon } from "neogestify-ui-components";
-import { SessionHistoryEntry } from "@/features/sessions/store";
+import type { SessionHistoryEntry } from "@/features/sessions/types";
 
 /** Ventana de tiempo relativa al ahora. `all` = sin límite. */
 export type DateRange = "all" | "today" | "week" | "month";

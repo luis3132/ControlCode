@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { Select } from "neogestify-ui-components";
+import { getSetting, setSetting } from "@/shared/ipc/settings";
 
 /** Misma clave que lee el backend (`orchestrator::WATCH_LIMIT_KEY`). */
 const WATCH_LIMIT_KEY = "orchestrator_watch_limit";
@@ -21,7 +21,7 @@ export function OrchestratorSection() {
 
   useEffect(() => {
     let stale = false;
-    invoke<string | null>("db_get_setting", { key: WATCH_LIMIT_KEY })
+    getSetting(WATCH_LIMIT_KEY)
       .then((value) => {
         const parsed = Number(value);
         if (!stale && Number.isInteger(parsed) && parsed > 0) setLimit(parsed);
@@ -32,7 +32,7 @@ export function OrchestratorSection() {
 
   const handleChange = async (value: string) => {
     setLimit(Number(value));
-    await invoke("db_set_setting", { key: WATCH_LIMIT_KEY, value }).catch(console.error);
+    await setSetting(WATCH_LIMIT_KEY, value).catch(console.error);
   };
 
   return (

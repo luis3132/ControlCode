@@ -4,7 +4,8 @@ import { Button, Select } from "neogestify-ui-components";
 import { TrashIcon, EditIcon, ThemeToggle, FolderIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n/index";
-import { CustomAgent, useSettingsStore } from "@/features/agents/store";
+import { useAgentsStore } from "@/features/agents/store";
+import type { CustomAgent } from "@/features/agents/types";
 import { useSkillsStore } from "@/features/skills/store";
 import { CustomAgentForm } from "@/features/agents/CustomAgentForm";
 import { CliInstallSection } from "@/features/settings/CliInstallSection";
@@ -55,7 +56,7 @@ const CARD = `bg-linear-to-br from-white to-gray-50
 
 export function SettingsPage() {
   const { t } = useTranslation();
-  const { customAgents, loadCustomAgents, saveCustomAgent, removeCustomAgent } = useSettingsStore();
+  const { customAgents, loadCustomAgents, saveCustomAgent, removeCustomAgent } = useAgentsStore();
   const { skillsDir, loadSkillsDir, setSkillsDir } = useSkillsStore();
   /** Id de la TUI que se está editando en línea; `null` = solo el formulario de alta. */
   const [editingId, setEditingId] = useState<string | null>(null);

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Modal, Select } from "neogestify-ui-components";
 import { FolderIcon, AnimateSpin } from "neogestify-ui-components";
-import { RegistrySourceType, RegistryProgress, useMarketplaceStore } from "@/features/marketplace/store";
+import { useMarketplaceStore } from "@/features/marketplace/store";
+import type { RegistrySourceType, RegistryProgress } from "@/features/marketplace/types";
 import { RegistryProgressBar } from "@/features/marketplace/RegistryProgress";
+import { previewRegistryLocation } from "./ipc";
 
 interface AddRegistryDialogProps {
   onClose: () => void;
@@ -46,7 +47,7 @@ export function AddRegistryDialog({ onClose }: AddRegistryDialogProps) {
     if (!raw && sourceType !== "skillssh") { setResolved(null); return; }
     let stale = false;
     const timer = setTimeout(() => {
-      invoke<string>("preview_registry_location", { sourceType, location: raw })
+      previewRegistryLocation(sourceType, raw)
         .then((r) => { if (!stale) setResolved(r); })
         .catch(() => { if (!stale) setResolved(null); });
     }, 250);

@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Input } from "neogestify-ui-components";
 import { EditIcon, TrashIcon, CheckIcon, CancelIcon, BoxIcon } from "neogestify-ui-components";
-import { useWorkspacesStore, WorkspaceSummary } from "@/features/workspaces/store";
+import { useWorkspacesStore } from "@/features/workspaces/store";
+import type { WorkspaceSummary } from "@/features/workspaces/types";
 import { OpenWorkspaceDialog } from "@/features/workspaces/OpenWorkspaceDialog";
 import { PageHeader } from "@/shared/ui/PageHeader";
 

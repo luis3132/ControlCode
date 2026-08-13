@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button, Input } from "neogestify-ui-components";
 import { HomeIcon, FolderIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
+import { homeDir } from "@/shared/ipc/window";
 
 interface FolderPickerStepProps {
   initialPath: string;
@@ -15,7 +15,7 @@ export function FolderPickerStep({ initialPath, onPathChange }: FolderPickerStep
   const [manualPath, setManualPath] = useState("");
 
   const handleHome = async () => {
-    const home = await invoke<string>("get_home_dir");
+    const home = await homeDir();
     onPathChange(home);
     setManualPath("");
   };

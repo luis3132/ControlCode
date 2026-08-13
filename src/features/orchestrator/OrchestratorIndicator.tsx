@@ -1,18 +1,7 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
-
-/** Foto del modo orquestador que emite el backend (`orchestrator::Stats`). */
-interface OrchestratorStats {
-  requests: number;
-  responseBytes: number;
-  estimatedTokens: number;
-  lastCommand: string | null;
-  lastAt: number | null;
-  watched: number;
-  watchLimit: number;
-}
+import { orchestratorStats, resetOrchestratorUsage, type OrchestratorStats } from "./ipc";
 
 /** A partir de acá el chip avisa en ámbar: el orquestador ya lleva consumido más contexto
  *  del que le queda cómodo a una conversación típica. */
@@ -42,7 +31,7 @@ export function OrchestratorIndicator() {
   useEffect(() => {
     let stale = false;
 
-    invoke<OrchestratorStats>("orchestrator_stats")
+    orchestratorStats()
       .then((s) => { if (!stale) setStats(s); })
       .catch(() => { /* sin backend de orquestador el chip simplemente no aparece */ });
 
@@ -85,7 +74,7 @@ export function OrchestratorIndicator() {
   return (
     <button
       title={tooltip}
-      onClick={() => invoke("orchestrator_reset_usage").catch(console.error)}
+      onClick={() => resetOrchestratorUsage().catch(console.error)}
       className={`flex items-center gap-1.5 h-6 px-2 rounded-full text-[11px] font-medium
         border transition-colors duration-150 shrink-0
         ${alert

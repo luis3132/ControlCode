@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import * as ipc from "./ipc";
 import { flushPendingSave } from "@/features/tabs/persistence";
 
 /**
@@ -29,7 +29,7 @@ export async function attachSkillsToTab(
   const errors: string[] = [];
   for (const skillId of skillIds) {
     try {
-      await invoke("attach_skill", { skillId, workspaceId, scope: "tab", tabId });
+      await ipc.attachSkill(skillId, workspaceId, "tab", tabId);
     } catch (e) {
       errors.push(String(e));
     }
@@ -37,7 +37,7 @@ export async function attachSkillsToTab(
 
   // Best-effort y aparte: esto solo hace que la tab nueva herede las skills que el
   // workspace ya tuviera activas, y que no fallara no es parte de lo que se pidió.
-  await invoke("sync_workspace_skills", { workspaceId }).catch(() => {});
+  await ipc.syncWorkspaceSkills(workspaceId).catch(() => {});
 
   return errors;
 }

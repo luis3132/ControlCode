@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loading } from "neogestify-ui-components";
 import { Terminal } from "@/features/terminal/Terminal";
-import { useAccountsStore, type AgentAccount } from "@/features/accounts/store";
+import { useAccountsStore } from "@/features/accounts/store";
+import type { AgentAccount } from "@/features/accounts/types";
 
 interface LoginTerminalProps {
   account: AgentAccount;

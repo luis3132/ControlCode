@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 import {
   Avatar, Badge, Button, Modal, Tooltip, AddIcon, TrashIcon, InfoIcon,
 } from "neogestify-ui-components";
-import { useAccountsStore, type AgentAccount } from "@/features/accounts/store";
+import { useAccountsStore } from "@/features/accounts/store";
+import type { AgentAccount } from "@/features/accounts/types";
 import { AddAccountDialog } from "@/features/accounts/AddAccountDialog";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
 import { AgentPicker } from "@/features/agents/AgentPicker";

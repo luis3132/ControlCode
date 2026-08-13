@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Modal, TextArea } from "neogestify-ui-components";
-import { useSkillsStore, SkillFrontmatterInput } from "@/features/skills/store";
+import { useSkillsStore } from "@/features/skills/store";
+import type { SkillFrontmatterInput } from "@/features/skills/types";
 import { SkillFilePickerStep } from "@/features/skills/SkillFilePickerStep";
 
 interface InstallSkillDialogProps {

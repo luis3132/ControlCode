@@ -4,7 +4,8 @@ import { Button } from "neogestify-ui-components";
 import { EditIcon, TrashIcon, CloudIcon, FolderIcon, AnimateSpin, IconReset } from "neogestify-ui-components";
 import { Switch } from "@/shared/ui/Switch";
 import { RegistryProgressBar, useRegistryProgress } from "@/features/marketplace/RegistryProgress";
-import { RegistrySummary, useMarketplaceStore } from "@/features/marketplace/store";
+import { useMarketplaceStore } from "@/features/marketplace/store";
+import type { RegistrySummary } from "@/features/marketplace/types";
 import { RemoveRegistryDialog } from "@/features/marketplace/RemoveRegistryDialog";
 
 function timeAgo(ts: number | null): string {

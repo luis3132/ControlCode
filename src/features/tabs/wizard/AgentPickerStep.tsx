@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { AgentInfo } from "@/features/tabs/store";
+import type { AgentInfo } from "@/features/tabs/types";
 
 interface AgentPickerStepProps {
   agents: AgentInfo[];

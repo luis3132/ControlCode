@@ -1,16 +1,11 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
 import { AlertaToast } from "neogestify-ui-components";
 import { useTabsStore } from "@/features/tabs/store";
 import { useSkillsStore } from "@/features/skills/store";
+import { broadcastEvent, focusWindow } from "@/shared/ipc/window";
 
-export interface WorkspaceSummary {
-  id: string;
-  name: string;
-  lastActive: number;
-  windowCount: number;
-  tabCount: number;
-}
+import * as ipc from "./ipc";
+import type { WorkspaceSummary } from "./types";
 
 interface WorkspacesState {
   workspaces: WorkspaceSummary[];
@@ -42,7 +37,7 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
   loadWorkspaces: async () => {
     set({ loading: true });
     try {
-      const rows = await invoke<WorkspaceSummary[]>("db_list_workspaces");
+      const rows = await ipc.listWorkspaces();
       set({ workspaces: rows });
     } finally {
       set({ loading: false });
@@ -50,16 +45,13 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
   },
 
   resetDefaultWorkspace: async () => {
-    await invoke("reset_default_workspace");
+    await ipc.resetDefaultWorkspace();
     await get().loadWorkspaces();
   },
 
   saveCurrentAsWorkspace: async (name) => {
     const sourceWorkspaceId = useTabsStore.getState().workspaceId;
-    const ws = await invoke<{ id: string; name: string }>("db_save_workspace", {
-      name,
-      sourceWorkspaceId,
-    });
+    const ws = await ipc.saveWorkspace(name, sourceWorkspaceId);
     useTabsStore.getState().setWorkspaceId(ws.id);
 
     // `db_save_workspace` mueve en la DB TODAS las ventanas abiertas del workspace de
@@ -68,17 +60,17 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
     // vive en el workspace nuevo: su autosave bumpeaba el `last_active` del workspace
     // equivocado (y con eso la app podía reabrir el workspace que no era), y "Nuevo
     // workspace" desde una de ellas apuntaba a un bucket que ya no las contiene.
-    await invoke("broadcast_event", {
-      event: "cc-workspace-reassigned",
-      payload: JSON.stringify({ from: sourceWorkspaceId, to: ws.id }),
-    }).catch(console.error);
+    await broadcastEvent(
+      "cc-workspace-reassigned",
+      JSON.stringify({ from: sourceWorkspaceId, to: ws.id })
+    ).catch(console.error);
 
     await get().loadWorkspaces();
     return ws.id;
   },
 
   openWorkspace: async (id, closeCurrent) => {
-    await invoke("open_workspace", { workspaceId: id, closeCurrent });
+    await ipc.openWorkspace(id, closeCurrent);
     await get().loadWorkspaces();
     // Best-effort: no bloquea la apertura del workspace si el check falla.
     useSkillsStore.getState().checkHealth(id).then((issues) => {
@@ -89,21 +81,19 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
   },
 
   focusIfOpen: async (id) => {
-    const liveWindows = await invoke<{ label: string }[]>("db_get_workspace_windows", {
-      workspaceId: id,
-    }).catch(() => []);
+    const liveWindows = await ipc.openWindowsOf(id).catch(() => []);
     if (liveWindows.length === 0) return false;
-    await invoke("focus_window", { label: liveWindows[0].label }).catch(console.error);
+    await focusWindow(liveWindows[0].label).catch(console.error);
     return true;
   },
 
   renameWorkspace: async (id, name) => {
-    await invoke("db_rename_workspace", { workspaceId: id, name });
+    await ipc.renameWorkspace(id, name);
     await get().loadWorkspaces();
   },
 
   deleteWorkspace: async (id) => {
-    await invoke("db_delete_workspace", { workspaceId: id });
+    await ipc.deleteWorkspace(id);
     await get().loadWorkspaces();
   },
 }));

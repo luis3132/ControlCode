@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Modal } from "neogestify-ui-components";
-import { useWorkspacesStore, WorkspaceSummary } from "@/features/workspaces/store";
+import { useWorkspacesStore } from "@/features/workspaces/store";
+import type { WorkspaceSummary } from "@/features/workspaces/types";
 
 interface OpenWorkspaceDialogProps {
   workspace: WorkspaceSummary;

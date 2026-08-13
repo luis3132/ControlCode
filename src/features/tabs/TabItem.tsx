@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Tab } from "@/features/tabs/store";
+import type { Tab } from "@/features/tabs/types";
 
 interface TabItemProps {
   tab: Tab;

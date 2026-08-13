@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Modal } from "neogestify-ui-components";
 import { AnimateSpin, CheckIcon, InfoIcon } from "neogestify-ui-components";
-import { SessionSkillStatus } from "@/features/sessions/store";
+import type { SessionSkillStatus } from "@/features/sessions/types";
 import { useMarketplaceStore } from "@/features/marketplace/store";
 import { useSkillsStore } from "@/features/skills/store";
 

@@ -1,45 +1,7 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
-import { SkillSummary } from "@/features/skills/store";
-
-/** `skillssh` es el directorio abierto de skills.sh, consultado por su CLI (`npx skills`). */
-export type RegistrySourceType = "local" | "github" | "skillssh";
-
-export interface RegistrySummary {
-  id: string;
-  name: string;
-  sourceType: RegistrySourceType;
-  location: string;
-  priority: number;
-  enabled: boolean;
-  lastFetched: number | null;
-  skillCount: number;
-  error: string | null;
-}
-
-export interface MarketplaceSkillEntry {
-  id: string;
-  registryId: string;
-  registryName: string;
-  name: string;
-  description: string | null;
-  categories: string[];
-  compatibleAgents: string[];
-  folderPath: string;
-  files: string[];
-  /** Instalaciones acumuladas ya formateadas (`"3.3K"`); solo lo informa skills.sh. */
-  installs: string | null;
-}
-
-/** Payload del evento `cc-registry-progress` (ver `marketplace/mod.rs`). */
-export interface RegistryProgress {
-  registryId: string;
-  phase: "connecting" | "listing" | "scanning" | "saving" | "done" | "error";
-  current: number;
-  /** `null` mientras la fase no sea contable — la UI muestra spinner en vez de barra. */
-  total: number | null;
-  detail: string | null;
-}
+import type { SkillSummary } from "@/features/skills/types";
+import * as ipc from "./ipc";
+import type { MarketplaceSkillEntry, RegistrySourceType, RegistrySummary } from "./types";
 
 interface MarketplaceState {
   registries: RegistrySummary[];
@@ -79,17 +41,14 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   installingKey: null,
 
   loadRegistries: async () => {
-    const registries = await invoke<RegistrySummary[]>("list_registries");
+    const registries = await ipc.listRegistries();
     set({ registries });
   },
 
   loadSkills: async (query, category) => {
     set({ loading: true });
     try {
-      const skills = await invoke<MarketplaceSkillEntry[]>("list_marketplace_skills", {
-        query: query || null,
-        category: category || null,
-      });
+      const skills = await ipc.listMarketplaceSkills(query, category);
       set({ skills });
     } finally {
       set({ loading: false });
@@ -101,7 +60,7 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
     if (!hasRemote || query.trim().length < 2) return;
     set({ searchingRemote: true });
     try {
-      await invoke("search_remote_registries", { query });
+      await ipc.searchRemoteRegistries(query);
       // El backend deja los resultados en el cache del repo; releerlo es lo que los trae
       // a la grilla. `loadRegistries` además refresca el error del repo (ej. falta Node).
       await get().loadRegistries();
@@ -112,28 +71,28 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   },
 
   addRegistry: async (name, sourceType, location, id) => {
-    await invoke("add_registry", { id: id ?? null, name, sourceType, location });
+    await ipc.addRegistry(name, sourceType, location, id);
     await get().loadRegistries();
     await get().loadSkills();
   },
 
   renameRegistry: async (id, name) => {
-    await invoke("rename_registry", { id, name });
+    await ipc.renameRegistry(id, name);
     await get().loadRegistries();
     await get().loadSkills();
   },
 
   removeRegistry: async (id) => {
-    const removedSkills = await invoke<number>("remove_registry", { id });
+    const removedSkills = await ipc.removeRegistry(id);
     await get().loadRegistries();
     await get().loadSkills();
     return removedSkills;
   },
 
-  registrySkills: async (id) => invoke<SkillSummary[]>("registry_skills", { registryId: id }),
+  registrySkills: async (id) => ipc.registrySkills(id),
 
   setRegistryEnabled: async (id, enabled) => {
-    await invoke("set_registry_enabled", { id, enabled });
+    await ipc.setRegistryEnabled(id, enabled);
     await get().loadRegistries();
     await get().loadSkills();
   },
@@ -141,7 +100,7 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   refreshRegistry: async (id) => {
     set({ refreshingId: id });
     try {
-      await invoke("refresh_registry", { id });
+      await ipc.refreshRegistry(id);
       await get().loadRegistries();
       await get().loadSkills();
     } finally {
@@ -163,7 +122,7 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
     const key = `${registryId}:${skillId}`;
     set({ installingKey: key });
     try {
-      return await invoke<SkillSummary>("install_marketplace_skill", { registryId, skillId });
+      return await ipc.installMarketplaceSkill(registryId, skillId);
     } finally {
       set({ installingKey: null });
     }

@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { WorkspaceSummary } from "@/features/workspaces/store";
+import type { WorkspaceSummary } from "@/features/workspaces/types";
 
 interface WorkspaceListProps {
   workspaces: WorkspaceSummary[];

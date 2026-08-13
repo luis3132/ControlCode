@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Modal } from "neogestify-ui-components";
-import { useAccountsStore, type AgentAccount } from "@/features/accounts/store";
+import { useAccountsStore } from "@/features/accounts/store";
+import type { AgentAccount } from "@/features/accounts/types";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
 import { AgentPicker } from "@/features/agents/AgentPicker";
 

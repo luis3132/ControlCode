@@ -1,13 +1,9 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AddIcon, TrashIcon, Input, Tooltip } from "neogestify-ui-components";
-import {
-  PrelaunchStep,
-  isPresetStep,
-  stepCommand,
-  stepLabel,
-  usePrelaunchStore,
-} from "@/features/prelaunch/store";
+import { usePrelaunchStore } from "@/features/prelaunch/store";
+import type { PrelaunchStep } from "@/features/prelaunch/types";
+import { isPresetStep, stepCommand, stepLabel } from "@/features/prelaunch/types";
 
 interface PrelaunchChainProps {
   value: PrelaunchStep[];

@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Input } from "neogestify-ui-components";
 import { FolderIcon, HomeIcon, ArrowRightIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
-import { useTabsStore, AgentInfo } from "@/features/tabs/store";
-import { useSettingsStore } from "@/features/agents/store";
-import { useWorkspacesStore, WorkspaceSummary } from "@/features/workspaces/store";
+import { useTabsStore } from "@/features/tabs/store";
+import type { AgentInfo } from "@/features/tabs/types";
+import { useAgentsStore } from "@/features/agents/store";
+import { useWorkspacesStore } from "@/features/workspaces/store";
+import type { WorkspaceSummary } from "@/features/workspaces/types";
 import { WorkspaceList } from "@/features/workspaces/WorkspaceList";
 import { OpenWorkspaceDialog } from "@/features/workspaces/OpenWorkspaceDialog";
 import { SkillPickerStep } from "@/features/tabs/wizard/SkillPickerStep";
@@ -17,13 +18,14 @@ import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { AccountPickerStep } from "@/features/tabs/wizard/AccountPickerStep";
 import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
-import type { PrelaunchStep } from "@/features/prelaunch/store";
+import type { PrelaunchStep } from "@/features/prelaunch/types";
+import { homeDir } from "@/shared/ipc/window";
 
 export function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { addTab, detectedAgents, workspaceId } = useTabsStore();
-  const { customAgents } = useSettingsStore();
+  const { customAgents } = useAgentsStore();
   const { workspaces, loadWorkspaces, focusIfOpen } = useWorkspacesStore();
   const [selectedCwd, setSelectedCwd] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
@@ -61,7 +63,7 @@ export function HomePage() {
   };
 
   const handleHome = async () => {
-    const home = await invoke<string>("get_home_dir");
+    const home = await homeDir();
     setSelectedCwd(home);
     setPathError("");
   };

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { AnimateSpin, CheckIcon } from "neogestify-ui-components";
-import { RegistryProgress } from "@/features/marketplace/store";
+import type { RegistryProgress } from "@/features/marketplace/types";
 
 /**
  * Último evento `cc-registry-progress` de este registry, o `null` si todavía no llegó

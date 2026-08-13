@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, AddIcon, TrashIcon, EditIcon, InfoIcon } from "neogestify-ui-components";
-import { usePrelaunchStore, type PrelaunchPreset } from "@/features/prelaunch/store";
+import { usePrelaunchStore } from "@/features/prelaunch/store";
+import type { PrelaunchPreset } from "@/features/prelaunch/types";
 
 /** Alta y edición usan el mismo formulario; `initial` decide cuál de las dos es. */
 function PresetForm({

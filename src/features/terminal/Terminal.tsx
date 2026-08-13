@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "neogestify-ui-components";
@@ -14,9 +13,15 @@ import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
 import { consumePtyTransferring } from "@/features/tabs/ptyTransfer";
 import { awaitSkillSetup } from "@/features/skills/pendingSkillSetup";
-import { useSettingsStore } from "@/features/agents/store";
-import type { PrelaunchStep } from "@/features/prelaunch/store";
+import { useAgentsStore } from "@/features/agents/store";
+import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
+import { accountEnv as accountEnvFor } from "@/features/accounts/ipc";
+import { resolvePrelaunch } from "@/features/prelaunch/ipc";
+import { discoverSessionId } from "@/features/sessions/ipc";
+import { reconcileTabSkills } from "@/features/skills/ipc";
+import { homeDir } from "@/shared/ipc/window";
+import { ptyAttach, ptyCreate, ptyKill, ptyResize, ptyWrite } from "./ipc";
 
 interface TerminalProps {
   /** Id de la tab en el store — solo se usa para esperar (si aplica) a que sus symlinks
@@ -242,7 +247,7 @@ export function Terminal({
       term,
       (data) => {
         if (ptyIdRef.current !== null) {
-          invoke("pty_write", { id: ptyIdRef.current, data }).catch(console.error);
+          ptyWrite(ptyIdRef.current, data).catch(console.error);
         }
       },
       TERMINAL_THEMES[themeRef.current]
@@ -322,7 +327,7 @@ export function Terminal({
         if (cancelled) return;
         discoveryAttempts += 1;
         try {
-          const found = await invoke<string | null>("discover_session_id", {
+          const found = await discoverSessionId({
             agentId,
             cwd: resolvedCwd,
             startedAfter,
@@ -376,7 +381,7 @@ export function Terminal({
       try {
         if (attachPtyId != null) {
           // Reconectar a un PTY que ya está vivo en otra ventana: nada de spawnear de nuevo.
-          const buffered = await invoke<string>("pty_attach", { id: attachPtyId });
+          const buffered = await ptyAttach(attachPtyId);
           ptyIdRef.current = attachPtyId;
           await fitOnce();
           if (buffered) term.write(buffered);
@@ -389,14 +394,14 @@ export function Terminal({
           // de origen, el session id se perdía y con él el "reabrir esta conversación".
           // El piso temporal es cuándo se abrió la tab, no ahora: el proceso puede llevar
           // horas vivo y su sesión ser mucho más vieja que esta reconexión.
-          const attachCwd: string = cwd ?? (await invoke<string>("get_home_dir"));
+          const attachCwd: string = cwd ?? (await homeDir());
           pollSessionId(attachCwd, openedAt ?? Math.floor(Date.now() / 1000));
 
           await attachListeners(attachPtyId);
           // La ventana a la que se reconecta puede tener un tamaño distinto al de la
           // ventana donde el PTY nació (tear-off, merge entre ventanas) — sincronizarlo.
           if (!cancelled) {
-            invoke("pty_resize", { id: attachPtyId, cols: term.cols, rows: term.rows }).catch(console.error);
+            ptyResize(attachPtyId, term.cols, term.rows).catch(console.error);
           }
           return;
         }
@@ -423,13 +428,13 @@ export function Terminal({
         // propias, y ninguna de otro workspace/tab que hubiera usado antes esa carpeta.
         // Tiene que pasar ANTES de spawnear: varios agentes escanean sus skills una sola
         // vez, al boot.
-        if (tabId) await invoke("reconcile_tab_skills", { tabId }).catch(console.error);
+        if (tabId) await reconcileTabSkills(tabId).catch(console.error);
         if (cancelled) return;
 
         await fitOnce();
         if (cancelled) return;
 
-        const resolvedCwd: string = cwd ?? await invoke<string>("get_home_dir");
+        const resolvedCwd: string = cwd ?? (await homeDir());
         const startedAfter = Math.floor(Date.now() / 1000) - SESSION_DISCOVERY_LOOKBACK_S;
 
         // Si esta tab corre con una cuenta alternativa, sus variables se piden ahora: la
@@ -439,7 +444,7 @@ export function Terminal({
         let accountEnv: Record<string, string> | null = null;
         if (accountId) {
           try {
-            accountEnv = await invoke<Record<string, string>>("agent_account_env", { accountId });
+            accountEnv = await accountEnvFor(accountId);
           } catch (e) {
             term.write(`\r\n\x1b[31m${t("terminal.accountMissing", { error: e })}\x1b[0m\r\n`);
             setStatus("exited");
@@ -454,7 +459,7 @@ export function Terminal({
         let resolvedPrelaunch: string[] = [];
         if (prelaunch && prelaunch.length > 0) {
           try {
-            resolvedPrelaunch = await invoke<string[]>("resolve_prelaunch", { steps: prelaunch });
+            resolvedPrelaunch = await resolvePrelaunch(prelaunch);
           } catch (e) {
             term.write(`\r\n\x1b[31m${t("terminal.prelaunchError", { error: e })}\x1b[0m\r\n`);
             setStatus("exited");
@@ -462,7 +467,7 @@ export function Terminal({
           }
         }
 
-        const ptyId = await invoke<number>("pty_create", {
+        const ptyId = await ptyCreate({
           command,
           cwd: resolvedCwd,
           cols: term.cols,
@@ -473,7 +478,7 @@ export function Terminal({
           // más específica, tomada para este proceso y no para la TUI en general.
           env: mergeEnv(
             agentId
-              ? useSettingsStore.getState().customAgents.find((a) => a.id === agentId)?.env
+              ? useAgentsStore.getState().customAgents.find((a) => a.id === agentId)?.env
               : undefined,
             accountEnv,
             env
@@ -496,7 +501,7 @@ export function Terminal({
     // ── 5. Input del usuario → PTY ───────────────────────────
     term.onData((data) => {
       if (ptyIdRef.current !== null) {
-        invoke("pty_write", { id: ptyIdRef.current, data }).catch(console.error);
+        ptyWrite(ptyIdRef.current, data).catch(console.error);
       }
     });
 
@@ -515,7 +520,7 @@ export function Terminal({
       fitAndTrim();
       if (ptyIdRef.current !== null) {
         const { cols, rows } = term;
-        invoke("pty_resize", { id: ptyIdRef.current, cols, rows }).catch(console.error);
+        ptyResize(ptyIdRef.current, cols, rows).catch(console.error);
       }
     };
 
@@ -539,7 +544,7 @@ export function Terminal({
       unlistenExit?.();
       if (ptyIdRef.current !== null) {
         if (!consumePtyTransferring(ptyIdRef.current)) {
-          invoke("pty_kill", { id: ptyIdRef.current }).catch(console.error);
+          ptyKill(ptyIdRef.current).catch(console.error);
         }
         ptyIdRef.current = null;
       }

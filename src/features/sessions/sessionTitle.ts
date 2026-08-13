@@ -1,16 +1,11 @@
-import { invoke } from "@tauri-apps/api/core";
-import type { Tab } from "@/features/tabs/store";
-
-interface SessionTitleResult {
-  title: string;
-  source: "summary" | "first_message" | "fallback";
-}
+import { sessionTitle } from "./ipc";
+import type { Tab } from "@/features/tabs/types";
 
 /** Pide al backend un título legible derivado de la sesión real del agente. */
 export async function refreshSessionTitle(tab: Tab): Promise<string> {
   if (tab.titleIsCustom) return tab.title;
   try {
-    const result = await invoke<SessionTitleResult>("get_session_title", {
+    const result = await sessionTitle({
       agentId: tab.agentId,
       cwd: tab.cwd,
       sessionId: tab.sessionId ?? null,

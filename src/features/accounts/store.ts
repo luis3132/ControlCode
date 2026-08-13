@@ -1,31 +1,7 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
 
-/** Ver `accounts::AgentAccount` en Rust. */
-export interface AgentAccount {
-  id: string;
-  agentId: string;
-  /** Nombre simbólico elegido por el usuario; también es el nombre de la carpeta. */
-  name: string;
-  dir: string;
-  /** Variable de entorno que apunta la TUI a esta cuenta (ej. `CLAUDE_CONFIG_DIR`). */
-  envVar: string;
-  /** Comando que abre el login de esa TUI. */
-  loginCommand: string;
-  /** Si la TUI dejó rastro de una sesión iniciada dentro de este perfil. */
-  loggedIn: boolean;
-  /** Mail (u otro identificador) de la cuenta, cuando la TUI lo expone. */
-  label: string | null;
-  createdAt: number;
-}
-
-/** TUI que soporta cuentas múltiples. Ver `accounts::AccountCapableAgent`. */
-export interface AccountCapableAgent {
-  agentId: string;
-  label: string;
-  envVar: string;
-  installed: boolean;
-}
+import * as ipc from "./ipc";
+import type { AccountCapableAgent, AgentAccount } from "./types";
 
 interface AccountsState {
   accounts: AgentAccount[];
@@ -47,23 +23,20 @@ export const useAccountsStore = create<AccountsState>()((set, get) => ({
   load: async () => {
     // El estado de login se lee del disco en cada consulta (no se cachea en la base): el
     // login pasa dentro de la TUI, fuera del alcance de la app, y puede caducar sin aviso.
-    const [accounts, capable] = await Promise.all([
-      invoke<AgentAccount[]>("list_agent_accounts"),
-      invoke<AccountCapableAgent[]>("account_capable_agents"),
-    ]);
+    const [accounts, capable] = await Promise.all([ipc.listAccounts(), ipc.listCapableAgents()]);
     set({ accounts, capable, loaded: true });
   },
 
   create: async (agentId, name) => {
-    const account = await invoke<AgentAccount>("create_agent_account", { agentId, name });
+    const account = await ipc.createAccount(agentId, name);
     await get().load();
     return account;
   },
 
   remove: async (id, deleteFiles) => {
-    await invoke("delete_agent_account", { id, deleteFiles });
+    await ipc.deleteAccount(id, deleteFiles);
     await get().load();
   },
 
-  envFor: (accountId) => invoke<Record<string, string>>("agent_account_env", { accountId }),
+  envFor: (accountId) => ipc.accountEnv(accountId),
 }));

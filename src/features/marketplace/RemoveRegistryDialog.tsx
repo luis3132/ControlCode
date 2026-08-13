@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Modal, AnimateSpin, InfoIcon, StackIcon } from "neogestify-ui-components";
-import { RegistrySummary, useMarketplaceStore } from "@/features/marketplace/store";
-import { useSkillsStore, SkillSummary } from "@/features/skills/store";
+import { useMarketplaceStore } from "@/features/marketplace/store";
+import type { RegistrySummary } from "@/features/marketplace/types";
+import { useSkillsStore } from "@/features/skills/store";
+import type { SkillSummary } from "@/features/skills/types";
 
 interface RemoveRegistryDialogProps {
   registry: RegistrySummary;
