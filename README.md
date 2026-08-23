@@ -131,10 +131,31 @@ bun run tauri dev
 ### Building a release bundle
 
 ```bash
-bun run app:build
+bun run app:build                                   # just the app, this machine, no installers
+bun run app:build --release                         # app + `ccode` CLI, packaged for everything this machine can produce
+bun run app:build --release --target macos-arm64    # one target only (id or Rust triple)
+bun run app:build --list                            # what this machine can and cannot produce, and why
 ```
 
-Produces `.deb`, `.rpm` and `.AppImage` on Linux, under `src-tauri/target/release/bundle/`.
+No machine can produce every target: the macOS bundle needs Apple's SDK and `codesign`,
+and Linux arm64 needs real ARM hardware (the AppImage bundler does not cross-compile).
+`--release` packages what it can and says explicitly what it skipped and why.
+
+| Target | Bundles | Where it can be built |
+| --- | --- | --- |
+| `linux-amd64` | deb, rpm, AppImage | Linux x86_64 |
+| `linux-arm64` | deb, rpm, AppImage | Linux arm64 |
+| `windows-amd64` | nsis, msi | Windows; cross-compiled from Linux with `cargo-xwin` + NSIS |
+| `windows-arm64` | nsis | Windows (either arch); cross-compiled from Linux with `cargo-xwin` + NSIS |
+| `macos-arm64` | app, dmg | macOS (either arch) |
+| `macos-amd64` | app, dmg | macOS (either arch) |
+| `macos-universal` | app, dmg | macOS — Intel + Apple Silicon in one bundle, `--target` only |
+
+`windows-arm64` has no `.msi`: WiX, the tool that builds it, does not support arm64.
+
+For all six at once, `.github/workflows/release.yml` runs the same command on a matrix of
+runners — one per OS/arch — and uploads each set of installers as its own artifact. It
+fires on `v*` tags and on manual dispatch.
 
 > **Why `app:build` and not `tauri build`?** It sets `NO_STRIP=true`. The `strip` bundled with linuxdeploy fails on system libraries that use the modern `.relr.dyn` ELF section, which is standard on current distros. Skipping the strip step is the supported workaround.
 
