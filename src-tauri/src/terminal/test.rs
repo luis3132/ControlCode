@@ -120,7 +120,14 @@ mod arbol {
 /// —porque el nieto muriera por el colgado del terminal en vez de por el grupo— dejaría de
 /// probar nada, así que el nieto se lanza con `setsid` precisamente para quedar fuera del
 /// alcance de esa red de seguridad.
-#[cfg(all(test, unix))]
+///
+/// **Solo Linux, y solo con cgroups.** Atrapar a ese nieto es exactamente lo que ningún
+/// recorrido por `ppid` puede hacer, así que el único mecanismo que cumple es el cgroup.
+/// En macOS la contención es best-effort por diseño (ver `containment`), y en Linux sin
+/// delegación de cgroups —un contenedor, o los runners de CI— la app cae al mismo respaldo
+/// best-effort. Afirmar la garantía ahí sería afirmar algo que el código nunca prometió,
+/// así que el test se saltea y dice por qué.
+#[cfg(all(test, target_os = "linux"))]
 mod tests_e2e {
     use crate::terminal::containment::ProcessGroup;
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -146,6 +153,16 @@ mod tests_e2e {
         let mut group = ProcessGroup::new(9_999);
         let child = pty.slave.spawn_command(cmd).expect("spawn");
         group.adopt(&*child);
+
+        // Después de `adopt` y no antes: el cgroup puede existir y aun así no dejarnos
+        // mover procesos, y eso recién se sabe al intentarlo.
+        if !group.is_escape_proof() {
+            eprintln!(
+                "omitido: sin cgroups delegados, la app cae al recorrido por `ppid`, que \
+                 por diseño no alcanza a un proceso en otra sesión. No hay garantía que probar."
+            );
+            return;
+        }
 
         // El agente imprime el pid del nieto por el pty.
         let mut reader = pty.master.try_clone_reader().expect("reader");

@@ -70,6 +70,23 @@ impl ProcessGroup {
     pub fn kill_all(&mut self) {
         imp::kill_all(&mut self.imp);
     }
+
+    /// ¿Hay detrás un mecanismo del kernel del que la descendencia no pueda escaparse?
+    ///
+    /// `false` significa que solo queda el recorrido por `ppid`, que por diseño no alcanza
+    /// a un proceso ya reasignado a `init` (ver la tabla de arriba). Es siempre `false` en
+    /// macOS, y en Linux cuando no se pudo crear el cgroup — un contenedor sin delegación,
+    /// cgroup v1, o un entorno donde no tenemos permiso, como los runners de CI.
+    ///
+    /// Se consulta **después** de `adopt`: el cgroup puede existir y aun así no dejarnos
+    /// mover procesos, y eso recién se sabe al intentarlo.
+    ///
+    /// Hoy solo lo usa el test de fin a fin, para no afirmar una garantía que el entorno
+    /// donde corre no da.
+    #[cfg(test)]
+    pub(crate) fn is_escape_proof(&self) -> bool {
+        imp::is_escape_proof(&self.imp)
+    }
 }
 
 impl Drop for ProcessGroup {
@@ -125,6 +142,11 @@ pub(crate) mod imp {
                 g.dir = None;
             }
         }
+    }
+
+    #[cfg(test)]
+    pub fn is_escape_proof(g: &Group) -> bool {
+        g.dir.is_some()
     }
 
     pub fn kill_all(g: &mut Group) {
@@ -193,6 +215,12 @@ pub(crate) mod imp {
 
     pub fn adopt<C: portable_pty::Child + ?Sized>(g: &mut Group, child: &C) {
         g.leader = child.process_id();
+    }
+
+    #[cfg(test)]
+    /// Nunca: acá el único mecanismo es el recorrido por `ppid`, que es best-effort.
+    pub fn is_escape_proof(_g: &Group) -> bool {
+        false
     }
 
     pub fn kill_all(g: &mut Group) {
@@ -312,6 +340,11 @@ pub(crate) mod imp {
         unsafe {
             AssignProcessToJobObject(g.job, handle as RawHandle as HANDLE);
         }
+    }
+
+    #[cfg(test)]
+    pub fn is_escape_proof(g: &Group) -> bool {
+        !g.job.is_null()
     }
 
     pub fn kill_all(g: &mut Group) {
