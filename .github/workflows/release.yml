@@ -111,6 +111,7 @@ jobs:
         if: matrix.native
         run: |
           bunx tsc --noEmit
+          bun run test
           cd src-tauri && cargo test
 
       # El mismo comando que se corre a mano, con el target de esta celda fijado.
@@ -130,3 +131,81 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+
+  # Los artifacts de arriba caducan y solo los ve quien entra al run. Este trabajo es el
+  # que convierte ese build en algo que la gente puede descargar: crea el release del tag
+  # y le cuelga los instaladores de las seis celdas.
+  #
+  # Corre una sola vez, cuando TODAS terminaron, para que no exista un release a medias
+  # con Linux publicado y macOS todavía compilando.
+  publish:
+    needs: build
+    # `workflow_dispatch` sirve para probar el build sin publicar nada: sin tag, no hay
+    # release que hacer.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      # Lo único que este trabajo necesita poder hacer: escribir el release.
+      contents: write
+
+    steps:
+      # Por las notas escritas a mano (ver abajo); acá no se compila nada.
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # `upload-artifact` conserva la estructura de directorios, así que los instaladores
+      # llegan enterrados en target/<triple>/release/bundle/<tipo>/. Se aplanan porque es
+      # el nombre del archivo lo que ve quien descarga, no su ruta en el runner.
+      - name: Juntar los instaladores
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          antes=$(find artifacts -type f | wc -l)
+          # `-n` no pisa: dos celdas que produzcan el mismo nombre de archivo tienen que
+          # notarse acá y no como un release al que le falta silenciosamente el arm64.
+          find artifacts -type f -exec mv -n -t dist/ {} +
+          despues=$(find dist -type f | wc -l)
+          if [ "$antes" -ne "$despues" ]; then
+            echo "::error::$antes archivos en $despues destinos — hay nombres repetidos entre celdas"
+            find artifacts -type f
+            exit 1
+          fi
+          echo "Se van a publicar $despues archivos:"
+          ls -lh dist/
+
+      # Las notas se escriben a mano en `.github/releases/<tag>.md` y se versionan con el
+      # código: un release describe QUÉ CAMBIÓ para quien lo usa, y eso no sale de la lista
+      # de commits. Si el archivo no está, GitHub genera las suyas — un release con notas
+      # automáticas es peor que uno con notas escritas, pero mucho mejor que uno sin nada.
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          notes=".github/releases/${tag}.md"
+
+          args=(--verify-tag --title "$tag")
+          if [ -f "$notes" ]; then
+            echo "Notas: $notes"
+            args+=(--notes-file "$notes")
+          else
+            echo "No hay $notes — GitHub genera las notas"
+            args+=(--generate-notes)
+          fi
+
+          # Un tag con guion (v1.5.0-beta.1) es una prerelease: no se ofrece como "última
+          # versión" ni le llega a quien sigue el repo esperando algo estable.
+          case "$tag" in *-*) args+=(--prerelease) ;; esac
+
+          # Idempotente: si el release ya existe (un re-run del workflow, o una celda que
+          # se reintentó), se le reemplazan los archivos en vez de fallar.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "El release $tag ya existe — reemplazando sus archivos"
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* "${args[@]}"
+          fi
