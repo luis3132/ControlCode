@@ -82,16 +82,23 @@ jobs:
 
       # Dependencias de sistema de Tauri en Linux (webkit2gtk y compañía) más las que
       # necesita el bundler de AppImage. Los mismos paquetes existen para arm64.
-      # `libappindicator3-dev` NO va: entra en conflicto declarado con el de ayatana
-      # ("Conflicts: libappindicator3-dev") y además tiene dependencias rotas en 22.04, así
-      # que pedir los dos hace fallar el apt entero. Tauri v2 usa el de ayatana.
+      # Dos cosas que no son obvias:
+      #
+      # - `libappindicator3-dev` NO va: entra en conflicto declarado con el de ayatana
+      #   ("Conflicts: libappindicator3-dev") y además tiene dependencias rotas en 22.04,
+      #   así que pedir los dos hace fallar el apt entero. Tauri v2 usa el de ayatana.
+      #
+      # - `xdg-utils` sí va, aunque no sea una dependencia de compilación: el bundler mete
+      #   `/usr/bin/xdg-open` DENTRO del AppImage, porque es con lo que
+      #   `tauri-plugin-opener` abre enlaces. La imagen x64 del runner ya lo trae, la arm64
+      #   no — por eso esto fallaba en una sola celda, y recién al empaquetar.
       - name: Dependencias de Linux
         if: startsWith(matrix.name, 'linux')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
-            build-essential curl wget file libssl-dev libxdo-dev
+            build-essential curl wget file libssl-dev libxdo-dev xdg-utils
 
       - name: Cache de cargo
         uses: actions/cache@v4
