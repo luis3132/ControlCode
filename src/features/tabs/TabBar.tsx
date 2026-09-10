@@ -5,30 +5,29 @@ import { AddIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { TabItem } from "@/features/tabs/TabItem";
-import { TabContextMenu } from "@/features/tabs/TabContextMenu";
+import { ContextMenu } from "@/shared/ui/ContextMenu";
+import { SkillScopeDialog, type SkillScopeTarget } from "@/features/skills/SkillScopeDialog";
+import { BoxIcon, CloseIcon } from "neogestify-ui-components";
 import { NewTabWizard } from "@/features/tabs/wizard/NewTabWizard";
 import { refreshSessionTitle } from "@/features/sessions/sessionTitle";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
-
-interface ContextMenuState {
-  tabId: string;
-  x: number;
-  y: number;
-}
+import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
+import { WindowLights } from "@/app/WindowLights";
 
 /**
- * Las tabs de agente, dentro de la barra de título.
+ * Las tabs del workspace activo, dentro de la barra de título.
  *
- * Arrancan justo donde termina el lateral izquierdo y no llevan nada a la derecha: el
- * resto de la franja es zona de arrastre de la ventana. Antes había 44px de barra con
- * navegación y controles MÁS 36px de tira de tabs, y la de arriba era casi todo color.
+ * Solo las de ESE workspace: el workspace es el tab de orden superior y sus agentes son
+ * las tabs de adentro. Mostrar las de todas las carpetas a la vez volvía a mezclar lo que
+ * el panel izquierdo separa, y con varios proyectos abiertos la barra no entraba.
  *
- * Arrastrar una tab la reordena, y nada más. Sacarla de la barra para abrir otra ventana
- * ya no existe: un workspace es una carpeta con agentes adentro y se cambia desde el
- * panel izquierdo, sin abrir ventanas.
+ * Arrastrar reordena, y nada más. Sacar una tab para abrir otra ventana ya no existe: se
+ * cambia de workspace en el lugar, desde el panel de la izquierda.
  */
-export function TabBar() {
+/** `showLights`: con el panel izquierdo plegado su encabezado queda en 48px y los tres
+ *  botones de ventana no entran, así que se mudan acá, al principio de la tira. */
+export function TabBar({ showLights = false }: { showLights?: boolean }) {
   const { t } = useTranslation();
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
@@ -41,17 +40,26 @@ export function TabBar() {
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const navigate = useNavigate();
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  // El arrastre se sigue por ID y no por índice: la lista visible es un subconjunto, así
+  // que un índice de acá no es el mismo que el que espera `reorderTabs`.
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [contextTab, setContextTab] = useState<{ tabId: string; x: number; y: number } | null>(null);
+  const [skillTarget, setSkillTarget] = useState<SkillScopeTarget | null>(null);
+
+  const visible = tabsOfWorkspace(tabs, activeTabId);
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
 
   const clearDrag = () => {
-    setDraggedIndex(null);
-    setDragOverIndex(null);
+    setDraggedId(null);
+    setDragOverId(null);
   };
 
-  const handleDrop = (toIndex: number) => {
-    if (draggedIndex !== null && draggedIndex !== toIndex) reorderTabs(draggedIndex, toIndex);
+  const moveTo = (targetId: string) => {
+    if (draggedId === null || draggedId === targetId) return clearDrag();
+    const from = tabs.findIndex((tab) => tab.id === draggedId);
+    const to = tabs.findIndex((tab) => tab.id === targetId);
+    if (from >= 0 && to >= 0) reorderTabs(from, to);
     clearDrag();
   };
 
@@ -73,18 +81,27 @@ export function TabBar() {
         className="cc-scroll-x flex items-stretch flex-1 min-w-0 h-10
           bg-white/80 dark:bg-gray-900/80 backdrop-blur-md
           border-b border-gray-200 dark:border-gray-800"
+        style={{ position: "relative", zIndex: 0 }}
         onDragOver={(e) => e.preventDefault()}
         onDrop={() => {
-          if (draggedIndex !== null) reorderTabs(draggedIndex, tabs.length - 1);
-          clearDrag();
+          // Soltar en el vacío = al final de ESTE workspace, no al final de todo.
+          const last = visible[visible.length - 1];
+          if (last) moveTo(last.id);
+          else clearDrag();
         }}
       >
-        {tabs.map((tab, index) => (
+        {showLights && (
+          <div className="flex items-center shrink-0 pl-3.5 pr-2" data-tauri-drag-region>
+            <WindowLights />
+          </div>
+        )}
+
+        {visible.map((tab) => (
           <TabItem
             key={tab.id}
             tab={tab}
             isActive={tab.id === activeTabId}
-            isDragOver={dragOverIndex === index && draggedIndex !== index}
+            isDragOver={dragOverId === tab.id && draggedId !== tab.id}
             onActivate={() => {
               activateTab(tab.id);
               navigate("/workspace");
@@ -94,15 +111,15 @@ export function TabBar() {
               closeTabWithTitleRefresh(tab.id);
             }}
             onRenameCommit={(title) => renameTab(tab.id, title)}
-            onDragStart={() => setDraggedIndex(index)}
+            onDragStart={() => setDraggedId(tab.id)}
             onDragOver={(e) => {
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
-              setDragOverIndex(index);
+              setDragOverId(tab.id);
             }}
-            onDrop={() => handleDrop(index)}
+            onDrop={() => moveTo(tab.id)}
             onDragEnd={clearDrag}
-            onContextMenu={(e) => setContextMenu({ tabId: tab.id, x: e.clientX, y: e.clientY })}
+            onContextMenu={(e) => setContextTab({ tabId: tab.id, x: e.clientX, y: e.clientY })}
           />
         ))}
 
@@ -123,18 +140,47 @@ export function TabBar() {
         <div className="flex-1 h-full" data-tauri-drag-region />
       </div>
 
-      {contextMenu && (
-        <TabContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          onClose={() => setContextMenu(null)}
-          onCloseTab={() => closeTabWithTitleRefresh(contextMenu.tabId)}
-        />
+      {contextTab && (() => {
+        const tab = tabs.find((x) => x.id === contextTab.tabId);
+        if (!tab) return null;
+        return (
+          <ContextMenu
+            x={contextTab.x}
+            y={contextTab.y}
+            onClose={() => setContextTab(null)}
+            items={[
+              {
+                key: "skills",
+                label: t("skills.scope.tabAction"),
+                icon: <BoxIcon className="w-4 h-4" />,
+                onSelect: () => setSkillTarget({
+                  scope: "tab",
+                  workspaceId,
+                  tabId: tab.id,
+                  agentId: tab.agentId,
+                  label: tab.title,
+                }),
+              },
+              {
+                key: "close",
+                label: t("tabs.close"),
+                icon: <CloseIcon className="w-4 h-4" />,
+                danger: true,
+                onSelect: () => closeTabWithTitleRefresh(tab.id),
+              },
+            ]}
+          />
+        );
+      })()}
+
+      {skillTarget && (
+        <SkillScopeDialog target={skillTarget} onClose={() => setSkillTarget(null)} />
       )}
 
       <NewTabWizard
         isOpen={wizardOpen}
         onClose={() => setWizardOpen(false)}
+        initialCwd={activeTab?.cwd}
         onConfirm={({ cwd, agent, skillIds, accountId, prelaunch }) => {
           const tabId = addTab({ cwd, agent, accountId, prelaunch });
           navigate("/workspace");

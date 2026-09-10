@@ -12,6 +12,7 @@ import { TabBar } from "@/features/tabs/TabBar";
 import { WorkspacesPanel } from "@/features/workspaces/WorkspacesPanel";
 import { ExplorerPanel } from "@/features/explorer/ExplorerPanel";
 import { SettingsModal } from "@/features/settings/SettingsModal";
+import { RouteModal } from "@/app/RouteModal";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { useUiStore } from "@/app/uiStore";
 import { buildWorkspaceTree } from "@/features/workspaces/workspaceTree";
@@ -29,6 +30,9 @@ import {
   newWindowWorkspaceKey,
   onTabReceived,
 } from "@/features/tabs/transfer";
+
+/** Las rutas que se muestran como modal encima de las terminales en vez de reemplazarlas. */
+const MODAL_ROUTES = ["/skills", "/marketplace"];
 
 function toFrontendTab(row: RestoredTabRow): Tab {
   return {
@@ -60,6 +64,10 @@ export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const isWorkspace = location.pathname === "/workspace";
+  // Skills y Marketplace se pintan ENCIMA en vez de reemplazar el centro: la regla del
+  // entorno es que nada tape el trabajo. Las rutas no cambian — adentro se sigue
+  // navegando igual (el detalle de una skill, los repos del marketplace).
+  const asModal = MODAL_ROUTES.some((p) => location.pathname.startsWith(p));
   const [isMaximized, setIsMaximized] = useState(false);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const workspacesCollapsed = useUiStore((s) => s.workspacesCollapsed);
@@ -227,7 +235,7 @@ export function AppShell() {
           la derecha de la barra de título se mudó al riel y a la barra de abajo. */}
       <div className="flex shrink-0">
         <SideHead width={sideWidth} />
-        <TabBar />
+        <TabBar showLights={workspacesCollapsed} />
       </div>
 
       <div className="flex flex-1 min-h-0">
@@ -243,17 +251,24 @@ export function AppShell() {
             style={{
               position: "absolute",
               inset: 0,
-              visibility: isWorkspace ? "visible" : "hidden",
+              // También visible detrás de un modal de ruta: es el punto de que sea modal.
+              visibility: isWorkspace || asModal ? "visible" : "hidden",
               zIndex: 0,
             }}
           >
             <TerminalPanel />
           </div>
 
-          {!isWorkspace && (
+          {!isWorkspace && !asModal && (
             <div className="absolute inset-0 z-10 cc-scroll">
               <Outlet />
             </div>
+          )}
+
+          {asModal && (
+            <RouteModal onClose={() => navigate(tabs.length > 0 ? "/workspace" : "/")}>
+              <Outlet />
+            </RouteModal>
           )}
 
           {/* Donde se montan los modales de las vistas (ver `ViewModal`). Va acá dentro y

@@ -165,6 +165,7 @@ fn same_named_skills_from_two_registries_coexist() {
             workspace_id.clone(),
             "tab".to_string(),
             Some(tab_id.clone()),
+            None,
             state.clone(),
         )
         .expect("attach");
@@ -222,6 +223,7 @@ fn una_tab_con_varias_skills_las_monta_a_todas() {
             workspace_id.clone(),
             "tab".to_string(),
             Some(tab_id.clone()),
+            None,
             state.clone(),
         )
         .expect("attach");
@@ -262,6 +264,7 @@ fn una_ventana_que_vuelve_a_abrirse_recupera_las_skills_de_sus_tabs() {
             workspace_id.clone(),
             "tab".to_string(),
             Some(tab_id.clone()),
+            None,
             state.clone(),
         )
         .expect("attach");
@@ -310,6 +313,7 @@ fn reanudar_una_sesion_recupera_sus_skills() {
             workspace_id.clone(),
             "tab".to_string(),
             Some(tab_id.clone()),
+            None,
             state.clone(),
         )
         .expect("attach");
@@ -446,6 +450,7 @@ fn full_lifecycle_install_attach_edit_detach_delete() {
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id.clone()),
+        None,
         state.clone(),
     )
     .expect("attach_skill debería funcionar");
@@ -472,6 +477,7 @@ fn full_lifecycle_install_attach_edit_detach_delete() {
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id.clone()),
+        None,
         state.clone(),
     )
     .expect("attach_skill debe ser idempotente");
@@ -515,6 +521,7 @@ fn full_lifecycle_install_attach_edit_detach_delete() {
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id.clone()),
+        None,
         state.clone(),
     )
     .unwrap();
@@ -528,6 +535,7 @@ fn full_lifecycle_install_attach_edit_detach_delete() {
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id.clone()),
+        None,
         state.clone(),
     )
     .unwrap();
@@ -612,6 +620,7 @@ fn skills_do_not_leak_between_workspaces_sharing_a_folder() {
         ws_a.clone(),
         "workspace".to_string(),
         None,
+        None,
         state.clone(),
     )
     .unwrap();
@@ -627,6 +636,7 @@ fn skills_do_not_leak_between_workspaces_sharing_a_folder() {
         "ws-b".to_string(),
         "tab".to_string(),
         Some("tab-b".to_string()),
+        None,
         state.clone(),
     )
     .unwrap();
@@ -706,6 +716,7 @@ fn reconcile_leaves_user_owned_entries_alone() {
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id.clone()),
+        None,
         state.clone(),
     )
     .unwrap();
@@ -726,6 +737,7 @@ fn reconcile_leaves_user_owned_entries_alone() {
         workspace_id,
         "tab".to_string(),
         Some(tab_id),
+        None,
         state.clone(),
     )
     .unwrap();
@@ -800,6 +812,7 @@ fn custom_agents_get_skills_in_their_declared_folder() {
         workspace_id.clone(),
         "workspace".to_string(),
         None,
+        None,
         state.clone(),
     )
     .unwrap();
@@ -826,6 +839,7 @@ fn custom_agents_get_skills_in_their_declared_folder() {
         info.id.clone(),
         workspace_id,
         "workspace".to_string(),
+        None,
         None,
         state.clone(),
     )
@@ -1342,6 +1356,7 @@ fn reinstalar_la_misma_entrada_actualiza_en_vez_de_duplicar() {
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id),
+        None,
         state.clone(),
     )
     .expect("attach");
@@ -1523,4 +1538,162 @@ fn la_copia_puede_llevar_el_nombre_que_elija_el_usuario() {
     assert_eq!(copia.name, "testing-de-luis");
     let md = std::fs::read_to_string(Path::new(&copia.source_path).join("SKILL.md")).unwrap();
     assert!(md.contains("name: testing-de-luis"), "el nombre va DENTRO del archivo: {md}");
+}
+
+/// v9: una skill de scope='workspace' aplica a UNA carpeta, no a todas las que estén
+/// abiertas en la misma ventana.
+///
+/// Antes de esto, "cada carpeta es un workspace" no se sostenía: activar una skill en un
+/// proyecto la metía también en los otros que tuvieras abiertos al lado.
+#[test]
+fn una_skill_de_workspace_solo_toca_su_carpeta() {
+    let (db, workspace_id, _tab_id, cwd_a, _skills_dir) = setup();
+    let app = tauri::test::mock_app();
+    app.manage(db);
+    let state = app.state::<DbConnection>();
+
+    // Segunda carpeta, misma ventana: el caso que antes se contaminaba.
+    let cwd_b = temp_dir("otra-carpeta");
+    {
+        let conn = state.lock().unwrap();
+        conn.execute(
+            "INSERT INTO tabs (id, window_id, title, agent_id, agent_label, command, cwd, opened_at, created_at, last_active)
+             VALUES ('tab-b', 'win-test', 'Otra', 'claude-code', 'Claude Code', 'claude', ?1, 0, 0, 0)",
+            rusqlite::params![cwd_b.to_string_lossy()],
+        )
+        .unwrap();
+    }
+
+    let src = temp_dir("skill-por-carpeta");
+    write_named_skill(&src, "solo-aca", "cuerpo");
+    let skill = install_skill(
+        src.join("SKILL.md").to_string_lossy().to_string(),
+        None,
+        state.clone(),
+    )
+    .unwrap();
+    let slug = slug_from_source_path(&skill.source_path);
+
+    let link_in = |cwd: &PathBuf| {
+        links_dir_for(&cwd.to_string_lossy(), "claude-code").unwrap().join(&slug)
+    };
+
+    attach_skill(
+        skill.id.clone(),
+        workspace_id.clone(),
+        "workspace".to_string(),
+        None,
+        Some(cwd_a.to_string_lossy().to_string()),
+        state.clone(),
+    )
+    .unwrap();
+
+    assert!(link_in(&cwd_a).symlink_metadata().is_ok(), "la carpeta elegida sí la lleva");
+    assert!(
+        link_in(&cwd_b).symlink_metadata().is_err(),
+        "la otra carpeta del mismo workspace NO debe recibirla"
+    );
+
+    // Y sacarla deja la carpeta como estaba.
+    detach_skill(
+        skill.id.clone(),
+        workspace_id.clone(),
+        "workspace".to_string(),
+        None,
+        Some(cwd_a.to_string_lossy().to_string()),
+        state.clone(),
+    )
+    .unwrap();
+    assert!(link_in(&cwd_a).symlink_metadata().is_err(), "detach debe quitar el symlink");
+}
+
+/// Las filas de antes de la v9 quedaron con `cwd = ''`, que significaba "todas las
+/// carpetas del workspace". Actualizar la app no debe cambiarles el alcance.
+#[test]
+fn una_fila_vieja_sin_carpeta_sigue_valiendo_para_todas() {
+    let (db, workspace_id, _tab_id, cwd_a, _skills_dir) = setup();
+    let app = tauri::test::mock_app();
+    app.manage(db);
+    let state = app.state::<DbConnection>();
+
+    let cwd_b = temp_dir("otra-carpeta-legacy");
+    {
+        let conn = state.lock().unwrap();
+        conn.execute(
+            "INSERT INTO tabs (id, window_id, title, agent_id, agent_label, command, cwd, opened_at, created_at, last_active)
+             VALUES ('tab-b', 'win-test', 'Otra', 'claude-code', 'Claude Code', 'claude', ?1, 0, 0, 0)",
+            rusqlite::params![cwd_b.to_string_lossy()],
+        )
+        .unwrap();
+    }
+
+    let src = temp_dir("skill-legacy");
+    write_named_skill(&src, "en-todas", "cuerpo");
+    let skill = install_skill(
+        src.join("SKILL.md").to_string_lossy().to_string(),
+        None,
+        state.clone(),
+    )
+    .unwrap();
+    let slug = slug_from_source_path(&skill.source_path);
+
+    // `None` es exactamente lo que guardaban las versiones anteriores.
+    attach_skill(
+        skill.id.clone(),
+        workspace_id.clone(),
+        "workspace".to_string(),
+        None,
+        None,
+        state.clone(),
+    )
+    .unwrap();
+
+    for cwd in [&cwd_a, &cwd_b] {
+        let link = links_dir_for(&cwd.to_string_lossy(), "claude-code").unwrap().join(&slug);
+        assert!(link.symlink_metadata().is_ok(), "{cwd:?} debería conservar la skill");
+    }
+}
+
+/// Attachear dos veces la misma skill al mismo alcance deja UNA fila.
+///
+/// Antes no: la UNIQUE de la tabla incluye `tab_id`, que es NULL en scope='workspace', y
+/// SQLite considera distintos a dos NULL — el ON CONFLICT nunca se activaba y cada
+/// re-attach agregaba una fila más.
+#[test]
+fn attachear_dos_veces_no_duplica_la_fila() {
+    let (db, workspace_id, _tab_id, cwd_a, _skills_dir) = setup();
+    let app = tauri::test::mock_app();
+    app.manage(db);
+    let state = app.state::<DbConnection>();
+
+    let src = temp_dir("skill-dup");
+    write_named_skill(&src, "sin-duplicar", "cuerpo");
+    let skill = install_skill(
+        src.join("SKILL.md").to_string_lossy().to_string(),
+        None,
+        state.clone(),
+    )
+    .unwrap();
+
+    for _ in 0..3 {
+        attach_skill(
+            skill.id.clone(),
+            workspace_id.clone(),
+            "workspace".to_string(),
+            None,
+            Some(cwd_a.to_string_lossy().to_string()),
+            state.clone(),
+        )
+        .unwrap();
+    }
+
+    let conn = state.lock().unwrap();
+    let filas: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM project_skills WHERE skill_id = ?1 AND scope = 'workspace'",
+            [&skill.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(filas, 1, "tres attach del mismo alcance dejaron {filas} filas");
 }

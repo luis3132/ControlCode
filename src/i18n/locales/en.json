@@ -413,5 +413,14 @@
   "explorer.noTab": "With no agent open there is no folder to show.",
   "explorer.noChanges": "The working tree is clean.",
   "status.account": "{{agent}} · {{name}}",
-  "status.agents": "{{n}} agents"
+  "status.agents": "{{n}} agents",
+  "tabs.close": "Close agent",
+  "skills.scope.workspaceAction": "Skills for this workspace…",
+  "skills.scope.tabAction": "Skills for this agent…",
+  "skills.scope.workspaceTitle": "Skills for {{name}}",
+  "skills.scope.tabTitle": "Skills for {{name}}",
+  "skills.scope.workspaceHelp": "These apply to every agent you open in this folder, including ones you open later.",
+  "skills.scope.tabHelp": "These apply to this agent only. The workspace ones are added on top.",
+  "skills.scope.confirm": "Save",
+  "skills.scope.restartHint": "Several TUIs only read their skills folder at startup, so this agent may not see the change until you reopen it."
 }

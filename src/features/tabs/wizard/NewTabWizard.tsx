@@ -15,6 +15,10 @@ type Step = "folder" | "agent" | "skills";
 interface NewTabWizardProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Carpeta con la que arranca el paso 1. El "+" de la barra la pasa: agregar un agente
+   *  al workspace donde estás parado es lo que se quiere el 90% de las veces, y volver a
+   *  elegir la misma carpeta a mano es puro trámite. */
+  initialCwd?: string;
   onConfirm: (params: {
     cwd: string;
     agent: AgentInfo;
@@ -26,10 +30,10 @@ interface NewTabWizardProps {
   }) => void;
 }
 
-export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) {
+export function NewTabWizard({ isOpen, onClose, onConfirm, initialCwd = "" }: NewTabWizardProps) {
   const { t } = useTranslation();
   const [step, setStep] = useState<Step>("folder");
-  const [selectedCwd, setSelectedCwd] = useState("");
+  const [selectedCwd, setSelectedCwd] = useState(initialCwd);
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>();
@@ -39,7 +43,7 @@ export function NewTabWizard({ isOpen, onClose, onConfirm }: NewTabWizardProps) 
 
   const reset = () => {
     setStep("folder");
-    setSelectedCwd("");
+    setSelectedCwd(initialCwd);
     setSelectedAgent(null);
     setSelectedSkillIds([]);
     setSelectedAccountId(undefined);

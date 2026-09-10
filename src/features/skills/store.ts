@@ -24,8 +24,8 @@ interface SkillsState {
   getSkillDetail: (id: string) => Promise<SkillSummary & { content: string }>;
   updateSkillContent: (id: string, content: string) => Promise<void>;
   deleteSkill: (id: string) => Promise<void>;
-  attachSkill: (skillId: string, workspaceId: string, scope: "workspace" | "tab", tabId?: string) => Promise<void>;
-  detachSkill: (skillId: string, workspaceId: string, scope: "workspace" | "tab", tabId?: string) => Promise<void>;
+  attachSkill: (skillId: string, workspaceId: string, scope: "workspace" | "tab", tabId?: string, cwd?: string) => Promise<void>;
+  detachSkill: (skillId: string, workspaceId: string, scope: "workspace" | "tab", tabId?: string, cwd?: string) => Promise<void>;
   checkHealth: (workspaceId: string) => Promise<SymlinkHealthEntry[]>;
   loadSkillsDir: () => Promise<void>;
   setSkillsDir: (path: string) => Promise<void>;
@@ -83,13 +83,13 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     await get().loadSkills();
   },
 
-  attachSkill: async (skillId, workspaceId, scope, tabId) => {
-    await ipc.attachSkill(skillId, workspaceId, scope, tabId);
+  attachSkill: async (skillId, workspaceId, scope, tabId, cwd) => {
+    await ipc.attachSkill(skillId, workspaceId, scope, tabId, cwd);
     await get().loadSkills();
   },
 
-  detachSkill: async (skillId, workspaceId, scope, tabId) => {
-    await ipc.detachSkill(skillId, workspaceId, scope, tabId);
+  detachSkill: async (skillId, workspaceId, scope, tabId, cwd) => {
+    await ipc.detachSkill(skillId, workspaceId, scope, tabId, cwd);
     await get().loadSkills();
   },
 

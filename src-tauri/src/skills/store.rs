@@ -44,7 +44,7 @@ pub(super) const SKILL_COLUMNS_QUALIFIED: &str = "s.id, s.name, s.description, s
 pub(super) fn fetch_usage_for_skill(conn: &rusqlite::Connection, skill_id: &str) -> Result<Vec<SkillUsageEntry>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT ps.workspace_id, w.name, ps.scope, ps.tab_id, t.title
+            "SELECT ps.workspace_id, w.name, ps.scope, ps.tab_id, t.title, ps.cwd
              FROM project_skills ps
              JOIN workspaces w ON w.id = ps.workspace_id
              LEFT JOIN tabs t ON t.id = ps.tab_id
@@ -60,6 +60,7 @@ pub(super) fn fetch_usage_for_skill(conn: &rusqlite::Connection, skill_id: &str)
                 scope: row.get(2)?,
                 tab_id: row.get(3)?,
                 tab_title: row.get(4)?,
+                cwd: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -156,18 +157,20 @@ pub(super) fn update_skill_content_inner(
 /// resolviendo attachments de scope='tab' (una tab puntual) y scope='workspace'
 /// (todas las tabs del workspace en ese momento) a filas concretas de `tabs`.
 pub(super) fn collect_linked_tabs(conn: &rusqlite::Connection, skill_id: &str) -> Result<Vec<(String, String)>, String> {
-    let attachments: Vec<(Option<String>, String, String)> = {
+    let attachments: Vec<(Option<String>, String, String, String)> = {
         let mut stmt = conn
-            .prepare("SELECT tab_id, scope, workspace_id FROM project_skills WHERE skill_id = ?1")
+            .prepare("SELECT tab_id, scope, workspace_id, cwd FROM project_skills WHERE skill_id = ?1")
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map([skill_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .query_map([skill_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
             .map_err(|e| e.to_string())?;
         rows.filter_map(|r| r.ok()).collect()
     };
 
     let mut result = Vec::new();
-    for (tab_id, scope, workspace_id) in attachments {
+    for (tab_id, scope, workspace_id, cwd) in attachments {
         if scope == "tab" {
             if let Some(tab_id) = tab_id {
                 let row: Option<(String, String)> = conn
@@ -181,12 +184,20 @@ pub(super) fn collect_linked_tabs(conn: &rusqlite::Connection, skill_id: &str) -
                 }
             }
         } else {
+            // La cadena vacía es "todas las carpetas" (filas anteriores a la v9); con una
+            // carpeta concreta, solo las tabs de esa.
             let rows: Vec<(String, String)> = {
                 let mut wstmt = conn
-                    .prepare("SELECT t.cwd, t.agent_id FROM tabs t JOIN windows w ON w.id = t.window_id WHERE w.workspace_id = ?1")
+                    .prepare(
+                        "SELECT t.cwd, t.agent_id FROM tabs t
+                         JOIN windows w ON w.id = t.window_id
+                         WHERE w.workspace_id = ?1 AND (?2 = '' OR t.cwd = ?2)",
+                    )
                     .map_err(|e| e.to_string())?;
                 let it = wstmt
-                    .query_map([&workspace_id], |row| Ok((row.get(0)?, row.get(1)?)))
+                    .query_map(rusqlite::params![&workspace_id, &cwd], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })
                     .map_err(|e| e.to_string())?;
                 it.filter_map(|r| r.ok()).collect()
             };

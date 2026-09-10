@@ -1,18 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { BoxIcon, HomeIcon, SaveIcon } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
 import { PanelIcon } from "@/app/icons";
+import { WindowLights } from "@/app/WindowLights";
 import { useTabsStore } from "@/features/tabs/store";
 import { DEFAULT_WORKSPACE_ID } from "@/features/tabs/types";
 import { useWorkspacesStore } from "@/features/workspaces/store";
 import { SaveWorkspaceDialog } from "@/features/workspaces/SaveWorkspaceDialog";
 import { ResetDefaultDialog } from "@/features/workspaces/ResetDefaultDialog";
 import { defaultWorkspaceHasContent } from "@/features/workspaces/ipc";
-import { closeAndForgetWindow } from "@/shared/ipc/window";
 
 function MenuItem({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
@@ -38,25 +37,15 @@ function MenuItem({ icon, label, onClick }: { icon: React.ReactNode; label: stri
 export function SideHead({ width }: { width: number }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const win = getCurrentWindow();
   const collapsed = useUiStore((s) => s.workspacesCollapsed);
   const toggle = useUiStore((s) => s.toggleWorkspaces);
   const hasTabs = useTabsStore((s) => s.tabs.length > 0);
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const resetDefaultWorkspace = useWorkspacesStore((s) => s.resetDefaultWorkspace);
-  const [isMaximized, setIsMaximized] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showSave, setShowSave] = useState(false);
   const [showReset, setShowReset] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    win.isMaximized().then(setIsMaximized).catch(() => {});
-    const unlisten = win.onResized(() => {
-      win.isMaximized().then(setIsMaximized).catch(() => {});
-    });
-    return () => { unlisten.then((fn) => fn()).catch(() => {}); };
-  }, [win]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -78,33 +67,18 @@ export function SideHead({ width }: { width: number }) {
 
   return (
     <>
+      {/* El z-index no es paranoia: la tira de tabs es el vecino de al lado y se le
+          montaba encima a los botones de ventana. Con esto el encabezado siempre pinta
+          arriba, y el `overflow-hidden` evita que lo suyo se derrame sobre ella. */}
       <div
         data-tauri-drag-region
-        style={{ width }}
-        className="relative flex items-center gap-2.5 h-10 shrink-0 pl-3.5 pr-1.5
+        style={{ width, position: "relative", zIndex: 30 }}
+        className="flex items-center gap-2.5 h-10 shrink-0 overflow-hidden pl-3.5 pr-1.5
           bg-gray-100 dark:bg-[#080b0f]
           border-r border-b border-gray-200 dark:border-white/7
           select-none transition-[width] duration-150"
       >
-        {/* Los tres puntos, en el orden de macOS. Cerrar pasa por el mismo camino de
-            siempre para que el estado de la ventana quede persistido. */}
-        <div className="flex items-center gap-2 shrink-0" data-tauri-drag-region="false">
-          <button
-            onClick={() => closeAndForgetWindow(win.label).catch(console.error)}
-            title={t("window.close")}
-            className="w-3 h-3 rounded-full bg-[#ff5f57] hover:brightness-110 transition-[filter]"
-          />
-          <button
-            onClick={() => win.minimize()}
-            title={t("window.minimize")}
-            className="w-3 h-3 rounded-full bg-[#febc2e] hover:brightness-110 transition-[filter]"
-          />
-          <button
-            onClick={() => win.toggleMaximize()}
-            title={isMaximized ? t("window.restore") : t("window.maximize")}
-            className="w-3 h-3 rounded-full bg-[#28c840] hover:brightness-110 transition-[filter]"
-          />
-        </div>
+        {!collapsed && <WindowLights />}
 
         {!collapsed && (
           <div className="relative min-w-0" data-tauri-drag-region="false" ref={menuRef}>

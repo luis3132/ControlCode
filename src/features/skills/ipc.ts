@@ -52,19 +52,27 @@ export const updateSkillContent = (skillId: string, content: string) =>
 
 export const deleteSkill = (skillId: string) => invoke<void>("delete_skill", { skillId });
 
+/** `cwd`, con scope `"workspace"`: la carpeta a la que aplica. Sin él vale para todas
+ *  las del workspace, que es lo que hacían las versiones anteriores a la v9. */
 export const attachSkill = (
   skillId: string,
   workspaceId: string,
   scope: SkillScope,
-  tabId?: string
-) => invoke<void>("attach_skill", { skillId, workspaceId, scope, tabId: tabId ?? null });
+  tabId?: string,
+  cwd?: string
+) => invoke<void>("attach_skill", {
+  skillId, workspaceId, scope, tabId: tabId ?? null, cwd: cwd ?? null,
+});
 
 export const detachSkill = (
   skillId: string,
   workspaceId: string,
   scope: SkillScope,
-  tabId?: string
-) => invoke<void>("detach_skill", { skillId, workspaceId, scope, tabId: tabId ?? null });
+  tabId?: string,
+  cwd?: string
+) => invoke<void>("detach_skill", {
+  skillId, workspaceId, scope, tabId: tabId ?? null, cwd: cwd ?? null,
+});
 
 export const checkSymlinksHealth = (workspaceId: string) =>
   invoke<SymlinkHealthEntry[]>("check_symlinks_health", { workspaceId });

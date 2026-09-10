@@ -1,19 +1,26 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AddIcon, ChevronDownIcon, ChevronRightIcon } from "neogestify-ui-components";
+import { AddIcon, BoxIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { BranchIcon, RunningIcon } from "@/app/icons";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
 import type { RepoGroup, WorkspaceAgent, WorkspaceNode } from "@/features/workspaces/workspaceTree";
+import { ContextMenu } from "@/shared/ui/ContextMenu";
+import { SkillScopeDialog, type SkillScopeTarget } from "@/features/skills/SkillScopeDialog";
 
-function AgentRow({ agent, onClick }: { agent: WorkspaceAgent; onClick: () => void }) {
+function AgentRow({ agent, onClick, onContextMenu }: {
+  agent: WorkspaceAgent;
+  onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+}) {
   const Icon = agentIcon(agent.agentId, agent.agentLabel);
   return (
     <button
       onClick={onClick}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e); }}
       title={agent.title}
       className={`flex items-center gap-2 h-[25px] pl-1.5 pr-1 rounded-md w-full text-left
         transition-colors duration-150
@@ -42,12 +49,20 @@ function AgentRow({ agent, onClick }: { agent: WorkspaceAgent; onClick: () => vo
   );
 }
 
-function WorkspaceCard({ ws, onOpenAgent }: { ws: WorkspaceNode; onOpenAgent: (id: string) => void }) {
+function WorkspaceCard({ ws, onOpenAgent, onWorkspaceMenu, onAgentMenu }: {
+  ws: WorkspaceNode;
+  onOpenAgent: (id: string) => void;
+  onWorkspaceMenu: (e: React.MouseEvent, ws: WorkspaceNode) => void;
+  onAgentMenu: (e: React.MouseEvent, agent: WorkspaceAgent) => void;
+}) {
   const { t } = useTranslation();
   return (
-    <div className="mx-2 my-0.5 px-1.5 pt-1.5 pb-1 rounded-[10px] flex flex-col gap-1
+    <div
+      onContextMenu={(e) => { e.preventDefault(); onWorkspaceMenu(e, ws); }}
+      className="mx-2 my-0.5 px-1.5 pt-1.5 pb-1 rounded-[10px] flex flex-col gap-1
       bg-gray-200/50 dark:bg-white/5
-      border border-gray-200 dark:border-white/10">
+      border border-gray-200 dark:border-white/10"
+    >
 
       <div className="flex items-center gap-1.5 px-0.5">
         <BranchIcon className="w-3.5 h-3.5 shrink-0 text-blue-500 dark:text-blue-400" />
@@ -80,18 +95,28 @@ function WorkspaceCard({ ws, onOpenAgent }: { ws: WorkspaceNode; onOpenAgent: (i
 
       <div className="flex flex-col gap-px">
         {ws.agents.map((a) => (
-          <AgentRow key={a.tabId} agent={a} onClick={() => onOpenAgent(a.tabId)} />
+          <AgentRow
+            key={a.tabId}
+            agent={a}
+            onClick={() => onOpenAgent(a.tabId)}
+            onContextMenu={(e) => onAgentMenu(e, a)}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function WorkspaceRow({ ws, onClick }: { ws: WorkspaceNode; onClick: () => void }) {
+function WorkspaceRow({ ws, onClick, onContextMenu }: {
+  ws: WorkspaceNode;
+  onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+}) {
   const running = ws.agents.some((a) => a.status === "running");
   return (
     <button
       onClick={onClick}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e); }}
       className="flex items-center gap-2.5 mx-2 px-2 py-1.5 rounded-lg w-[calc(100%-1rem)] text-left
         hover:bg-gray-200/60 dark:hover:bg-white/5 transition-colors duration-150"
     >
@@ -121,6 +146,10 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
   const activateTab = useTabsStore((s) => s.activateTab);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [menu, setMenu] = useState<{ x: number; y: number; target: SkillScopeTarget } | null>(null);
+  const [skillTarget, setSkillTarget] = useState<SkillScopeTarget | null>(null);
+  const workspaceId = useTabsStore((s) => s.workspaceId);
+  const closeTab = useTabsStore((s) => s.closeTab);
 
   const running = useMemo(
     () => groups.flatMap((g) => g.workspaces).flatMap((w) => w.agents).filter((a) => a.status === "running").length,
@@ -135,6 +164,28 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
     activateTab(tabId);
     navigate("/workspace");
   };
+
+  // Click derecho sobre el WORKSPACE: sus skills valen para todos los agentes que se
+  // abran en esa carpeta. Sobre un AGENTE: solo para ese.
+  const onWorkspaceMenu = (e: React.MouseEvent, ws: WorkspaceNode) =>
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      target: { scope: "workspace", workspaceId, cwd: ws.cwd, agentId: null, label: ws.title },
+    });
+
+  const onAgentMenu = (e: React.MouseEvent, agent: WorkspaceAgent) =>
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      target: {
+        scope: "tab",
+        workspaceId,
+        tabId: agent.tabId,
+        agentId: agent.agentId,
+        label: agent.title,
+      },
+    });
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups((prev) => {
@@ -216,14 +267,54 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
                 {!collapsed && group.workspaces.map((ws) => {
                   const hasActive = ws.agents.some((a) => a.tabId === activeTabId);
                   return hasActive
-                    ? <WorkspaceCard key={ws.key} ws={ws} onOpenAgent={openAgent} />
-                    : <WorkspaceRow key={ws.key} ws={ws} onClick={() => openAgent(ws.agents[0].tabId)} />;
+                    ? <WorkspaceCard
+                        key={ws.key}
+                        ws={ws}
+                        onOpenAgent={openAgent}
+                        onWorkspaceMenu={onWorkspaceMenu}
+                        onAgentMenu={onAgentMenu}
+                      />
+                    : <WorkspaceRow
+                        key={ws.key}
+                        ws={ws}
+                        onClick={() => openAgent(ws.agents[0].tabId)}
+                        onContextMenu={(e) => onWorkspaceMenu(e, ws)}
+                      />;
                 })}
               </div>
             );
           })
         )}
       </div>
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            {
+              key: "skills",
+              label: t(menu.target.scope === "tab" ? "skills.scope.tabAction" : "skills.scope.workspaceAction"),
+              icon: <BoxIcon className="w-4 h-4" />,
+              onSelect: () => setSkillTarget(menu.target),
+            },
+            ...(menu.target.scope === "tab" && menu.target.tabId
+              ? [{
+                  key: "close",
+                  label: t("tabs.close"),
+                  icon: <CloseIcon className="w-4 h-4" />,
+                  danger: true,
+                  onSelect: () => closeTab(menu.target.tabId!),
+                }]
+              : []),
+          ]}
+        />
+      )}
+
+      {skillTarget && (
+        <SkillScopeDialog target={skillTarget} onClose={() => setSkillTarget(null)} />
+      )}
     </aside>
   );
 }

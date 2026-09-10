@@ -413,5 +413,14 @@
   "explorer.noTab": "Sin agente abierto, no hay carpeta que mostrar.",
   "explorer.noChanges": "El árbol de trabajo está limpio.",
   "status.account": "{{agent}} · {{name}}",
-  "status.agents": "{{n}} agentes"
+  "status.agents": "{{n}} agentes",
+  "tabs.close": "Cerrar agente",
+  "skills.scope.workspaceAction": "Skills de este workspace…",
+  "skills.scope.tabAction": "Skills de este agente…",
+  "skills.scope.workspaceTitle": "Skills de {{name}}",
+  "skills.scope.tabTitle": "Skills de {{name}}",
+  "skills.scope.workspaceHelp": "Valen para todos los agentes que abras en esta carpeta, incluidos los que abras después.",
+  "skills.scope.tabHelp": "Valen solo para este agente. Las del workspace se suman a estas.",
+  "skills.scope.confirm": "Guardar",
+  "skills.scope.restartHint": "Varias TUIs solo leen su carpeta de skills al arrancar: puede que este agente no vea el cambio hasta reabrirlo."
 }

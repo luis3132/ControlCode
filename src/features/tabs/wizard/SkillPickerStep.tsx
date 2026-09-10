@@ -11,7 +11,9 @@ import { useSkillsStore } from "@/features/skills/store";
 const SEARCH_ONLY_THRESHOLD = 10;
 
 interface SkillPickerStepProps {
-  agentId: string;
+  /** `null` = sin filtrar por TUI. Es el caso del workspace, que no tiene una sola: sus
+   *  skills valen para todos los agentes que se abran en esa carpeta. */
+  agentId: string | null;
   selected: string[];
   onChange: (ids: string[]) => void;
 }
@@ -30,9 +32,9 @@ export function SkillPickerStep({ agentId, selected, onChange }: SkillPickerStep
     loadSkills();
   }, [loadSkills]);
 
-  const compatible = skills.filter(
-    (s) => s.compatibleAgents.length === 0 || s.compatibleAgents.includes(agentId)
-  );
+  const compatible = agentId === null
+    ? skills
+    : skills.filter((s) => s.compatibleAgents.length === 0 || s.compatibleAgents.includes(agentId));
 
   const trimmedQuery = query.trim().toLowerCase();
   const matchesQuery = (s: (typeof compatible)[number]) => {

@@ -146,6 +146,8 @@ pub fn restore_session_skills(
                     workspace_id.clone(),
                     "tab".to_string(),
                     Some(tab_id.clone()),
+                    // Scope de tab: la carpeta la define la tab, no el llamador.
+                    None,
                     db.clone(),
                 );
             }

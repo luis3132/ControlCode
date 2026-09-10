@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
 import { useUiStore } from "@/app/uiStore";
 
 import { WORKSPACE_PATH, matchShortcut, nextTabId, resolveGoto } from "./shortcuts";
@@ -44,8 +45,10 @@ export function useGlobalShortcuts() {
         return;
       }
 
+      // Cicla dentro del workspace, no por todas las tabs de la ventana: saltar a una
+      // que la barra ni siquiera muestra es cambiar de carpeta a ciegas.
       const next = nextTabId(
-        tabs.map((t) => t.id),
+        tabsOfWorkspace(tabs, activeTabId).map((t) => t.id),
         activeTabId,
         shortcut.action.delta
       );
