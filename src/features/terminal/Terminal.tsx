@@ -11,7 +11,6 @@ import { isResumable } from "@/features/sessions/agentResume";
 import { registerCapabilityResponders } from "@/features/terminal/terminalCapabilities";
 import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
-import { consumePtyTransferring } from "@/features/tabs/ptyTransfer";
 import { awaitSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { useAgentsStore } from "@/features/agents/store";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
@@ -365,9 +364,10 @@ export function Terminal({
       unlistenData?.();
       unlistenExit?.();
       if (ptyIdRef.current !== null) {
-        if (!consumePtyTransferring(ptyIdRef.current)) {
-          ptyKill(ptyIdRef.current).catch(console.error);
-        }
+        // Antes había un guardia acá para no matar un PTY que estaba viajando a otra
+        // ventana. Ese camino ya no existe: se cambia de workspace en el lugar, así que
+        // desmontar una terminal siempre significa cerrarla.
+        ptyKill(ptyIdRef.current).catch(console.error);
         ptyIdRef.current = null;
       }
       termRef.current = null;

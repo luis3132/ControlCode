@@ -53,6 +53,9 @@ pub fn run() {
             crate::window::close_and_forget_window,
             crate::window::reset_default_workspace,
             crate::window::confirm_exit_all,
+            // Explorador de archivos del workspace (panel derecho)
+            crate::explorer::explorer_read_dir,
+            crate::explorer::explorer_repo_info,
             // Detección de agentes
             crate::agents::detect_agents,
             // Cuentas múltiples por TUI

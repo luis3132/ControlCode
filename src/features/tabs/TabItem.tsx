@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from "react";
+
+import { agentIcon } from "@/features/agents/agentIcons";
 import type { Tab } from "@/features/tabs/types";
 
 interface TabItemProps {
@@ -23,6 +25,7 @@ export function TabItem({
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(tab.title);
   const inputRef = useRef<HTMLInputElement>(null);
+  const AgentIcon = agentIcon(tab.agentId, tab.command);
 
   useEffect(() => {
     if (isEditing) inputRef.current?.select();
@@ -58,20 +61,21 @@ export function TabItem({
         onContextMenu(e);
       }}
       className={`
-        group relative flex items-center gap-1 h-9 pl-3 pr-1.5 shrink-0
-        max-w-48 min-w-24 border-r cursor-pointer select-none
+        group relative flex items-center gap-2 h-10 pl-3 pr-1.5 shrink-0
+        max-w-48 min-w-27 rounded-t-[9px] cursor-pointer select-none
         transition-colors duration-150
-        border-gray-200 dark:border-white/8
         ${isDragOver ? "border-l-2 border-l-blue-500" : ""}
         ${isActive
-          ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
-          : "bg-gray-100 dark:bg-gray-800/60 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-800 dark:hover:text-gray-200"}
+          ? "bg-gray-50 dark:bg-[#0d1117] text-gray-900 dark:text-white"
+          : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-white/5 hover:text-gray-800 dark:hover:text-gray-200"}
       `}
     >
-      {/* Indicador activo */}
+      {/* La tab activa se funde con el área de abajo; la línea la remata. */}
       {isActive && (
         <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500" />
       )}
+
+      <AgentIcon className="w-3.5 h-3.5 shrink-0 opacity-70" />
 
       {/* Título o input de rename */}
       {isEditing ? (
@@ -92,6 +96,13 @@ export function TabItem({
         <span className="text-xs truncate flex-1 min-w-0">{tab.title}</span>
       )}
 
+      {/* Sin PTY todavía = arrancando. Es lo único que se puede afirmar del estado. */}
+      <span
+        className={`w-1.5 h-1.5 rounded-full shrink-0 transition-opacity
+          ${tab.ptyId == null ? "bg-amber-500" : "bg-emerald-500"}
+          group-hover:opacity-0`}
+      />
+
       {/* Botón cerrar — siempre visible pero sutil, hover lo destaca */}
       <button
         onClick={(e) => {
@@ -101,7 +112,7 @@ export function TabItem({
         onMouseDown={(e) => e.stopPropagation()}
         title="Cerrar"
         className="
-          shrink-0 flex items-center justify-center
+          absolute right-1.5 shrink-0 flex items-center justify-center
           w-4 h-4 rounded
           text-gray-400 dark:text-gray-600
           opacity-0 group-hover:opacity-100

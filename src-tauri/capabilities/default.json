@@ -8,6 +8,7 @@
   "permissions": [
     "core:default",
     "opener:default",
+    "opener:allow-reveal-item-in-dir",
     "dialog:allow-open",
     "dialog:allow-save",
     "core:window:allow-minimize",

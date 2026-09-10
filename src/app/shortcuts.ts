@@ -33,6 +33,8 @@ export const WORKSPACE_PATH = "/workspace";
 
 export type ShortcutAction =
   | { kind: "goto"; path: string }
+  /** Configuración es un modal, no una ruta: se abre encima sin tapar las terminales. */
+  | { kind: "openSettings" }
   /** `delta` en el ORDEN de la barra de tabs: +1 la siguiente, -1 la anterior. */
   | { kind: "cycleTab"; delta: 1 | -1 };
 
@@ -42,6 +44,10 @@ export interface Shortcut {
   /** `true` exige Shift; ausente exige que NO esté. */
   shift?: boolean;
   action: ShortcutAction;
+  /** La ruta con la que se busca este acorde desde un botón (ver `shortcutForPath`).
+   *  Se declara aparte porque no toda acción es una navegación: configuración abre un
+   *  modal, pero el botón que lo abre sigue queriendo mostrar "Ctrl+G". */
+  path?: string;
   /** Cómo se escribe para el usuario. No se traduce: "Ctrl" se llama igual en los dos idiomas. */
   display: string;
   /** Clave i18n de qué hace. */
@@ -60,7 +66,7 @@ export const SHORTCUTS: Shortcut[] = [
   { key: "e", action: { kind: "goto", path: "/sessions" }, display: "Ctrl+E", labelKey: "sidebar.sessions" },
   { key: "k", action: { kind: "goto", path: "/skills" }, display: "Ctrl+K", labelKey: "sidebar.skills" },
   { key: "m", action: { kind: "goto", path: "/marketplace" }, display: "Ctrl+M", labelKey: "sidebar.marketplace" },
-  { key: "g", action: { kind: "goto", path: "/settings" }, display: "Ctrl+G", labelKey: "sidebar.settings" },
+  { key: "g", action: { kind: "openSettings" }, path: "/settings", display: "Ctrl+G", labelKey: "sidebar.settings" },
   { key: "tab", action: { kind: "cycleTab", delta: 1 }, display: "Ctrl+Tab", labelKey: "shortcuts.nextTab" },
   {
     key: "tab",
@@ -115,6 +121,8 @@ export function nextTabId(tabIds: string[], activeId: string | null, delta: numb
 
 /** El acorde que lleva a esta ruta, para mostrarlo en el tooltip del botón que hace lo mismo. */
 export function shortcutForPath(path: string): string | null {
-  const found = SHORTCUTS.find((s) => s.action.kind === "goto" && s.action.path === path);
+  const found = SHORTCUTS.find(
+    (s) => s.path === path || (s.action.kind === "goto" && s.action.path === path)
+  );
   return found?.display ?? null;
 }

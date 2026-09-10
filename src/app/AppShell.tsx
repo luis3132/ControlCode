@@ -1,14 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabsStore } from "@/features/tabs/store";
 import type { Tab } from "@/features/tabs/types";
 import { initTabsPersistence } from "@/features/tabs/persistence";
-import { TopBar } from "@/app/TopBar";
+import { SideHead } from "@/app/SideHead";
+import { ActivityRail } from "@/app/ActivityRail";
+import { StatusBar } from "@/app/StatusBar";
 import { TabBar } from "@/features/tabs/TabBar";
-import { PathBar } from "@/features/workspaces/PathBar";
+import { WorkspacesPanel } from "@/features/workspaces/WorkspacesPanel";
+import { ExplorerPanel } from "@/features/explorer/ExplorerPanel";
+import { SettingsModal } from "@/features/settings/SettingsModal";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
+import { useUiStore } from "@/app/uiStore";
+import { buildWorkspaceTree } from "@/features/workspaces/workspaceTree";
+import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { ResizeHandles } from "@/app/ResizeHandles";
 import { useGlobalShortcuts } from "@/app/useGlobalShortcuts";
 import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
@@ -54,6 +61,26 @@ export function AppShell() {
   const navigate = useNavigate();
   const isWorkspace = location.pathname === "/workspace";
   const [isMaximized, setIsMaximized] = useState(false);
+  const activeTabId = useTabsStore((s) => s.activeTabId);
+  const workspacesCollapsed = useUiStore((s) => s.workspacesCollapsed);
+  const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+
+  // El árbol del panel izquierdo se DERIVA de las tabs abiertas más lo que git diga de
+  // cada `cwd`. No hay tabla nueva: un workspace es una carpeta con agentes adentro.
+  const repos = useRepoInfo(useMemo(() => tabs.map((tab) => tab.cwd), [tabs]));
+  const groups = useMemo(
+    () => buildWorkspaceTree(tabs, repos, activeTabId),
+    [tabs, repos, activeTabId]
+  );
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
+  const activeRepo = activeTab ? repos.get(activeTab.cwd) ?? null : null;
+
+  // El encabezado del lateral mide exactamente lo mismo que el riel más el panel, para
+  // que la división vertical sea una sola línea de arriba a abajo.
+  const RAIL_W = 48;
+  const PANEL_W = 272;
+  const sideWidth = RAIL_W + (workspacesCollapsed ? 0 : PANEL_W);
 
   useGlobalShortcuts();
 
@@ -194,45 +221,66 @@ export function AppShell() {
 
       <ResizeHandles />
       <AppExitListener />
-      <TopBar />
 
-      {/* TabBar siempre visible si hay tabs (estilo Chrome: se ve aunque estés en Home,
-          y es la forma de volver a una terminal). PathBar solo tiene sentido en /workspace. */}
-      {tabs.length > 0 && <TabBar />}
-      {isWorkspace && tabs.length > 0 && <PathBar />}
+      {/* Fila 0: encabezado del lateral (controles de ventana + nombre) y, a partir de
+          donde ese lateral termina, las tabs de agente. Nada más — lo que antes vivía a
+          la derecha de la barra de título se mudó al riel y a la barra de abajo. */}
+      <div className="flex shrink-0">
+        <SideHead width={sideWidth} />
+        <TabBar />
+      </div>
 
-      <div className="relative flex-1 min-h-0 overflow-hidden">
-        {/* TerminalPanel siempre montado para preservar PTYs */}
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            visibility: isWorkspace ? "visible" : "hidden",
-            zIndex: 0,
-          }}
-        >
-          <TerminalPanel />
+      <div className="flex flex-1 min-h-0">
+        {/* Izquierda: los AGENTES. Es lo primero que se ve porque en un entorno de
+            desarrollo para agentes lo primero es qué está corriendo; el árbol de
+            archivos es el panel secundario y va del otro lado. */}
+        <ActivityRail agentCount={tabs.length} />
+        {!workspacesCollapsed && <WorkspacesPanel groups={groups} width={PANEL_W} />}
+
+        <div className="relative flex-1 min-w-0 overflow-hidden">
+          {/* TerminalPanel siempre montado para preservar PTYs */}
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              visibility: isWorkspace ? "visible" : "hidden",
+              zIndex: 0,
+            }}
+          >
+            <TerminalPanel />
+          </div>
+
+          {!isWorkspace && (
+            <div className="absolute inset-0 z-10 cc-scroll">
+              <Outlet />
+            </div>
+          )}
+
+          {/* Donde se montan los modales de las vistas (ver `ViewModal`). Va acá dentro y
+              no en el body para que queden ENCERRADOS en el área de contenido: un modal
+              de una página no tiene por qué tapar las tabs ni los paneles, que son la
+              forma de salir de donde estás.
+
+              El `transform` no es decorativo: hace que el `position: fixed` del modal se
+              resuelva contra este contenedor en vez de contra la ventana. */}
+          <div
+            id={VIEW_OVERLAY_ID}
+            className="absolute inset-0 z-20 pointer-events-none"
+            style={{ transform: "translateZ(0)" }}
+          />
         </div>
 
-        {!isWorkspace && (
-          <div className="absolute inset-0 z-10 cc-scroll">
-            <Outlet />
-          </div>
-        )}
-
-        {/* Donde se montan los modales de las vistas (ver `ViewModal`). Va acá dentro y no
-            en el body para que queden ENCERRADOS en el área de contenido: un modal de una
-            página no tiene por qué tapar la barra de título ni la de tabs, que son la
-            forma de salir de donde estás.
-
-            El `transform` no es decorativo: hace que el `position: fixed` del modal se
-            resuelva contra este contenedor en vez de contra la ventana. */}
-        <div
-          id={VIEW_OVERLAY_ID}
-          className="absolute inset-0 z-20 pointer-events-none"
-          style={{ transform: "translateZ(0)" }}
+        {/* Derecha: los archivos del workspace activo. */}
+        <ExplorerPanel
+          cwd={activeTab?.cwd ?? null}
+          repo={activeRepo}
+          title={activeRepo?.branch ?? activeTab?.cwd.split(/[\\/]/).filter(Boolean).pop() ?? ""}
         />
       </div>
+
+      <StatusBar repo={activeRepo} />
+
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

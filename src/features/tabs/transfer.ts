@@ -38,13 +38,6 @@ export interface TabTransfer {
 const TRANSFER_EVENT = "cc-receive-tab";
 const READY_EVENT = "cc-window-ready";
 
-/** Cuánto se espera a que la ventana recién creada esté lista para recibir la tab. */
-const READY_TIMEOUT_MS = 10_000;
-
-export function sendTab(transfer: TabTransfer): Promise<void> {
-  return broadcastEvent(TRANSFER_EVENT, JSON.stringify(transfer));
-}
-
 export function onTabReceived(handle: (transfer: TabTransfer) => void) {
   return listen<string>(TRANSFER_EVENT, (event) => {
     try {
@@ -59,36 +52,6 @@ export function onTabReceived(handle: (transfer: TabTransfer) => void) {
 /** La ventana avisa que ya montó y está escuchando transferencias. */
 export function announceWindowReady(label: string): Promise<void> {
   return broadcastEvent(READY_EVENT, label);
-}
-
-/**
- * Espera a que la ventana `label` avise que está lista.
- *
- * Hace falta porque el evento de transferencia es efímero: mandarlo apenas vuelve
- * `open_new_window` lo perdería, porque el JS de esa ventana todavía no registró su
- * listener. Antes esto se resolvía dejando la tab en `localStorage` para que la levantara
- * "la próxima ventana que arranque" — un buzón sin destinatario, que con dos ventanas
- * abriéndose a la vez podía depositar la tab en la equivocada.
- *
- * Resuelve `false` si la ventana no avisa en `READY_TIMEOUT_MS`: quien llama conserva la
- * tab en el origen en vez de tirarla a una ventana que quizá nunca abrió.
- */
-export async function waitForWindow(label: string): Promise<boolean> {
-  let unlisten: (() => void) | undefined;
-  try {
-    return await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), READY_TIMEOUT_MS);
-      listen<string>(READY_EVENT, (event) => {
-        if (event.payload !== label) return;
-        clearTimeout(timer);
-        resolve(true);
-      }).then((fn) => {
-        unlisten = fn;
-      });
-    });
-  } finally {
-    unlisten?.();
-  }
 }
 
 /**

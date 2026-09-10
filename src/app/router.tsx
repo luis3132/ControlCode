@@ -1,7 +1,6 @@
 import { createHashRouter } from "react-router-dom";
 import { AppShell } from "@/app/AppShell";
 import { HomePage } from "@/features/workspaces/HomePage";
-import { SettingsPage } from "@/features/settings/SettingsPage";
 import { WorkspacesPage } from "@/features/workspaces/WorkspacesPage";
 import { SkillsPage } from "@/features/skills/SkillsPage";
 import { SkillDetailPage } from "@/features/skills/SkillDetailPage";
@@ -17,7 +16,6 @@ export const router = createHashRouter([
       { index: true, element: <HomePage /> },
       { path: "workspace", element: <></> },
       { path: "workspaces", element: <WorkspacesPage /> },
-      { path: "settings", element: <SettingsPage /> },
       { path: "skills", element: <SkillsPage /> },
       { path: "skills/:id", element: <SkillDetailPage /> },
       { path: "sessions", element: <SessionsPage /> },

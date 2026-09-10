@@ -3,20 +3,13 @@ import { useEffect, useRef } from "react";
 interface TabContextMenuProps {
   x: number;
   y: number;
-  otherWindows: string[];
   onClose: () => void;
-  onMoveToWindow: (label: string) => void;
   onCloseTab: () => void;
 }
 
-function formatWindowLabel(label: string, index: number): string {
-  if (label === "main") return "Ventana principal";
-  return `Ventana ${index + 1}`;
-}
-
-export function TabContextMenu({
-  x, y, otherWindows, onClose, onMoveToWindow, onCloseTab,
-}: TabContextMenuProps) {
+/** "Mover a ventana" ya no está: un workspace es una carpeta con agentes adentro y se
+ *  cambia desde el panel izquierdo, sin abrir ventanas. */
+export function TabContextMenu({ x, y, onClose, onCloseTab }: TabContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   // Cierra al hacer clic fuera o presionar Escape
@@ -53,27 +46,6 @@ export function TabContextMenu({
         text-gray-800 dark:text-gray-100
         text-xs select-none"
     >
-      {otherWindows.length > 0 && (
-        <>
-          <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-            Mover a ventana
-          </div>
-          {otherWindows.map((label, i) => (
-            <button
-              key={label}
-              onClick={() => { onMoveToWindow(label); onClose(); }}
-              className="w-full text-left px-3 py-1.5
-                hover:bg-blue-50 dark:hover:bg-blue-500/15
-                hover:text-blue-700 dark:hover:text-blue-300
-                transition-colors"
-            >
-              {formatWindowLabel(label, i)}
-            </button>
-          ))}
-          <div className="my-1 border-t border-gray-100 dark:border-white/6" />
-        </>
-      )}
-
       <button
         onClick={() => { onCloseTab(); onClose(); }}
         className="w-full text-left px-3 py-1.5 pb-2

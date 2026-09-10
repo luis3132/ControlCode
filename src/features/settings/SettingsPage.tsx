@@ -55,7 +55,8 @@ const CARD = `bg-linear-to-br from-white to-gray-50
   rounded-xl border border-gray-200 dark:border-gray-700
   shadow-sm hover:shadow-md transition-shadow duration-300 p-6`;
 
-export function SettingsPage() {
+/** `embedded`: dentro del modal, que ya pone su propio marco, título y scroll. */
+export function SettingsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useTranslation();
   const customAgents = useAgentsStore((s) => s.customAgents);
   const loadCustomAgents = useAgentsStore((s) => s.loadCustomAgents);
@@ -102,18 +103,22 @@ export function SettingsPage() {
   };
 
   return (
-    <main className="min-h-full px-6 py-10 bg-gray-50 dark:bg-gray-950">
+    <main className={embedded
+      ? "px-6 py-6"
+      : "min-h-full px-6 py-10 bg-gray-50 dark:bg-gray-950"}>
       <div className="max-w-5xl mx-auto">
 
-        {/* Header */}
-        <div className="text-center mb-10">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-            {t("settings.title")}
-          </h2>
-          <p className="text-gray-600 dark:text-gray-400">
-            {t("settings.subtitle")}
-          </p>
-        </div>
+        {/* Header — el modal ya trae el suyo, así que ahí sobra. */}
+        {!embedded && (
+          <div className="text-center mb-10">
+            <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+              {t("settings.title")}
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400">
+              {t("settings.subtitle")}
+            </p>
+          </div>
+        )}
 
         <div className="flex gap-8 justify-center">
           {/* El índice va a la IZQUIERDA, como la navegación de cualquier página de ajustes:

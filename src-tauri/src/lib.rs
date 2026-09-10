@@ -6,6 +6,7 @@ mod accounts;
 mod agents;
 mod app;
 mod database;
+mod explorer;
 pub mod ipc;
 mod marketplace;
 mod orchestrator;
