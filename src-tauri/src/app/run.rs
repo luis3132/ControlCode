@@ -55,6 +55,7 @@ pub fn run() {
             crate::explorer::explorer_read_dir,
             crate::explorer::explorer_repo_info,
             // Detección de agentes
+            crate::agents::agent_registry,
             crate::agents::detect_agents,
             // Cuentas múltiples por TUI
             crate::accounts::account_capable_agents,

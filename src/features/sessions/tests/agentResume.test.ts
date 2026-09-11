@@ -1,9 +1,51 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+// El fuente de Rust como texto. Va por `?raw` de Vite y no por `node:fs` para no meterle
+// `@types/node` al proyecto solo por un test.
+import registrySource from "../../../../src-tauri/src/agents/registry.rs?raw";
+
 import { useAgentsStore } from "@/features/agents/store";
+import { setAgentRegistry, type AgentRegistryEntry } from "@/features/agents/registry";
 import type { CustomAgent } from "@/features/agents/types";
 
-import { buildResumeCommand, isResumable, RESUMABLE_AGENT_IDS } from "../agentResume";
+import { buildResumeCommand, isResumable } from "../agentResume";
+
+/**
+ * El catálogo salido de `src-tauri/src/agents/registry.rs`, leído del fuente.
+ *
+ * Se parsea el Rust en vez de escribir a mano las mismas filas acá porque si no este
+ * archivo sería otra copia de la tabla — exactamente lo que el registro vino a eliminar—
+ * y las aserciones de abajo pasarían aunque la tabla de Rust hubiera cambiado. Es el mismo
+ * truco que usa `ipc/test.rs` para atar la CLI con su despachador: dos tablas en archivos
+ * distintos no rompen la compilación cuando divergen, así que se las ata leyendo el fuente.
+ */
+function registryFromRust(): AgentRegistryEntry[] {
+  // Solo el cuerpo de la tabla: la struct de arriba también tiene campos `id`/`resume`
+  // en sus doc-comments y confundiría al parseo.
+  const table = registrySource.slice(registrySource.indexOf("pub const AGENTS"));
+
+  return table
+    .split("AgentDef {")
+    .slice(1)
+    .map((block) => {
+      const id = /\bid:\s*"([^"]+)"/.exec(block)?.[1];
+      const command = /\bcommand:\s*"([^"]+)"/.exec(block)?.[1];
+      const resume = /\bresume:\s*Some\("([^"]+)"\)/.exec(block)?.[1] ?? null;
+      const skillsDir = /\bskills_dir:\s*Some\("([^"]+)"\)/.exec(block)?.[1] ?? null;
+      if (!id || !command) throw new Error(`fila ilegible en registry.rs: ${block.slice(0, 80)}`);
+      return {
+        id,
+        label: /\blabel:\s*"([^"]+)"/.exec(block)?.[1] ?? id,
+        command,
+        skillsDir,
+        resume,
+        supportsAccounts: /\bprofile:\s*Some\(/.test(block),
+        sessions: "",
+      };
+    });
+}
+
+const RUST_REGISTRY = registryFromRust();
 
 function customAgent(patch: Partial<CustomAgent> = {}): CustomAgent {
   return {
@@ -21,11 +63,22 @@ function customAgent(patch: Partial<CustomAgent> = {}): CustomAgent {
 
 beforeEach(() => {
   useAgentsStore.setState({ customAgents: [], loaded: true });
+  setAgentRegistry(RUST_REGISTRY);
+});
+
+/// Si el parseo del fuente de Rust se rompe (se renombró un campo, cambió el formato),
+/// todas las aserciones de abajo pasarían contra un catálogo vacío sin que nadie se
+/// entere. Esta es la que avisa.
+it("el catálogo se pudo leer del registro de Rust", () => {
+  expect(RUST_REGISTRY.length).toBeGreaterThanOrEqual(5);
+  expect(RUST_REGISTRY.map((a) => a.id)).toContain("claude-code");
 });
 
 describe("isResumable", () => {
   it("reconoce a las TUIs de fábrica que saben reanudar", () => {
-    for (const id of RESUMABLE_AGENT_IDS) expect(isResumable(id)).toBe(true);
+    const resumable = RUST_REGISTRY.filter((a) => a.resume).map((a) => a.id);
+    expect(resumable).toHaveLength(5);
+    for (const id of resumable) expect(isResumable(id)).toBe(true);
   });
 
   it("bash no reanuda nada", () => {

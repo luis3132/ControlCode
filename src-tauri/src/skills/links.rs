@@ -42,11 +42,7 @@ pub(super) fn remove_symlink_best_effort(path: &Path) {
 /// Solo resuelve los agentes soportados de fábrica; para una TUI custom hay que usar
 /// `links_dir_for_conn`, que consulta la carpeta que el usuario le declaró.
 pub fn links_dir_for(cwd: &str, agent_id: &str) -> Option<PathBuf> {
-    let subdir = match agent_id {
-        "claude-code" => ".claude/skills",
-        "gemini-cli" | "opencode" | "codex" | "kimi-code" => ".agents/skills",
-        _ => return None,
-    };
+    let subdir = crate::agents::agent_def(agent_id)?.skills_dir?;
     Some(Path::new(cwd).join(subdir))
 }
 

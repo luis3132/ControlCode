@@ -1,40 +1,26 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
+use super::registry::{self, AgentDef, SHELL_AGENT_ID};
+
+/// Una TUI tal como la ve el frontend: lo que dice el registro más lo que solo se puede
+/// saber sondeando esta máquina.
+///
+/// `resume` y `skills_dir` viajan aunque el backend no los necesite para responder: son
+/// justamente los dos datos que el frontend tenía copiados en tablas propias
+/// (`agentResume.ts`), y mandarlos acá es lo que le permite dejar de tenerlas.
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
     pub id: String,
     pub label: String,
     pub command: String,
     pub available: bool,
     pub version: Option<String>,
-}
-
-struct AgentCandidate {
-    id: &'static str,
-    label: &'static str,
-    command: &'static str,
-    version_flag: &'static str,
-}
-
-const AGENTS: &[AgentCandidate] = &[
-    AgentCandidate { id: "claude-code", label: "Claude Code", command: "claude",  version_flag: "--version" },
-    AgentCandidate { id: "gemini-cli",  label: "Gemini CLI",  command: "gemini",  version_flag: "--version" },
-    AgentCandidate { id: "codex",       label: "Codex",       command: "codex",   version_flag: "--version" },
-    AgentCandidate { id: "opencode",    label: "OpenCode",    command: "opencode", version_flag: "--version" },
-    // Moonshot AI — repo en transición de nombre kimi-cli → kimi-code, el binario real
-    // sigue siendo `kimi` (moonshotai.github.io/kimi-code/en/reference/kimi-command.html).
-    AgentCandidate { id: "kimi-code",   label: "Kimi Code",   command: "kimi",    version_flag: "--version" },
-];
-
-/// Etiqueta legible de una TUI de fábrica, por id.
-pub fn agent_label(id: &str) -> Option<&'static str> {
-    AGENTS.iter().find(|a| a.id == id).map(|a| a.label)
-}
-
-/// Comando de invocación de una TUI de fábrica, por id.
-pub fn agent_command(id: &str) -> Option<&'static str> {
-    AGENTS.iter().find(|a| a.id == id).map(|a| a.command)
+    /// Argumentos de reanudación con el placeholder `{session}`. `None` = no sabe.
+    pub resume: Option<String>,
+    /// Carpeta de skills relativa al cwd. `None` = no gestiona skills.
+    pub skills_dir: Option<String>,
 }
 
 /// ¿Está este comando en el PATH?
@@ -50,12 +36,16 @@ pub fn command_exists(command: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn probe_agent(candidate: &AgentCandidate) -> AgentInfo {
-    let in_path = command_exists(candidate.command);
+fn probe_agent(def: &AgentDef) -> AgentInfo {
+    // `bash` es la salida de emergencia a una terminal pelada, no una TUI que se instale:
+    // se reporta disponible sin sondear. En Windows el binario ni siquiera está en el
+    // PATH con ese nombre, así que sondearlo lo daría por ausente.
+    let is_shell = def.id == SHELL_AGENT_ID;
+    let in_path = is_shell || command_exists(def.command);
 
-    let version = if in_path {
-        Command::new(candidate.command)
-            .arg(candidate.version_flag)
+    let version = if in_path && !is_shell {
+        Command::new(def.command)
+            .arg(def.version_flag)
             .output()
             .ok()
             .filter(|o| o.status.success())
@@ -67,11 +57,13 @@ fn probe_agent(candidate: &AgentCandidate) -> AgentInfo {
     };
 
     AgentInfo {
-        id: candidate.id.to_string(),
-        label: candidate.label.to_string(),
-        command: candidate.command.to_string(),
+        id: def.id.to_string(),
+        label: def.label.to_string(),
+        command: def.command.to_string(),
         available: in_path,
         version,
+        resume: def.resume.map(str::to_string),
+        skills_dir: def.skills_dir.map(str::to_string),
     }
 }
 
@@ -86,17 +78,7 @@ fn probe_agent(candidate: &AgentCandidate) -> AgentInfo {
 /// demorar otros comandos async programados en ese mismo worker.
 #[tauri::command]
 pub async fn detect_agents() -> Result<Vec<AgentInfo>, String> {
-    tokio::task::spawn_blocking(|| {
-        let mut agents: Vec<AgentInfo> = AGENTS.iter().map(probe_agent).collect();
-        agents.push(AgentInfo {
-            id: "bash".to_string(),
-            label: "Terminal (bash)".to_string(),
-            command: "bash".to_string(),
-            available: true,
-            version: None,
-        });
-        agents
-    })
-    .await
-    .map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(|| registry::AGENTS.iter().map(probe_agent).collect())
+        .await
+        .map_err(|e| e.to_string())
 }
