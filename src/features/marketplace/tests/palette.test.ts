@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { flatOrder, groupByRegistry, keyOf, moveSelection, reconcileSelection } from "../palette";
+import { flatOrder, groupByRegistry, keyOf } from "../palette";
+import { moveSelection, reconcileSelection } from "@/shared/ui/paletteNav";
 import type { MarketplaceSkillEntry } from "../types";
 
 const entry = (registryId: string, id: string, registryName = registryId): MarketplaceSkillEntry => ({
@@ -38,22 +39,22 @@ describe("moveSelection", () => {
   const order = [entry("a", "1"), entry("a", "2"), entry("b", "3")];
 
   it("baja y sube", () => {
-    expect(moveSelection(order, keyOf(order[0]), 1)).toBe(keyOf(order[1]));
-    expect(moveSelection(order, keyOf(order[1]), -1)).toBe(keyOf(order[0]));
+    expect(moveSelection(order.map(keyOf), keyOf(order[0]), 1)).toBe(keyOf(order[1]));
+    expect(moveSelection(order.map(keyOf), keyOf(order[1]), -1)).toBe(keyOf(order[0]));
   });
 
   it("cruza de un grupo al siguiente", () => {
-    expect(moveSelection(order, keyOf(order[1]), 1)).toBe(keyOf(order[2]));
+    expect(moveSelection(order.map(keyOf), keyOf(order[1]), 1)).toBe(keyOf(order[2]));
   });
 
   it("se queda en los extremos en vez de dar la vuelta", () => {
-    expect(moveSelection(order, keyOf(order[2]), 1)).toBe(keyOf(order[2]));
-    expect(moveSelection(order, keyOf(order[0]), -1)).toBe(keyOf(order[0]));
+    expect(moveSelection(order.map(keyOf), keyOf(order[2]), 1)).toBe(keyOf(order[2]));
+    expect(moveSelection(order.map(keyOf), keyOf(order[0]), -1)).toBe(keyOf(order[0]));
   });
 
   it("sin nada marcado entra por la punta del sentido", () => {
-    expect(moveSelection(order, null, 1)).toBe(keyOf(order[0]));
-    expect(moveSelection(order, null, -1)).toBe(keyOf(order[2]));
+    expect(moveSelection(order.map(keyOf), null, 1)).toBe(keyOf(order[0]));
+    expect(moveSelection(order.map(keyOf), null, -1)).toBe(keyOf(order[2]));
   });
 
   it("sin resultados no hay nada que marcar", () => {
@@ -64,13 +65,13 @@ describe("moveSelection", () => {
 describe("reconcileSelection", () => {
   it("respeta lo marcado si sigue en la lista", () => {
     const order = [entry("a", "1"), entry("a", "2")];
-    expect(reconcileSelection(order, keyOf(order[1]))).toBe(keyOf(order[1]));
+    expect(reconcileSelection(order.map(keyOf), keyOf(order[1]))).toBe(keyOf(order[1]));
   });
 
   it("marca lo primero cuando lo anterior ya no está", () => {
     // Pasa con cada tecla del buscador: Enter no puede instalar algo que ya no se ve.
     const order = [entry("a", "9")];
-    expect(reconcileSelection(order, "a::viejo")).toBe(keyOf(order[0]));
+    expect(reconcileSelection(order.map(keyOf), "a::viejo")).toBe(keyOf(order[0]));
   });
 
   it("sin resultados no marca nada", () => {

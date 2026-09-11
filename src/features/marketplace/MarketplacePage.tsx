@@ -7,7 +7,8 @@ import { Markdown } from "@/shared/ui/Markdown";
 
 import { SkillResultRow } from "./SkillResultRow";
 import { useSkillReadme } from "./useSkillReadme";
-import { flatOrder, groupByRegistry, keyOf, moveSelection, reconcileSelection } from "./palette";
+import { flatOrder, groupByRegistry, keyOf } from "./palette";
+import { moveSelection, reconcileSelection } from "@/shared/ui/paletteNav";
 import { RegistryFilterSidebar, type RegistryFilter } from "./RegistryFilterSidebar";
 
 export function MarketplacePage() {
@@ -118,7 +119,7 @@ export function MarketplacePage() {
   // pasa a ser lo primero. Dejarlo apuntando a algo que ya no se ve haría que Enter
   // instalara una skill que el usuario no tiene delante.
   useEffect(() => {
-    setSelectedKey((current) => reconcileSelection(order, current));
+    setSelectedKey((current) => reconcileSelection(order.map(keyOf), current));
   }, [order]);
 
   const selected = useMemo(
@@ -141,7 +142,7 @@ export function MarketplacePage() {
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      setSelectedKey((current) => moveSelection(order, current, e.key === "ArrowDown" ? 1 : -1));
+      setSelectedKey((current) => moveSelection(order.map(keyOf), current, e.key === "ArrowDown" ? 1 : -1));
       return;
     }
     if (e.key === "Enter" && selected && !isInstalled(selected)) {

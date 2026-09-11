@@ -6,7 +6,7 @@ import { AddIcon } from "neogestify-ui-components";
 import { useTabsStore } from "@/features/tabs/store";
 import { TabItem } from "@/features/tabs/TabItem";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
-import { SkillScopeDialog, type SkillScopeTarget } from "@/features/skills/SkillScopeDialog";
+import { SkillPalette, type SkillScopeTarget } from "@/features/skills/SkillPalette";
 import { BoxIcon, CloseIcon } from "neogestify-ui-components";
 import { NewTabWizard } from "@/features/tabs/wizard/NewTabWizard";
 import { refreshSessionTitle } from "@/features/sessions/sessionTitle";
@@ -174,7 +174,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
       })()}
 
       {skillTarget && (
-        <SkillScopeDialog target={skillTarget} onClose={() => setSkillTarget(null)} />
+        <SkillPalette target={skillTarget} onClose={() => setSkillTarget(null)} />
       )}
 
       <NewTabWizard

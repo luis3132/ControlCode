@@ -9,7 +9,7 @@ import { BranchIcon, RunningIcon } from "@/app/icons";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
 import type { RepoGroup, WorkspaceAgent, WorkspaceNode } from "@/features/workspaces/workspaceTree";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
-import { SkillScopeDialog, type SkillScopeTarget } from "@/features/skills/SkillScopeDialog";
+import { SkillPalette, type SkillScopeTarget } from "@/features/skills/SkillPalette";
 
 function AgentRow({ agent, onClick, onContextMenu }: {
   agent: WorkspaceAgent;
@@ -312,7 +312,7 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
       )}
 
       {skillTarget && (
-        <SkillScopeDialog target={skillTarget} onClose={() => setSkillTarget(null)} />
+        <SkillPalette target={skillTarget} onClose={() => setSkillTarget(null)} />
       )}
     </aside>
   );
