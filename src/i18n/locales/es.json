@@ -185,10 +185,8 @@
   "settings.accounts.noneInstalled": "No hay ninguna TUI instalada que soporte varias cuentas.",
   "settings.accounts.unsupportedNote": "Solo aparecen las TUIs que permiten mover su login a otra carpeta. Gemini CLI y Kimi Code no exponen una forma de hacerlo, así que darles varias cuentas terminaría en cuentas que se pisan entre sí.",
   "settings.accounts.add.title": "Agregar cuenta",
-  "settings.accounts.add.agent": "TUI",
   "settings.accounts.add.name": "Nombre de la cuenta",
   "settings.accounts.add.nameHelper": "Es el nombre de la carpeta a la que se apunta {{envVar}}. Letras, números, '-', '_' y '.'",
-  "settings.accounts.add.nameRules": "Letras, números, '-', '_' y '.'",
   "settings.accounts.add.taken": "Ya existe una cuenta con ese nombre para esta TUI.",
   "settings.accounts.add.next": "Crear y loguear",
   "settings.accounts.add.noneInstalled": "No hay ninguna TUI instalada que soporte varias cuentas.",
@@ -448,5 +446,6 @@
   "marketplace.registries.count": "{{n}} repos",
   "workspaces.noRepo": "sin repo",
   "accounts.services": "Servicios",
-  "settings.accounts.delete.action": "Quitar cuenta"
+  "settings.accounts.delete.action": "Quitar cuenta",
+  "settings.accounts.add.titleFor": "Nueva cuenta de {{agent}}"
 }

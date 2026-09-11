@@ -168,6 +168,10 @@ export function AccountsModal({ onClose }: { onClose: () => void }) {
               <button
                 key={c.agentId}
                 onClick={() => setAgentId(c.agentId)}
+                // El número solo no dice qué cuenta: al lado de un nombre puede leerse como
+                // una versión o un índice. Acá `count` SÍ es lo que se quiere — la clave
+                // tiene formas _one/_other y es i18next quien elige.
+                title={t("settings.accounts.count", { count: n })}
                 className={`cc-t flex items-center gap-2 w-full h-8 px-2 rounded-lg text-left
                   ${active
                     ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-900 dark:text-white font-semibold"

@@ -185,10 +185,8 @@
   "settings.accounts.noneInstalled": "No installed TUI supports multiple accounts.",
   "settings.accounts.unsupportedNote": "Only TUIs that can move their login to another folder are listed. Gemini CLI and Kimi Code expose no way to do that, so giving them multiple accounts would end up with accounts overwriting each other.",
   "settings.accounts.add.title": "Add account",
-  "settings.accounts.add.agent": "TUI",
   "settings.accounts.add.name": "Account name",
   "settings.accounts.add.nameHelper": "This is the folder name {{envVar}} points to. Letters, digits, '-', '_' and '.'",
-  "settings.accounts.add.nameRules": "Letters, digits, '-', '_' and '.'",
   "settings.accounts.add.taken": "An account with that name already exists for this TUI.",
   "settings.accounts.add.next": "Create and sign in",
   "settings.accounts.add.noneInstalled": "No installed TUI supports multiple accounts.",
@@ -448,5 +446,6 @@
   "marketplace.registries.count": "{{n}} repos",
   "workspaces.noRepo": "no repo",
   "accounts.services": "Services",
-  "settings.accounts.delete.action": "Remove account"
+  "settings.accounts.delete.action": "Remove account",
+  "settings.accounts.add.titleFor": "New {{agent}} account"
 }
