@@ -144,8 +144,10 @@ pub(crate) fn install_skill_internal(
     // Si el usuario completó metadata faltante en el formulario de instalación, esos
     // valores reemplazan el frontmatter original al completo (el frontend siempre manda
     // el objeto ya fusionado: lo que vino del archivo + lo que el usuario tipeó).
-    let meta: SkillFrontmatter = match overrides {
-        Some(o) => o.into(),
+    // Por referencia: más abajo `overrides` puede tener que viajar entero a
+    // `update_installed`, si resulta que esta skill ya estaba instalada desde antes.
+    let meta: SkillFrontmatter = match &overrides {
+        Some(o) => o.clone().into(),
         None => parsed_meta,
     };
 
@@ -154,6 +156,30 @@ pub(crate) fn install_skill_internal(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "skill".to_string());
     let name = meta.name.clone().unwrap_or(folder_basename);
+
+    // Una instalación VIEJA de esta misma skill. Las filas anteriores a que existiera
+    // `origin_skill_id` no saben de qué entrada salieron, así que la búsqueda por (repo,
+    // entrada) de arriba no las encuentra: el marketplace las ofrecía como no instaladas y
+    // volver a instalarlas dejaba dos copias de lo mismo, compitiendo por el mismo symlink.
+    //
+    // Se adopta la fila en vez de duplicarla: se le anota el origen que le faltaba y se
+    // actualiza en el lugar, con lo que conserva su id y sobreviven los proyectos que la
+    // tenían adjunta. Por nombre y solo si hay UNA, igual que `link_orphan_installs`: con
+    // dos homónimas sin origen en el mismo repositorio no hay forma de saber cuál es, y
+    // elegir mal sería pisar la equivocada.
+    if let Some(o) = origin {
+        if let Some((existing_id, existing_path)) = adoptable_orphan(db, o.registry_id, &name)? {
+            {
+                let conn = db.lock().map_err(|e| e.to_string())?;
+                conn.execute(
+                    "UPDATE skills SET origin_skill_id = ?1 WHERE id = ?2",
+                    rusqlite::params![o.skill_id, existing_id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            return update_installed(&existing_id, &existing_path, source_file, overrides, db);
+        }
+    }
 
     let skills_dir = resolve_skills_dir(db)?;
     let bucket_dir = skills_dir.join(bucket_for_origin(origin));
@@ -298,6 +324,33 @@ pub(super) fn delete_skill_internal(skill_id: &str, db: &DbConnection) -> Result
 /// Es lo que hace que "instalar" una skill que ya está sea "actualizarla": borrar y volver
 /// a insertar le cambiaría el id, y `project_skills.skill_id` cascadea — el usuario
 /// perdería todos los attachments de esa skill a cambio de nada.
+/// La instalación vieja de `name` en este repositorio, si hay exactamente una sin origen
+/// anotado. Ver el uso en `install_skill_internal`.
+fn adoptable_orphan(
+    db: &DbConnection,
+    registry_id: &str,
+    name: &str,
+) -> Result<Option<(String, String)>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, source_path FROM skills
+             WHERE registry_id = ?1 AND origin_skill_id IS NULL AND name = ?2 COLLATE NOCASE",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut rows: Vec<(String, String)> = stmt
+        .query_map(rusqlite::params![registry_id, name], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    // Con dos o más no se adopta ninguna: la duplicada es mejor que la pisada.
+    if rows.len() == 1 {
+        Ok(Some(rows.remove(0)))
+    } else {
+        Ok(None)
+    }
+}
+
 fn update_installed(
     skill_id: &str,
     dest: &str,

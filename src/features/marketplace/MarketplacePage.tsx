@@ -55,9 +55,17 @@ export function MarketplacePage() {
   // un proceso `npx` que tarda segundos: la espera es para no lanzar uno por tecla, no para
   // que el usuario tenga que pedirlo.
   useEffect(() => {
-    const handle = setTimeout(() => searchRemote(query), 700);
+    // Al terminar se relee el catálogo instalado. La búsqueda es lo que le deja al backend
+    // el cache del repositorio, y con ese cache puede reconocer las instalaciones viejas
+    // que no sabían de qué entrada salieron (ver `link_orphan_installs`). Sin esta
+    // relectura, esas filas seguirían apareciendo como no instaladas hasta el próximo
+    // arranque — que es lo que llevaba a instalarlas de nuevo y terminar con dos copias.
+    const handle = setTimeout(
+      () => searchRemote(query).then(() => loadInstalledSkills()).catch(() => {}),
+      700
+    );
     return () => clearTimeout(handle);
-  }, [query, searchRemote]);
+  }, [query, searchRemote, loadInstalledSkills]);
 
   // Por (repositorio, entrada de origen), NUNCA por nombre.
   //

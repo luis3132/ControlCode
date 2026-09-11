@@ -444,6 +444,14 @@ pub async fn search_remote_conn(db: &DbConnection, query: &str) -> Result<(), St
                     params![json, now, id],
                 )
                 .map_err(|e| e.to_string())?;
+                // Con entradas frescas en el cache se puede vincular lo instalado que
+                // todavía no sabe de qué entrada salió. Para skills.sh esta es la ÚNICA
+                // oportunidad: "refrescar" no baja ningún catálogo (no existe tal cosa sin
+                // su API privada), así que el vínculo que hace `refresh_registry` nunca
+                // llegaba acá. Sin esto, una instalación vieja se quedaba huérfana para
+                // siempre: el marketplace la ofrecía como no instalada y volver a
+                // instalarla dejaba dos copias.
+                crate::skills::link_orphan_installs(&conn, &id);
             }
             // Un fallo de búsqueda no puede tumbar el resto del marketplace: queda anotado
             // en el repositorio (la UI lo muestra ahí) y los demás siguen andando.

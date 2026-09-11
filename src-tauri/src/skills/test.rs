@@ -1382,6 +1382,217 @@ fn reinstalar_la_misma_entrada_actualiza_en_vez_de_duplicar() {
     assert!(contenido.contains("version dos"), "quedó el contenido nuevo: {contenido}");
 }
 
+/// Deja una fila como las de antes de que existiera `origin_skill_id`: sabe de qué
+/// repositorio salió, pero no de qué entrada.
+fn forget_origin(db: &DbConnection, skill_id: &str) {
+    db.lock()
+        .unwrap()
+        .execute("UPDATE skills SET origin_skill_id = NULL WHERE id = ?1", [skill_id])
+        .unwrap();
+}
+
+/// EL bug de las duplicadas: una instalación vieja no sabe de qué entrada salió, así que
+/// el marketplace la ofrecía como no instalada — y aceptar esa oferta dejaba dos copias de
+/// la misma skill compitiendo por el mismo symlink.
+#[test]
+fn instalar_algo_que_ya_estaba_desde_antes_adopta_la_fila_vieja() {
+    let (db, workspace_id, tab_id, _cwd, _skills_dir) = setup();
+    let app = tauri::test::mock_app();
+    app.manage(db);
+    let state = app.state::<DbConnection>();
+
+    let src = temp_dir("vieja");
+    write_named_skill(&src, "testing", "la de siempre");
+    let origin = SkillOrigin {
+        registry_id: "reg-a",
+        registry_name: "skills.sh",
+        skill_id: "quien/repo/testing",
+    };
+
+    let vieja = install_skill_internal(
+        &src.join("SKILL.md").to_string_lossy(),
+        None,
+        Some(origin),
+        &state,
+    )
+    .expect("instalar");
+    attach_skill(
+        vieja.id.clone(),
+        workspace_id.clone(),
+        "tab".to_string(),
+        Some(tab_id),
+        None,
+        state.clone(),
+    )
+    .expect("attach");
+    forget_origin(&state, &vieja.id);
+
+    let otra_vez = install_skill_internal(
+        &src.join("SKILL.md").to_string_lossy(),
+        None,
+        Some(origin),
+        &state,
+    )
+    .expect("instalar de nuevo");
+
+    assert_eq!(count_skills(&state), 1, "no quedó una segunda copia");
+    assert_eq!(otra_vez.id, vieja.id, "conserva el id: los attachments cuelgan de él");
+    assert_eq!(
+        otra_vez.origin_skill_id.as_deref(),
+        Some("quien/repo/testing"),
+        "de paso queda anotado el origen que le faltaba, así el marketplace la reconoce"
+    );
+    assert_eq!(
+        count(&state, "SELECT COUNT(*) FROM project_skills"),
+        1,
+        "el attachment sobrevive"
+    );
+}
+
+/// Adivinar por nombre tiene un límite: con dos instalaciones viejas homónimas del mismo
+/// repositorio no hay forma de saber cuál es cuál. Una duplicada molesta; pisar la
+/// equivocada le cambia el contenido a una skill que el usuario no tocó.
+#[test]
+fn con_dos_viejas_homonimas_no_se_adopta_ninguna() {
+    let (db, _ws, _tab, _cwd, _skills_dir) = setup();
+    let app = tauri::test::mock_app();
+    app.manage(db);
+    let state = app.state::<DbConnection>();
+
+    let src = temp_dir("homonimas");
+    write_named_skill(&src, "testing", "una");
+    let una = install_skill_internal(
+        &src.join("SKILL.md").to_string_lossy(),
+        None,
+        Some(SkillOrigin { registry_id: "reg-a", registry_name: "skills.sh", skill_id: "a/testing" }),
+        &state,
+    )
+    .expect("instalar la primera");
+    let otra = install_skill_internal(
+        &src.join("SKILL.md").to_string_lossy(),
+        None,
+        Some(SkillOrigin { registry_id: "reg-a", registry_name: "skills.sh", skill_id: "b/testing" }),
+        &state,
+    )
+    .expect("instalar la segunda");
+    forget_origin(&state, &una.id);
+    forget_origin(&state, &otra.id);
+
+    install_skill_internal(
+        &src.join("SKILL.md").to_string_lossy(),
+        None,
+        Some(SkillOrigin { registry_id: "reg-a", registry_name: "skills.sh", skill_id: "c/testing" }),
+        &state,
+    )
+    .expect("instalar la tercera");
+
+    assert_eq!(count_skills(&state), 3, "se instala una nueva en vez de pisar a ciegas");
+}
+
+// ── Vincular lo instalado con la entrada de la que salió ─────────
+
+/// Deja un repositorio con su cache, que es contra lo que `link_orphan_installs` compara.
+fn registry_with_cache(db: &DbConnection, id: &str, entries: &[(&str, &str)]) {
+    let json = serde_json::to_string(
+        &entries
+            .iter()
+            .map(|(entry_id, name)| {
+                serde_json::json!({
+                    "id": entry_id,
+                    "name": name,
+                    "registryId": id,
+                    "registryName": "skills.sh",
+                    "description": null,
+                    "categories": [],
+                    "compatibleAgents": [],
+                    "folderPath": name,
+                })
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    db.lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO registries (id, name, source_type, location, priority, enabled, cache_json, created_at)
+             VALUES (?1, 'skills.sh', 'skillssh', '', 0, 1, ?2, 0)",
+            rusqlite::params![id, json],
+        )
+        .unwrap();
+}
+
+#[test]
+fn una_instalacion_vieja_se_vincula_con_su_entrada() {
+    let (db, _ws, _tab, _cwd, _skills_dir) = setup();
+    let app = tauri::test::mock_app();
+    app.manage(db);
+    let state = app.state::<DbConnection>();
+    registry_with_cache(&state, "reg-a", &[("quien/repo/testing", "testing")]);
+
+    let src = temp_dir("porvincular");
+    write_named_skill(&src, "testing", "la de siempre");
+    let vieja = install_skill_internal(
+        &src.join("SKILL.md").to_string_lossy(),
+        None,
+        Some(SkillOrigin { registry_id: "reg-a", registry_name: "skills.sh", skill_id: "quien/repo/testing" }),
+        &state,
+    )
+    .expect("instalar");
+    forget_origin(&state, &vieja.id);
+
+    crate::skills::link_orphan_installs(&state.lock().unwrap(), "reg-a");
+
+    let origen: Option<String> = state
+        .lock()
+        .unwrap()
+        .query_row("SELECT origin_skill_id FROM skills WHERE id = ?1", [&vieja.id], |r| r.get(0))
+        .unwrap();
+    assert_eq!(origen.as_deref(), Some("quien/repo/testing"));
+}
+
+/// Una entrada no puede tener dos dueños: si ya hay una instalación que salió de ella, la
+/// huérfana es otra copia que quedó al lado —lo que pasaba antes de que instalar adoptara
+/// la fila vieja— y darles el mismo origen haría que actualizar una tocara a cualquiera.
+#[test]
+fn no_se_vincula_una_entrada_que_ya_tiene_dueño() {
+    let (db, _ws, _tab, _cwd, _skills_dir) = setup();
+    let app = tauri::test::mock_app();
+    app.manage(db);
+    let state = app.state::<DbConnection>();
+    registry_with_cache(&state, "reg-a", &[("quien/repo/testing", "testing")]);
+
+    let src = temp_dir("condueño");
+    write_named_skill(&src, "testing", "la copia nueva");
+    install_skill_internal(
+        &src.join("SKILL.md").to_string_lossy(),
+        None,
+        Some(SkillOrigin { registry_id: "reg-a", registry_name: "skills.sh", skill_id: "quien/repo/testing" }),
+        &state,
+    )
+    .expect("instalar la que reclama la entrada");
+
+    // La copia vieja que ya estaba en la base de antes, sin origen anotado.
+    state
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO skills (id, name, version, categories, compatible_agents, compatible_versions,
+                                 source_path, installed_at, updated_at, registry_id, registry_name)
+             VALUES ('vieja', 'testing', '0.1.0', '[]', '[]', '{}', '/no/importa', 0, 0, 'reg-a', 'skills.sh')",
+            [],
+        )
+        .unwrap();
+
+    crate::skills::link_orphan_installs(&state.lock().unwrap(), "reg-a");
+
+    let origen: Option<String> = state
+        .lock()
+        .unwrap()
+        .query_row("SELECT origin_skill_id FROM skills WHERE id = 'vieja'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(origen, None, "la vieja se queda sin vincular, no comparte dueño");
+}
+
 fn count(db: &DbConnection, sql: &str) -> i64 {
     db.lock().unwrap().query_row(sql, [], |r| r.get(0)).unwrap()
 }
