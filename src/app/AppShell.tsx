@@ -12,6 +12,7 @@ import { TabBar } from "@/features/tabs/TabBar";
 import { WorkspacesPanel } from "@/features/workspaces/WorkspacesPanel";
 import { ExplorerPanel } from "@/features/explorer/ExplorerPanel";
 import { SettingsModal } from "@/features/settings/SettingsModal";
+import { AccountsModal } from "@/features/accounts/AccountsModal";
 import { RouteModal } from "@/app/RouteModal";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { useUiStore } from "@/app/uiStore";
@@ -68,6 +69,8 @@ export function AppShell() {
   const workspacesCollapsed = useUiStore((s) => s.workspacesCollapsed);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const accountsOpen = useUiStore((s) => s.accountsOpen);
+  const setAccountsOpen = useUiStore((s) => s.setAccountsOpen);
 
   // El árbol del panel izquierdo se DERIVA de las tabs abiertas más lo que git diga de
   // cada `cwd`. No hay tabla nueva: un workspace es una carpeta con agentes adentro.
@@ -255,6 +258,7 @@ export function AppShell() {
       <StatusBar repo={activeRepo} />
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {accountsOpen && <AccountsModal onClose={() => setAccountsOpen(false)} />}
     </div>
   );
 }

@@ -109,7 +109,6 @@
   "wizard.step3.searchEmpty": "Ninguna skill coincide con la búsqueda",
   "wizard.step3.searchToReveal": "{{count}} más instaladas — buscá para encontrarlas",
   "wizard.step3.selectedCount": "{{count}} skill(s) seleccionada(s)",
-  "settings.nav": "Secciones",
   "settings.terminal": "Terminal",
   "settings.terminal.desc": "Cómo se ve y se navega el historial de las terminales.",
   "settings.terminal.marks": "Líneas de corte",
@@ -172,12 +171,10 @@
   "accounts.needsLogin": "Falta loguearse",
   "terminal.accountMissing": "No se pudo usar la cuenta de esta tab ({{error}}). No se lanzó nada para no arrancar con la cuenta equivocada.",
   "settings.accounts": "Cuentas de las TUIs",
-  "settings.accounts.desc": "Varias cuentas de la misma TUI, cada una con su propio login. Cada cuenta es una carpeta de perfil aparte: la de tu sistema no se toca.",
   "settings.accounts.add": "Agregar cuenta",
   "settings.accounts.loggedIn": "Sesión iniciada",
   "settings.accounts.notLoggedIn": "Sin iniciar sesión",
   "settings.accounts.pendingLogin": "Falta iniciar sesión en esta cuenta",
-  "settings.accounts.pickAgent": "Elegí la TUI",
   "settings.accounts.of": "Cuentas de {{agent}}",
   "settings.accounts.count_one": "1 cuenta",
   "settings.accounts.count_other": "{{count}} cuentas",
@@ -449,5 +446,7 @@
   "skills.detail.unsaved": "Sin guardar",
   "skills.detail.chars": "{{n}} caracteres",
   "marketplace.registries.count": "{{n}} repos",
-  "workspaces.noRepo": "sin repo"
+  "workspaces.noRepo": "sin repo",
+  "accounts.services": "Servicios",
+  "settings.accounts.delete.action": "Quitar cuenta"
 }

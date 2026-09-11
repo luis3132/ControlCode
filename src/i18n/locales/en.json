@@ -109,7 +109,6 @@
   "wizard.step3.searchEmpty": "No skill matches your search",
   "wizard.step3.searchToReveal": "{{count}} more installed — search to find them",
   "wizard.step3.selectedCount": "{{count}} skill(s) selected",
-  "settings.nav": "Sections",
   "settings.terminal": "Terminal",
   "settings.terminal.desc": "How terminal history looks and how you move through it.",
   "settings.terminal.marks": "Cut lines",
@@ -172,12 +171,10 @@
   "accounts.needsLogin": "Needs sign-in",
   "terminal.accountMissing": "This tab's account could not be used ({{error}}). Nothing was launched, to avoid starting with the wrong account.",
   "settings.accounts": "TUI accounts",
-  "settings.accounts.desc": "Several accounts for the same TUI, each with its own login. Every account is a separate profile folder — your system one is left untouched.",
   "settings.accounts.add": "Add account",
   "settings.accounts.loggedIn": "Signed in",
   "settings.accounts.notLoggedIn": "Not signed in",
   "settings.accounts.pendingLogin": "This account still needs a sign-in",
-  "settings.accounts.pickAgent": "Pick the TUI",
   "settings.accounts.of": "{{agent}} accounts",
   "settings.accounts.count_one": "1 account",
   "settings.accounts.count_other": "{{count}} accounts",
@@ -449,5 +446,7 @@
   "skills.detail.unsaved": "Unsaved",
   "skills.detail.chars": "{{n}} characters",
   "marketplace.registries.count": "{{n}} repos",
-  "workspaces.noRepo": "no repo"
+  "workspaces.noRepo": "no repo",
+  "accounts.services": "Services",
+  "settings.accounts.delete.action": "Remove account"
 }

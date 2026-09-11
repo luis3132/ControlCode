@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button, Input, AddIcon, TrashIcon, EditIcon, InfoIcon } from "neogestify-ui-components";
 import { usePrelaunchStore } from "@/features/prelaunch/store";
 import type { PrelaunchPreset } from "@/features/prelaunch/types";
+import { SettingsSection } from "@/features/settings/SettingsSection";
 
 /** Alta y edición usan el mismo formulario; `initial` decide cuál de las dos es. */
 function PresetForm({
@@ -91,17 +92,7 @@ export function PrelaunchSection() {
   useEffect(() => { if (!loaded) load().catch(console.error); }, [loaded, load]);
 
   return (
-    <section className="bg-linear-to-br from-white to-gray-50
-      dark:from-gray-800 dark:to-gray-900
-      rounded-xl border border-gray-200 dark:border-gray-700
-      shadow-sm hover:shadow-md transition-shadow duration-150 p-6">
-
-      <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-1">
-        {t("settings.prelaunch")}
-      </h2>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        {t("settings.prelaunch.desc")}
-      </p>
+    <SettingsSection title={t("settings.prelaunch")} description={t("settings.prelaunch.desc")}>
 
       {presets.length > 0 && (
         <div className="flex flex-col gap-2 mb-4">
@@ -124,16 +115,15 @@ export function PrelaunchSection() {
             ) : (
               <div
                 key={preset.id}
-                className="group flex items-center justify-between gap-3 px-4 py-3
-                  rounded-xl border border-gray-200 dark:border-gray-700
-                  bg-gray-50/60 dark:bg-white/[0.02]
-                  hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
+                className="cc-t group flex items-center justify-between gap-3 px-3 py-2 rounded-lg
+                  bg-gray-100/70 dark:bg-white/4
+                  hover:bg-gray-100 dark:hover:bg-white/6"
               >
                 <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">
+                  <span className="text-[12.5px] font-semibold text-gray-800 dark:text-gray-100 truncate">
                     {preset.name}
                   </span>
-                  <code className="text-[11px] font-mono text-gray-500 dark:text-gray-400 truncate">
+                  <code className="text-[10.5px] font-mono text-gray-400 dark:text-white/35 truncate">
                     {preset.command}
                   </code>
                 </div>
@@ -172,6 +162,6 @@ export function PrelaunchSection() {
         <InfoIcon className="w-3.5 h-3.5 mt-0.5 shrink-0" />
         <p>{t("settings.prelaunch.hint")}</p>
       </div>
-    </section>
+    </SettingsSection>
   );
 }

@@ -67,6 +67,8 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
   const toggleWorkspaces = useUiStore((s) => s.toggleWorkspaces);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const setAccountsOpen = useUiStore((s) => s.setAccountsOpen);
+  const accountsOpen = useUiStore((s) => s.accountsOpen);
 
   // `startsWith` y no `===`: si no, /marketplace/registries no ilumina Marketplace.
   const on = (path: string) => pathname.startsWith(path) && path !== "/";
@@ -100,7 +102,14 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
 
       <div className="flex-1" />
 
-      <RailButton label={t("settings.accounts")} path={null} active={false} onClick={() => setSettingsOpen(true)}>
+      {/* Cuentas es su propia pantalla, no un atajo a una sección de Configuración: es lo
+          que va a ir creciendo a medida que se sumen servicios que pidan iniciar sesión. */}
+      <RailButton
+        label={t("settings.accounts")}
+        path={null}
+        active={accountsOpen}
+        onClick={() => setAccountsOpen(true)}
+      >
         <UserIcon className="w-[18px] h-[18px]" />
       </RailButton>
 

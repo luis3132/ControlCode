@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Switch } from "neogestify-ui-components";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
+import { SettingsSection } from "@/features/settings/SettingsSection";
 
 export function TerminalSection() {
   const { t } = useTranslation();
@@ -9,17 +10,7 @@ export function TerminalSection() {
   const gpuRenderer = useTerminalPrefsStore((s) => s.gpuRenderer);
   const setGpuRenderer = useTerminalPrefsStore((s) => s.setGpuRenderer);
   return (
-    <section className="bg-linear-to-br from-white to-gray-50
-      dark:from-gray-800 dark:to-gray-900
-      rounded-xl border border-gray-200 dark:border-gray-700
-      shadow-sm hover:shadow-md transition-shadow duration-150 p-6">
-
-      <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">
-        {t("settings.terminal")}
-      </h3>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
-        {t("settings.terminal.desc")}
-      </p>
+    <SettingsSection title={t("settings.terminal")} description={t("settings.terminal.desc")}>
 
       <Switch
         checked={inputMarks}
@@ -50,6 +41,6 @@ export function TerminalSection() {
       <p className="text-[11px] text-gray-400 dark:text-white/40 mt-2">
         {t("settings.terminal.marks.applies")}
       </p>
-    </section>
+    </SettingsSection>
   );
 }

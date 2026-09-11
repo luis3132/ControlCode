@@ -1,8 +1,8 @@
-import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { CloseIcon } from "neogestify-ui-components";
+import { GearIcon } from "neogestify-ui-components";
 
 import { SettingsPage } from "@/features/settings/SettingsPage";
+import { ShellModal } from "@/shared/ui/ShellModal";
 
 /**
  * Configuración como modal.
@@ -13,55 +13,13 @@ import { SettingsPage } from "@/features/settings/SettingsPage";
  */
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      // Se corta acá: si no, el Escape sigue viaje hasta la terminal que está detrás y el
-      // agente lo recibe como si lo hubieras tecleado vos.
-      e.preventDefault();
-      e.stopPropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", onKey, { capture: true });
-    return () => window.removeEventListener("keydown", onKey, { capture: true });
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-100 flex items-center justify-center p-8">
-      <button
-        onClick={onClose}
-        aria-label={t("btn.close")}
-        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/65"
-      />
-
-      <div className="cc-rise relative flex flex-col w-full max-w-4xl h-full max-h-[42rem]
-        rounded-2xl overflow-hidden
-        bg-white dark:bg-gray-900
-        border border-gray-200 dark:border-white/12
-        shadow-2xl">
-
-        <div className="flex items-center gap-3 h-12 shrink-0 pl-6 pr-3
-          border-b border-gray-200 dark:border-white/8">
-          <h2 className="flex-1 text-[15px] font-bold text-gray-900 dark:text-white">
-            {t("settings.title")}
-          </h2>
-          <button
-            onClick={onClose}
-            title={t("btn.close")}
-            className="flex items-center justify-center w-8 h-8 rounded-lg
-              text-gray-400 dark:text-gray-500
-              hover:text-gray-700 dark:hover:text-white
-              hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
-          >
-            <CloseIcon className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 min-h-0 cc-scroll">
-          <SettingsPage />
-        </div>
-      </div>
-    </div>
+    <ShellModal
+      title={t("settings.title")}
+      icon={<GearIcon className="w-[15px] h-[15px] shrink-0 text-gray-400 dark:text-white/40" />}
+      onClose={onClose}
+    >
+      <SettingsPage />
+    </ShellModal>
   );
 }

@@ -9,11 +9,14 @@ interface UiState {
    *  todo el ancho: gestionar repos es algo que se hace de vez en cuando. */
   marketplaceReposCollapsed: boolean;
   settingsOpen: boolean;
+  /** Las cuentas son su propia pantalla, no una sección de Configuración. */
+  accountsOpen: boolean;
 
   toggleWorkspaces: () => void;
   toggleExplorer: () => void;
   toggleMarketplaceRepos: () => void;
   setSettingsOpen: (open: boolean) => void;
+  setAccountsOpen: (open: boolean) => void;
 }
 
 const KEY = "cc-ui-panels";
@@ -52,6 +55,7 @@ function persist(state: UiState) {
 export const useUiStore = create<UiState>((set, get) => ({
   ...load(),
   settingsOpen: false,
+  accountsOpen: false,
 
   toggleWorkspaces: () => {
     set({ workspacesCollapsed: !get().workspacesCollapsed });
@@ -66,4 +70,5 @@ export const useUiStore = create<UiState>((set, get) => ({
     persist(get());
   },
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setAccountsOpen: (accountsOpen) => set({ accountsOpen }),
 }));

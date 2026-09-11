@@ -1,11 +1,7 @@
 import { useTranslation } from "react-i18next";
 
 import { SHORTCUTS } from "@/app/shortcuts";
-
-const CARD = `bg-linear-to-br from-white to-gray-50
-  dark:from-gray-800 dark:to-gray-900
-  rounded-xl border border-gray-200 dark:border-gray-700
-  shadow-sm hover:shadow-md transition-shadow duration-150 p-6`;
+import { SettingsSection } from "@/features/settings/SettingsSection";
 
 /** Cada tecla en su propia caja, como se dibuja una tecla. */
 function Chord({ display }: { display: string }) {
@@ -37,13 +33,7 @@ export function ShortcutsSection() {
   const { t } = useTranslation();
 
   return (
-    <section className={CARD}>
-      <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">
-        {t("settings.shortcuts")}
-      </h3>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
-        {t("settings.shortcuts.desc")}
-      </p>
+    <SettingsSection title={t("settings.shortcuts")} description={t("settings.shortcuts.desc")}>
 
       <ul className="flex flex-col divide-y divide-gray-200 dark:divide-gray-700">
         {SHORTCUTS.map((s) => (
@@ -62,6 +52,6 @@ export function ShortcutsSection() {
         bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300">
         {t("settings.shortcuts.terminalNote")}
       </p>
-    </section>
+    </SettingsSection>
   );
 }
