@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Badge, ChevronDownIcon, ChevronRightIcon, DocumentIcon, Skeleton, Tabs, Tooltip } from "neogestify-ui-components";
+import {
+  Badge, ChevronDownIcon, ChevronRightIcon, DocumentIcon, FolderIcon, Skeleton, Tabs, Tooltip,
+} from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
-import { BranchIcon, DotsIcon, PanelIcon, RefreshIcon } from "@/app/icons";
+import { BranchIcon, DotsIcon, FolderOpenIcon, PanelIcon, RefreshIcon } from "@/app/icons";
 import { readDir } from "@/features/explorer/ipc";
 import { flattenTree, toggleExpanded } from "@/features/explorer/tree";
 import type { DirEntry, FileMark, RepoInfo } from "@/features/explorer/types";
@@ -208,7 +210,14 @@ export function ExplorerPanel({ cwd, repo, title }: {
             ))
           )
         ) : (
-          rows.map(({ entry, depth, isExpanded, mark }) => (
+          rows.map(({ entry, depth, isExpanded, mark }) => {
+            // Carpeta abierta / cerrada / archivo. Que la carpeta desplegada cambie de
+            // icono no duplica al chevron: el chevron dice "esto se puede plegar" y vive
+            // en la columna de la jerarquía; el icono dice qué ES la fila.
+            const Icon = entry.isDir
+              ? (isExpanded ? FolderOpenIcon : FolderIcon)
+              : DocumentIcon;
+            return (
             <button
               key={entry.path}
               onClick={() => onRowClick(entry)}
@@ -225,8 +234,15 @@ export function ExplorerPanel({ cwd, repo, title }: {
                   ? <ChevronDownIcon className="w-2.5 h-2.5" />
                   : <ChevronRightIcon className="w-2.5 h-2.5" />)}
               </span>
-              <DocumentIcon className={`w-3.5 h-3.5 shrink-0
-                ${entry.isHidden ? "text-gray-300 dark:text-white/20" : "text-gray-400 dark:text-white/35"}`} />
+              {/* La carpeta va un punto más marcada que el archivo: en una lista larga es
+                  lo que deja separar la estructura del contenido de un vistazo, sin meter
+                  un color que compita con el azul de la fila seleccionada. */}
+              <Icon className={`w-3.5 h-3.5 shrink-0
+                ${entry.isHidden
+                  ? "text-gray-300 dark:text-white/20"
+                  : entry.isDir
+                    ? "text-gray-500 dark:text-white/50"
+                    : "text-gray-400 dark:text-white/30"}`} />
               <span className={`flex-1 min-w-0 truncate text-[11.5px]
                 ${entry.isDir ? "font-semibold" : ""}
                 ${entry.isHidden
@@ -240,7 +256,8 @@ export function ExplorerPanel({ cwd, repo, title }: {
                 </span>
               )}
             </button>
-          ))
+            );
+          })
         )}
       </div>
 

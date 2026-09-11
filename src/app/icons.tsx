@@ -72,3 +72,31 @@ export function RunningIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/**
+ * Carpeta abierta: la que está desplegada en el explorador.
+ *
+ * Va acá porque la librería solo trae la cerrada. Y a diferencia del resto de este
+ * archivo NO usa `BASE`: esta convive en la misma lista con `FolderIcon` y `DocumentIcon`
+ * de la librería, que son de trazo 2 sobre la misma grilla. Parecerse a sus vecinas
+ * importa más que parecerse a sus hermanas de archivo — con 1.7 se veía más fina justo al
+ * lado de la cerrada, y el cambio de peso se leía como un cambio de estado que no existe.
+ */
+export function FolderOpenIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      {/* El fondo de la carpeta, con su pestaña. */}
+      <path d="M4 19V6a2 2 0 012-2h3.6a2 2 0 011.6.8l1.3 1.7H17a2 2 0 012 2v1" />
+      {/* La bandeja del frente, inclinada: es lo que la hace leer como abierta. */}
+      <path d="M4 19l2.5-8A2 2 0 018.4 9.5H21l-2.5 8a2 2 0 01-1.9 1.5H4z" />
+    </svg>
+  );
+}
