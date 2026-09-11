@@ -445,6 +445,10 @@
   "accounts.usage.input": "Entrada",
   "accounts.usage.output": "Salida",
   "accounts.usage.cache": "Leído de caché",
-  "accounts.usage.sessions": "Conversaciones",
-  "accounts.usage.source": "Sumado de {{files}} transcripts de la propia TUI. Las barras comparan cada ventana contra la semana, no contra el límite de tu plan — ese dato no está en ningún lado."
+  "accounts.usage.windowLeft": "Quedan {{time}} de esta ventana",
+  "accounts.usage.windowClosed": "No hay ninguna ventana abierta: hace más de 5 h que no usás esta cuenta.",
+  "accounts.usage.resetFromServer": "Hora de reinicio informada por el servidor.",
+  "accounts.usage.resetDerived": "Deducido del primer mensaje de la ventana.",
+  "accounts.usage.sessionsShort": "conv.",
+  "accounts.usage.noQuota": "Los tokens salen de los transcripts de la propia TUI, así que son exactos. Cuánto cupo te da el plan NO está en ningún archivo local — Claude Code se lo pide a la API y no lo guarda — así que no hay porcentaje que mostrar sin inventarlo."
 }

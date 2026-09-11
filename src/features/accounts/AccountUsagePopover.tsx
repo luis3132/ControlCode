@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Progress, Skeleton } from "neogestify-ui-components";
+import { Alert, Badge, Progress, Skeleton } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
-import { agentAccountUsage, formatTokens, totalOf, type AccountUsage } from "./usage";
+import {
+  WINDOW_SECS, agentAccountUsage, formatRemaining, formatTokens, planLabel, totalOf,
+  type AccountUsage,
+} from "./usage";
 import type { AgentAccount } from "./types";
 
 /** Un perfil sintético (`system:*`) no tiene fila en la base: para el backend es `null`. */
@@ -50,6 +53,15 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
 
   const week = usage?.windows.find((w) => w.key === "7d");
   const reference = week ? totalOf(week) : 0;
+  const plan = planLabel(usage?.plan.tier ?? null);
+
+  // Cuándo se reabre la ventana. Manda lo que dijo el SERVIDOR si es de esta misma
+  // ventana; si no, el arranque deducido de las marcas de los mensajes.
+  const now = Math.floor(Date.now() / 1000);
+  const serverFresh =
+    usage?.serverResetsAt != null && usage.serverResetsAt > now ? usage.serverResetsAt : null;
+  const resetsAt = serverFresh ?? usage?.windowResetsAt ?? null;
+  const startedAt = usage?.windowStartedAt ?? null;
 
   return (
     <div className="flex flex-col gap-3 w-72 p-3.5">
@@ -63,8 +75,12 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
             {account.id.startsWith("system:") ? t("accounts.system") : account.name}
           </span>
         </span>
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0
-          ${account.loggedIn ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/20"}`} />
+        {plan ? (
+          <Badge variant="accent" size="sm" className="shrink-0">{plan}</Badge>
+        ) : (
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0
+            ${account.loggedIn ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/20"}`} />
+        )}
       </div>
 
       {failed ? (
@@ -79,38 +95,55 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
         </p>
       ) : (
         <>
-          <div className="flex flex-col gap-2.5">
-            {usage.windows.map((w) => (
+          {/* La ÚNICA barra con un denominador real: el tiempo de la ventana. Los cinco
+              minutos que pasaron son cinco minutos; el porcentaje de cupo consumido no se
+              puede saber desde acá y no se dibuja. */}
+          {startedAt && resetsAt ? (
+            <div className="flex flex-col gap-1">
               <Progress
-                key={w.key}
-                value={totalOf(w)}
-                max={reference}
-                size="xs"
-                variant={w.key === "5h" ? "accent" : "info"}
+                value={Math.min(WINDOW_SECS, now - startedAt)}
+                max={WINDOW_SECS}
+                size="sm"
+                variant={resetsAt - now < 1800 ? "warning" : "accent"}
                 label={
                   <span className="text-[10.5px] text-gray-500 dark:text-gray-400">
-                    {t(`accounts.usage.window.${w.key}`)}
-                    <span className="ml-1.5 font-mono tabular-nums text-gray-700 dark:text-gray-300">
-                      {formatTokens(totalOf(w))}
-                    </span>
+                    {t("accounts.usage.windowLeft", { time: formatRemaining(resetsAt - now) })}
                   </span>
                 }
+              />
+              <span className="text-[10px] text-gray-400 dark:text-white/30">
+                {serverFresh
+                  ? t("accounts.usage.resetFromServer")
+                  : t("accounts.usage.resetDerived")}
+              </span>
+            </div>
+          ) : (
+            <p className="text-[11px] text-gray-400 dark:text-white/35">
+              {t("accounts.usage.windowClosed")}
+            </p>
+          )}
+
+          <div className="flex flex-col gap-1.5 pt-2.5 border-t border-gray-200 dark:border-white/8">
+            {usage.windows.map((w) => (
+              <Row
+                key={w.key}
+                label={t(`accounts.usage.window.${w.key}`)}
+                value={`${formatTokens(totalOf(w))} · ${w.sessions} ${t("accounts.usage.sessionsShort")}`}
               />
             ))}
           </div>
 
-          {/* El desglose de la ventana más corta, que es la que importa ahora mismo. */}
+          {/* El desglose de la ventana en curso, que es la que importa ahora mismo. */}
           {usage.windows[0] && (
             <div className="flex flex-col gap-1 pt-2.5 border-t border-gray-200 dark:border-white/8">
               <Row label={t("accounts.usage.input")} value={formatTokens(usage.windows[0].inputTokens)} />
               <Row label={t("accounts.usage.output")} value={formatTokens(usage.windows[0].outputTokens)} />
               <Row label={t("accounts.usage.cache")} value={formatTokens(usage.windows[0].cacheReadTokens)} />
-              <Row label={t("accounts.usage.sessions")} value={String(usage.windows[0].sessions)} />
             </div>
           )}
 
           <p className="text-[10px] leading-relaxed text-gray-400 dark:text-white/30">
-            {t("accounts.usage.source", { files: usage.scannedFiles })}
+            {t("accounts.usage.noQuota")}
           </p>
         </>
       )}

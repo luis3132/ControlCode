@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatTokens, totalOf } from "../usage";
+import { formatRemaining, formatTokens, planLabel, totalOf } from "../usage";
 
 describe("formatTokens", () => {
   it("deja los números chicos como están", () => {
@@ -26,5 +26,39 @@ describe("totalOf", () => {
       key: "5h", inputTokens: 1, outputTokens: 2,
       cacheWriteTokens: 4, cacheReadTokens: 8, messages: 0, sessions: 0,
     })).toBe(15);
+  });
+});
+
+describe("planLabel", () => {
+  it("traduce los planes conocidos", () => {
+    expect(planLabel("default_claude_max_20x")).toBe("Max 20×");
+    expect(planLabel("default_claude_pro")).toBe("Pro");
+  });
+
+  it("muestra tal cual un plan que no conoce", () => {
+    // Un identificador crudo dice más que una etiqueta vacía o un "desconocido".
+    expect(planLabel("default_claude_futuro")).toBe("default_claude_futuro");
+  });
+
+  it("sin plan no inventa ninguno", () => {
+    expect(planLabel(null)).toBeNull();
+  });
+});
+
+describe("formatRemaining", () => {
+  it("minutos abajo de la hora, redondeando hacia arriba", () => {
+    // Hacia arriba: decir "0 min" cuando quedan 30 segundos es peor que decir "1 min".
+    expect(formatRemaining(30)).toBe("1 min");
+    expect(formatRemaining(59 * 60)).toBe("59 min");
+  });
+
+  it("horas y minutos", () => {
+    expect(formatRemaining(2 * 3600 + 14 * 60)).toBe("2 h 14 min");
+    expect(formatRemaining(3 * 3600)).toBe("3 h");
+  });
+
+  it("una ventana vencida no muestra negativos", () => {
+    expect(formatRemaining(-500)).toBe("0 min");
+    expect(formatRemaining(0)).toBe("0 min");
   });
 });

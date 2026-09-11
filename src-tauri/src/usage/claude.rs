@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::database::DbConnection;
 use crate::util::now_ts;
 
-use super::types::{AccountUsage, UsageWindow, WINDOWS};
+use super::types::{AccountUsage, PlanInfo, UsageWindow, WINDOWS, WINDOW_SECS};
 
 /// Lo único que hace falta de cada línea. El resto del objeto (contenido del mensaje,
 /// herramientas, adjuntos) es la mayor parte de los bytes y no se usa, así que `serde` lo
@@ -20,6 +20,16 @@ struct Line {
     #[serde(rename = "sessionId")]
     session_id: Option<String>,
     message: Option<Message>,
+    /// Solo aparece cuando el servidor RECHAZA por límite, y es la única vez que dice
+    /// cuándo se reabre la ventana. Cuando está, manda sobre lo que deduzcamos nosotros.
+    #[serde(rename = "quotaLimits")]
+    quota: Option<QuotaLimits>,
+}
+
+#[derive(Deserialize)]
+struct QuotaLimits {
+    #[serde(rename = "resetsAt")]
+    resets_at: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -47,6 +57,9 @@ struct Usage {
 /// microsegundos; construir el JSON entero para descartarlo, no.
 const USAGE_MARK: &str = "\"output_tokens\"";
 
+/// Lo mismo para el aviso de límite del servidor, que viene en otras líneas.
+const QUOTA_MARK: &str = "\"quotaLimits\"";
+
 /// `2026-08-21T20:29:09.363Z` → epoch en segundos.
 ///
 /// Se parsea a mano en vez de sumar una dependencia de fechas: el formato lo escribe la
@@ -71,6 +84,51 @@ pub(crate) fn parse_ts(raw: &str) -> Option<i64> {
     let days = era * 146_097 + doe - 719_468;
 
     Some(days * 86_400 + h * 3600 + mi * 60 + se)
+}
+
+/// Lo que la cuenta dice de sí misma: plan y mail, de su propio `.claude.json`.
+///
+/// Es el ÚNICO dato real de la cuenta que hay en disco. El cupo que da ese plan —cuántos
+/// tokens por ventana— no está en ningún archivo: la TUI se lo pide a la API en caliente y
+/// no lo guarda. Por eso acá se informa QUÉ plan es y no cuánto queda de él.
+fn read_plan(dir: &Path) -> PlanInfo {
+    let Ok(raw) = std::fs::read_to_string(dir.join(".claude.json")) else {
+        return PlanInfo::default();
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return PlanInfo::default();
+    };
+    let account = &json["oauthAccount"];
+    PlanInfo {
+        // El de la organización es el que manda; el del usuario solo aparece en cuentas
+        // con asiento propio dentro de una organización.
+        tier: account["organizationRateLimitTier"]
+            .as_str()
+            .or_else(|| account["userRateLimitTier"].as_str())
+            .map(str::to_string),
+        email: account["emailAddress"].as_str().map(str::to_string),
+        extra_usage_enabled: account["hasExtraUsageEnabled"].as_bool().unwrap_or(false),
+    }
+}
+
+/// Cuándo arrancó la ventana de cinco horas que está corriendo.
+///
+/// La ventana empieza con el primer mensaje después de que venció la anterior, así que se
+/// recorre todo en orden: cada vez que un mensaje cae más allá de cinco horas del arranque
+/// vigente, ese mensaje abre una ventana nueva. Lo que queda al final es el arranque de la
+/// actual — siempre que el último mensaje siga dentro de ella.
+///
+/// No es una estimación de consumo: son las marcas de tiempo reales de los mensajes.
+pub(crate) fn current_window_start(mut stamps: Vec<i64>, now: i64) -> Option<i64> {
+    stamps.sort_unstable();
+    let mut start = *stamps.first()?;
+    for ts in stamps.iter().copied() {
+        if ts - start >= WINDOW_SECS {
+            start = ts;
+        }
+    }
+    // Si la última actividad ya quedó fuera, no hay ninguna ventana abierta.
+    if now - start >= WINDOW_SECS { None } else { Some(start) }
 }
 
 /// El directorio de configuración de la cuenta: el del perfil, o el de siempre.
@@ -154,18 +212,40 @@ pub async fn agent_account_usage(
             .collect();
         let mut sessions: Vec<HashSet<String>> = WINDOWS.iter().map(|_| HashSet::new()).collect();
         let mut last_activity: Option<i64> = None;
+        // Las marcas de los mensajes del último día: alcanza y sobra para ubicar el
+        // arranque de una ventana de cinco horas, y evita cargar la semana entera.
+        let mut recent_stamps: Vec<i64> = Vec::new();
+        let mut server_reset: Option<(i64, i64)> = None;
 
         for path in files {
             let Ok(raw) = std::fs::read_to_string(&path) else { continue };
             for line in raw.lines() {
-                if !line.contains(USAGE_MARK) {
+                // Las dos cosas que interesan: el consumo de un mensaje, y el aviso de
+                // límite del servidor. El resto de las líneas no se parsea.
+                let has_usage = line.contains(USAGE_MARK);
+                if !has_usage && !line.contains(QUOTA_MARK) {
                     continue;
                 }
                 let Ok(parsed) = serde_json::from_str::<Line>(line) else { continue };
+
+                if let (Some(quota), Some(at)) =
+                    (parsed.quota.as_ref(), parsed.timestamp.as_deref().and_then(parse_ts))
+                {
+                    if let Some(resets) = quota.resets_at {
+                        // Gana el aviso más reciente: los viejos hablan de ventanas que ya
+                        // se reabrieron.
+                        if server_reset.is_none_or(|(seen, _)| at > seen) {
+                            server_reset = Some((at, resets));
+                        }
+                    }
+                }
                 let Some(usage) = parsed.message.and_then(|m| m.usage) else { continue };
                 let Some(at) = parsed.timestamp.as_deref().and_then(parse_ts) else { continue };
 
                 last_activity = Some(last_activity.map_or(at, |prev: i64| prev.max(at)));
+                if at >= now - 86_400 {
+                    recent_stamps.push(at);
+                }
 
                 for (i, (_, secs)) in WINDOWS.iter().enumerate() {
                     if at < now - secs {
@@ -188,12 +268,19 @@ pub async fn agent_account_usage(
             w.sessions = sessions[i].len() as u64;
         }
 
+        let window_started_at = current_window_start(recent_stamps, now);
+
         Ok(AccountUsage {
             agent_id,
             available: true,
             windows: totals,
             last_activity,
             scanned_files: scanned,
+            plan: read_plan(&dir),
+            window_started_at,
+            window_resets_at: window_started_at.map(|s| s + WINDOW_SECS),
+            server_resets_at: server_reset.map(|(_, r)| r),
+            server_seen_at: server_reset.map(|(seen, _)| seen),
         })
     })
     .await

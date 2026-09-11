@@ -41,3 +41,54 @@ fn una_linea_rota_no_devuelve_una_fecha_inventada() {
         assert_eq!(parse_ts(malo), None, "{malo}");
     }
 }
+
+use super::claude::current_window_start;
+use super::types::WINDOW_SECS;
+
+const NOW: i64 = 1_800_000_000;
+
+/// La ventana arranca con el primer mensaje y dura cinco horas. Es lo que responde
+/// "cuánto le queda a la sesión", así que tiene que salir de las marcas REALES y no de
+/// una cuenta redonda hacia atrás desde ahora.
+#[test]
+fn la_ventana_arranca_en_el_primer_mensaje() {
+    let start = NOW - 3600;
+    assert_eq!(current_window_start(vec![start, NOW - 600, NOW - 60], NOW), Some(start));
+}
+
+#[test]
+fn un_hueco_de_mas_de_cinco_horas_abre_una_ventana_nueva() {
+    // Trabajaste a la mañana, paraste, y volviste hace un rato: la ventana vigente es la
+    // que abriste al volver, no la de la mañana.
+    let manana = NOW - 20 * 3600;
+    let vuelta = NOW - 1800;
+    assert_eq!(
+        current_window_start(vec![manana, manana + 600, vuelta, NOW - 60], NOW),
+        Some(vuelta)
+    );
+}
+
+#[test]
+fn sin_actividad_reciente_no_hay_ventana_abierta() {
+    // El último mensaje quedó fuera de la ventana: ya se reabrió y no hay nada que contar.
+    assert_eq!(current_window_start(vec![NOW - WINDOW_SECS - 60], NOW), None);
+}
+
+#[test]
+fn el_limite_exacto_cuenta_como_vencida() {
+    assert_eq!(current_window_start(vec![NOW - WINDOW_SECS], NOW), None);
+    assert!(current_window_start(vec![NOW - WINDOW_SECS + 1], NOW).is_some());
+}
+
+#[test]
+fn no_importa_en_que_orden_vengan_las_marcas() {
+    // Se recorren varios archivos, cada uno con su propio orden.
+    let start = NOW - 7200;
+    let desordenadas = vec![NOW - 60, start, NOW - 3600, start + 10];
+    assert_eq!(current_window_start(desordenadas, NOW), Some(start));
+}
+
+#[test]
+fn sin_mensajes_no_hay_ventana() {
+    assert_eq!(current_window_start(vec![], NOW), None);
+}

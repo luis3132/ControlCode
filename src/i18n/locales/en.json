@@ -445,6 +445,10 @@
   "accounts.usage.input": "Input",
   "accounts.usage.output": "Output",
   "accounts.usage.cache": "Read from cache",
-  "accounts.usage.sessions": "Conversations",
-  "accounts.usage.source": "Summed from {{files}} of the TUI's own transcripts. The bars compare each window against the week, not against your plan limit — that number isn't available anywhere."
+  "accounts.usage.windowLeft": "{{time}} left in this window",
+  "accounts.usage.windowClosed": "No window is open: this account hasn't been used in over 5 h.",
+  "accounts.usage.resetFromServer": "Reset time reported by the server.",
+  "accounts.usage.resetDerived": "Derived from the window's first message.",
+  "accounts.usage.sessionsShort": "conv.",
+  "accounts.usage.noQuota": "Token counts come from the TUI's own transcripts, so they're exact. How much the plan allows is NOT in any local file — Claude Code asks the API and doesn't store it — so there's no percentage to show without making it up."
 }
