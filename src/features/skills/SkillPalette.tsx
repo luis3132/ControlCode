@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Badge, CheckIcon, CloudIcon, Skeleton, StackIcon } from "neogestify-ui-components";
+import {
+  Alert, Badge, CheckIcon, CloseIcon, CloudIcon, InfoIcon, Skeleton, StackIcon, Tooltip,
+} from "neogestify-ui-components";
 
 import { Markdown } from "@/shared/ui/Markdown";
 import { moveSelection, reconcileSelection } from "@/shared/ui/paletteNav";
@@ -231,6 +233,35 @@ export function SkillPalette({ target: initial, onClose }: {
                 ? t("skills.palette.scopeTab", { name: initial.label })
                 : t("skills.palette.scopeWorkspace", { name: initial.label })}
             </Badge>
+
+            {/* Qué hace exactamente adjuntar, pegado al chip que decide el alcance: es
+                donde se lo busca, y así no ocupa lugar el resto del tiempo. */}
+            <Tooltip
+              placement="bottom"
+              maxWidth={280}
+              content={target.cwd
+                ? t("skills.palette.note", { dir: target.cwd })
+                : t("skills.palette.noteTab")}
+            >
+              <button className="cc-t flex items-center justify-center w-5 h-5 rounded shrink-0
+                text-gray-400 dark:text-white/30
+                hover:text-gray-600 dark:hover:text-white/60">
+                <InfoIcon className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
+
+            <Tooltip content={t("btn.close")} placement="bottom">
+              <button
+                onClick={onClose}
+                aria-label={t("btn.close")}
+                className="cc-t flex items-center justify-center w-7 h-7 rounded-lg shrink-0
+                  text-gray-400 dark:text-gray-500
+                  hover:text-gray-700 dark:hover:text-white
+                  hover:bg-gray-100 dark:hover:bg-white/10"
+              >
+                <CloseIcon className="w-4 h-4" />
+              </button>
+            </Tooltip>
           </div>
 
           <div className="flex-1 min-h-0 cc-scroll py-1.5">
@@ -323,14 +354,14 @@ export function SkillPalette({ target: initial, onClose }: {
           </div>
         </div>
 
-        <SkillPreview row={current} scopeDir={target.cwd ?? null} />
+        <SkillPreview row={current} />
       </div>
     </div>
   );
 }
 
 /** La columna derecha: el SKILL.md de lo que esté marcado, renderizado. */
-function SkillPreview({ row, scopeDir }: { row: Row | null; scopeDir: string | null }) {
+function SkillPreview({ row }: { row: Row | null }) {
   const { t } = useTranslation();
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -388,14 +419,6 @@ function SkillPreview({ row, scopeDir }: { row: Row | null; scopeDir: string | n
             )}
           </div>
 
-          {/* Qué pasa exactamente al adjuntar. Es lo que hace que la decisión no dé miedo. */}
-          <div className="shrink-0 m-4 mt-0 p-3 rounded-lg text-[10.5px] leading-relaxed
-            bg-emerald-500/7 border border-emerald-500/25
-            text-emerald-700 dark:text-emerald-300">
-            {scopeDir
-              ? t("skills.palette.note", { dir: scopeDir })
-              : t("skills.palette.noteTab")}
-          </div>
         </>
       )}
     </aside>
