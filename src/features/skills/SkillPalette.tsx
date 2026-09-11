@@ -5,7 +5,7 @@ import {
 } from "neogestify-ui-components";
 
 import { Markdown } from "@/shared/ui/Markdown";
-import { moveSelection, reconcileSelection } from "@/shared/ui/paletteNav";
+import { moveSelection, reconcileSelection, useSelectionVisible } from "@/shared/ui/paletteNav";
 import { useSkillsStore } from "@/features/skills/store";
 import { skillDetail } from "@/features/skills/ipc";
 import { useMarketplaceStore } from "@/features/marketplace/store";
@@ -157,6 +157,7 @@ export function SkillPalette({ target: initial, onClose }: {
   useEffect(() => { setSelected((current) => reconcileSelection(keys, current)); }, [keys]);
 
   const current = rows.find((r) => r.key === selected) ?? null;
+  const selectedRef = useSelectionVisible<HTMLDivElement>(selected);
 
   const apply = useCallback(async (row: Row) => {
     setBusy(true);
@@ -283,6 +284,7 @@ export function SkillPalette({ target: initial, onClose }: {
                     <GroupHeader label={t("skills.palette.install")} />
                   )}
                   <div
+                    ref={row.key === selected ? selectedRef : undefined}
                     onClick={() => setSelected(row.key)}
                     onDoubleClick={() => !busy && apply(row)}
                     className={`cc-t flex items-center gap-3 h-[42px] mx-1.5 px-2.5 rounded-lg cursor-pointer

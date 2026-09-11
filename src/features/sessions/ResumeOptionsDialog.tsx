@@ -134,9 +134,9 @@ export function ResumeOptionsDialog({
             de las sesiones no los usa, pero cuando los usa hay que poder corregirlos —
             un preset renombrado o un entorno que ya no existe se arregla acá y no
             reabriendo a ciegas para que falle. */}
-        <div className="flex flex-col gap-2 pt-3 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex flex-col gap-2 pt-3 border-t border-gray-200 dark:border-white/8">
           <span className="text-[11px] font-semibold uppercase tracking-widest
-            text-gray-400 dark:text-gray-500">
+            text-gray-400 dark:text-white/30">
             {t("wizard.advanced")}
           </span>
           <p className="text-xs text-gray-500 dark:text-gray-400">

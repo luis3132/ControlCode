@@ -54,7 +54,9 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
           <CloseIcon className="w-4 h-4" />
         </button>
 
-        <div className="flex-1 min-h-0 cc-scroll">{children}</div>
+        {/* Sin scroll propio: las rutas que se pintan acá son de alto completo y
+            scrollean por dentro. Ver la nota equivalente en `AppShell`. */}
+        <div className="flex-1 min-h-0 overflow-hidden">{children}</div>
       </div>
     </div>
   );

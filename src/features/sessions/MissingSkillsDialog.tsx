@@ -99,8 +99,8 @@ export function MissingSkillsDialog({
               <li
                 key={s.name}
                 className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg
-                  border border-gray-200 dark:border-gray-700
-                  bg-gray-50 dark:bg-gray-800/50"
+                  border border-gray-200 dark:border-white/8
+                  bg-gray-50 dark:bg-white/4"
               >
                 <div className="flex flex-col min-w-0 gap-0.5">
                   <span className={`text-sm font-medium truncate

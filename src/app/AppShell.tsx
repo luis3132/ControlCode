@@ -214,8 +214,12 @@ export function AppShell() {
             <TerminalPanel />
           </div>
 
+          {/* `overflow-hidden` y no `cc-scroll`: cada página arma su propio alto y
+              scrollea por dentro (encabezado fijo arriba, atajos fijos abajo, la lista en
+              el medio). Un scroll acá afuera además reservaría su carril a la derecha de
+              TODAS las páginas, incluidas las que no lo necesitan. */}
           {!isWorkspace && !asModal && (
-            <div className="absolute inset-0 z-10 cc-scroll">
+            <div className="absolute inset-0 z-10 overflow-hidden">
               <Outlet />
             </div>
           )}

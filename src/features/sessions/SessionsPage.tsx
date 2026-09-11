@@ -1,22 +1,32 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { ClockIcon, FolderIcon, ChevronDownIcon } from "neogestify-ui-components";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  EmptyState,
+  Kbd,
+} from "neogestify-ui-components";
+
 import { useSessionsStore } from "@/features/sessions/store";
-import type { SessionHistoryEntry } from "@/features/sessions/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { useAccountsStore } from "@/features/accounts/store";
-import { PageHeader } from "@/shared/ui/PageHeader";
+import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
+import { BranchIcon } from "@/app/icons";
 import { MissingSkillsDialog } from "@/features/sessions/MissingSkillsDialog";
 import { ResumeOptionsDialog } from "@/features/sessions/ResumeOptionsDialog";
 import { SessionRow } from "@/features/sessions/SessionRow";
 import { SessionFilters } from "@/features/sessions/SessionFilters";
+import { buildSessionTree, flatSessionOrder } from "@/features/sessions/sessionTree";
+import { moveSelection, reconcileSelection, useSelectionVisible } from "@/shared/ui/paletteNav";
 import {
   EMPTY_FILTERS,
   filterSessions,
   hasActiveFilters,
   type SessionFilterState,
 } from "@/features/sessions/filters";
+
 import { useResumeSession } from "./useResumeSession";
 
 export function SessionsPage() {
@@ -38,6 +48,8 @@ export function SessionsPage() {
   const loadAccounts = useAccountsStore((s) => s.load);
   const [filters, setFilters] = useState<SessionFilterState>(EMPTY_FILTERS);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { loadAccounts().catch(console.error); }, [loadAccounts]);
 
@@ -51,109 +63,187 @@ export function SessionsPage() {
 
   const visible = useMemo(() => filterSessions(history, filters), [history, filters]);
 
-  /** Sesiones agrupadas por carpeta, cada grupo ordenado por cierre más reciente. */
-  const groups = useMemo(() => {
-    const byCwd = new Map<string, SessionHistoryEntry[]>();
-    for (const entry of visible) {
-      const list = byCwd.get(entry.cwd);
-      if (list) list.push(entry);
-      else byCwd.set(entry.cwd, [entry]);
-    }
-    return Array.from(byCwd.entries())
-      .map(([cwd, entries]) => ({ cwd, entries }))
-      // El grupo con la actividad más reciente va primero, no el alfabético: al volver a
-      // Sesiones, lo que buscás casi siempre es lo último que cerraste.
-      .sort((a, b) => b.entries[0].closedAt - a.entries[0].closedAt);
-  }, [visible]);
+  // Las carpetas del historial se resuelven contra git igual que las del panel: es lo que
+  // permite agrupar dos worktrees del mismo proyecto juntos en vez de como cosas sueltas.
+  const repos = useRepoInfo(useMemo(() => visible.map((e) => e.cwd), [visible]));
+  const groups = useMemo(() => buildSessionTree(visible, repos), [visible, repos]);
 
-  const toggleGroup = (cwd: string) =>
+  // Solo lo que está DESPLEGADO se puede recorrer con las flechas: saltar a una fila que
+  // no se ve equivale a actuar a ciegas.
+  const order = useMemo(
+    () => flatSessionOrder(
+      groups.map((g) => ({
+        ...g,
+        workspaces: g.workspaces.map((w) =>
+          collapsed.has(w.key) ? { ...w, sessions: [] } : w
+        ),
+      }))
+    ),
+    [groups, collapsed]
+  );
+
+  // Al escribir, la lista se rehace: lo marcado sobrevive si sigue estando, y si no se
+  // marca lo primero.
+  useEffect(() => {
+    setSelectedId((current) => reconcileSelection(order.map((s) => s.id), current));
+  }, [order]);
+
+  const selected = order.find((s) => s.id === selectedId) ?? null;
+  const selectedRef = useSelectionVisible<HTMLDivElement>(selectedId);
+
+  // El foco arranca en el buscador: esto se recorre escribiendo, como el marketplace.
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const toggleGroup = (key: string) =>
     setCollapsed((prev) => {
       const next = new Set(prev);
-      if (next.has(cwd)) next.delete(cwd);
-      else next.add(cwd);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
 
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedId((current) =>
+        moveSelection(order.map((s) => s.id), current, e.key === "ArrowDown" ? 1 : -1)
+      );
+      return;
+    }
+    if (e.key === "Enter" && selected) {
+      e.preventDefault();
+      resume(selected);
+    }
+  };
+
   return (
-    <main className="min-h-full px-6 py-10 bg-gray-50 dark:bg-gray-950">
-      <div className="max-w-2xl mx-auto">
+    <div className="flex flex-col h-full min-h-0">
 
-        <PageHeader
-          icon={<ClockIcon className="w-5 h-5" />}
-          title={t("sessions.title")}
-          subtitle={t("sessions.subtitle")}
+      {/* ══ el buscador ═══════════════════════════════════════════════════ */}
+      <div className="flex items-center gap-3 h-[54px] shrink-0 px-4
+        border-b border-gray-200 dark:border-white/8">
+        <ClockIcon className="w-[15px] h-[15px] shrink-0 text-blue-500 dark:text-blue-400" />
+        <input
+          ref={inputRef}
+          value={filters.query}
+          onChange={(e) => setFilters({ ...filters, query: e.target.value })}
+          onKeyDown={onKeyDown}
+          placeholder={t("sessions.filters.search")}
+          className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15px]
+            text-gray-900 dark:text-white
+            placeholder:text-gray-400 dark:placeholder:text-white/25"
         />
+        <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
+          {t("sessions.filters.results", { count: visible.length })}
+        </span>
+      </div>
 
+      {history.length > 0 && (
+        <SessionFilters
+          entries={history}
+          value={filters}
+          onChange={setFilters}
+          resultCount={visible.length}
+        />
+      )}
+
+      {/* ══ el árbol: repo → carpeta → sesiones ═══════════════════════════ */}
+      <div className="flex-1 min-h-0 cc-scroll py-1.5" onKeyDown={onKeyDown} tabIndex={-1}>
         {history.length === 0 ? (
-          <p className="text-sm italic text-gray-400 dark:text-gray-500">
-            {t("sessions.empty")}
-          </p>
+          <EmptyState
+            className="py-14"
+            icon={<ClockIcon className="w-8 h-8" />}
+            title={t("sessions.empty")}
+            description={t("sessions.workspaceScopeHint")}
+          />
+        ) : visible.length === 0 ? (
+          <EmptyState
+            className="py-14"
+            icon={<ClockIcon className="w-8 h-8" />}
+            title={t("sessions.noMatches")}
+            action={
+              hasActiveFilters(filters) ? (
+                <button
+                  onClick={() => setFilters(EMPTY_FILTERS)}
+                  className="cc-t text-[11.5px] text-blue-500 dark:text-blue-400 hover:underline"
+                >
+                  {t("sessions.filters.clear")}
+                </button>
+              ) : undefined
+            }
+          />
         ) : (
-          <>
-            <SessionFilters
-              entries={history}
-              value={filters}
-              onChange={setFilters}
-              resultCount={visible.length}
-            />
-
-            {visible.length === 0 ? (
-              <p className="text-sm italic text-gray-400 dark:text-gray-500">
-                {t("sessions.noMatches")}
-              </p>
-            ) : (
-              <div className="flex flex-col gap-5">
-                {groups.map(({ cwd, entries }) => {
-                  const isCollapsed = collapsed.has(cwd);
-                  return (
-                    <section key={cwd} className="flex flex-col gap-2">
-                      {/* La agrupación por carpeta solo aporta cuando hay más de una:
-                          con una sola, el encabezado repetiría lo que ya dice cada fila. */}
-                      {groups.length > 1 && (
-                        <button
-                          onClick={() => toggleGroup(cwd)}
-                          className="flex items-center gap-1.5 w-fit max-w-full text-xs font-medium
-                            text-gray-500 dark:text-gray-400
-                            hover:text-gray-800 dark:hover:text-gray-100 transition-colors"
-                        >
-                          <ChevronDownIcon
-                            className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200
-                              ${isCollapsed ? "-rotate-90" : ""}`}
-                          />
-                          <FolderIcon className="w-3.5 h-3.5 shrink-0" />
-                          <span className="font-mono truncate">{cwd}</span>
-                          <span className="text-gray-400 dark:text-gray-500 shrink-0">
-                            ({entries.length})
-                          </span>
-                        </button>
-                      )}
-
-                      {!isCollapsed && (
-                        <div className="flex flex-col gap-2">
-                          {entries.map((entry) => (
-                            <SessionRow
-                              key={entry.id}
-                              entry={entry}
-                              workspaceId={workspaceId}
-                              onResume={resume}
-                              onResumeWithSkills={resumeWithOptions}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </section>
-                  );
-                })}
+          groups.map((group) => (
+            <div key={group.key} className="mt-2 first:mt-0">
+              {/* El repo, como eyebrow: agrupa pero no compite con las filas. */}
+              <div className="flex items-center gap-2.5 px-4 pt-1 pb-1">
+                <span className="text-[9.5px] font-extrabold uppercase tracking-[0.11em]
+                  text-gray-400 dark:text-white/30">
+                  {group.name}
+                </span>
+                <span className="flex-1 h-px bg-gray-200 dark:bg-white/6" />
+                <span className="text-[9.5px] tabular-nums text-gray-400 dark:text-white/25">
+                  {group.sessionCount}
+                </span>
               </div>
-            )}
-          </>
-        )}
 
-        {history.length > 0 && !hasActiveFilters(filters) && (
-          <p className="mt-6 text-[11px] text-gray-400 dark:text-white/40">
-            {t("sessions.workspaceScopeHint")}
-          </p>
+              {group.workspaces.map((ws) => {
+                const isCollapsed = collapsed.has(ws.key);
+                return (
+                  <div key={ws.key}>
+                    <button
+                      onClick={() => toggleGroup(ws.key)}
+                      title={ws.cwd}
+                      className="cc-t flex items-center gap-2 h-7 w-full px-4 text-left
+                        hover:bg-gray-100 dark:hover:bg-white/4"
+                    >
+                      {isCollapsed
+                        ? <ChevronRightIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/35" />
+                        : <ChevronDownIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/35" />}
+                      {/* La rama es lo que distingue dos copias del mismo repo; el nombre
+                          de la carpeta va detrás, atenuado, para ubicarla en el disco. */}
+                      <BranchIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/30" />
+                      <span className="shrink-0 max-w-[14rem] truncate text-[11.5px] font-semibold
+                        text-gray-700 dark:text-gray-300">
+                        {ws.title}
+                      </span>
+                      <span className="min-w-0 truncate text-[10.5px] text-gray-400 dark:text-white/30">
+                        {ws.subtitle}
+                      </span>
+                      <span className="flex-1" />
+                      <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
+                        {ws.sessions.length}
+                      </span>
+                    </button>
+
+                    {!isCollapsed && ws.sessions.map((entry) => (
+                      <SessionRow
+                        key={entry.id}
+                        entry={entry}
+                        workspaceId={workspaceId}
+                        selected={entry.id === selectedId}
+                        rowRef={entry.id === selectedId ? selectedRef : undefined}
+                        onSelect={() => setSelectedId(entry.id)}
+                        onResume={resume}
+                        onResumeWithSkills={resumeWithOptions}
+                      />
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          ))
         )}
+      </div>
+
+      <div className="flex items-center gap-4 h-[34px] shrink-0 px-4
+        border-t border-gray-200 dark:border-white/8
+        bg-gray-100/60 dark:bg-black/20
+        text-[10.5px] text-gray-400 dark:text-white/35">
+        <span className="flex items-center gap-1.5"><Kbd>↵</Kbd> {t("sessions.key.resume")}</span>
+        <span className="flex items-center gap-1.5"><Kbd>↑↓</Kbd> {t("sessions.key.move")}</span>
+        <div className="flex-1" />
+        <span className="truncate">{t("sessions.workspaceScopeHint")}</span>
       </div>
 
       {pendingSkillChoice && (
@@ -184,6 +274,6 @@ export function SessionsPage() {
           }}
         />
       )}
-    </main>
+    </div>
   );
 }

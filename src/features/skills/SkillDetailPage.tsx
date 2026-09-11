@@ -1,11 +1,21 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AnimateSpin, Button, Input, Loading, TextArea } from "neogestify-ui-components";
-import { CloudIcon, FolderIcon, InfoIcon, StackIcon } from "neogestify-ui-components";
+import {
+  Alert,
+  AnimateSpin,
+  ArrowLeftIcon,
+  Badge,
+  Button,
+  CloudIcon,
+  FolderIcon,
+  InfoIcon,
+  Loading,
+  StackIcon,
+  Tooltip,
+} from "neogestify-ui-components";
 
 import { useSkillsStore } from "@/features/skills/store";
-import { PageHeader } from "@/shared/ui/PageHeader";
 
 import { applyName } from "./frontmatter";
 
@@ -33,18 +43,21 @@ export function SkillDetailPage() {
   const [name, setName] = useState("");
   const [meta, setMeta] = useState<DetailMeta | null>(null);
   const [content, setContent] = useState("");
+  const [savedContent, setSavedContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   /** Vino de un repositorio: guardarle encima sería escribir en algo que la app pisa al
    *  reinstalar, así que acá solo se puede guardar una copia propia. */
   const fromRegistry = meta?.registryName != null;
+  const dirty = content !== savedContent || name !== savedName;
 
   const load = (skillId: string) =>
     getSkillDetail(skillId).then((detail) => {
       setSavedName(detail.name);
       setName(detail.name);
       setContent(detail.content);
+      setSavedContent(detail.content);
       setMeta({
         version: detail.version,
         categories: detail.categories,
@@ -100,129 +113,144 @@ export function SkillDetailPage() {
 
   if (loading) {
     return (
-      <main className="min-h-full flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+      <div className="flex h-full items-center justify-center">
         <Loading />
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="min-h-full px-6 py-10 bg-gray-50 dark:bg-gray-950">
-      <div className="max-w-3xl mx-auto">
-        <PageHeader icon={<StackIcon className="w-5 h-5" />} title={savedName} />
+    <div className="flex flex-col h-full min-h-0">
 
-        {meta && (
-          <div className="flex flex-wrap items-center gap-2 mb-4 text-xs">
-            <span className="px-2 py-1 rounded bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 font-mono">
-              v{meta.version}
-            </span>
-            <span
-              className={`flex items-center gap-1 px-2 py-1 rounded-full
-              ${
-                meta.registryName
-                  ? "bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400"
-                  : "bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400"
-              }`}
-            >
-              {meta.registryName ? (
-                <CloudIcon className="w-3 h-3" />
-              ) : (
-                <FolderIcon className="w-3 h-3" />
-              )}
-              {meta.registryName ?? t("skills.list.localOrigin")}
-            </span>
-            {meta.author && (
-              <span className="px-2 py-1 rounded-full bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                {meta.author}
-              </span>
-            )}
-            {meta.categories.map((c) => (
-              <span
-                key={c}
-                className="px-2 py-1 rounded-full bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400"
-              >
-                {c}
-              </span>
-            ))}
-            {meta.compatibleAgents.map((a) => (
-              <span
-                key={a}
-                className="px-2 py-1 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-              >
-                {a}
-              </span>
-            ))}
-            {meta.license && (
-              <span className="text-gray-400 dark:text-gray-500">{meta.license}</span>
-            )}
-            {meta.homepage && (
-              <a
-                href={meta.homepage}
-                target="_blank"
-                rel="noreferrer"
-                className="text-blue-500 hover:underline truncate"
-              >
-                {meta.homepage}
-              </a>
-            )}
-          </div>
-        )}
-
-        {/* Se dice ANTES de escribir, no al guardar: enterarte de que tus cambios van a
-            otra skill recién cuando apretás el botón es enterarte tarde. */}
-        {fromRegistry && (
-          <div
-            className="flex items-start gap-2 mb-4 px-3 py-2 rounded-lg text-xs
-              bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300"
+      {/* ══ encabezado: volver + el nombre, editable en su sitio ══════════ */}
+      <div className="flex items-center gap-3 h-[54px] shrink-0 pl-4 pr-14
+        border-b border-gray-200 dark:border-white/8">
+        <Tooltip content={t("skills.detail.back")} placement="bottom">
+          <button
+            onClick={() => navigate("/skills")}
+            aria-label={t("skills.detail.back")}
+            className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
+              text-gray-400 dark:text-white/35
+              hover:text-gray-700 dark:hover:text-white
+              hover:bg-gray-200 dark:hover:bg-white/10"
           >
-            <InfoIcon className="w-4 h-4 mt-0.5 shrink-0" />
-            <p>{t("skills.detail.fromRegistryNote", { registry: meta?.registryName })}</p>
-          </div>
-        )}
-
-        <div className="mb-3">
-          <Input
-            label={t("skills.detail.name")}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            variant="outline"
-          />
-        </div>
-
-        <TextArea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          variant="outline"
-          autoResize
-          showCount
-          className="font-mono text-sm min-h-[50vh]"
+            <ArrowLeftIcon className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
+        <StackIcon className="w-[15px] h-[15px] shrink-0 text-violet-500 dark:text-violet-400" />
+        {/* El nombre se edita donde se lee: un campo aparte repetiría el título dos veces
+            en la misma pantalla. */}
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          aria-label={t("skills.detail.name")}
+          className="flex-1 min-w-0 bg-transparent outline-none text-[13.5px] font-bold
+            text-gray-900 dark:text-white
+            border-b border-transparent focus:border-blue-400"
         />
+        {dirty && (
+          <span className="shrink-0 text-[10px] text-amber-600 dark:text-amber-400">
+            {t("skills.detail.unsaved")}
+          </span>
+        )}
+      </div>
 
-        {error && <p className="text-sm text-red-500 dark:text-red-400 mt-3">{error}</p>}
-
-        <div className="flex justify-end gap-2 mt-4">
-          {/* Para una skill propia el usuario elige: guardar encima o sacar una copia y
-              seguir por ahí. Para una de repositorio solo existe la copia. */}
-          {!fromRegistry && (
-            <Button
-              variant="primary"
-              disabled={saving}
-              onClick={save}
-              leftIcon={saving ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
-            >
-              {t("skills.detail.save")}
-            </Button>
+      {/* ══ la ficha ══════════════════════════════════════════════════════ */}
+      {meta && (
+        <div className="flex flex-wrap items-center gap-1.5 shrink-0 px-4 py-1.5
+          border-b border-gray-200 dark:border-white/8
+          bg-gray-100/40 dark:bg-white/2">
+          <span className="font-mono text-[10px] text-gray-400 dark:text-white/35">
+            v{meta.version}
+          </span>
+          <span className={`flex items-center gap-1 shrink-0 px-1.5 rounded-full text-[9.5px]
+            ${meta.registryName
+              ? "bg-violet-500/12 text-violet-600 dark:text-violet-400"
+              : "bg-gray-200/70 dark:bg-white/10 text-gray-500 dark:text-white/40"}`}>
+            {meta.registryName
+              ? <CloudIcon className="w-2.5 h-2.5" />
+              : <FolderIcon className="w-2.5 h-2.5" />}
+            {meta.registryName ?? t("skills.list.localOrigin")}
+          </span>
+          {meta.author && <Badge variant="info" size="sm">{meta.author}</Badge>}
+          {meta.categories.map((c) => (
+            <Badge key={c} variant="neutral" size="sm">{c}</Badge>
+          ))}
+          {meta.compatibleAgents.map((a) => (
+            <Badge key={a} variant="success" size="sm">{a}</Badge>
+          ))}
+          <div className="flex-1" />
+          {meta.license && (
+            <span className="text-[10px] text-gray-400 dark:text-white/30">{meta.license}</span>
           )}
+          {meta.homepage && (
+            <a
+              href={meta.homepage}
+              target="_blank"
+              rel="noreferrer"
+              className="max-w-[14rem] truncate text-[10px] text-blue-500 dark:text-blue-400 hover:underline"
+            >
+              {meta.homepage}
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* Se dice ANTES de escribir, no al guardar: enterarte de que tus cambios van a
+          otra skill recién cuando apretás el botón es enterarte tarde. */}
+      {fromRegistry && (
+        <div className="flex items-start gap-2 shrink-0 px-4 py-2
+          border-b border-amber-200/70 dark:border-amber-500/15
+          bg-amber-50 dark:bg-amber-500/8
+          text-[11px] text-amber-700 dark:text-amber-300/90">
+          <InfoIcon className="w-3.5 h-3.5 mt-px shrink-0" />
+          <p>{t("skills.detail.fromRegistryNote", { registry: meta?.registryName })}</p>
+        </div>
+      )}
+
+      {/* ══ el SKILL.md ═══════════════════════════════════════════════════ */}
+      <textarea
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        spellCheck={false}
+        className="flex-1 min-h-0 w-full resize-none cc-scroll px-4 py-3
+          bg-transparent outline-none
+          font-mono text-[12.5px] leading-relaxed
+          text-gray-800 dark:text-gray-200"
+      />
+
+      {error && <div className="shrink-0 px-4 pb-2"><Alert variant="danger">{error}</Alert></div>}
+
+      <div className="flex items-center gap-2 h-[42px] shrink-0 px-4
+        border-t border-gray-200 dark:border-white/8
+        bg-gray-100/60 dark:bg-black/20">
+        <span className="flex-1 min-w-0 truncate text-[10.5px] tabular-nums
+          text-gray-400 dark:text-white/35">
+          {t("skills.detail.chars", { n: content.length })}
+        </span>
+        {/* Para una skill propia el usuario elige: guardar encima o sacar una copia y
+            seguir por ahí. Para una de repositorio solo existe la copia. */}
+        {!fromRegistry && (
           <Button
-            variant={fromRegistry ? "primary" : "outline"}
+            variant="primary"
+            size="sm"
             disabled={saving}
-            onClick={saveAsCopy}
+            onClick={save}
             leftIcon={saving ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
           >
-            {t("skills.detail.saveAsCopy")}
+            {t("skills.detail.save")}
           </Button>
-        </div>
+        )}
+        <Button
+          variant={fromRegistry ? "primary" : "outline"}
+          size="sm"
+          disabled={saving}
+          onClick={saveAsCopy}
+          leftIcon={saving ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
+        >
+          {t("skills.detail.saveAsCopy")}
+        </Button>
       </div>
-    </main>
+    </div>
   );
 }

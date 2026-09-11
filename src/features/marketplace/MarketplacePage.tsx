@@ -8,7 +8,7 @@ import { Markdown } from "@/shared/ui/Markdown";
 import { SkillResultRow } from "./SkillResultRow";
 import { useSkillReadme } from "./useSkillReadme";
 import { flatOrder, groupByRegistry, keyOf } from "./palette";
-import { moveSelection, reconcileSelection } from "@/shared/ui/paletteNav";
+import { moveSelection, reconcileSelection, useSelectionVisible } from "@/shared/ui/paletteNav";
 import { RegistryFilterSidebar, type RegistryFilter } from "./RegistryFilterSidebar";
 
 export function MarketplacePage() {
@@ -127,6 +127,7 @@ export function MarketplacePage() {
     [order, selectedKey]
   );
 
+  const selectedRef = useSelectionVisible<HTMLDivElement>(selectedKey);
   const readme = useSkillReadme(selected?.registryId ?? null, selected?.id ?? null);
   const sourceTypeOf = useCallback(
     (registryId: string) => registries.find((r) => r.id === registryId)?.sourceType,
@@ -153,21 +154,19 @@ export function MarketplacePage() {
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="shrink-0 p-3 pr-0">
-        <RegistryFilterSidebar
-          registries={registries}
-          selected={selectedRegistry}
-          onSelect={setSelectedRegistry}
-          countByRegistry={countByRegistry}
-          totalCount={skills.length}
-          refreshingId={refreshingId}
-          onRefresh={handleRefresh}
-        />
-      </div>
+      <RegistryFilterSidebar
+        registries={registries}
+        selected={selectedRegistry}
+        onSelect={setSelectedRegistry}
+        countByRegistry={countByRegistry}
+        totalCount={skills.length}
+        refreshingId={refreshingId}
+        onRefresh={handleRefresh}
+      />
 
       {/* ══ la lista ══════════════════════════════════════════════════════ */}
       <div className="flex flex-col flex-1 min-w-0 min-h-0">
-        <div className="flex items-center gap-3 h-[54px] shrink-0 px-4
+        <div className="flex items-center gap-3 h-[54px] shrink-0 pl-4 pr-14
           border-b border-gray-200 dark:border-white/8">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
@@ -222,6 +221,7 @@ export function MarketplacePage() {
                     skill={skill}
                     sourceType={sourceTypeOf(skill.registryId)}
                     selected={keyOf(skill) === selectedKey}
+                    rowRef={keyOf(skill) === selectedKey ? selectedRef : undefined}
                     installed={isInstalled(skill)}
                     installing={installingKey === `${skill.registryId}:${skill.id}`}
                     onSelect={() => setSelectedKey(keyOf(skill))}

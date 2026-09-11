@@ -6,6 +6,7 @@
  * necesitan es que el orden de las claves sea el mismo en el que se dibujan las filas —
  * incluidos los saltos entre grupos, que a la flecha abajo le tienen que dar igual.
  */
+import { useEffect, useRef, type RefObject } from "react";
 
 /**
  * La clave a marcar al mover la selección.
@@ -32,4 +33,33 @@ export function reconcileSelection(keys: string[], current: string | null): stri
   if (keys.length === 0) return null;
   if (current !== null && keys.includes(current)) return current;
   return keys[0];
+}
+
+/**
+ * Mantiene a la vista lo que está marcado.
+ *
+ * Sin esto, bajar con las flechas más allá del borde del contenedor deja la selección
+ * fuera de pantalla: se sigue moviendo, pero a ciegas, y Enter actúa sobre algo que no se
+ * ve. El `ref` se le pone SOLO a la fila marcada, así que en cada momento hay uno solo.
+ *
+ * Dos decisiones que importan:
+ *
+ * - `block: "nearest"` desplaza lo mínimo. Con `"center"` la lista salta en cada flecha
+ *   aunque la fila siguiente ya estuviera perfectamente visible.
+ * - Sin `behavior: "smooth"`: manteniendo la flecha apretada, la animación no llega a
+ *   terminar antes de la próxima tecla y el scroll queda arrastrándose detrás de la
+ *   selección. Instantáneo es lo que se siente preciso.
+ *
+ * El foco del teclado NO se mueve: se queda en el buscador, que es lo que permite seguir
+ * escribiendo mientras se recorre el resultado.
+ */
+export function useSelectionVisible<T extends HTMLElement>(
+  selectedKey: string | null
+): RefObject<T | null> {
+  const ref = useRef<T | null>(null);
+  useEffect(() => {
+    if (selectedKey === null) return;
+    ref.current?.scrollIntoView({ block: "nearest" });
+  }, [selectedKey]);
+  return ref;
 }

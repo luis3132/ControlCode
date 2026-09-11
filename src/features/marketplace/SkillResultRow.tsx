@@ -5,11 +5,13 @@ import type { MarketplaceSkillEntry, RegistrySourceType } from "./types";
 
 /** Una fila de resultado de la búsqueda, al estilo de una paleta de comandos. */
 export function SkillResultRow({
-  skill, sourceType, selected, installed, installing, onSelect, onInstall,
+  skill, sourceType, selected, rowRef, installed, installing, onSelect, onInstall,
 }: {
   skill: MarketplaceSkillEntry;
   sourceType: RegistrySourceType | undefined;
   selected: boolean;
+  /** Solo lo recibe la fila MARCADA, para poder traerla a la vista con las flechas. */
+  rowRef?: React.RefObject<HTMLDivElement | null>;
   installed: boolean;
   installing: boolean;
   onSelect: () => void;
@@ -20,6 +22,7 @@ export function SkillResultRow({
 
   return (
     <div
+      ref={rowRef}
       onClick={onSelect}
       onDoubleClick={() => { if (!installed && !installing) onInstall(); }}
       className={`cc-t flex items-center gap-3 h-[42px] mx-1.5 px-2.5 rounded-lg cursor-pointer

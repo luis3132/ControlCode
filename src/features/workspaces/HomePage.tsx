@@ -91,7 +91,7 @@ export function HomePage() {
   };
 
   return (
-    <div className="flex flex-col items-center min-h-full px-6 py-12
+    <div className="cc-scroll flex flex-col items-center h-full px-6 py-12
       bg-gray-50 dark:bg-gray-950">
 
       <div className="w-full max-w-xl flex flex-col gap-8">

@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Badge, Button, Tooltip, AlertaToast, AlertaConfirmacion } from "neogestify-ui-components";
 import {
-  FolderIcon,
+  AlertaConfirmacion,
+  AlertaToast,
   ArrowRightIcon,
-  TrashIcon,
-  DocumentIcon,
+  Badge,
   ChevronDownIcon,
+  DocumentIcon,
   StackIcon,
+  Tooltip,
+  TrashIcon,
 } from "neogestify-ui-components";
+
 import { useSessionsStore } from "@/features/sessions/store";
 import type { SessionHistoryEntry } from "@/features/sessions/types";
 import { useAccountsStore } from "@/features/accounts/store";
@@ -48,15 +51,49 @@ function suggestedFileName(entry: SessionHistoryEntry): string {
   return `${base || "sesion"}-${date}.md`;
 }
 
+/** Botón de acción de la fila: aparece con el hover o con la fila marcada. */
+function RowAction({ label, onClick, danger, disabled, children }: {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip content={label} placement="bottom">
+      <button
+        onClick={(e) => { e.stopPropagation(); onClick(); }}
+        disabled={disabled}
+        aria-label={label}
+        className={`cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
+          text-gray-400 dark:text-white/35
+          hover:bg-gray-200 dark:hover:bg-white/10
+          disabled:opacity-40 disabled:hover:bg-transparent
+          ${danger
+            ? "hover:text-red-500 dark:hover:text-red-400"
+            : "hover:text-gray-700 dark:hover:text-white"}`}
+      >
+        {children}
+      </button>
+    </Tooltip>
+  );
+}
+
 interface SessionRowProps {
   entry: SessionHistoryEntry;
   workspaceId: string;
+  selected: boolean;
+  /** Solo lo recibe la fila MARCADA, para poder traerla a la vista con las flechas. */
+  rowRef?: React.RefObject<HTMLDivElement | null>;
+  onSelect: () => void;
   onResume: (entry: SessionHistoryEntry) => void;
   /** Reabrir eligiendo antes con qué skills montar la TUI. */
   onResumeWithSkills: (entry: SessionHistoryEntry) => void;
 }
 
-export function SessionRow({ entry, workspaceId, onResume, onResumeWithSkills }: SessionRowProps) {
+export function SessionRow({
+  entry, workspaceId, selected, rowRef, onSelect, onResume, onResumeWithSkills,
+}: SessionRowProps) {
   const { t } = useTranslation();
   const deleteSession = useSessionsStore((s) => s.deleteSession);
   const exportSession = useSessionsStore((s) => s.exportSession);
@@ -106,146 +143,123 @@ export function SessionRow({ entry, workspaceId, onResume, onResumeWithSkills }:
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-700
-      bg-white dark:bg-gray-800/50
-      hover:border-gray-300 dark:hover:border-gray-600
-      transition-colors">
-
-      <div className="flex items-center gap-3 px-4 py-3">
-        <span className="shrink-0 flex items-center justify-center w-8 h-8 rounded-lg
+    <div className="mx-1.5">
+      <div
+        ref={rowRef}
+        onClick={onSelect}
+        onDoubleClick={() => onResume(entry)}
+        className={`cc-t group flex items-center gap-2.5 h-[42px] px-2.5 rounded-lg cursor-pointer
+          ${selected
+            ? "bg-blue-500/12 dark:bg-blue-400/13 shadow-[inset_0_0_0_1px_rgba(88,166,255,0.24)]"
+            : "hover:bg-gray-100 dark:hover:bg-white/5"}`}
+      >
+        <span className="flex items-center justify-center w-6 h-6 rounded-md shrink-0
           bg-gray-100 dark:bg-white/8 text-gray-500 dark:text-gray-400">
-          <AgentIcon className="w-4 h-4" />
+          <AgentIcon className="w-3.5 h-3.5" />
         </span>
 
-        <div className="flex flex-col min-w-0 gap-1 flex-1">
-          <span className="flex items-center gap-2 text-sm font-semibold
-            text-gray-800 dark:text-gray-100 truncate">
-            {entry.title ?? entry.agentLabel}
-            <Badge variant="neutral" size="sm" className="shrink-0">
-              {entry.agentLabel}
-            </Badge>
+        <span className="flex flex-col gap-0.5 min-w-0 flex-1">
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="truncate text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">
+              {entry.title ?? entry.agentLabel}
+            </span>
             {/* Solo si NO es la cuenta principal: marcar lo habitual sería ruido en todas
                 las filas de todos los que nunca crearon una cuenta. */}
             {entry.accountId && accountsLoaded && (
               <Tooltip content={account?.label ?? ""} placement="bottom">
-                <Badge
-                  variant={account ? "accent" : "warning"}
-                  size="sm"
-                  dot
-                  className="shrink-0"
-                >
+                <Badge variant={account ? "accent" : "warning"} size="sm" dot className="shrink-0">
                   {account ? account.name : t("sessions.account.gone")}
                 </Badge>
               </Tooltip>
             )}
           </span>
-          <span className="flex items-center gap-1 text-xs truncate font-mono
-            text-gray-400 dark:text-gray-500">
-            <FolderIcon className="w-3 h-3 shrink-0" />
-            {entry.cwd}
-          </span>
-          <span className="text-[11px] text-gray-400 dark:text-gray-500">
-            {t("sessions.opened", { time: formatDateTime(entry.openedAt) })}
-            {" · "}
-            {t("sessions.closed", { time: formatRelative(entry.closedAt) })}
-          </span>
-
-          {entry.skills.length > 0 && (
-            <span className="flex flex-wrap gap-1 mt-0.5">
-              {entry.skills.map((s) => (
-                <Tooltip
-                  key={s.name}
-                  content={t("sessions.skillScope", { scope: s.scope })}
-                  placement="bottom"
-                >
-                  <Badge variant="info" size="sm" pill>{s.name}</Badge>
-                </Tooltip>
-              ))}
+          <span className="flex items-center gap-1.5 min-w-0 text-[10.5px]
+            text-gray-400 dark:text-white/35">
+            <span className="shrink-0 font-mono">{entry.agentLabel}</span>
+            {entry.skills.length > 0 && (
+              <>
+                <span className="shrink-0 opacity-50">·</span>
+                <span className="shrink-0">
+                  {t("sessions.skillCount", { n: entry.skills.length })}
+                </span>
+              </>
+            )}
+            <span className="shrink-0 opacity-50">·</span>
+            <span className="truncate" title={formatDateTime(entry.openedAt)}>
+              {t("sessions.closed", { time: formatRelative(entry.closedAt) })}
             </span>
-          )}
-        </div>
+          </span>
+        </span>
 
-        <div className="flex items-center gap-1 shrink-0">
+        {/* Las acciones aparecen con el hover o con la fila marcada: cinco iconos por fila
+            en una lista larga son más ruido que ayuda cuando no estás mirando esa fila. */}
+        <span className={`cc-t flex items-center gap-0.5 shrink-0
+          ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
           {hasDetail && (
-            <Button
-              variant="icon"
+            <RowAction
+              label={t("sessions.detail.toggle")}
               onClick={() => setExpanded((v) => !v)}
-              title={t("sessions.detail.toggle")}
             >
               <ChevronDownIcon
-                className={`w-4 h-4 transition-transform duration-200 ${expanded ? "" : "-rotate-90"}`}
+                className={`w-3.5 h-3.5 transition-transform duration-150 ${expanded ? "" : "-rotate-90"}`}
               />
-            </Button>
+            </RowAction>
           )}
-          <Button variant="icon" disabled={busy} onClick={handleExport} title={t("sessions.export.action")}>
-            <DocumentIcon className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="icon"
-            disabled={busy}
-            onClick={handleDelete}
-            title={t("sessions.delete.action")}
-            className="hover:text-red-500! dark:hover:text-red-400!"
-          >
-            <TrashIcon className="w-4 h-4" />
-          </Button>
+          <RowAction label={t("sessions.export.action")} onClick={handleExport} disabled={busy}>
+            <DocumentIcon className="w-3.5 h-3.5" />
+          </RowAction>
+          <RowAction label={t("sessions.delete.action")} onClick={handleDelete} disabled={busy} danger>
+            <TrashIcon className="w-3.5 h-3.5" />
+          </RowAction>
           {/* Reanudar ajustando las skills. Va pegado al de reanudar porque son la misma
               acción con distinto grado de control, no dos cosas distintas. */}
-          <Button
-            variant="icon"
-            onClick={() => onResumeWithSkills(entry)}
-            title={t("sessions.resumeWithSkills")}
-          >
-            <StackIcon className="w-4 h-4" />
-          </Button>
-          <Button variant="icon" onClick={() => onResume(entry)} title={t("sessions.resume")}>
-            <ArrowRightIcon className="w-4 h-4" />
-          </Button>
-        </div>
+          <RowAction label={t("sessions.resumeWithSkills")} onClick={() => onResumeWithSkills(entry)}>
+            <StackIcon className="w-3.5 h-3.5" />
+          </RowAction>
+          <RowAction label={t("sessions.resume")} onClick={() => onResume(entry)}>
+            <ArrowRightIcon className="w-3.5 h-3.5" />
+          </RowAction>
+        </span>
       </div>
 
       {/* Con qué configuración se estaba trabajando: las skills activas y las otras tabs
           que estaban abiertas en el workspace cuando esta sesión se cerró. */}
       {expanded && hasDetail && (
-        <div className="px-4 pb-3 pt-1 ml-11 flex flex-col gap-3
-          border-t border-gray-100 dark:border-white/5">
+        <div className="cc-fade flex flex-col gap-2.5 ml-8 mr-2.5 mt-0.5 mb-1.5 pl-3 py-2
+          border-l border-gray-200 dark:border-white/8">
 
           {entry.skills.length > 0 && (
-            <div className="flex flex-col gap-1 mt-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wide
-                text-gray-400 dark:text-gray-500">
+            <div className="flex flex-col gap-1">
+              <span className="text-[9.5px] font-extrabold uppercase tracking-[0.11em]
+                text-gray-400 dark:text-white/30">
                 {t("sessions.detail.skills")}
               </span>
-              <ul className="flex flex-col gap-0.5">
-                {entry.skills.map((s) => (
-                  <li key={s.name} className="text-xs text-gray-600 dark:text-gray-300">
-                    {s.name}
-                    <span className="text-gray-400 dark:text-gray-500">
-                      {" — "}{t("sessions.skillScope", { scope: s.scope })}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              {entry.skills.map((s) => (
+                <span key={s.name} className="text-[11.5px] text-gray-600 dark:text-gray-400">
+                  {s.name}
+                  <span className="text-gray-400 dark:text-white/30">
+                    {" — "}{t("sessions.skillScope", { scope: s.scope })}
+                  </span>
+                </span>
+              ))}
             </div>
           )}
 
           {entry.siblingTabs.length > 0 && (
             <div className="flex flex-col gap-1">
-              <span className="flex items-center gap-1.5 text-[11px] font-semibold
-                uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                <StackIcon className="w-3 h-3" />
+              <span className="text-[9.5px] font-extrabold uppercase tracking-[0.11em]
+                text-gray-400 dark:text-white/30">
                 {t("sessions.detail.siblings")}
               </span>
-              <ul className="flex flex-col gap-0.5">
-                {entry.siblingTabs.map((s, i) => (
-                  <li key={`${s.cwd}-${i}`} className="text-xs text-gray-600 dark:text-gray-300 truncate">
-                    {s.title ?? s.agentLabel}
-                    <span className="font-mono text-gray-400 dark:text-gray-500">
-                      {" — "}{s.cwd}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              {entry.siblingTabs.map((s, i) => (
+                <span key={`${s.cwd}-${i}`} className="truncate text-[11.5px]
+                  text-gray-600 dark:text-gray-400">
+                  {s.title ?? s.agentLabel}
+                  <span className="font-mono text-gray-400 dark:text-white/30">
+                    {" — "}{s.cwd}
+                  </span>
+                </span>
+              ))}
             </div>
           )}
         </div>
