@@ -103,11 +103,22 @@ export interface Meter {
   resets: string | null;
 }
 
+/** La semana de un modelo concreto, cuando el plan lo mide aparte. */
+export interface ModelMeter {
+  model: string;
+  meter: Meter;
+}
+
 export interface LiveUsage {
   /** `false` = no se pudo preguntar; `problem` dice por qué. */
   available: boolean;
   session: Meter | null;
   week: Meter | null;
+  weekModels: ModelMeter[];
+  /** Cuándo se preguntó de verdad (epoch en segundos). */
+  fetchedAt: number;
+  /** `true` = salió de la caché, no se volvió a levantar la TUI. */
+  cached: boolean;
   problem: string | null;
 }
 
@@ -121,5 +132,23 @@ export interface LiveUsage {
  * `cwd` tiene que ser una carpeta que la TUI ya considere de confianza: si no, se queda
  * esperando una confirmación que nadie puede darle desde acá.
  */
-export const claudeLiveUsage = (cwd: string, env: Record<string, string>) =>
-  invoke<LiveUsage>("claude_live_usage", { cwd, env });
+export const claudeLiveUsage = (
+  accountKey: string,
+  cwd: string,
+  env: Record<string, string>,
+  force = false
+) => invoke<LiveUsage>("claude_live_usage", { accountKey, cwd, env, force });
+
+/**
+ * La antigüedad de lo que se está mostrando, en piezas.
+ *
+ * Devuelve unidad y número en vez de texto armado: el texto lo pone i18n. Una función que
+ * devuelve "hace 2 min" está escribiendo español a mano dentro de la lógica, y en inglés
+ * se ve exactamente igual de mal.
+ */
+export function formatAgo(seconds: number): { unit: "now" | "min" | "h"; value: number } {
+  if (seconds < 45) return { unit: "now", value: 0 };
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return { unit: "min", value: mins };
+  return { unit: "h", value: Math.round(mins / 60) };
+}

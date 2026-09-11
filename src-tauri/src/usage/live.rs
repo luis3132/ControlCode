@@ -10,7 +10,9 @@
 //! parseo deja de encontrar los números. Por eso devuelve `available: false` en vez de
 //! ceros, y por eso el parser vive separado y con los tests hechos sobre una captura real.
 
+use std::collections::HashMap;
 use std::io::Read;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -25,6 +27,27 @@ const TIMEOUT: Duration = Duration::from_secs(25);
 /// el `/usage` se escribe mientras todavía está montando la pantalla, y se pierde.
 const SETTLE: Duration = Duration::from_millis(2500);
 
+/// Cuánto vale una respuesta antes de volver a preguntar.
+///
+/// Preguntar cuesta levantar la TUI entera: son segundos, y con el usuario esperando. Cinco
+/// minutos es corto para que el número siga siendo representativo y largo para que abrir y
+/// cerrar el panel tres veces seguidas no levante tres procesos.
+const TTL: i64 = 5 * 60;
+
+/// Lo último que respondió cada cuenta. Vive en el backend y no en la ventana: así dos
+/// ventanas abiertas comparten la misma respuesta en vez de preguntar cada una por su lado.
+static CACHE: LazyLock<Mutex<HashMap<String, LiveUsage>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// ¿Sigue sirviendo lo que se guardó?
+///
+/// Un reloj que se corrió hacia atrás (NTP, volver de suspensión) daría una diferencia
+/// negativa; eso se trata como vencido en vez de dejar la entrada viva para siempre.
+pub(super) fn is_fresh(fetched_at: i64, now: i64, ttl: i64) -> bool {
+    let age = now - fetched_at;
+    (0..ttl).contains(&age)
+}
+
 /// Una de las barras del panel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +56,14 @@ pub struct Meter {
     pub percent: u8,
     /// Cuándo se reinicia, con el texto que muestra la TUI (incluye su zona horaria).
     pub resets: Option<String>,
+}
+
+/// La semana de un modelo concreto, cuando el plan lo mide aparte.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelMeter {
+    pub model: String,
+    pub meter: Meter,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -45,6 +76,13 @@ pub struct LiveUsage {
     pub session: Option<Meter>,
     /// La semana, sumando todos los modelos.
     pub week: Option<Meter>,
+    /// Las semanas que el plan mide por modelo (Fable, por ejemplo).
+    pub week_models: Vec<ModelMeter>,
+    /// Cuándo se preguntó de verdad, en epoch de segundos. Es lo que le permite a la UI
+    /// decir "actualizado hace tanto" en vez de dar a entender que el dato es de ahora.
+    pub fetched_at: i64,
+    /// `true` = salió de la caché, no se volvió a preguntar.
+    pub cached: bool,
     /// Por qué no se pudo, para poder decirlo en vez de mostrar un panel vacío.
     pub problem: Option<String>,
 }
@@ -136,9 +174,23 @@ fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Result<String,
 /// El consumo del plan de una cuenta, preguntado en vivo.
 #[tauri::command]
 pub async fn claude_live_usage(
+    // `account_key`: con qué cuenta se preguntó. Es la clave de la caché.
+    account_key: String,
     cwd: String,
-    env: std::collections::HashMap<String, String>,
+    env: HashMap<String, String>,
+    // `force`: volver a preguntar aunque haya algo guardado. Es el botón de refrescar.
+    force: bool,
 ) -> Result<LiveUsage, String> {
+    if !force {
+        if let Ok(cache) = CACHE.lock() {
+            if let Some(hit) = cache.get(&account_key) {
+                if is_fresh(hit.fetched_at, crate::util::now_ts(), TTL) {
+                    return Ok(LiveUsage { cached: true, ..hit.clone() });
+                }
+            }
+        }
+    }
+
     let Some(command) = crate::agents::agent_command("claude-code") else {
         return Ok(LiveUsage::failed("No se conoce el comando de Claude Code"));
     };
@@ -147,10 +199,21 @@ pub async fn claude_live_usage(
     }
 
     let env: Vec<(String, String)> = env.into_iter().collect();
-    tauri::async_runtime::spawn_blocking(move || match capture(command, &cwd, &env) {
+    let fresh = tauri::async_runtime::spawn_blocking(move || match capture(command, &cwd, &env) {
         Ok(screen) => parse_usage_screen(&screen),
         Err(problem) => LiveUsage::failed(problem),
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    let fresh = LiveUsage { fetched_at: crate::util::now_ts(), cached: false, ..fresh };
+
+    // Un fallo NO se guarda: puede ser pasajero (la TUI todavía no estaba, la carpeta se
+    // acaba de confiar), y cachearlo dejaría el panel roto cinco minutos sin motivo.
+    if fresh.available {
+        if let Ok(mut cache) = CACHE.lock() {
+            cache.insert(account_key, fresh.clone());
+        }
+    }
+    Ok(fresh)
 }

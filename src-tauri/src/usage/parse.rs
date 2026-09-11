@@ -11,7 +11,7 @@
 //! alineado dejan de importar, que es justo lo que hace falta cuando el formato lo decide
 //! otro programa.
 
-use super::live::{LiveUsage, Meter};
+use super::live::{LiveUsage, Meter, ModelMeter};
 
 /// Hasta dónde se busca el porcentaje después de su rótulo. Suficiente para cruzar la
 /// barra y su relleno, corto como para no robarle el número a la sección siguiente.
@@ -111,7 +111,44 @@ fn meter_after(text: &str, marker: &str) -> Option<Meter> {
     Some(Meter { percent, resets: resets_in(&segment[offset..]) })
 }
 
-/// Lee el panel: la ventana en curso y la semana. Nada más.
+/// El modelo de un rótulo `Current week (Fable)`. `all models` no es un modelo.
+fn model_of(text: &str, at: usize) -> Option<String> {
+    let rest = &text[at..];
+    let open = rest.find('(')?;
+    let close = rest[open..].find(')')? + open;
+    // Un paréntesis que aparece mucho después no es el de este rótulo.
+    if open > 20 {
+        return None;
+    }
+    let inside = rest[open + 1..close].trim();
+    (!inside.is_empty() && !inside.eq_ignore_ascii_case("all models"))
+        .then(|| inside.to_string())
+}
+
+/// Las semanas por modelo, cuando el plan las mide aparte.
+///
+/// Se recorren todas las apariciones y gana la última de cada modelo: la TUI repinta el
+/// panel mientras lo abre, y la pintada final es la única completa.
+fn week_models(text: &str) -> Vec<ModelMeter> {
+    let mut found: Vec<ModelMeter> = Vec::new();
+
+    for (at, _) in text.match_indices("Current week") {
+        let Some(model) = model_of(text, at) else { continue };
+        let after = at + "Current week".len();
+        let end = (after + REACH).min(text.len());
+        let Some(end) = (after..=end).rev().find(|i| text.is_char_boundary(*i)) else { continue };
+        let Some((percent, offset)) = percent_in(&text[after..end]) else { continue };
+
+        let meter = Meter { percent, resets: resets_in(&text[after + offset..end]) };
+        match found.iter_mut().find(|m| m.model == model) {
+            Some(existing) => existing.meter = meter,
+            None => found.push(ModelMeter { model, meter }),
+        }
+    }
+    found
+}
+
+/// Lee el panel: la ventana en curso, la semana, y las semanas por modelo.
 pub(super) fn parse_usage_screen(raw: &str) -> LiveUsage {
     let clean = strip_ansi(raw);
 
@@ -121,11 +158,15 @@ pub(super) fn parse_usage_screen(raw: &str) -> LiveUsage {
     let week = meter_after(&clean, "Current week (all models)")
         .or_else(|| meter_after(&clean, "Current week"));
 
+    let models = week_models(&clean);
+
     let available = session.is_some() || week.is_some();
     LiveUsage {
         available,
         session,
         week,
+        week_models: models,
         problem: (!available).then(|| "No se encontró el panel de consumo en la salida".to_string()),
+        ..Default::default()
     }
 }

@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Badge, Progress, Skeleton } from "neogestify-ui-components";
+import { RefreshIcon } from "@/app/icons";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import {
-  WINDOW_SECS, agentAccountUsage, claudeLiveUsage, formatRemaining, formatTokens, planLabel,
-  totalOf, type AccountUsage, type LiveUsage,
+  WINDOW_SECS, agentAccountUsage, claudeLiveUsage, formatAgo, formatRemaining, formatTokens,
+  planLabel, totalOf, type AccountUsage, type LiveUsage,
 } from "./usage";
 import { accountEnv } from "./ipc";
 import type { AgentAccount } from "./types";
@@ -46,6 +47,8 @@ export function AccountUsagePopover({ account, cwd }: {
   const [failed, setFailed] = useState(false);
   const [live, setLive] = useState<LiveUsage | null>(null);
   const [asking, setAsking] = useState(false);
+  /** Sube al apretar refrescar: obliga a preguntar de nuevo en vez de releer la caché. */
+  const [reload, setReload] = useState(0);
   const Icon = agentIcon(account.agentId, account.agentId);
 
   useEffect(() => {
@@ -68,15 +71,16 @@ export function AccountUsagePopover({ account, cwd }: {
 
     const vars = realAccountId(account) ? accountEnv(account.id) : Promise.resolve({});
     vars
-      .then((env) => claudeLiveUsage(cwd, env))
+      .then((env) => claudeLiveUsage(account.id, cwd, env, reload > 0))
       .then((l) => { if (!stale) setLive(l); })
       .catch((e) => { if (!stale) setLive({
-        available: false, session: null, week: null, problem: String(e),
+        available: false, session: null, week: null, weekModels: [],
+        fetchedAt: 0, cached: false, problem: String(e),
       }); })
       .finally(() => { if (!stale) setAsking(false); });
 
     return () => { stale = true; };
-  }, [account, cwd]);
+  }, [account, cwd, reload]);
 
   const week = usage?.windows.find((w) => w.key === "7d");
   const reference = week ? totalOf(week) : 0;
@@ -159,6 +163,42 @@ export function AccountUsagePopover({ account, cwd }: {
                   }
                 />
               )}
+              {live.weekModels.map(({ model, meter }) => (
+                <Progress
+                  key={model}
+                  value={meter.percent}
+                  max={100}
+                  size="xs"
+                  showValue
+                  variant={meter.percent >= 80 ? "warning" : "info"}
+                  label={
+                    <span className="text-[10.5px] text-gray-500 dark:text-gray-400">
+                      {t("accounts.plan.weekModel", { model })}
+                    </span>
+                  }
+                />
+              ))}
+
+              {/* Cuándo se preguntó de verdad. Sin esto, un número de hace cinco minutos
+                  se lee como si fuera de ahora mismo. */}
+              <div className="flex items-center gap-2 pt-0.5">
+                <span className="flex-1 text-[10px] text-gray-400 dark:text-white/30">
+                  {(() => {
+                    const ago = formatAgo(now - live.fetchedAt);
+                    return t(`accounts.plan.ago.${ago.unit}`, { n: ago.value });
+                  })()}
+                </span>
+                <button
+                  onClick={() => setReload((n) => n + 1)}
+                  title={t("accounts.plan.refresh")}
+                  className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
+                    text-gray-400 dark:text-white/35
+                    hover:text-gray-700 dark:hover:text-white
+                    hover:bg-gray-200 dark:hover:bg-white/10"
+                >
+                  <RefreshIcon className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </>
           ) : live ? (
             <Alert variant="neutral">{live.problem ?? t("accounts.plan.failed")}</Alert>

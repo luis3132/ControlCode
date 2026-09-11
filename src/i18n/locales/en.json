@@ -455,5 +455,10 @@
   "accounts.plan.session": "Current window",
   "accounts.plan.week": "This week",
   "accounts.plan.failed": "Couldn't read the plan quota.",
-  "accounts.plan.noFolder": "A trusted folder is needed before the TUI can be asked for the quota."
+  "accounts.plan.noFolder": "A trusted folder is needed before the TUI can be asked for the quota.",
+  "accounts.plan.weekModel": "This week ({{model}})",
+  "accounts.plan.refresh": "Ask the TUI again",
+  "accounts.plan.ago.now": "Checked just now",
+  "accounts.plan.ago.min": "Checked {{n}} min ago",
+  "accounts.plan.ago.h": "Checked {{n}} h ago"
 }

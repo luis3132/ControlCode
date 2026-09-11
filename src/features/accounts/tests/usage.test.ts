@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatRemaining, formatTokens, planLabel, totalOf } from "../usage";
+import { formatAgo, formatRemaining, formatTokens, planLabel, totalOf } from "../usage";
 
 describe("formatTokens", () => {
   it("deja los números chicos como están", () => {
@@ -60,5 +60,23 @@ describe("formatRemaining", () => {
   it("una ventana vencida no muestra negativos", () => {
     expect(formatRemaining(-500)).toBe("0 min");
     expect(formatRemaining(0)).toBe("0 min");
+  });
+});
+
+describe("formatAgo", () => {
+  it("lo muy reciente no lleva número", () => {
+    // "hace 0 min" se lee raro y no dice nada más que "recién".
+    expect(formatAgo(0)).toEqual({ unit: "now", value: 0 });
+    expect(formatAgo(44)).toEqual({ unit: "now", value: 0 });
+  });
+
+  it("minutos y horas", () => {
+    expect(formatAgo(45)).toEqual({ unit: "min", value: 1 });
+    expect(formatAgo(5 * 60)).toEqual({ unit: "min", value: 5 });
+    expect(formatAgo(90 * 60)).toEqual({ unit: "h", value: 2 });
+  });
+
+  it("no arma texto: eso es cosa de i18n", () => {
+    expect(typeof formatAgo(300)).toBe("object");
   });
 });

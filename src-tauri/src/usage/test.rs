@@ -209,3 +209,28 @@ fn contra_una_captura_cruda_en_disco() {
     assert!(u.available, "no se encontró el panel en la captura cruda");
     assert!(u.session.is_some() && u.week.is_some());
 }
+
+// ── La caché de cinco minutos ────────────────────────────────────
+
+use super::live::is_fresh;
+
+const TTL: i64 = 5 * 60;
+
+#[test]
+fn una_respuesta_recien_hecha_sirve() {
+    assert!(is_fresh(1000, 1000, TTL));
+    assert!(is_fresh(1000, 1000 + TTL - 1, TTL));
+}
+
+#[test]
+fn al_cumplirse_el_plazo_se_vuelve_a_preguntar() {
+    assert!(!is_fresh(1000, 1000 + TTL, TTL));
+    assert!(!is_fresh(1000, 1000 + TTL + 60, TTL));
+}
+
+#[test]
+fn un_reloj_corrido_hacia_atras_no_deja_la_entrada_viva_para_siempre() {
+    // Pasa de verdad con NTP o al volver de suspensión: si la diferencia sale negativa y
+    // solo se compara contra el plazo, la entrada nunca vence.
+    assert!(!is_fresh(5000, 1000, TTL));
+}
