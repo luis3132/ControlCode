@@ -274,7 +274,13 @@ html:not(.dark) .cc-term-scrollable .xterm-scrollable-element > .scrollbar {
   to   { opacity: 1; transform: none; }
 }
 
-.cc-fade { animation: cc-fade var(--cc-base) var(--cc-ease) both; }
+/* SIN `both`, a diferencia de las otras dos. Una animación de opacidad que queda "en
+   efecto" (que es lo que hace `both`/`forwards`) le crea al elemento un contexto de
+   apilamiento PERMANENTE, y todo lo que se dibuje adentro queda encerrado ahí por más
+   z-index que tenga — así quedaba tapado el menú de click derecho de los paneles. Sin
+   fill, la animación termina y el elemento vuelve a su opacidad normal, que ya es 1: se ve
+   igual y no encierra nada. */
+.cc-fade { animation: cc-fade var(--cc-base) var(--cc-ease); }
 .cc-rise { animation: cc-rise var(--cc-base) var(--cc-ease) both; }
 .cc-pop  { animation: cc-pop  var(--cc-fast) var(--cc-ease) both; }
 

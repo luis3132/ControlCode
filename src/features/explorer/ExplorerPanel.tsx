@@ -114,7 +114,11 @@ export function ExplorerPanel({ cwd, repo, title }: {
       bg-gray-50 dark:bg-[#0a0f16]
       border-l border-gray-200 dark:border-white/7">
 
-      <div className="flex items-center gap-1 h-10 shrink-0 pl-2 pr-1.5
+      {/* Sin alto fijo: `Tabs size="sm"` mide lo que midan sus paddings (~30px), y
+          forzarle una franja de 40px dejaba el fondo del hover más corto que la fila —
+          se veían dos barras, arriba y abajo de la pestaña. La fila se ajusta al
+          contenido y el problema desaparece de raíz. */}
+      <div className="flex items-center gap-1 shrink-0 py-1 pl-2 pr-1.5
         border-b border-gray-200 dark:border-white/7">
         <Tabs
           items={[
