@@ -365,7 +365,6 @@
   "panel.expand": "Expand the panel",
   "btn.close": "Close",
   "rail.workspaces": "Workspaces",
-  "workspaces.primary": "PRIMARY",
   "workspaces.changed": "{{n}} uncommitted",
   "workspaces.new": "Open a new agent",
   "workspaces.empty": "No agents open yet. Open one and its folder shows up here.",
@@ -449,5 +448,6 @@
   "skills.detail.back": "Back to Skills",
   "skills.detail.unsaved": "Unsaved",
   "skills.detail.chars": "{{n}} characters",
-  "marketplace.registries.count": "{{n}} repos"
+  "marketplace.registries.count": "{{n}} repos",
+  "workspaces.noRepo": "no repo"
 }

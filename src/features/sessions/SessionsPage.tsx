@@ -200,16 +200,21 @@ export function SessionsPage() {
                       {isCollapsed
                         ? <ChevronRightIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/35" />
                         : <ChevronDownIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/35" />}
-                      {/* La rama es lo que distingue dos copias del mismo repo; el nombre
-                          de la carpeta va detrás, atenuado, para ubicarla en el disco. */}
-                      <BranchIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/30" />
+                      {/* La carpeta manda —es como se llama un workspace— y la rama va
+                          detrás, atenuada: es estado, y cambia sin que cambie el workspace. */}
                       <span className="shrink-0 max-w-[14rem] truncate text-[11.5px] font-semibold
                         text-gray-700 dark:text-gray-300">
                         {ws.title}
                       </span>
-                      <span className="min-w-0 truncate text-[10.5px] text-gray-400 dark:text-white/30">
-                        {ws.subtitle}
-                      </span>
+                      {ws.branch && (
+                        <span className="flex items-center gap-1 min-w-0
+                          text-[10.5px] text-gray-400 dark:text-white/30">
+                          <BranchIcon className="w-3 h-3 shrink-0" />
+                          <span className="truncate font-mono">
+                            {ws.isWorktree && "worktree · "}{ws.branch}
+                          </span>
+                        </span>
+                      )}
                       <span className="flex-1" />
                       <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
                         {ws.sessions.length}

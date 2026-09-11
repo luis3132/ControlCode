@@ -42,10 +42,12 @@ describe("buildSessionTree", () => {
     expect(groups[0].name).toBe("main");
     expect(groups[0].isRepo).toBe(true);
     expect(groups[0].sessionCount).toBe(2);
-    expect(groups[0].workspaces.map((w) => w.title)).toEqual(["main", "fix-usage"]);
+    // Los títulos son las CARPETAS (`/p/main`, `/p/fix`), no las ramas.
+    expect(groups[0].workspaces.map((w) => w.title)).toEqual(["main", "fix"]);
+    expect(groups[0].workspaces.map((w) => w.branch)).toEqual(["main", "fix-usage"]);
   });
 
-  it("marca el worktree en el subtítulo y el checkout principal como primary", () => {
+  it("distingue el worktree del checkout principal", () => {
     const repos = new Map<string, RepoInfo>([
       ["/p/main", repo({ root: "/p/main", branch: "main" })],
       ["/p/fix", repo({ root: "/p/main", branch: "fix", isWorktree: true })],
@@ -59,9 +61,12 @@ describe("buildSessionTree", () => {
     const main = group.workspaces.find((w) => w.cwd === "/p/main")!;
     const fix = group.workspaces.find((w) => w.cwd === "/p/fix")!;
     expect(main.isPrimary).toBe(true);
-    expect(main.subtitle).toBe("main");
+    expect(main.title).toBe("main");
+    expect(main.branch).toBe("main");
     expect(fix.isPrimary).toBe(false);
-    expect(fix.subtitle).toBe("worktree · fix");
+    // El título es la carpeta (`fix`), no la rama que también se llama `fix`.
+    expect(fix.title).toBe("fix");
+    expect(fix.isWorktree).toBe(true);
   });
 
   it("ordena por lo más reciente en los tres niveles", () => {

@@ -2,12 +2,12 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
-  AddIcon, ArchiveIcon, Badge, BoxIcon, CloseIcon, TrashIcon, Tooltip,
+  AddIcon, ArchiveIcon, BoxIcon, CloseIcon, TrashIcon, Tooltip,
 } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { agentIcon } from "@/features/agents/agentIcons";
-import { RunningIcon } from "@/app/icons";
+import { BranchIcon, RunningIcon } from "@/app/icons";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
 import { flattenWorkspaces } from "@/features/workspaces/workspaceTree";
 import type { RepoGroup, WorkspaceAgent, WorkspaceNode } from "@/features/workspaces/workspaceTree";
@@ -76,8 +76,8 @@ function WorkspaceItem({ ws, expanded, onActivate, onOpenAgent, onWorkspaceMenu,
   const { t } = useTranslation();
   const running = ws.agents.some((a) => a.status === "running");
 
-  // El mismo encabezado en los dos tamaños, para que al desplegarse se lea como la misma
-  // fila creciendo: cambian los cuerpos de letra, no los elementos ni su orden.
+  // Marcador y nombre, idénticos en los dos tamaños: al desplegarse la fila crece, no se
+  // reemplaza por otra cosa.
   const head = (
     <>
       {ws.closed ? (
@@ -86,40 +86,15 @@ function WorkspaceItem({ ws, expanded, onActivate, onOpenAgent, onWorkspaceMenu,
         <span className={`shrink-0 rounded-full ${expanded ? "w-2 h-2" : "w-1.5 h-1.5"}
           ${running ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/20"}`} />
       )}
-      <span className="flex flex-col gap-px min-w-0 flex-1">
-        <span className="flex items-center gap-1.5 min-w-0">
-          <span className={`truncate
-            ${expanded ? "text-[12.5px] font-semibold" : "text-[11.5px]"}
-            ${ws.closed
-              ? "text-gray-400 dark:text-white/35"
-              : expanded
-                ? "text-gray-900 dark:text-white"
-                : "text-gray-700 dark:text-gray-300"}`}>
-            {ws.title}
-          </span>
-          {expanded && ws.isPrimary && (
-            <Badge variant="outline" size="sm" className="shrink-0">
-              {t("workspaces.primary")}
-            </Badge>
-          )}
-        </span>
-        <span className="flex items-center gap-2 min-w-0">
-          <span className="flex-1 min-w-0 truncate font-mono text-[10px]
-            text-gray-400 dark:text-white/30">
-            {ws.closed ? t("workspaces.saved", { n: ws.savedAgents }) : ws.subtitle}
-          </span>
-          {expanded && ws.changedCount > 0 && (
-            <span className="shrink-0 font-mono text-[9.5px] text-amber-600 dark:text-amber-400">
-              {t("workspaces.changed", { n: ws.changedCount })}
-            </span>
-          )}
-        </span>
+      <span className={`flex-1 min-w-0 truncate
+        ${expanded ? "text-[12.5px] font-semibold" : "text-[11.5px]"}
+        ${ws.closed
+          ? "text-gray-400 dark:text-white/35"
+          : expanded
+            ? "text-gray-900 dark:text-white"
+            : "text-gray-700 dark:text-gray-300"}`}>
+        {ws.title}
       </span>
-      {!ws.closed && !expanded && (
-        <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
-          {ws.agents.length}
-        </span>
-      )}
     </>
   );
 
@@ -128,11 +103,23 @@ function WorkspaceItem({ ws, expanded, onActivate, onOpenAgent, onWorkspaceMenu,
       <button
         onClick={onActivate}
         onContextMenu={(e) => { e.preventDefault(); onWorkspaceMenu(e, ws); }}
-        className="cc-t flex items-center gap-2.5 mx-2 px-2 py-1.5 rounded-lg
+        title={ws.closed ? `${ws.cwd} — ${t("workspaces.saved", { n: ws.savedAgents })}` : ws.cwd}
+        className="cc-t flex items-center gap-2.5 mx-2 px-2 h-7 rounded-lg
           w-[calc(100%-1rem)] text-left
           hover:bg-gray-200/60 dark:hover:bg-white/5"
       >
         {head}
+        {/* Que sea un worktree es IDENTIDAD, no estado: con dos carpetas del mismo repo en
+            la lista, es lo único que dice cuál es cuál sin desplegarlas. */}
+        {ws.isWorktree && (
+          <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider
+            text-gray-400 dark:text-white/25">
+            wt
+          </span>
+        )}
+        <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
+          {ws.closed ? ws.savedAgents : ws.agents.length}
+        </span>
       </button>
     );
   }
@@ -145,6 +132,25 @@ function WorkspaceItem({ ws, expanded, onActivate, onOpenAgent, onWorkspaceMenu,
         border border-gray-200 dark:border-white/10"
     >
       <div className="flex items-center gap-2.5">{head}</div>
+
+      {/* La rama solo acá: es estado, cambia sin avisar, y en la fila compacta competía
+          con el nombre de la carpeta, que es como el usuario llama al workspace. */}
+      <div className="flex items-center gap-2 pl-[18px]">
+        <span className="flex items-center gap-1.5 min-w-0 flex-1">
+          <BranchIcon className="w-3 h-3 shrink-0 text-blue-500 dark:text-blue-400" />
+          <span className="truncate font-mono text-[10px] text-gray-500 dark:text-white/45">
+            {ws.isWorktree && (
+              <span className="text-gray-400 dark:text-white/25">worktree · </span>
+            )}
+            {ws.branch ?? t("workspaces.noRepo")}
+          </span>
+        </span>
+        {ws.changedCount > 0 && (
+          <span className="shrink-0 font-mono text-[9.5px] text-amber-600 dark:text-amber-400">
+            {t("workspaces.changed", { n: ws.changedCount })}
+          </span>
+        )}
+      </div>
 
       <div className="flex flex-col gap-px">
         {ws.agents.map((a) => (

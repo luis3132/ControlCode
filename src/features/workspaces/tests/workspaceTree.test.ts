@@ -67,8 +67,11 @@ describe("buildWorkspaceTree", () => {
     ]);
     const tree = buildWorkspaceTree(tabs, repos, null);
     expect(tree).toHaveLength(1);
-    expect(tree[0].workspaces.map((w) => w.title)).toEqual(["main", "feat/mcp"]);
-    expect(tree[0].workspaces[1].subtitle).toBe("worktree · mcp");
+    // El título es la CARPETA, no la rama: un workspace es una carpeta, y la rama cambia
+    // sin que cambie el workspace.
+    expect(tree[0].workspaces.map((w) => w.title)).toEqual(["p", "mcp"]);
+    expect(tree[0].workspaces.map((w) => w.branch)).toEqual(["main", "feat/mcp"]);
+    expect(tree[0].workspaces[1].isWorktree).toBe(true);
   });
 
   it("el checkout principal va primero aunque alfabéticamente no le toque", () => {
@@ -78,7 +81,9 @@ describe("buildWorkspaceTree", () => {
       ["/p", repo("/p", "zzz")],
     ]);
     const tree = buildWorkspaceTree(tabs, repos, null);
-    expect(tree[0].workspaces.map((w) => w.title)).toEqual(["zzz", "aaa"]);
+    // Ordena por CARPETA (el título), así que alfabéticamente "a" iría antes que "p":
+    // que "p" salga primero es justamente lo que prueba que el principal se adelanta.
+    expect(tree[0].workspaces.map((w) => w.title)).toEqual(["p", "a"]);
     expect(tree[0].workspaces[0].isPrimary).toBe(true);
   });
 
@@ -208,7 +213,7 @@ describe("cwdsToResolve con cerrados", () => {
 
 describe("flattenWorkspaces", () => {
   const ws = (key: string, closed = false): WorkspaceNode => ({
-    key, cwd: key, title: key, subtitle: key,
+    key, cwd: key, title: key, branch: null,
     isPrimary: false, isWorktree: false, changedCount: 0,
     agents: [], closed, savedAgents: 0,
   });

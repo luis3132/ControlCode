@@ -365,7 +365,6 @@
   "panel.expand": "Desplegar el panel",
   "btn.close": "Cerrar",
   "rail.workspaces": "Workspaces",
-  "workspaces.primary": "PRINCIPAL",
   "workspaces.changed": "{{n}} sin commitear",
   "workspaces.new": "Abrir un agente nuevo",
   "workspaces.empty": "Todavía no hay ningún agente abierto. Abrí uno y su carpeta aparece acá.",
@@ -449,5 +448,6 @@
   "skills.detail.back": "Volver a Skills",
   "skills.detail.unsaved": "Sin guardar",
   "skills.detail.chars": "{{n}} caracteres",
-  "marketplace.registries.count": "{{n}} repos"
+  "marketplace.registries.count": "{{n}} repos",
+  "workspaces.noRepo": "sin repo"
 }

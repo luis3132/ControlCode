@@ -26,10 +26,12 @@ export interface WorkspaceNode {
   /** El `cwd`: dos tabs en la misma carpeta son el mismo workspace. */
   key: string;
   cwd: string;
-  /** La rama, que es lo que de verdad distingue dos copias del mismo repo. Sin repo,
-   *  el nombre de la carpeta. */
+  /** El nombre de la carpeta. Es como el usuario llama a un workspace: un workspace ES
+   *  una carpeta, y la rama es algo que le pasa a esa carpeta y cambia sin avisar. */
   title: string;
-  subtitle: string;
+  /** La rama del checkout. `null` = la carpeta no está en ningún repo. Se muestra solo
+   *  con el workspace desplegado: es estado, no identidad. */
+  branch: string | null;
   /** El checkout principal del repo, no un worktree enlazado. */
   isPrimary: boolean;
   isWorktree: boolean;
@@ -111,8 +113,8 @@ export function buildWorkspaceTree(
       ws = {
         key: tab.cwd,
         cwd: tab.cwd,
-        title: info?.branch ?? folder,
-        subtitle: isWorktree ? `worktree · ${folder}` : folder,
+        title: folder,
+        branch: info?.branch ?? null,
         isPrimary: root !== null && !isWorktree && tab.cwd === root,
         isWorktree,
         changedCount: info?.changedCount ?? 0,
@@ -152,8 +154,8 @@ export function buildWorkspaceTree(
     group.workspaces.push({
       key: snap.cwd,
       cwd: snap.cwd,
-      title: info?.branch ?? folder,
-      subtitle: isWorktree ? `worktree · ${folder}` : folder,
+      title: folder,
+      branch: info?.branch ?? null,
       isPrimary: root !== null && !isWorktree && snap.cwd === root,
       isWorktree,
       changedCount: info?.changedCount ?? 0,

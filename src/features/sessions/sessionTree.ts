@@ -20,10 +20,10 @@ export interface SessionWorkspaceNode {
   /** El `cwd`: dos sesiones de la misma carpeta son el mismo workspace. */
   key: string;
   cwd: string;
-  /** La rama, que es lo que de verdad distingue dos copias del mismo repo. Sin repo, el
-   *  nombre de la carpeta. */
+  /** El nombre de la carpeta — un workspace ES una carpeta. Mismo criterio que el panel. */
   title: string;
-  subtitle: string;
+  /** La rama del checkout. `null` = la carpeta no está en ningún repo. */
+  branch: string | null;
   /** El checkout principal del repo, no un worktree enlazado. */
   isPrimary: boolean;
   isWorktree: boolean;
@@ -80,8 +80,8 @@ export function buildSessionTree(
       ws = {
         key: entry.cwd,
         cwd: entry.cwd,
-        title: info?.branch ?? folder,
-        subtitle: isWorktree ? `worktree · ${folder}` : folder,
+        title: folder,
+        branch: info?.branch ?? null,
         isPrimary: root !== null && !isWorktree && entry.cwd === root,
         isWorktree,
         sessions: [],
