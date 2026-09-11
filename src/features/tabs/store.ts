@@ -133,14 +133,27 @@ export const useTabsStore = create<TabsState>((set) => ({
 
   setWorkspaceId: (workspaceId) => set({ workspaceId }),
 
+  // Idempotente a propósito: hidratar dos veces tiene que dejar lo mismo que hidratar
+  // una. Antes anexaba sin mirar los ids —para el flujo de mover una tab entre ventanas,
+  // que ya no existe—, así que cualquier remontaje del árbol de React duplicaba TODAS las
+  // tabs: 5 pasaban a 10, a 15. Un error de render en una terminal bastaba para
+  // dispararlo en bucle.
+  //
+  // La regla ahora es fusionar por id: lo que viene del backend manda, y lo que había en
+  // memoria y no viene se conserva (una tab recién creada cuya fila todavía no persistió).
   hydrateFromBackend: (tabs, workspaceId) =>
     set((state) => {
       const base = workspaceId ? { workspaceId } : {};
-      if (state.tabs.length === 0) {
-        return { ...base, tabs, activeTabId: tabs[0]?.id ?? null };
-      }
-      // Ya hay tabs en memoria (flujo cc-detach/cc-receive-tab) — anexar sin pisarlas.
-      return { ...base, tabs: [...tabs, ...state.tabs] };
+      const incoming = new Set(tabs.map((tab) => tab.id));
+      const extras = state.tabs.filter((tab) => !incoming.has(tab.id));
+      const merged = [...tabs, ...extras];
+      const keepsActive = state.activeTabId !== null
+        && merged.some((tab) => tab.id === state.activeTabId);
+      return {
+        ...base,
+        tabs: merged,
+        activeTabId: keepsActive ? state.activeTabId : merged[0]?.id ?? null,
+      };
     }),
 
   setHydrated: (hydrated) => set({ hydrated }),

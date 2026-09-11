@@ -33,5 +33,12 @@ pub fn init_db() -> SqlResult<DbConnection> {
     super::seeds::seed_defaults(&conn)?;
     super::queries::dedupe_session_history_once(&conn)?;
 
+    // Las ventanas cerradas que no guardan tabs no representan nada y se acumulan: una por
+    // cierre, y una por intento cuando un arranque falla en bucle.
+    let purgadas = super::queries::purge_empty_closed_windows(&conn)?;
+    if purgadas > 0 {
+        eprintln!("se limpiaron {purgadas} filas de ventanas cerradas y vacías");
+    }
+
     Ok(Arc::new(Mutex::new(conn)))
 }

@@ -166,6 +166,10 @@ export function Terminal({
       // puesto el antialiasing de subpíxel. No servía para nada — los dos temas de la
       // terminal tienen fondo 100% opaco (ver theme.ts).
       allowTransparency: false,
+      // Lo exige el addon de Unicode 11: `term.unicode` es API propuesta de xterm y sin
+      // esta opción `loadAddon` LANZA. Faltaba, así que cada terminal reventaba al
+      // montarse y se llevaba puesta la app entera.
+      allowProposedApi: true,
       // Un glifo más ancho que su celda (los de Nerd Font, las líneas de Powerline) se
       // escala en vez de invadir la celda siguiente. Sin esto, una barra de progreso o un
       // prompt con iconos corre todo lo que tiene a la derecha.
@@ -176,9 +180,16 @@ export function Terminal({
     // no conocen los emoji modernos ni varios rangos CJK. Con las viejas, un emoji ocupa
     // una celda cuando en pantalla ocupa dos, y a partir de ahí toda la línea queda
     // corrida. Los agentes imprimen emoji todo el tiempo, así que se nota enseguida.
-    const unicode11 = new Unicode11Addon();
-    term.loadAddon(unicode11);
-    term.unicode.activeVersion = "11";
+    //
+    // Va en try/catch por lo que acaba de pasar: un addon que solo mejora cómo se ve el
+    // texto no puede tumbar la aplicación si falla. Sin él las tablas viejas siguen
+    // funcionando; es peor, no es fatal.
+    try {
+      term.loadAddon(new Unicode11Addon());
+      term.unicode.activeVersion = "11";
+    } catch (e) {
+      console.error("no se pudo activar Unicode 11; se siguen usando las tablas de ancho viejas", e);
+    }
 
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();

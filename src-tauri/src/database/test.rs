@@ -768,3 +768,44 @@ fn migrar_es_idempotente() {
     schema::migrate(&conn).expect("primera migración");
     schema::migrate(&conn).expect("segunda migración sobre la ya migrada");
 }
+
+/// Un bucle de arranques fallidos deja una fila de ventana por intento, todas cerradas y
+/// sin tabs. No rompen nada (nadie las restaura), pero se acumulan para siempre.
+#[test]
+fn se_barren_las_ventanas_cerradas_y_vacias() {
+    let conn = setup();
+    conn.execute_batch(
+        "INSERT INTO windows (id, label, workspace_id, is_open, last_active)
+             VALUES ('muerta-1', 'w1', 'ws', 0, 0), ('muerta-2', 'w2', 'ws', 0, 0);",
+    )
+    .unwrap();
+
+    let borradas = queries::purge_empty_closed_windows(&conn).unwrap();
+    assert_eq!(borradas, 2);
+
+    let quedan: i64 = conn
+        .query_row("SELECT COUNT(*) FROM windows", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(quedan, 1, "la ventana abierta del setup tiene que seguir ahí");
+}
+
+/// Lo único que no se puede tirar: una ventana cerrada que todavía guarda sus tabs, que es
+/// justo la que hay que poder restaurar al reabrir el workspace.
+#[test]
+fn no_se_barre_una_ventana_cerrada_que_conserva_sus_tabs() {
+    let conn = setup();
+    conn.execute_batch(
+        "INSERT INTO windows (id, label, workspace_id, is_open, last_active)
+             VALUES ('cerrada', 'w1', 'ws', 0, 0);
+         INSERT INTO tabs (id, window_id, title, agent_id, agent_label, command, cwd,
+                           opened_at, created_at, last_active)
+             VALUES ('t1', 'cerrada', 'Una', 'claude-code', 'Claude Code', 'claude', '/p', 0, 0, 0);",
+    )
+    .unwrap();
+
+    assert_eq!(queries::purge_empty_closed_windows(&conn).unwrap(), 0);
+    let quedan: i64 = conn
+        .query_row("SELECT COUNT(*) FROM windows WHERE id = 'cerrada'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(quedan, 1);
+}

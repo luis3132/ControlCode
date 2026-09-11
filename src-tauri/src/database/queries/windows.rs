@@ -464,3 +464,24 @@ fn resolve_tabs_of_window(db: &DbConnection, label: &str) -> HashMap<String, Res
         (id, resolved)
     }).collect()
 }
+
+/// Borra las filas de ventana cerradas que no guardan ninguna tab.
+///
+/// Una fila así no representa nada: `restore_windows` la saltea (no tiene qué restaurar) y
+/// `live_workspace_window_count` solo mira las abiertas. Pero se acumulan — cada ventana
+/// que se cierra deja la suya, y un arranque que falle en bucle deja una por intento. Se
+/// vieron 15 de golpe después de que un error de renderizado tumbara la ventana una y otra
+/// vez, y sin barrerlas la tabla crece para siempre.
+///
+/// Solo toca filas CERRADAS y VACÍAS, así que no hay nada que perder: una ventana viva
+/// tiene `is_open = 1` (incluida la que se acaba de crear en blanco, ver
+/// `create_blank_window_row`), y una cerrada con tabs es justo la que hay que conservar
+/// para poder restaurarla.
+pub(crate) fn purge_empty_closed_windows(conn: &rusqlite::Connection) -> rusqlite::Result<usize> {
+    conn.execute(
+        "DELETE FROM windows
+         WHERE is_open = 0
+           AND NOT EXISTS (SELECT 1 FROM tabs WHERE tabs.window_id = windows.id)",
+        [],
+    )
+}
