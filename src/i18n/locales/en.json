@@ -462,7 +462,7 @@
   "skills.palette.attached": "attached",
   "skills.palette.installedTag": "installed",
   "skills.palette.local": "local",
-  "skills.palette.empty": "No skill matches that. Try another name.",
+  "skills.palette.empty": "No installed skill matches. Type to search the repositories.",
   "skills.palette.pick": "Pick a skill to read it before attaching.",
   "skills.palette.noDescription": "This skill has no description.",
   "skills.palette.note": "Attaching writes one symlink inside {{dir}} and removes it when you detach. Nothing else on disk is touched.",
@@ -470,5 +470,6 @@
   "skills.palette.key.attach": "attach",
   "skills.palette.key.detach": "detach",
   "skills.palette.key.scope": "change scope",
-  "skills.palette.key.close": "close"
+  "skills.palette.key.close": "close",
+  "skills.palette.searchHint": "Type to search the repositories too."
 }

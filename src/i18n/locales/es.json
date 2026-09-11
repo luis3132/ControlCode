@@ -462,7 +462,7 @@
   "skills.palette.attached": "adjunta",
   "skills.palette.installedTag": "instalada",
   "skills.palette.local": "local",
-  "skills.palette.empty": "No hay ninguna skill que coincida. Probá con otro nombre.",
+  "skills.palette.empty": "Ninguna skill instalada coincide. Escribí para buscar en los repositorios.",
   "skills.palette.pick": "Elegí una skill para leerla antes de adjuntarla.",
   "skills.palette.noDescription": "Esta skill no trae descripción.",
   "skills.palette.note": "Adjuntar escribe un symlink dentro de {{dir}} y lo quita al soltarla. Nada más se toca en el disco.",
@@ -470,5 +470,6 @@
   "skills.palette.key.attach": "adjuntar",
   "skills.palette.key.detach": "quitar",
   "skills.palette.key.scope": "cambiar alcance",
-  "skills.palette.key.close": "cerrar"
+  "skills.palette.key.close": "cerrar",
+  "skills.palette.searchHint": "Escribí para buscar también en los repositorios."
 }

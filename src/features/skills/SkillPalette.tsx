@@ -96,13 +96,25 @@ export function SkillPalette({ target: initial, onClose }: {
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { loadSkills(); loadRemote(); inputRef.current?.focus(); }, [loadSkills, loadRemote]);
+  useEffect(() => { loadSkills(); inputRef.current?.focus(); }, [loadSkills]);
 
-  // El marketplace se consulta con espera: cada disparo puede levantar un proceso.
+  /**
+   * A partir de cuándo se sale a buscar afuera.
+   *
+   * Al abrir, la ventana muestra TU catálogo: las instaladas, que son las que se adjuntan
+   * el 99% de las veces. Listar de entrada todo lo que hay en los repositorios las ahogaba
+   * entre cientos de entradas que nadie pidió — y de paso disparaba una búsqueda remota
+   * (un proceso `npx`) apenas se abría el panel.
+   */
+  const searching = query.trim().length >= 2;
+
   useEffect(() => {
+    if (!searching) return;
+    loadRemote(query);
+    // Con espera aparte, porque cada disparo puede levantar un proceso.
     const handle = setTimeout(() => searchRemote(query), 700);
     return () => clearTimeout(handle);
-  }, [query, searchRemote]);
+  }, [query, searching, loadRemote, searchRemote]);
 
   const installed = useMemo(() => {
     const compatible = target.agentId === null
@@ -120,9 +132,16 @@ export function SkillPalette({ target: initial, onClose }: {
     [skills]
   );
 
+  /** Lo que falta por instalar: del marketplace, menos lo que ya está en el catálogo. */
   const available = useMemo(
-    () => remote.filter((e) => !installedOrigins.has(`${e.registryId}:${e.id}`)),
-    [remote, installedOrigins]
+    () => (searching
+      ? remote
+          .filter((e) => !installedOrigins.has(`${e.registryId}:${e.id}`))
+          // Un tope: la lista se recorre con las flechas, y con doscientas filas eso deja
+          // de ser navegable. Afinar la búsqueda es más rápido que bajar hasta el final.
+          .slice(0, 25)
+      : []),
+    [searching, remote, installedOrigins]
   );
 
   const rows: Row[] = useMemo(() => [
@@ -229,7 +248,7 @@ export function SkillPalette({ target: initial, onClose }: {
                   {i === 0 && row.kind === "installed" && (
                     <GroupHeader label={t("skills.palette.attach")} />
                   )}
-                  {i === firstRemote && (
+                  {i === firstRemote && firstRemote > -1 && (
                     <GroupHeader label={t("skills.palette.install")} />
                   )}
                   <div
@@ -277,6 +296,13 @@ export function SkillPalette({ target: initial, onClose }: {
                   </div>
                 </div>
               ))
+            )}
+
+            {/* Sin esto, no queda claro que el marketplace también se busca desde acá. */}
+            {!searching && rows.length > 0 && (
+              <p className="px-4 py-3 text-[10.5px] text-gray-400 dark:text-white/30">
+                {t("skills.palette.searchHint")}
+              </p>
             )}
           </div>
 
