@@ -8,7 +8,7 @@ import { TabItem } from "@/features/tabs/TabItem";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { SkillPalette, type SkillScopeTarget } from "@/features/skills/SkillPalette";
 import { BoxIcon, CloseIcon } from "neogestify-ui-components";
-import { NewTabWizard } from "@/features/tabs/wizard/NewTabWizard";
+import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
 import { refreshSessionTitle } from "@/features/sessions/sessionTitle";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
@@ -124,7 +124,9 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
         ))}
 
         <button
-          onClick={() => setWizardOpen(true)}
+          // Sin workspace abierto no hay carpeta donde abrir un agente: eso es empezar uno
+          // nuevo, y eso vive en Home.
+          onClick={() => (activeTab ? setWizardOpen(true) : navigate("/"))}
           title={t("tabs.new")}
           data-tauri-drag-region="false"
           className="flex items-center justify-center w-9 h-10 shrink-0
@@ -177,11 +179,13 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
         <SkillPalette target={skillTarget} onClose={() => setSkillTarget(null)} />
       )}
 
-      <NewTabWizard
-        isOpen={wizardOpen}
+      <NewAgentDialog
+        isOpen={wizardOpen && activeTab !== undefined}
+        cwd={activeTab?.cwd ?? ""}
         onClose={() => setWizardOpen(false)}
-        initialCwd={activeTab?.cwd}
-        onConfirm={({ cwd, agent, skillIds, accountId, prelaunch }) => {
+        onConfirm={({ agent, skillIds, accountId, prelaunch }) => {
+          const cwd = activeTab?.cwd;
+          if (!cwd) return;
           const tabId = addTab({ cwd, agent, accountId, prelaunch });
           navigate("/workspace");
 
