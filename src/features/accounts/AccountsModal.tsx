@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  AddIcon, Avatar, Badge, Button, EmptyState, InfoIcon, Modal, Tooltip, TrashIcon,
-  UserIcon,
+  AddIcon, Avatar, Badge, Button, EmptyState, InfoIcon, Tooltip, TrashIcon, UserIcon,
 } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
@@ -11,6 +10,7 @@ import { AddAccountDialog } from "@/features/accounts/AddAccountDialog";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { ShellModal } from "@/shared/ui/ShellModal";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 /** Una cuenta: nombre simbólico, quién está logueado, y qué se puede hacer con ella. */
 function AccountRow({ account, onLogin, onDelete }: {
@@ -284,7 +284,7 @@ export function AccountsModal({ onClose }: { onClose: () => void }) {
       )}
 
       {loginFor && (
-        <Modal
+        <AppDialog
           title={t("settings.accounts.login.title", { name: loginFor.name })}
           onClose={() => setLoginFor(null)}
           size="lg"
@@ -300,11 +300,11 @@ export function AccountsModal({ onClose }: { onClose: () => void }) {
             {t("settings.accounts.login.helper", { command: loginFor.loginCommand })}
           </p>
           <LoginTerminal account={loginFor} />
-        </Modal>
+        </AppDialog>
       )}
 
       {deleting && (
-        <Modal
+        <AppDialog
           title={t("settings.accounts.delete.title", { name: deleting.name })}
           onClose={() => setDeleting(null)}
           size="sm"
@@ -332,7 +332,7 @@ export function AccountsModal({ onClose }: { onClose: () => void }) {
             text-gray-500 dark:text-gray-400">
             {deleting.dir}
           </code>
-        </Modal>
+        </AppDialog>
       )}
     </ShellModal>
   );

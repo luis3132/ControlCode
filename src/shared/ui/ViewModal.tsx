@@ -1,6 +1,8 @@
 import { createPortal } from "react-dom";
 import { Modal } from "neogestify-ui-components";
 
+import { DIALOG_BODY_CLASS, DIALOG_PANEL_CLASS, DialogHeader } from "@/shared/ui/AppDialog";
+
 /** Contenedor que AppShell deja en el área de contenido. Ver `App.css`. */
 export const VIEW_OVERLAY_ID = "cc-view-overlay";
 
@@ -30,11 +32,24 @@ interface ViewModalProps extends ModalProps {
  * Los diálogos de la app —salir, cerrar todas las ventanas— siguen usando `Modal` directo:
  * esos SÍ son de la ventana entera y tapar la barra es lo correcto.
  */
-export function ViewModal({ fill, ...props }: ViewModalProps) {
+export function ViewModal({ fill, title, ...props }: ViewModalProps) {
   const host = document.getElementById(VIEW_OVERLAY_ID);
+  // Misma piel que `AppDialog`: se aplica acá y no allá porque este monta el `Modal` por
+  // su cuenta para poder portalearlo, pero tiene que verse igual que cualquier diálogo.
   const modal = (
     <div className={fill ? "cc-modal-fill" : undefined}>
-      <Modal {...props} />
+      <Modal
+        {...props}
+        aria-label={typeof title === "string" ? title : undefined}
+        className={DIALOG_PANEL_CLASS}
+        bodyClassName={DIALOG_BODY_CLASS}
+        header={
+          <DialogHeader
+            title={typeof title === "string" ? title : ""}
+            onClose={props.onClose}
+          />
+        }
+      />
     </div>
   );
 

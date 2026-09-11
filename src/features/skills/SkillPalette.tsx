@@ -208,7 +208,7 @@ export function SkillPalette({ target: initial, onClose }: {
 
       <div className="cc-rise relative flex w-full max-w-4xl h-[30rem]
         rounded-2xl overflow-hidden
-        bg-white dark:bg-gray-900
+        bg-white dark:bg-[#0a0f16]
         border border-gray-200 dark:border-white/12 shadow-2xl">
 
         <div className="flex flex-col flex-1 min-w-0">
@@ -256,7 +256,7 @@ export function SkillPalette({ target: initial, onClose }: {
                 onClick={onClose}
                 aria-label={t("btn.close")}
                 className="cc-t flex items-center justify-center w-7 h-7 rounded-lg shrink-0
-                  text-gray-400 dark:text-gray-500
+                  text-gray-400 dark:text-white/35
                   hover:text-gray-700 dark:hover:text-white
                   hover:bg-gray-100 dark:hover:bg-white/10"
               >

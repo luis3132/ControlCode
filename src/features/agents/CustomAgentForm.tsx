@@ -77,8 +77,8 @@ export function CustomAgentForm({ initial, onSubmit, onCancel }: CustomAgentForm
 
   return (
     <div className="flex flex-col gap-3 p-4 rounded-lg border border-dashed
-      border-gray-300 dark:border-gray-600
-      bg-gray-50/50 dark:bg-gray-900/30">
+      border-gray-300 dark:border-white/15
+      bg-gray-50/50 dark:bg-white/3">
 
       <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
         {initial?.id ? t("settings.tuis.editSection") : t("settings.tuis.addSection")}
@@ -117,7 +117,7 @@ export function CustomAgentForm({ initial, onSubmit, onCancel }: CustomAgentForm
       </button>
 
       {advancedOpen && (
-        <div className="flex flex-col gap-3 pl-4 border-l-2 border-gray-200 dark:border-gray-700">
+        <div className="flex flex-col gap-3 pl-4 border-l-2 border-gray-200 dark:border-white/10">
           <p className="text-[11px] text-gray-400 dark:text-white/40">
             {t("settings.tuis.advancedDesc")}
           </p>

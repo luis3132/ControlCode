@@ -51,7 +51,7 @@ export function RegistryProgressBar({ progress, compact = false }: RegistryProgr
           : <AnimateSpin className="w-3.5 h-3.5 text-blue-500 shrink-0" />}
         <span className="font-medium truncate">{t(`marketplace.add.phase.${phase}`)}</span>
         {pct !== null && (
-          <span className="ml-auto font-mono tabular-nums text-gray-400 dark:text-gray-500 shrink-0">
+          <span className="ml-auto font-mono tabular-nums text-gray-400 dark:text-white/35 shrink-0">
             {pct}%
           </span>
         )}
@@ -68,7 +68,7 @@ export function RegistryProgressBar({ progress, compact = false }: RegistryProgr
       />
 
       {progress?.detail && !compact && (
-        <p className="text-[11px] font-mono text-gray-400 dark:text-gray-500 truncate">
+        <p className="text-[11px] font-mono text-gray-400 dark:text-white/35 truncate">
           {progress.detail}
         </p>
       )}

@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Modal } from "neogestify-ui-components";
+import {
+  Button,
+} from "neogestify-ui-components";
 import { useSkillsStore } from "@/features/skills/store";
 import type { SkillSummary } from "@/features/skills/types";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface DeleteSkillDialogProps {
   skill: SkillSummary;
@@ -28,7 +31,7 @@ export function DeleteSkillDialog({ skill, onClose }: DeleteSkillDialogProps) {
   };
 
   return (
-    <Modal
+    <AppDialog
       title={t("skills.delete.title", { name: skill.name })}
       onClose={onClose}
       size="sm"
@@ -62,6 +65,6 @@ export function DeleteSkillDialog({ skill, onClose }: DeleteSkillDialogProps) {
         </div>
       )}
       {error && <p className="text-xs text-red-500 dark:text-red-400 mt-3">{error}</p>}
-    </Modal>
+    </AppDialog>
   );
 }

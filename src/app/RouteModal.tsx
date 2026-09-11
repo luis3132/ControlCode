@@ -38,7 +38,7 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
 
       <div className="cc-rise relative flex flex-col w-full max-w-5xl h-full
         rounded-2xl overflow-hidden
-        bg-gray-50 dark:bg-gray-950
+        bg-gray-50 dark:bg-[#0d1117]
         border border-gray-200 dark:border-white/12
         shadow-2xl">
 
@@ -46,7 +46,7 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
           onClick={onClose}
           title={t("btn.close")}
           className="absolute top-3 right-3 z-10 flex items-center justify-center w-8 h-8 rounded-lg
-            text-gray-400 dark:text-gray-500
+            text-gray-400 dark:text-white/35
             bg-white/80 dark:bg-white/8
             hover:text-gray-700 dark:hover:text-white
             hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"

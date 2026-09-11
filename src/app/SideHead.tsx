@@ -100,8 +100,8 @@ export function SideHead({ width }: { width: number }) {
 
             {menuOpen && (
               <div className="absolute top-full left-0 mt-1.5 w-56 py-1 z-100
-                rounded-lg border border-gray-200 dark:border-gray-700
-                bg-white dark:bg-gray-800 shadow-lg">
+                rounded-lg border border-gray-200 dark:border-white/10
+                bg-white dark:bg-[#0d1117] shadow-lg">
                 <MenuItem
                   icon={<HomeIcon className="w-4 h-4 shrink-0" />}
                   label={t("topbar.menu.home")}

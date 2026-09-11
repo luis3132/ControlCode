@@ -1,9 +1,12 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Modal, Select } from "neogestify-ui-components";
+import {
+  Button, Select,
+} from "neogestify-ui-components";
 import { useSkillsStore } from "@/features/skills/store";
 import type { SkillSummary } from "@/features/skills/types";
 import { useTabsStore } from "@/features/tabs/store";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface AttachSkillDialogProps {
   skill: SkillSummary;
@@ -39,7 +42,7 @@ export function AttachSkillDialog({ skill, onClose }: AttachSkillDialogProps) {
   };
 
   return (
-    <Modal
+    <AppDialog
       title={t("skills.attach.title", { name: skill.name })}
       onClose={onClose}
       size="sm"
@@ -79,6 +82,6 @@ export function AttachSkillDialog({ skill, onClose }: AttachSkillDialogProps) {
         )}
         {error && <p className="text-xs text-red-500 dark:text-red-400">{error}</p>}
       </div>
-    </Modal>
+    </AppDialog>
   );
 }

@@ -2,12 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Modal, Select } from "neogestify-ui-components";
+import {
+  Button, Input, Select,
+} from "neogestify-ui-components";
 import { FolderIcon, AnimateSpin } from "neogestify-ui-components";
 import { useMarketplaceStore } from "@/features/marketplace/store";
 import type { RegistrySourceType, RegistryProgress } from "@/features/marketplace/types";
 import { RegistryProgressBar } from "@/features/marketplace/RegistryProgress";
 import { previewRegistryLocation } from "./ipc";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface AddRegistryDialogProps {
   onClose: () => void;
@@ -78,7 +81,7 @@ export function AddRegistryDialog({ onClose }: AddRegistryDialogProps) {
   };
 
   return (
-    <Modal
+    <AppDialog
       title={t("marketplace.add.title")}
       onClose={onClose}
       size="md"
@@ -185,6 +188,6 @@ export function AddRegistryDialog({ onClose }: AddRegistryDialogProps) {
       {busy && <div className="mt-4"><RegistryProgressBar progress={progress} /></div>}
 
       {error && <p className="text-xs text-red-500 dark:text-red-400 mt-3">{error}</p>}
-    </Modal>
+    </AppDialog>
   );
 }

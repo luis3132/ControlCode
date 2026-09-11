@@ -9,6 +9,63 @@
 
 @variant dark (&:where(.dark, .dark *)) {}
 
+/* ── La paleta de la librería ──────────────────────────────────────────────
+   `neogestify-ui-components` pinta sus superficies, bordes y textos con variables
+   `--nui-*` que traen un valor por defecto. Esos valores son grises de Tailwind
+   (gray-800 de fondo, gray-700 de borde) con acento índigo — razonables sueltos, pero
+   al lado de los paneles casi negros de esta app un modal parecía de otra aplicación.
+
+   Declararlas acá las cambia TODAS de una vez: modales, botones, inputs, badges,
+   skeletons. La alternativa era pisar clases diálogo por diálogo, que además de tedioso
+   se desincroniza en cuanto se agrega uno nuevo.
+
+   Se definen las dos variantes juntas porque el modo oscuro de esta app va por clase
+   (`.dark`): las reglas de los dos temas existen siempre en el CSS y solo aplica una, así
+   que un único bloque en `:root` alcanza.
+
+   Los semánticos (danger, success, warning, info) se dejan como vienen: ya son el rojo,
+   verde, ámbar y azul que usa el resto de la app. */
+:root {
+  /* Superficies. `surface` es el panel de un modal y va igual que el shell; las bandas de
+     cabecera y pie se HUNDEN respecto del panel, no se elevan. */
+  --nui-surface-dark: #0d1117;
+  --nui-surface-muted-dark: #0a0f16;
+  --nui-surface-sunken-dark: #080b0f;
+  --nui-surface-band-dark: #0a0f16;
+  --nui-surface-hover-dark: rgba(255, 255, 255, 0.06);
+  --nui-skeleton-dark: rgba(255, 255, 255, 0.08);
+  --nui-surface-band: rgba(243, 244, 246, 0.6);
+
+  /* Bordes: los mismos `white/8` y `white/12` que usan los paneles de la app. */
+  --nui-border-dark: rgba(255, 255, 255, 0.12);
+  --nui-border-subtle-dark: rgba(255, 255, 255, 0.08);
+
+  /* Texto, en la misma escala que el resto de la UI. */
+  --nui-text-dark: #f9fafb;
+  --nui-text-muted-dark: #d1d5db;
+  --nui-text-subtle-dark: rgba(255, 255, 255, 0.45);
+  --nui-text-faint-dark: rgba(255, 255, 255, 0.3);
+
+  /* Acento: la librería viene en índigo y la app es azul. Se cambia en los dos temas —
+     un botón primario índigo al lado de una fila seleccionada azul se ve como un error. */
+  --nui-accent: #2563eb;
+  --nui-accent-hover: #1d4ed8;
+  --nui-accent-text: #2563eb;
+  --nui-accent-text-hover: #1d4ed8;
+  --nui-accent-soft: rgba(59, 130, 246, 0.1);
+  --nui-ring: #3b82f6;
+  --nui-accent-dark: #3b82f6;
+  --nui-accent-hover-dark: #2563eb;
+  --nui-accent-text-dark: #60a5fa;
+  --nui-accent-text-hover-dark: #93c5fd;
+  --nui-accent-soft-dark: rgba(96, 165, 250, 0.13);
+  --nui-ring-dark: #60a5fa;
+
+  /* El velo detrás de un diálogo, igual que el de `ShellModal` y `RouteModal`. */
+  --nui-scrim: rgba(17, 24, 39, 0.45);
+  --nui-scrim-dark: rgba(0, 0, 0, 0.65);
+}
+
 /* ── Tipografía ────────────────────────────────────────────────────────────
    El stack nombra fuentes que EXISTEN en cada plataforma en vez de confiar en que
    `system-ui` caiga en algo bien hinteado: en Linux, `system-ui` resuelve a lo que diga

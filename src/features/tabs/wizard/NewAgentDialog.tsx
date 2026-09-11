@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, FolderIcon, Modal } from "neogestify-ui-components";
+import {
+  Button, FolderIcon,
+} from "neogestify-ui-components";
 
 import { AgentPickerStep } from "@/features/tabs/wizard/AgentPickerStep";
 import { AccountPickerStep } from "@/features/tabs/wizard/AccountPickerStep";
@@ -9,6 +11,7 @@ import { SkillPickerStep } from "@/features/tabs/wizard/SkillPickerStep";
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
 import type { AgentInfo } from "@/features/tabs/types";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface NewAgentDialogProps {
   isOpen: boolean;
@@ -64,7 +67,7 @@ export function NewAgentDialog({ isOpen, cwd, onClose, onConfirm }: NewAgentDial
   };
 
   return (
-    <Modal
+    <AppDialog
       onClose={onClose}
       title={t("newAgent.title")}
       size="md"
@@ -119,6 +122,6 @@ export function NewAgentDialog({ isOpen, cwd, onClose, onConfirm }: NewAgentDial
           />
         )}
       </div>
-    </Modal>
+    </AppDialog>
   );
 }

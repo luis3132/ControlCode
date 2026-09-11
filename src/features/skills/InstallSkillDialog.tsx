@@ -1,9 +1,12 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Modal, TextArea } from "neogestify-ui-components";
+import {
+  Button, Input, TextArea,
+} from "neogestify-ui-components";
 import { useSkillsStore } from "@/features/skills/store";
 import type { SkillFrontmatterInput } from "@/features/skills/types";
 import { SkillFilePickerStep } from "@/features/skills/SkillFilePickerStep";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface InstallSkillDialogProps {
   onClose: () => void;
@@ -81,7 +84,7 @@ export function InstallSkillDialog({ onClose }: InstallSkillDialogProps) {
 
   if (step === "metadata" && meta) {
     return (
-      <Modal
+      <AppDialog
         title={t("skills.install.metadataTitle")}
         onClose={onClose}
         size="md"
@@ -166,12 +169,12 @@ export function InstallSkillDialog({ onClose }: InstallSkillDialogProps) {
           )}
         </div>
         {error && <p className="text-xs text-red-500 dark:text-red-400 mt-3">{error}</p>}
-      </Modal>
+      </AppDialog>
     );
   }
 
   return (
-    <Modal
+    <AppDialog
       title={t("skills.install.title")}
       onClose={onClose}
       size="md"
@@ -193,6 +196,6 @@ export function InstallSkillDialog({ onClose }: InstallSkillDialogProps) {
       </p>
       <SkillFilePickerStep initialPath={file} onPathChange={(p) => { setFile(p); setError(""); }} />
       {error && <p className="text-xs text-red-500 dark:text-red-400 mt-3">{error}</p>}
-    </Modal>
+    </AppDialog>
   );
 }

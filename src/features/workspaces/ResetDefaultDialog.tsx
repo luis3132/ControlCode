@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Modal } from "neogestify-ui-components";
+import {
+  Button,
+} from "neogestify-ui-components";
 import { useWorkspacesStore } from "@/features/workspaces/store";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface ResetDefaultDialogProps {
   onClose: () => void;
@@ -24,7 +27,7 @@ export function ResetDefaultDialog({ onClose }: ResetDefaultDialogProps) {
   };
 
   return (
-    <Modal
+    <AppDialog
       title={t("workspace.resetDefault.title")}
       onClose={onClose}
       size="sm"
@@ -45,6 +48,6 @@ export function ResetDefaultDialog({ onClose }: ResetDefaultDialogProps) {
       <p className="text-sm text-gray-600 dark:text-gray-300">
         {t("workspace.resetDefault.body")}
       </p>
-    </Modal>
+    </AppDialog>
   );
 }

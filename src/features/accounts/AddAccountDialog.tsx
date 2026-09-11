@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Badge, Button, Input, Modal } from "neogestify-ui-components";
+import {
+  Badge, Button, Input,
+} from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
 import { agentIcon } from "@/features/agents/agentIcons";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface AddAccountDialogProps {
   /** El servicio para el que se crea. Viene de la sección en la que estás parado, y no se
@@ -57,7 +60,7 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
   // ── Paso 2: login ─────────────────────────────────────────
   if (created) {
     return (
-      <Modal
+      <AppDialog
         title={t("settings.accounts.login.title", { name: created.name })}
         onClose={onClose}
         size="lg"
@@ -81,7 +84,7 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
           {t("settings.accounts.login.helper", { command: created.loginCommand })}
         </p>
         <LoginTerminal account={created} />
-      </Modal>
+      </AppDialog>
     );
   }
 
@@ -89,7 +92,7 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
   const Icon = agent ? agentIcon(agent.agentId, agent.label) : null;
 
   return (
-    <Modal
+    <AppDialog
       title={agent
         ? t("settings.accounts.add.titleFor", { agent: agent.label })
         : t("settings.accounts.add.title")}
@@ -154,6 +157,6 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
       {error && (
         <p className="mt-3 text-[11.5px] text-red-500 dark:text-red-400">{error}</p>
       )}
-    </Modal>
+    </AppDialog>
   );
 }
