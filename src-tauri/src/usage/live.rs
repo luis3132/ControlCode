@@ -45,9 +45,6 @@ pub struct LiveUsage {
     pub session: Option<Meter>,
     /// La semana, sumando todos los modelos.
     pub week: Option<Meter>,
-    /// La semana de un modelo en particular, cuando el plan lo mide aparte.
-    pub week_model: Option<String>,
-    pub week_model_meter: Option<Meter>,
     /// Por qué no se pudo, para poder decirlo en vez de mostrar un panel vacío.
     pub problem: Option<String>,
 }
@@ -117,7 +114,9 @@ fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Result<String,
 
         // Se corta apenas el panel está completo, no al vencer el tiempo: son segundos de
         // diferencia y esto corre con el usuario esperando.
-        if sent && text.matches("% used").count() >= 2 && text.contains("Resets") {
+        // Con la semana dibujada ya está todo lo que interesa: el panel pinta primero la
+        // ventana en curso y después la semana.
+        if sent && text.contains("Current week") && text.contains("Resets") {
             break Ok(text.into_owned());
         }
         if start.elapsed() > TIMEOUT {

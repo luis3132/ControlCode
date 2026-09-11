@@ -71,8 +71,7 @@ export function AccountUsagePopover({ account, cwd }: {
       .then((env) => claudeLiveUsage(cwd, env))
       .then((l) => { if (!stale) setLive(l); })
       .catch((e) => { if (!stale) setLive({
-        available: false, session: null, week: null,
-        weekModel: null, weekModelMeter: null, problem: String(e),
+        available: false, session: null, week: null, problem: String(e),
       }); })
       .finally(() => { if (!stale) setAsking(false); });
 
@@ -156,20 +155,6 @@ export function AccountUsagePopover({ account, cwd }: {
                           · {live.week.resets}
                         </span>
                       )}
-                    </span>
-                  }
-                />
-              )}
-              {live.weekModelMeter && live.weekModel && (
-                <Progress
-                  value={live.weekModelMeter.percent}
-                  max={100}
-                  size="xs"
-                  showValue
-                  variant="info"
-                  label={
-                    <span className="text-[10.5px] text-gray-500 dark:text-gray-400">
-                      {t("accounts.plan.weekModel", { model: live.weekModel })}
                     </span>
                   }
                 />

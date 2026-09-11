@@ -95,66 +95,69 @@ fn sin_mensajes_no_hay_ventana() {
 
 // ── El panel de `/usage`, leído de la pantalla ───────────────────
 //
-// La captura de abajo es real: salió de abrir `claude` en una PTY y mandarle el comando.
-// Se conserva con sus rarezas —el "3%used" sin espacio, los bloques de las barras, los
-// encabezados repetidos por el redibujado— porque son justo las que rompen un parseo
-// escrito de memoria.
+// La captura de abajo es literal: salió de abrir `claude` en una PTY y guardar los bytes.
+// Lo importante es lo que rompió el primer intento — la TUI separa sus renglones con `\r`,
+// no con `\n`, así que para cualquier parseo por líneas el panel entero es UNA línea. Se
+// conserva también el `3%used` sin espacio y el aviso de promoción con su propio `%`.
 
 use super::parse::{parse_usage_screen, strip_ansi};
 
-const PANTALLA: &str = "\
-   Settings  Status   Config   Usage   Stats
- Session
-Total cost:            $0.0000
-Usage:                 0 input, 0 output, 0 cache read, 0 cache write
-Current session
-█▌                                                3%used
-Resets 12:50pm (America/Bogota)
-Current week (all models)
-   ██████████████████████████████████▌                69% used
-  Resets Sep 13, 11am (America/Bogota)
-   +50% weekly limits promo through Sep 13 · clau.de/cc-50-promo
-What's contributing to your limits usage?
-Current week (Fable)
-████████████▌                                      25% used
-";
+const PANTALLA: &str = concat!(
+    "Current session\r",
+    "█▌                                                3%used\r",
+    "Resets 12:50pm (America/Bogota)\r",
+    "Current week (all models)\r",
+    "   ██████████████████████████████████▌                69% used\r",
+    "  Resets Sep 13, 11am (America/Bogota)\r",
+    "   +50% weekly limits promo through Sep 13 · clau.de/cc-50-promo\r\r",
+    "What's contributing to your limits usage?\r",
+    "Current week (Fable)\r",
+    "████████████▌                                      25% used             ",
+);
 
 #[test]
-fn lee_las_tres_barras_de_una_captura_real() {
+fn lee_el_panel_aunque_todo_venga_en_un_solo_renglon() {
+    assert!(!PANTALLA.contains('\n'), "la captura real no trae saltos de línea");
+
     let u = parse_usage_screen(PANTALLA);
     assert!(u.available);
 
-    let s = u.session.expect("la ventana corta");
+    let s = u.session.expect("la ventana en curso");
     assert_eq!(s.percent, 3, "el '3%used' sin espacio tiene que leerse igual");
     assert_eq!(s.resets.as_deref(), Some("12:50pm (America/Bogota)"));
 
     let w = u.week.expect("la semana");
     assert_eq!(w.percent, 69);
     assert_eq!(w.resets.as_deref(), Some("Sep 13, 11am (America/Bogota)"));
-
-    assert_eq!(u.week_model.as_deref(), Some("Fable"));
-    assert_eq!(u.week_model_meter.expect("la semana del modelo").percent, 25);
 }
 
 #[test]
-fn el_promo_con_porcentaje_no_se_confunde_con_una_barra() {
-    // "+50% weekly limits promo" tiene un porcentaje y está justo debajo de la semana.
-    // Sin exigir la palabra "used", se leería como el consumo semanal.
-    let u = parse_usage_screen(PANTALLA);
-    assert_eq!(u.week.unwrap().percent, 69);
+fn el_aviso_de_promocion_no_se_confunde_con_una_barra() {
+    // "+50% weekly limits promo" cae justo después de la barra semanal. Sin exigir la
+    // palabra "used" pegada al porcentaje, se leería como el consumo de la semana.
+    assert_eq!(parse_usage_screen(PANTALLA).week.unwrap().percent, 69);
 }
 
 #[test]
-fn all_models_no_es_un_modelo() {
-    let u = parse_usage_screen(PANTALLA);
-    assert_eq!(u.week_model.as_deref(), Some("Fable"), "el modelo es Fable, no 'all models'");
+fn la_semana_es_la_de_todos_los_modelos_no_la_de_uno() {
+    // El panel trae también "Current week (Fable)" con otro número. La semana es la
+    // completa; la de un modelo suelto no lo es.
+    assert_eq!(parse_usage_screen(PANTALLA).week.unwrap().percent, 69);
+}
+
+#[test]
+fn sirve_igual_si_solo_esta_la_seccion_por_modelo() {
+    // Un plan que no desglose por modelo no dibuja "(all models)"; ahí el rótulo a secas
+    // es lo único que hay y tiene que alcanzar.
+    let u = parse_usage_screen("Current week\r  12% used\r");
+    assert_eq!(u.week.unwrap().percent, 12);
 }
 
 #[test]
 fn una_salida_sin_panel_no_inventa_ceros() {
-    // Mostrar 0% se leería como "no gastaste nada", que es una mentira distinta a
-    // "no se pudo preguntar".
-    let u = parse_usage_screen("bienvenido a la TUI\n> \n");
+    // Un 0% se leería como "no gastaste nada", que es una mentira distinta a "no se pudo
+    // preguntar".
+    let u = parse_usage_screen("bienvenido a la TUI\r> \r");
     assert!(!u.available);
     assert!(u.problem.is_some());
     assert!(u.session.is_none() && u.week.is_none());
@@ -162,24 +165,47 @@ fn una_salida_sin_panel_no_inventa_ceros() {
 
 #[test]
 fn descarta_un_porcentaje_imposible() {
-    let u = parse_usage_screen("Current session\n999% used\n");
-    assert!(u.session.is_none());
+    assert!(parse_usage_screen("Current session\r999% used\r").session.is_none());
+}
+
+#[test]
+fn un_rotulo_sin_barra_no_le_roba_el_numero_a_la_siguiente() {
+    let lejos = " ".repeat(600);
+    let texto = format!("Current session\r{lejos}Current week (all models)\r42% used\r");
+    let u = parse_usage_screen(&texto);
+    assert!(u.session.is_none(), "la ventana no tiene barra y no debe tomar la semanal");
+    assert_eq!(u.week.unwrap().percent, 42);
+}
+
+#[test]
+fn se_queda_con_la_ultima_pintada_del_panel() {
+    // La TUI repinta mientras abre: la primera pasada puede estar a medias.
+    let texto = "Current session\r0% used\rCurrent session\r37% used\rResets 3pm\r";
+    assert_eq!(parse_usage_screen(texto).session.unwrap().percent, 37);
 }
 
 #[test]
 fn quita_los_escapes_y_los_bloques_de_las_barras() {
-    let raw = "\x1b[32m\x1b[1mCurrent session\x1b[0m\n\x1b]0;titulo\x07█▌ 7% used\n";
+    let raw = "\x1b[32m\x1b[1mCurrent session\x1b[0m\r\x1b]0;titulo\x07█▌ 7% used\r";
     let limpio = strip_ansi(raw);
-    assert!(limpio.contains("Current session"));
-    assert!(limpio.contains("7% used"));
+    assert!(limpio.contains("Current session") && limpio.contains("7% used"));
     assert!(!limpio.contains('\x1b'), "quedaron escapes: {limpio:?}");
     assert!(!limpio.contains('█'));
 }
 
+/// Comprobación contra los BYTES crudos de una captura, escapes incluidos. Solo corre si
+/// se le pasa el archivo por variable de entorno; es una verificación puntual, no algo que
+/// tenga que estar en la máquina de todos.
 #[test]
-fn un_encabezado_sin_su_barra_no_arrastra_la_de_abajo() {
-    // Si una sección quedó cortada, su porcentaje no puede salir de la siguiente.
-    let u = parse_usage_screen("Current session\n\n\n\n\n\nCurrent week (all models)\n42% used\n");
-    assert!(u.session.is_none());
-    assert_eq!(u.week.unwrap().percent, 42);
+fn contra_una_captura_cruda_en_disco() {
+    let Ok(path) = std::env::var("CC_USAGE_CAPTURE") else { return };
+    let raw = std::fs::read(&path).expect("leer la captura");
+    let texto = String::from_utf8_lossy(&raw);
+    let u = parse_usage_screen(&texto);
+    println!(
+        "session={:?} week={:?} available={}",
+        u.session, u.week, u.available
+    );
+    assert!(u.available, "no se encontró el panel en la captura cruda");
+    assert!(u.session.is_some() && u.week.is_some());
 }

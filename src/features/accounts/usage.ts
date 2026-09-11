@@ -108,8 +108,6 @@ export interface LiveUsage {
   available: boolean;
   session: Meter | null;
   week: Meter | null;
-  weekModel: string | null;
-  weekModelMeter: Meter | null;
   problem: string | null;
 }
 

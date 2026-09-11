@@ -454,7 +454,6 @@
   "accounts.plan.asking": "Asking the TUI for your quota…",
   "accounts.plan.session": "Current window",
   "accounts.plan.week": "This week",
-  "accounts.plan.weekModel": "This week ({{model}})",
   "accounts.plan.failed": "Couldn't read the plan quota.",
   "accounts.plan.noFolder": "A trusted folder is needed before the TUI can be asked for the quota."
 }
