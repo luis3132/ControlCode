@@ -5,7 +5,8 @@ import { Tooltip } from "neogestify-ui-components";
 import { agentIcon } from "@/features/agents/agentIcons";
 
 import { isLive } from "./fleetOrder";
-import type { Task, TaskStatus } from "./types";
+import { PermissionCard } from "./PermissionCard";
+import type { PendingApproval, Task, TaskStatus } from "./types";
 
 /** Segundos transcurridos, refrescados solo mientras la tarea sigue viva. */
 function useElapsed(task: Task): number {
@@ -53,12 +54,17 @@ const BADGE: Record<TaskStatus, string> = {
  * que "qué archivo tocó" viene como dato: las líneas son ya la forma corta (`Bash(cargo
  * test)`), no un recorte de su salida. Quien quiera el detalle abre la tarea como pane.
  */
-export function AgentCard({ task, activity, onCancel, onOpenPane, onShowResult }: {
+export function AgentCard({ task, activity, approval, focused, onCancel, onOpenPane, onShowResult, onDecide }: {
   task: Task;
   activity: string[];
+  /** El permiso que esta tarea está esperando, si hay uno. */
+  approval?: PendingApproval;
+  /** Si es la tarjeta que responde a `y`/`n`. */
+  focused: boolean;
   onCancel: () => void;
   onOpenPane: () => void;
   onShowResult: () => void;
+  onDecide: (allow: boolean) => void;
 }) {
   const { t } = useTranslation();
   const Icon = agentIcon(task.agentId);
@@ -69,9 +75,11 @@ export function AgentCard({ task, activity, onCancel, onOpenPane, onShowResult }
   return (
     <div className={`flex flex-col rounded-xl overflow-hidden
       bg-gray-50 dark:bg-white/4
-      border ${task.status === "failed"
-        ? "border-red-300/60 dark:border-red-500/25"
-        : "border-gray-200 dark:border-white/10"}`}>
+      border ${approval
+        ? "border-amber-400/70 dark:border-amber-500/40"
+        : task.status === "failed"
+          ? "border-red-300/60 dark:border-red-500/25"
+          : "border-gray-200 dark:border-white/10"}`}>
 
       {/* ── quién y en qué estado ── */}
       <div className="flex items-start gap-2.5 px-3 pt-2.5">
@@ -89,9 +97,13 @@ export function AgentCard({ task, activity, onCancel, onOpenPane, onShowResult }
             {task.cwd}
           </span>
         </div>
+        {/* Estar esperando una decisión gana sobre el estado: para quien mira, esta
+            tarjeta no está trabajando, está parada por su culpa. */}
         <span className={`shrink-0 px-1.5 py-px rounded-full text-[9.5px] font-bold
-          uppercase tracking-wider ${BADGE[task.status]}`}>
-          {t(`fleet.status.${task.status}`)}
+          uppercase tracking-wider ${approval
+            ? "text-amber-800 dark:text-amber-300 bg-amber-500/20"
+            : BADGE[task.status]}`}>
+          {approval ? t("fleet.status.needsYou") : t(`fleet.status.${task.status}`)}
         </span>
       </div>
 
@@ -118,6 +130,10 @@ export function AgentCard({ task, activity, onCancel, onOpenPane, onShowResult }
           </span>
         )}
       </div>
+
+      {approval && (
+        <PermissionCard approval={approval} focused={focused} onDecide={onDecide} />
+      )}
 
       {/* ── qué costó y qué se puede hacer ── */}
       <div className="flex items-center gap-2.5 px-3 h-8 shrink-0

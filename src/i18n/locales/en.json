@@ -492,5 +492,9 @@
   "fleet.detail.result": "What it delivered",
   "fleet.detail.error": "Why it failed",
   "fleet.detail.nothing": "It left nothing written down.",
-  "fleet.error.noWorkspace": "Open a folder before launching an agent."
+  "fleet.error.noWorkspace": "Open a folder before launching an agent.",
+  "fleet.status.needsYou": "needs you",
+  "fleet.permission.allow": "allow",
+  "fleet.permission.deny": "deny",
+  "fleet.permission.blocked": "blocked {{secs}}"
 }

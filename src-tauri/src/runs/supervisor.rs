@@ -33,6 +33,14 @@ use super::types::{status, AgentEvent, Task, TaskOutcome};
 pub const TASK_EVENT: &str = "cc-task-event";
 /// Evento de "esta tarjeta cambió de estado"; la consola recarga esa fila.
 pub const TASK_CHANGED: &str = "cc-task-changed";
+/// Evento de "cambió la cola de permisos"; la consola vuelve a pedirla.
+pub const APPROVALS_CHANGED: &str = "cc-task-approvals";
+
+/// Avisa que la cola de permisos cambió. Se manda el estado entero y no el delta porque
+/// son unos pocos pedidos y así una ventana que se perdió un evento se recupera sola.
+pub fn notify_approvals(app: &AppHandle) {
+    let _ = app.emit(APPROVALS_CHANGED, super::broker::pending());
+}
 
 /// Nombre del grupo de contención. No se cruza con los ids de PTY porque va por otro
 /// contador y el nombre del cgroup los distingue igual; solo sirve para leerlo.
@@ -67,6 +75,33 @@ fn emit_event(app: &AppHandle, task_id: &str, event: AgentEvent) {
 
 fn emit_changed(app: &AppHandle, task_id: &str) {
     let _ = app.emit(TASK_CHANGED, task_id.to_string());
+}
+
+/// El `--mcp-config` que le dice al agente cómo alcanzar su puente de permisos.
+///
+/// Se escribe uno por tarea porque el `--task` de adentro es lo que después le dice a la
+/// app a qué tarjeta pertenece cada pedido. El archivo se borra al terminar; los que
+/// queden de un cierre sucio los barre el arranque.
+fn write_mcp_config(task_id: &str) -> Option<PathBuf> {
+    // El mismo binario que la app instala en el PATH. Si no está —una build de desarrollo
+    // sin `ccode` al lado— se corre sin broker en vez de fallar: el agente igual sirve,
+    // solo que sin poder pedir permiso.
+    let ccode = crate::ipc::install::source_binary()?;
+
+    let dir = dirs::home_dir()?.join(".controlcode").join("mcp");
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join(format!("{task_id}.json"));
+
+    let config = serde_json::json!({
+        "mcpServers": {
+            crate::ipc::mcp::SERVER_NAME: {
+                "command": ccode.to_string_lossy(),
+                "args": ["mcp", "--task", task_id],
+            }
+        }
+    });
+    std::fs::write(&path, config.to_string()).ok()?;
+    Some(path)
 }
 
 /// Dónde va el NDJSON crudo de una tarea.
@@ -108,7 +143,8 @@ pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
         None => Default::default(),
     };
 
-    let ctx = LaunchCtx { session_id: &session_id, account_env };
+    let mcp_config = write_mcp_config(&task.id);
+    let ctx = LaunchCtx { session_id: &session_id, account_env, mcp_config: mcp_config.clone() };
     let launch = adapter.launch(&task.prompt, task.model.as_deref(), task.budget_usd, &ctx);
 
     let mut command = tokio::process::Command::new(&launch.program);
@@ -186,6 +222,12 @@ pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
         // Sacarlo del registro corre el `Drop` del grupo, que barre lo que el agente
         // hubiera dejado atrás (un `cargo test` a medias, un server levantado).
         live().remove(&task_id);
+        // Un pedido de permiso sin proceso que lo espere no lo va a contestar nadie:
+        // dejarlo en la cola lo mostraría en la consola para siempre.
+        super::broker::drop_task(&task_id);
+        if let Some(path) = &mcp_config {
+            let _ = std::fs::remove_file(path);
+        }
 
         if let Ok(conn) = db.lock() {
             let _ = store::finish_task(&conn, &task_id, &outcome);
@@ -214,6 +256,7 @@ pub fn cancel(app: &AppHandle, task_id: &str) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
     drop(conn);
 
+    super::broker::drop_task(task_id);
     if let Some(mut group) = live().remove(task_id) {
         group.kill_all();
     }

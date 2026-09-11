@@ -44,20 +44,29 @@ fn tarea(conn: &Connection, run_id: &str) -> String {
 
 // ── El argv ─────────────────────────────────────────────────────
 
-/// Los cinco flags sin los cuales esto no es un agente headless supervisado, sino un
-/// proceso suelto: sin `stream-json` no hay eventos, sin `--session-id` no se puede
-/// reabrir como tab, y sin la pareja de permisos queda esperando a un humano que no está.
+fn ctx_sin_broker() -> LaunchCtx<'static> {
+    LaunchCtx { session_id: "s-1", account_env: Default::default(), mcp_config: None }
+}
+
+fn ctx_con_broker() -> LaunchCtx<'static> {
+    LaunchCtx {
+        session_id: "s-1",
+        account_env: Default::default(),
+        mcp_config: Some(std::path::PathBuf::from("/tmp/cc/t1.json")),
+    }
+}
+
+/// Los flags sin los cuales esto no es un agente headless supervisado, sino un proceso
+/// suelto: sin `stream-json` no hay eventos y sin `--session-id` no se puede reabrir como
+/// tab.
 #[test]
-fn el_lanzamiento_de_claude_pide_eventos_sesion_y_permisos_resueltos() {
-    let ctx = LaunchCtx { session_id: "s-1", account_env: Default::default() };
-    let launch = claude().launch("arreglá el bug", None, None, &ctx);
+fn el_lanzamiento_de_claude_pide_eventos_y_sesion_fijada() {
+    let launch = claude().launch("arreglá el bug", None, None, &ctx_sin_broker());
     let args = launch.args.join(" ");
 
     assert!(args.contains("-p arreglá el bug"));
     assert!(args.contains("--output-format stream-json"));
     assert!(args.contains("--session-id s-1"));
-    assert!(args.contains("--permission-mode acceptEdits"));
-    assert!(args.contains("--permission-prompts none"));
 
     // Nunca por default: dejar a un agente sin supervisión y sin límites son dos
     // decisiones distintas, y acá solo se tomó la primera.
@@ -65,9 +74,35 @@ fn el_lanzamiento_de_claude_pide_eventos_sesion_y_permisos_resueltos() {
     assert!(!args.contains("--dangerously-skip-permissions"));
 }
 
+/// Con broker el agente PREGUNTA, y la pregunta tiene que llegar a nuestra tool. Los cuatro
+/// flags van juntos o no va ninguno: `--permission-mode default` sin `host` deja la
+/// pregunta sin destino, y `host` sin `--permission-prompt-tool` la manda a un SDK que acá
+/// no existe.
+#[test]
+fn con_broker_los_permisos_se_rutean_a_la_consola() {
+    let args = claude().launch("x", None, None, &ctx_con_broker()).args.join(" ");
+
+    assert!(args.contains("--mcp-config /tmp/cc/t1.json"));
+    assert!(args.contains("--strict-mcp-config"));
+    assert!(args.contains("--permission-prompt-tool mcp__controlcode__approve_tool_use"));
+    assert!(args.contains("--permission-mode default"));
+    assert!(args.contains("--permission-prompts host"));
+}
+
+/// Sin broker no hay a quién preguntarle: lo que preguntaría se deniega en vez de colgar el
+/// proceso esperando a nadie.
+#[test]
+fn sin_broker_lo_que_preguntaria_se_deniega() {
+    let args = claude().launch("x", None, None, &ctx_sin_broker()).args.join(" ");
+
+    assert!(args.contains("--permission-mode acceptEdits"));
+    assert!(args.contains("--permission-prompts none"));
+    assert!(!args.contains("--permission-prompt-tool"));
+}
+
 #[test]
 fn el_modelo_y_el_presupuesto_solo_van_si_se_pidieron() {
-    let ctx = LaunchCtx { session_id: "s-1", account_env: Default::default() };
+    let ctx = ctx_sin_broker();
 
     let pelado = claude().launch("x", None, None, &ctx).args.join(" ");
     assert!(!pelado.contains("--model"));
@@ -408,4 +443,204 @@ fn una_corrida_real_produce_la_actividad_que_se_muestra() {
 
     assert_eq!(lineas.len(), 2, "un texto y una herramienta");
     assert!(lineas[1].starts_with("Read("), "la herramienta se muestra con su archivo");
+}
+
+// ── Las reglas ──────────────────────────────────────────────────
+
+use super::rules::{decide, Decision, PermissionRule};
+
+fn regla(pattern: &str, allow: bool) -> PermissionRule {
+    PermissionRule { pattern: pattern.into(), allow }
+}
+
+fn entrada(json: serde_json::Value) -> serde_json::Value {
+    json
+}
+
+/// Sin reglas se pregunta todo. Es el default y es el lado seguro: una columna vacía, rota
+/// o de un run viejo no puede terminar autorizando algo sola.
+#[test]
+fn sin_reglas_se_pregunta_todo() {
+    assert_eq!(decide(&[], "Edit", &entrada(serde_json::json!({}))), Decision::Ask);
+    assert_eq!(
+        super::rules::parse_rules("{no es json").len(),
+        0,
+        "una columna ilegible deja al run sin reglas, no con reglas inventadas"
+    );
+}
+
+#[test]
+fn una_regla_sin_parentesis_vale_para_toda_la_herramienta() {
+    let reglas = [regla("Read", true)];
+    assert_eq!(decide(&reglas, "Read", &entrada(serde_json::json!({"file_path": "/x"}))), Decision::Allow);
+    assert_eq!(decide(&reglas, "Edit", &entrada(serde_json::json!({"file_path": "/x"}))), Decision::Ask);
+}
+
+#[test]
+fn el_patron_compara_contra_el_campo_que_identifica_la_accion() {
+    let reglas = [regla("Bash(git status*)", true), regla("Edit(src/**)", true)];
+
+    assert_eq!(
+        decide(&reglas, "Bash", &entrada(serde_json::json!({"command": "git status --short"}))),
+        Decision::Allow
+    );
+    assert_eq!(
+        decide(&reglas, "Bash", &entrada(serde_json::json!({"command": "git push origin main"}))),
+        Decision::Ask
+    );
+    assert_eq!(
+        decide(&reglas, "Edit", &entrada(serde_json::json!({"file_path": "src/a/b.rs"}))),
+        Decision::Allow
+    );
+    assert_eq!(
+        decide(&reglas, "Edit", &entrada(serde_json::json!({"file_path": "otro/a.rs"}))),
+        Decision::Ask
+    );
+}
+
+/// Gana la primera que coincide, no la más específica. El orden es el que el usuario ve;
+/// inferir precedencia haría que dos reglas que se leen claras den un resultado que no se
+/// deduce mirándolas.
+#[test]
+fn gana_la_primera_regla_que_coincide() {
+    let deniega_primero = [regla("Bash(git push*)", false), regla("Bash", true)];
+    assert_eq!(
+        decide(&deniega_primero, "Bash", &entrada(serde_json::json!({"command": "git push"}))),
+        Decision::Deny
+    );
+
+    let permite_primero = [regla("Bash", true), regla("Bash(git push*)", false)];
+    assert_eq!(
+        decide(&permite_primero, "Bash", &entrada(serde_json::json!({"command": "git push"}))),
+        Decision::Allow
+    );
+}
+
+/// Una regla con patrón necesita un argumento que comparar. Si la herramienta no expone
+/// ninguno que sepamos leer, la regla NO aplica y se termina preguntando: el otro lado del
+/// error sería permitir algo por una regla que nunca se pudo verificar.
+#[test]
+fn una_regla_con_patron_no_aplica_a_una_herramienta_sin_argumento_legible() {
+    let reglas = [regla("mcp__foo__bar(*)", true)];
+    assert_eq!(
+        decide(&reglas, "mcp__foo__bar", &entrada(serde_json::json!({"lo_que_sea": 1}))),
+        Decision::Ask
+    );
+
+    // Y la misma herramienta SIN patrón sí se puede autorizar entera.
+    let reglas = [regla("mcp__foo__bar", true)];
+    assert_eq!(
+        decide(&reglas, "mcp__foo__bar", &entrada(serde_json::json!({"lo_que_sea": 1}))),
+        Decision::Allow
+    );
+}
+
+#[test]
+fn el_glob_ancla_los_extremos() {
+    let exacto = [regla("Bash(ls)", true)];
+    assert_eq!(decide(&exacto, "Bash", &entrada(serde_json::json!({"command": "ls"}))), Decision::Allow);
+    assert_eq!(
+        decide(&exacto, "Bash", &entrada(serde_json::json!({"command": "ls -la"}))),
+        Decision::Ask,
+        "sin `*` el patrón es exacto"
+    );
+
+    let sufijo = [regla("Edit(*.rs)", true)];
+    assert_eq!(
+        decide(&sufijo, "Edit", &entrada(serde_json::json!({"file_path": "src/main.rs"}))),
+        Decision::Allow
+    );
+    assert_eq!(
+        decide(&sufijo, "Edit", &entrada(serde_json::json!({"file_path": "src/main.ts"}))),
+        Decision::Ask
+    );
+}
+
+// ── El broker ───────────────────────────────────────────────────
+
+use super::broker;
+use std::time::Duration;
+
+lazy_static::lazy_static! {
+    /// La cola del broker es global —tiene que serlo: el `ccode mcp` de cualquier tarea
+    /// entra por ahí— así que estos tests no pueden correr en paralelo entre sí. Sin esto
+    /// pasan solos y fallan en la suite completa, que es la peor forma de fallar.
+    static ref UNO_A_LA_VEZ: std::sync::Mutex<()> = std::sync::Mutex::new(());
+}
+
+fn con_broker_limpio() -> std::sync::MutexGuard<'static, ()> {
+    let guard = UNO_A_LA_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+    broker::clear();
+    guard
+}
+
+/// El circuito completo: el agente pregunta y se queda esperando, una persona contesta, y
+/// el agente sigue con esa respuesta. Es lo único que separa "un agente que corre solo" de
+/// "un agente al que le podés confiar el repo".
+#[test]
+fn un_pedido_espera_hasta_que_alguien_contesta() {
+    let _serial = con_broker_limpio();
+    let id = "ap-1";
+
+    let esperando = std::thread::spawn(move || {
+        broker::ask(id, "t1", "Edit", serde_json::json!({"file_path": "/x"}), Duration::from_secs(5))
+    });
+
+    // El pedido aparece en la cola para que la consola lo muestre.
+    let visto = loop {
+        let p = broker::pending();
+        if !p.is_empty() {
+            break p;
+        }
+        std::thread::yield_now();
+    };
+    assert_eq!(visto[0].tool_name, "Edit");
+    assert_eq!(visto[0].task_id, "t1");
+
+    assert!(broker::decide(id, true, None));
+    let verdict = esperando.join().unwrap().expect("contestado");
+    assert!(verdict.allow);
+
+    // Y deja de estar pendiente.
+    assert!(broker::pending().is_empty());
+}
+
+/// Si nadie contesta, NO se inventa un permiso. Devuelve "nadie contestó", que quien llama
+/// traduce a denegado diciendo justamente eso — porque "te dijeron que no" y "no había
+/// nadie" son cosas distintas y el agente las repite en su salida.
+#[test]
+fn un_pedido_que_vence_no_se_aprueba_solo() {
+    let _serial = con_broker_limpio();
+    let verdict = broker::ask(
+        "ap-2",
+        "t1",
+        "Bash",
+        serde_json::json!({"command": "rm -rf /"}),
+        Duration::from_millis(50),
+    );
+    assert_eq!(verdict, None);
+    assert!(broker::pending().is_empty(), "un pedido vencido no queda en la cola");
+}
+
+/// Cancelar una tarea tiene que soltar lo que estuviera esperando: ese pedido no lo va a
+/// contestar nadie, y dejarlo lo mostraría en la consola para siempre.
+#[test]
+fn cancelar_una_tarea_suelta_sus_pedidos() {
+    let _serial = con_broker_limpio();
+    let esperando = std::thread::spawn(|| {
+        broker::ask("ap-3", "t9", "Edit", serde_json::json!({}), Duration::from_secs(5))
+    });
+    while broker::pending().is_empty() {
+        std::thread::yield_now();
+    }
+
+    assert_eq!(broker::drop_task("t9"), 1);
+    assert_eq!(esperando.join().unwrap(), None);
+    assert!(broker::pending().is_empty());
+}
+
+#[test]
+fn contestar_un_pedido_que_ya_no_existe_lo_dice() {
+    let _serial = con_broker_limpio();
+    assert!(!broker::decide("no-existe", true, None));
 }

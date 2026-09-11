@@ -38,7 +38,7 @@ pub struct CliInstallStatus {
 
 /// El binario `ccode` que acompaña a este ejecutable. Sale del mismo crate, así que en
 /// desarrollo (`target/debug/`) y en un bundle queda siempre al lado de la app.
-fn source_binary() -> Option<PathBuf> {
+pub(crate) fn source_binary() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
 

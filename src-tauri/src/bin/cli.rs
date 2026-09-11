@@ -105,6 +105,13 @@ fn main() -> ExitCode {
         return ExitCode::from(EXIT_OK);
     }
 
+    // `ccode mcp --task <id>` se atiende antes que nada: no devuelve una línea JSON como
+    // el resto, sino que se queda con stdin y stdout hablando JSON-RPC con el agente que
+    // lo lanzó. Mezclarlo con el parseo de flags normal le ensuciaría el canal.
+    if args[0] == "mcp" {
+        return run_mcp(&args[1..]);
+    }
+
     // `ccode skills` / `ccode agents`: listar es lo único que se hace con ellos, y exigir
     // `skill list` para eso era ceremonia sin ganancia.
     let (command, flag_args) = match shortcut(&args[0]) {
@@ -341,11 +348,13 @@ fn value_for(key: &str, raw: &str) -> Value {
 
 /// Cuánto esperar la respuesta de la app.
 ///
-/// Casi todos los comandos responden al instante. Dos no:
+/// Casi todos los comandos responden al instante. Tres no:
 /// - `watch wait` bloquea a propósito hasta su timeout, así que la CLI tiene que esperar
 ///   más que él o cortaría justo la llamada cuya gracia es quedarse esperando.
 /// - `tab create --initprompt` espera a que la TUI termine de arrancar antes de escribirle,
 ///   y eso puede llevarse varias decenas de segundos con un agente lento.
+/// - `run.approve` espera a que una PERSONA mire un diff y decida. Ahí el tope no lo pone
+///   la paciencia de la CLI sino la del broker, así que se le suma margen al suyo.
 fn read_timeout_for(command: &str, args: &Value) -> Duration {
     const DEFAULT: u64 = 30;
     match command {
@@ -355,6 +364,13 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         }
         // Los topes del backend suman ~40s (15 para que aparezca el PTY + 25 de arranque).
         "tab.create" if has_init_prompt(args) => Duration::from_secs(75),
+        "run.approve" => {
+            let requested = args
+                .get("timeout")
+                .and_then(Value::as_u64)
+                .unwrap_or(controlcode_lib::ipc::mcp::APPROVAL_TIMEOUT_SECS);
+            Duration::from_secs(requested + 30)
+        }
         _ => Duration::from_secs(DEFAULT),
     }
 }
@@ -438,6 +454,45 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
         message: format!("Respuesta ilegible de la app: {e}"),
         code: EXIT_NO_APP,
     })
+}
+
+/// `ccode mcp --task <id>`: el puente de permisos de un agente headless.
+///
+/// Cada pedido se traduce a un comando del mismo protocolo que usa el resto de la CLI, así
+/// que no hay un canal nuevo ni una autorización nueva — el token del handshake es el
+/// mismo. Los errores van a stderr: stdout es del JSON-RPC y meterle una línea suelta
+/// rompe al cliente.
+fn run_mcp(args: &[String]) -> ExitCode {
+    let task_id = match args {
+        [flag, value, ..] if flag == "--task" => value.clone(),
+        _ => {
+            eprintln!("Uso: ccode mcp --task <id-de-tarea>");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+
+    let stdin = std::io::stdin();
+    let result = controlcode_lib::ipc::mcp::serve(
+        &task_id,
+        stdin.lock(),
+        std::io::stdout(),
+        |command, payload| {
+            let response = send(command, payload).map_err(|e| e.message)?;
+            if response.ok {
+                Ok(response.data.unwrap_or(Value::Null))
+            } else {
+                Err(response.error.unwrap_or_else(|| "la app rechazó el pedido".into()))
+            }
+        },
+    );
+
+    match result {
+        Ok(()) => ExitCode::from(EXIT_OK),
+        Err(e) => {
+            eprintln!("ccode mcp: {e}");
+            ExitCode::from(EXIT_COMMAND_FAILED)
+        }
+    }
 }
 
 // El archivo vive fuera de `src/bin/` a propósito: el bundler de Tauri trata CADA entrada

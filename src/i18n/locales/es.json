@@ -492,5 +492,9 @@
   "fleet.detail.result": "Lo que entregó",
   "fleet.detail.error": "Por qué falló",
   "fleet.detail.nothing": "No dejó nada escrito.",
-  "fleet.error.noWorkspace": "Abrí una carpeta antes de lanzar un agente."
+  "fleet.error.noWorkspace": "Abrí una carpeta antes de lanzar un agente.",
+  "fleet.status.needsYou": "te necesita",
+  "fleet.permission.allow": "permitir",
+  "fleet.permission.deny": "rechazar",
+  "fleet.permission.blocked": "trabado {{secs}}"
 }

@@ -4,6 +4,7 @@ mod agents;
 mod app;
 mod dispatch;
 mod shared;
+mod runs;
 mod skills;
 mod tabs;
 mod watch;

@@ -10,11 +10,12 @@ import { AgentCard } from "./AgentCard";
 import { countByGroup, filterFleet, FLEET_GROUPS, sortFleet, type FleetGroup } from "./fleetOrder";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { useRunsStore } from "./store";
-import type { TaskEventPayload } from "./types";
+import type { PendingApproval, TaskEventPayload } from "./types";
 
 /** Los eventos que emite el supervisor. Deben coincidir con `runs/supervisor.rs`. */
 const TASK_EVENT = "cc-task-event";
 const TASK_CHANGED = "cc-task-changed";
+const APPROVALS_CHANGED = "cc-task-approvals";
 
 /**
  * La consola de flota: qué está haciendo cada agente headless, todo junto.
@@ -36,6 +37,10 @@ export function FleetPage() {
   const refreshTask = useRunsStore((s) => s.refreshTask);
   const startTask = useRunsStore((s) => s.startTask);
   const cancelTask = useRunsStore((s) => s.cancelTask);
+  const approvals = useRunsStore((s) => s.approvals);
+  const setApprovals = useRunsStore((s) => s.setApprovals);
+  const loadApprovals = useRunsStore((s) => s.loadApprovals);
+  const decideApproval = useRunsStore((s) => s.decideApproval);
 
   const [group, setGroup] = useState<FleetGroup | null>(null);
   const [query, setQuery] = useState("");
@@ -47,22 +52,42 @@ export function FleetPage() {
 
   useEffect(() => {
     if (workspaceId) loadTasks(workspaceId).catch(console.error);
-  }, [workspaceId, loadTasks]);
+    // La cola no es por workspace: un permiso esperando es de la app entera. Se pide al
+    // montar porque puede haber uno de antes de abrir esta pantalla.
+    loadApprovals().catch(console.error);
+  }, [workspaceId, loadTasks, loadApprovals]);
 
   useEffect(() => {
     if (!workspaceId) return;
     const unlisten = [
       listen<TaskEventPayload>(TASK_EVENT, (e) => applyEvent(e.payload)),
       listen<string>(TASK_CHANGED, (e) => refreshTask(workspaceId, e.payload)),
+      listen<PendingApproval[]>(APPROVALS_CHANGED, (e) => setApprovals(e.payload)),
     ];
     return () => {
       unlisten.forEach((p) => p.then((off) => off()).catch(() => {}));
     };
-  }, [workspaceId, applyEvent, refreshTask]);
+  }, [workspaceId, applyEvent, refreshTask, setApprovals]);
 
-  const counts = useMemo(() => countByGroup(tasks), [tasks]);
-  const shown = useMemo(() => sortFleet(filterFleet(tasks, group, query)), [tasks, group, query]);
+  // Por tarea, el primer permiso que esté esperando. Puede haber más de uno encolado si el
+  // agente pidió varias cosas seguidas; se muestra de a uno para que la decisión sea sobre
+  // algo concreto y no sobre una lista.
+  const byTask = useMemo(() => {
+    const map = new Map<string, PendingApproval>();
+    for (const a of approvals) if (!map.has(a.taskId)) map.set(a.taskId, a);
+    return map;
+  }, [approvals]);
+  const blocked = useMemo(() => new Set(byTask.keys()), [byTask]);
+
+  const counts = useMemo(() => countByGroup(tasks, blocked), [tasks, blocked]);
+  const shown = useMemo(
+    () => sortFleet(filterFleet(tasks, group, query, blocked), blocked),
+    [tasks, group, query, blocked]
+  );
   const detailTask = tasks.find((tk) => tk.id === detail);
+  // El teclado contesta la PRIMERA tarjeta trabada del orden vigente, que es la que el
+  // usuario tiene arriba de todo. Con varias, `y` a secas sería ambiguo.
+  const focusedId = shown.find((tk) => blocked.has(tk.id))?.id;
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -126,6 +151,12 @@ export function FleetPage() {
                 key={task.id}
                 task={task}
                 activity={activity[task.id] ?? []}
+                approval={byTask.get(task.id)}
+                focused={task.id === focusedId}
+                onDecide={(allow) => {
+                  const a = byTask.get(task.id);
+                  if (a) decideApproval(a.id, allow).catch(console.error);
+                }}
                 onCancel={() => cancelTask(task.id).catch(console.error)}
                 onShowResult={() => setDetail(task.id)}
                 // El pane todavía no existe: llega en el corte 3, junto con el resto de la

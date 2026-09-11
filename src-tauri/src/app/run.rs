@@ -62,6 +62,9 @@ pub fn run() {
             crate::runs::run_list_runs,
             crate::runs::run_start_task,
             crate::runs::run_cancel_task,
+            crate::runs::run_pending_approvals,
+            crate::runs::run_decide_approval,
+            crate::runs::run_set_permission_rules,
             // Cuentas múltiples por TUI
             crate::accounts::account_capable_agents,
             crate::accounts::list_agent_accounts,
@@ -171,6 +174,9 @@ pub fn run() {
                     eprintln!("[runs] {n} tarea(s) headless quedaron colgadas del cierre anterior");
                 }
             }
+            // Y sus pedidos de permiso: el agente que esperaba murió con la app, así que
+            // no los va a contestar nadie.
+            let _ = crate::runs::sweep_orphan_approvals(&db);
 
             let active_id = crate::database::db_get_last_active_workspace_id(&db)?;
             let windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;

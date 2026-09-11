@@ -11,6 +11,8 @@
 
 mod activity;
 mod agents;
+mod broker;
+mod rules;
 mod store;
 mod supervisor;
 mod types;
@@ -19,6 +21,8 @@ mod test;
 
 pub use store::sweep_orphans;
 pub use types::{Run, Task};
+
+use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
 
@@ -103,4 +107,64 @@ pub fn run_start_task(
 #[tauri::command]
 pub fn run_cancel_task(app: AppHandle, task_id: String) -> Result<(), String> {
     supervisor::cancel(&app, &task_id)
+}
+
+// ── Permisos ────────────────────────────────────────────────────
+
+/// Lo que el puente MCP de una tarea pregunta: ¿puede usar esta herramienta?
+///
+/// Vive acá y no en `broker` porque además de resolverlo hay que avisarle a la consola: un
+/// pedido que espera y nadie ve es un agente parado en silencio.
+pub fn resolve_permission(
+    app: &AppHandle,
+    db: &DbConnection,
+    task_id: &str,
+    tool_name: &str,
+    input: serde_json::Value,
+    timeout: Duration,
+) -> broker::Verdict {
+    supervisor::notify_approvals(app);
+    let verdict = broker::resolve(db, task_id, tool_name, input, timeout);
+    // Y otra vez al cerrarse, para que la tarjeta deje de pedir.
+    supervisor::notify_approvals(app);
+    verdict
+}
+
+/// Los pedidos que están esperando a una persona ahora mismo.
+#[tauri::command]
+pub fn run_pending_approvals() -> Vec<broker::PendingApproval> {
+    broker::pending()
+}
+
+/// Contesta un pedido. `false` si ya no existe: venció, o la tarea se canceló mientras
+/// tanto, y en los dos casos el usuario tiene que enterarse en vez de creer que decidió.
+#[tauri::command]
+pub fn run_decide_approval(
+    app: AppHandle,
+    approval_id: String,
+    allow: bool,
+    reason: Option<String>,
+) -> Result<bool, String> {
+    let decided = broker::decide(&approval_id, allow, reason);
+    supervisor::notify_approvals(&app);
+    Ok(decided)
+}
+
+/// Las reglas de permisos de un run.
+#[tauri::command]
+pub fn run_set_permission_rules(
+    run_id: String,
+    rules: Vec<rules::PermissionRule>,
+    db: tauri::State<DbConnection>,
+) -> Result<(), String> {
+    let json = serde_json::to_string(&rules).map_err(|e| e.to_string())?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    conn.execute("UPDATE runs SET permission_rules = ?1 WHERE id = ?2", rusqlite::params![json, run_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Cierra los pedidos que quedaron colgados de una ejecución anterior de la app.
+pub fn sweep_orphan_approvals(db: &DbConnection) -> Result<usize, String> {
+    broker::sweep_orphans(db)
 }

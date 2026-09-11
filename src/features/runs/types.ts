@@ -44,3 +44,13 @@ export interface TaskOutcome {
 
 /** El evento en vivo que emite el backend, con a qué tarjeta pertenece. */
 export type TaskEventPayload = AgentEvent & { taskId: string };
+
+/** Un permiso que un agente está esperando que le contesten. */
+export interface PendingApproval {
+  id: string;
+  taskId: string;
+  toolName: string;
+  /** El `input` crudo de la herramienta. De acá sale el diff. */
+  input: Record<string, unknown>;
+  askedAt: number;
+}

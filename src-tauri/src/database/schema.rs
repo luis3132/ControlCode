@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 11;
+const SCHEMA_VERSION: i32 = 12;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -423,8 +423,40 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              created_at INTEGER NOT NULL
          );
          CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
-         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);",
+         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+
+         -- v12 — Cada permiso que un agente headless pidió, y qué se le contestó.
+         --
+         -- Se persiste y no vive solo en memoria por dos motivos. Es el registro de qué le
+         -- autorizaste a quién, que es lo que uno quiere poder mirar después de dejar
+         -- agentes corriendo solos. Y es de donde salen las reglas: una decisión que se
+         -- repite es una que conviene dejar de preguntar.
+         CREATE TABLE IF NOT EXISTS task_approvals (
+             id         TEXT PRIMARY KEY,
+             task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+             tool_name  TEXT NOT NULL,
+             -- El `input` crudo de la herramienta. De acá sale el diff que se muestra.
+             input_json TEXT NOT NULL,
+             -- pending | allowed | denied
+             status     TEXT NOT NULL DEFAULT 'pending',
+             -- user | rule: si lo decidió una persona o una regla del run.
+             decided_by TEXT,
+             reason     TEXT,
+             asked_at   INTEGER NOT NULL,
+             decided_at INTEGER
+         );
+         CREATE INDEX IF NOT EXISTS idx_task_approvals_task ON task_approvals(task_id);",
     )?;
+
+    // Las reglas de permisos cuelgan del run: son la política de ESE lote de trabajo, no
+    // una preferencia global. Va con ALTER porque `runs` ya existe en las bases que
+    // estrenaron la v11.
+    if !has_column(conn, "runs", "permission_rules") {
+        conn.execute(
+            "ALTER TABLE runs ADD COLUMN permission_rules TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )?;
+    }
 
     // Columna agregada después de que `tabs` ya existía en instalaciones reales, así que
     // se suma con ALTER en vez de recrear la tabla (que perdería las tabs guardadas).

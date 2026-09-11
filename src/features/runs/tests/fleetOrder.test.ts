@@ -157,3 +157,40 @@ describe("lineOf", () => {
     ).toBeNull();
   });
 });
+
+describe("needsYou", () => {
+  const flota = [
+    task({ id: "trabajando", status: "running", startedAt: 10 }),
+    task({ id: "trabada", status: "running", startedAt: 900 }),
+    task({ id: "lista", status: "done", endedAt: 999 }),
+  ];
+  const bloqueadas = new Set(["trabada"]);
+
+  /// Una tarea con un permiso esperando sigue en `running` para el backend, pero desde
+  /// afuera no está trabajando: está parada por culpa del usuario.
+  it("una tarea con un permiso esperando deja de contar como trabajando", () => {
+    expect(groupOf(task({ id: "trabada", status: "running" }), bloqueadas)).toBe("needsYou");
+    expect(groupOf(task({ id: "otra", status: "running" }), bloqueadas)).toBe("running");
+  });
+
+  /// Es el orden del que depende que la consola sirva: la que pide algo va arriba de todo,
+  /// aunque haya arrancado después que las demás.
+  it("la trabada va primera aunque sea la más nueva", () => {
+    expect(sortFleet(flota, bloqueadas).map((t) => t.id))
+      .toEqual(["trabada", "trabajando", "lista"]);
+  });
+
+  it("el contador la mueve de grupo", () => {
+    expect(countByGroup(flota, bloqueadas)).toEqual({ needsYou: 1, running: 1, idle: 1 });
+  });
+
+  it("el filtro de 'te necesita' deja solo a las trabadas", () => {
+    expect(filterFleet(flota, "needsYou", "", bloqueadas).map((t) => t.id)).toEqual(["trabada"]);
+  });
+
+  /// Sin el conjunto, todo se comporta como antes: es lo que permite que la consola pinte
+  /// aunque la cola de permisos todavía no haya llegado.
+  it("sin datos de bloqueo nada cambia", () => {
+    expect(countByGroup(flota)).toEqual({ needsYou: 0, running: 2, idle: 1 });
+  });
+});

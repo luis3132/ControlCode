@@ -25,6 +25,9 @@ pub struct LaunchCtx<'a> {
     pub session_id: &'a str,
     /// Variables de la cuenta con la que corre (`CLAUDE_CONFIG_DIR` y compañía).
     pub account_env: HashMap<String, String>,
+    /// El `--mcp-config` con el puente de permisos de ESTA tarea. `None` = sin broker: el
+    /// agente corre con lo que su modo de permisos decida solo.
+    pub mcp_config: Option<std::path::PathBuf>,
 }
 
 pub trait HeadlessAgent {
@@ -73,16 +76,41 @@ impl HeadlessAgent for ClaudeCode {
             // (`sessionDiscovery.ts`, hasta 35 minutos de reintentos).
             "--session-id".into(),
             ctx.session_id.into(),
-            // El default desatendido: las ediciones dentro del cwd pasan solas y
-            // cualquier cosa que preguntaría se DENIEGA en vez de colgar el proceso
-            // esperando a nadie. Nunca `bypassPermissions`: dejar a un agente sin
-            // supervisión Y sin límites son dos decisiones distintas, y acá solo se tomó
-            // la primera. El broker que sube la pregunta a la consola es el corte 2.
-            "--permission-mode".into(),
-            "acceptEdits".into(),
-            "--permission-prompts".into(),
-            "none".into(),
         ];
+
+        // Nunca `bypassPermissions`: dejar a un agente sin supervisión Y sin límites son
+        // dos decisiones distintas, y acá solo se tomó la primera.
+        match &ctx.mcp_config {
+            // Con broker: el agente PREGUNTA y la consola contesta. `default` es el modo
+            // que manda a preguntar las ediciones (las lecturas las resuelve solo, así que
+            // no llegan a molestar), y `host` es lo que rutea esa pregunta a nuestra tool.
+            // `--strict-mcp-config` deja fuera los MCP del usuario: una tarea desatendida
+            // con servidores que no elegimos es superficie que nadie revisó. Los MCP por
+            // tarea son la Fase 11.
+            Some(path) => {
+                args.push("--mcp-config".into());
+                args.push(path.to_string_lossy().into_owned());
+                args.push("--strict-mcp-config".into());
+                args.push("--permission-prompt-tool".into());
+                args.push(format!(
+                    "mcp__{}__{}",
+                    crate::ipc::mcp::SERVER_NAME,
+                    crate::ipc::mcp::TOOL_NAME
+                ));
+                args.push("--permission-mode".into());
+                args.push("default".into());
+                args.push("--permission-prompts".into());
+                args.push("host".into());
+            }
+            // Sin broker no hay a quién preguntarle, así que lo que preguntaría se DENIEGA
+            // en vez de colgar el proceso esperando a nadie.
+            None => {
+                args.push("--permission-mode".into());
+                args.push("acceptEdits".into());
+                args.push("--permission-prompts".into());
+                args.push("none".into());
+            }
+        }
         if let Some(m) = model {
             args.push("--model".into());
             args.push(m.into());
