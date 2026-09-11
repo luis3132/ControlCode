@@ -109,6 +109,34 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         conn.execute("ALTER TABLE tabs ADD COLUMN opened_at INTEGER NOT NULL DEFAULT 0", [])?;
     }
 
+    // Va ACÁ y no más abajo a propósito: el batch de más adelante crea un índice único
+    // sobre `cwd`, y sobre una base que ya existe el `CREATE TABLE IF NOT EXISTS` de esa
+    // tabla es un no-op — sin la columna puesta primero, ese índice falla y la app no
+    // arranca. En una base nueva no se nota, porque ahí la tabla nace con la columna.
+    //
+    // v9 — las skills de scope='workspace' pasan a ser POR CARPETA.
+    //
+    // Antes valían para todas las tabs del workspace, o sea que activar una skill en un
+    // proyecto la metía también en los otros que tuvieras abiertos en la misma ventana.
+    // Con "cada carpeta es un workspace" eso deja de tener sentido. Las filas que ya
+    // existían quedan con `''` = "todas las carpetas", que es exactamente lo que
+    // significaban, así que nadie pierde una skill al actualizar.
+    if table_exists(conn, "project_skills") && !has_column(conn, "project_skills", "cwd") {
+        conn.execute("ALTER TABLE project_skills ADD COLUMN cwd TEXT NOT NULL DEFAULT ''", [])?;
+
+        // Los índices únicos nuevos no se pueden crear sobre filas repetidas, y repetidas
+        // puede haber: hasta acá el upsert de scope='workspace' nunca encontraba conflicto
+        // (ver el comentario del schema), así que cada re-attach dejaba una fila más.
+        // Se conserva la más vieja de cada grupo.
+        conn.execute(
+            "DELETE FROM project_skills WHERE rowid NOT IN (
+                 SELECT MIN(rowid) FROM project_skills
+                 GROUP BY skill_id, workspace_id, scope, IFNULL(tab_id, ''), cwd
+             )",
+            [],
+        )?;
+    }
+
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS workspaces (
              id          TEXT PRIMARY KEY,
@@ -379,29 +407,6 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     // el repositorio tenga cache, y solo si la coincidencia es inequívoca.
     if !has_column(conn, "skills", "origin_skill_id") {
         conn.execute("ALTER TABLE skills ADD COLUMN origin_skill_id TEXT", [])?;
-    }
-
-    // v9 — las skills de scope='workspace' pasan a ser POR CARPETA.
-    //
-    // Antes valían para todas las tabs del workspace, o sea que activar una skill en un
-    // proyecto la metía también en los otros que tuvieras abiertos en la misma ventana.
-    // Con "cada carpeta es un workspace" eso deja de tener sentido. Las filas que ya
-    // existían quedan con `''` = "todas las carpetas", que es exactamente lo que
-    // significaban, así que nadie pierde una skill al actualizar.
-    if !has_column(conn, "project_skills", "cwd") {
-        conn.execute("ALTER TABLE project_skills ADD COLUMN cwd TEXT NOT NULL DEFAULT ''", [])?;
-
-        // Los índices únicos nuevos no se pueden crear sobre filas repetidas, y repetidas
-        // puede haber: hasta acá el upsert de scope='workspace' nunca encontraba conflicto
-        // (ver el comentario del schema), así que cada re-attach dejaba una fila más.
-        // Se conserva la más vieja de cada grupo.
-        conn.execute(
-            "DELETE FROM project_skills WHERE rowid NOT IN (
-                 SELECT MIN(rowid) FROM project_skills
-                 GROUP BY skill_id, workspace_id, scope, IFNULL(tab_id, ''), cwd
-             )",
-            [],
-        )?;
     }
 
     set_user_version(conn, SCHEMA_VERSION)?;

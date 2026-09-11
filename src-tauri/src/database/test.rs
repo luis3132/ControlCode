@@ -640,3 +640,131 @@ fn el_modelo_viejo_se_aparta_en_vez_de_borrarse() {
     );
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM workspaces"), 0, "y la tabla nueva arranca vacía");
 }
+
+// ── Migraciones sobre una base que ya existía ────────────────────
+//
+// `schema::in_memory()` crea todo de cero, así que no puede ver los errores que solo
+// aparecen cuando la tabla YA está: un `CREATE TABLE IF NOT EXISTS` es un no-op ahí, y
+// todo lo que dependa de una columna nueva tiene que venir de un ALTER antes.
+
+/// Una base con la forma de la v8: `project_skills` sin la columna `cwd`.
+fn base_v8() -> Connection {
+    let conn = Connection::open_in_memory().expect("base en memoria");
+    conn.execute_batch(
+        "PRAGMA foreign_keys = ON;
+         PRAGMA user_version = 8;
+         CREATE TABLE workspaces (
+             id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+             created_at INTEGER NOT NULL, last_active INTEGER NOT NULL
+         );
+         CREATE TABLE windows (
+             id TEXT PRIMARY KEY, label TEXT NOT NULL,
+             workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+             is_open INTEGER NOT NULL DEFAULT 1, last_active INTEGER NOT NULL
+         );
+         CREATE TABLE tabs (
+             id TEXT PRIMARY KEY,
+             window_id TEXT NOT NULL REFERENCES windows(id) ON DELETE CASCADE,
+             title TEXT, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL,
+             command TEXT NOT NULL, cwd TEXT NOT NULL,
+             opened_at INTEGER NOT NULL DEFAULT 0,
+             created_at INTEGER NOT NULL, last_active INTEGER NOT NULL
+         );
+         CREATE TABLE skills (
+             id TEXT PRIMARY KEY, name TEXT NOT NULL, source_path TEXT NOT NULL
+         );
+         CREATE TABLE project_skills (
+             id           TEXT PRIMARY KEY,
+             skill_id     TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+             workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+             scope        TEXT NOT NULL DEFAULT 'workspace',
+             tab_id       TEXT REFERENCES tabs(id) ON DELETE CASCADE,
+             enabled      INTEGER NOT NULL DEFAULT 1,
+             created_at   INTEGER NOT NULL,
+             UNIQUE (skill_id, workspace_id, scope, tab_id)
+         );
+         INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+         INSERT INTO skills (id, name, source_path) VALUES ('sk', 'una', '/tmp/una');",
+    )
+    .expect("base v8");
+    conn
+}
+
+/// El bug que tiró la app al arrancar: la migración corría los índices sobre `cwd` antes
+/// del ALTER que la agrega, y sobre una base existente eso es `no such column: cwd`.
+#[test]
+fn migrar_una_base_v8_no_explota() {
+    let conn = base_v8();
+    schema::migrate(&conn).expect("migrar de v8 a v9");
+
+    let tiene_cwd: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('project_skills') WHERE name = 'cwd'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(tiene_cwd, 1, "la columna cwd debería existir tras migrar");
+
+    let indices: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index'
+             AND name IN ('idx_project_skills_ws_cwd', 'idx_project_skills_tab')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(indices, 2, "los dos índices parciales deberían quedar creados");
+}
+
+/// Las filas que ya existían significaban "todas las carpetas del workspace", y eso es
+/// exactamente lo que guarda la cadena vacía. Actualizar no debe cambiarles el alcance.
+#[test]
+fn las_filas_v8_conservan_su_alcance() {
+    let conn = base_v8();
+    conn.execute(
+        "INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, enabled, created_at)
+         VALUES ('ps1', 'sk', 'ws', 'workspace', NULL, 1, 0)",
+        [],
+    )
+    .unwrap();
+
+    schema::migrate(&conn).expect("migrar");
+
+    let cwd: String = conn
+        .query_row("SELECT cwd FROM project_skills WHERE id = 'ps1'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(cwd, "", "una fila vieja tiene que seguir valiendo para todas las carpetas");
+}
+
+/// Hasta la v8 el upsert de scope='workspace' nunca encontraba conflicto (la UNIQUE
+/// incluye `tab_id`, que ahí es NULL, y SQLite considera distintos a dos NULL), así que
+/// re-attachear dejaba filas repetidas. El índice único nuevo no se puede crear sobre
+/// ellas: la migración tiene que barrerlas primero.
+#[test]
+fn migrar_deduplica_las_filas_repetidas_de_la_v8() {
+    let conn = base_v8();
+    for id in ["ps1", "ps2", "ps3"] {
+        conn.execute(
+            "INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, enabled, created_at)
+             VALUES (?1, 'sk', 'ws', 'workspace', NULL, 1, 0)",
+            [id],
+        )
+        .expect("la v8 dejaba meter duplicados");
+    }
+
+    schema::migrate(&conn).expect("migrar con duplicados");
+
+    let filas: i64 = conn
+        .query_row("SELECT COUNT(*) FROM project_skills", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(filas, 1, "quedaron {filas} filas; la migración debería dejar una");
+}
+
+/// Migrar dos veces seguidas no puede fallar: la app corre `migrate` en cada arranque.
+#[test]
+fn migrar_es_idempotente() {
+    let conn = base_v8();
+    schema::migrate(&conn).expect("primera migración");
+    schema::migrate(&conn).expect("segunda migración sobre la ya migrada");
+}
