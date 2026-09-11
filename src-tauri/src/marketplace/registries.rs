@@ -381,3 +381,48 @@ pub fn preview_registry_location(source_type: String, location: String) -> Resul
         other => Err(format!("Tipo de registry no soportado: {other}")),
     }
 }
+
+/// El `SKILL.md` de una entrada del catálogo, para mostrarlo al elegirla en la búsqueda.
+///
+/// Devuelve el markdown CRUDO; renderizarlo es cosa del frontend. No cachea: el contenido
+/// de una skill remota puede cambiar entre refrescos, y una lectura por click es barata
+/// comparada con mostrar algo desactualizado.
+#[tauri::command]
+pub async fn marketplace_skill_readme(
+    registry_id: String,
+    skill_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<String, String> {
+    let (source_type, location, entries) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let (source_type, location, cache_json): (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT source_type, location, cache_json FROM registries WHERE id = ?1",
+                [&registry_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .map_err(|_| "Registry no encontrado".to_string())?;
+        let entries: Vec<MarketplaceSkillEntry> = cache_json
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default();
+        (source_type, location, entries)
+    };
+
+    let entry = entries
+        .into_iter()
+        .find(|e| e.id == skill_id)
+        .ok_or_else(|| "Esta skill ya no está en el registry (probá refrescarlo)".to_string())?;
+
+    match source_type.as_str() {
+        "local" => {
+            let file = PathBuf::from(&location).join(&entry.folder_path).join("SKILL.md");
+            std::fs::read_to_string(&file).map_err(|e| format!("No se pudo leer {}: {e}", file.display()))
+        }
+        "github" => super::github::fetch_github_skill_markdown(&location, &entry).await,
+        // skills.sh no expone el archivo: bajarlo implica correr `npx skills add` en un
+        // directorio temporal, que tarda segundos. Demasiado para una previsualización —
+        // el frontend se queda con la descripción que ya tiene del catálogo.
+        "skillssh" => Err("Este repositorio no permite leer la skill sin instalarla".to_string()),
+        other => Err(format!("Tipo de repositorio desconocido: {other}")),
+    }
+}

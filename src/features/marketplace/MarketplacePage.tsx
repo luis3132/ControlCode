@@ -1,14 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Input } from "neogestify-ui-components";
-import {
-  SearchIcon, CloudIcon, AnimateSpin,
-} from "neogestify-ui-components";
+import { Alert, AnimateSpin, Badge, Button, CloudIcon, Skeleton } from "neogestify-ui-components";
 import { useMarketplaceStore } from "@/features/marketplace/store";
 import { useSkillsStore } from "@/features/skills/store";
-import { PageHeader } from "@/shared/ui/PageHeader";
+import { Markdown } from "@/shared/ui/Markdown";
 
-import { MarketplaceSkillCard } from "./MarketplaceSkillCard";
+import { SkillResultRow } from "./SkillResultRow";
+import { useSkillReadme } from "./useSkillReadme";
+import { flatOrder, groupByRegistry, keyOf, moveSelection, reconcileSelection } from "./palette";
 import { RegistryFilterSidebar, type RegistryFilter } from "./RegistryFilterSidebar";
 
 export function MarketplacePage() {
@@ -27,6 +26,9 @@ export function MarketplacePage() {
   const [query, setQuery] = useState("");
   const [selectedRegistry, setSelectedRegistry] = useState<RegistryFilter>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Lo marcado en la lista, por `keyOf`. Manda el teclado tanto como el mouse. */
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Lo que YA está instalado sale del catálogo global real, no de un estado local de la
   // página: si no, al entrar todo aparece como "Instalar" aunque ya lo tengas, y volver a
@@ -82,10 +84,6 @@ export function MarketplacePage() {
     return relevant.length > 0 && relevant.every((r) => r.sourceType === "skillssh");
   }, [query, selectedRegistry, registries]);
 
-  const hasSkillsSh = useMemo(
-    () => registries.some((r) => r.sourceType === "skillssh" && r.enabled),
-    [registries]
-  );
 
   const visible = useMemo(
     () => (selectedRegistry ? skills.filter((s) => s.registryId === selectedRegistry) : skills),
@@ -113,118 +111,197 @@ export function MarketplacePage() {
     await refreshRegistry(id);
   };
 
-  // Ancho completo, sin `max-w` centrado: el sidebar ocupa el margen izquierdo que antes
-  // quedaba vacío, y las cards se llevan todo el resto. En una grilla de tarjetas el ancho
-  // extra se traduce en más columnas y tarjetas más grandes, no en líneas de texto
-  // incómodas de leer — que es el motivo por el que el ABM de repositorios sí conserva su
-  // `max-w`.
+  const groups = useMemo(() => groupByRegistry(visible), [visible]);
+  const order = useMemo(() => flatOrder(groups), [groups]);
+
+  // La lista se rehace con cada tecla: lo marcado se conserva si sigue estando, y si no
+  // pasa a ser lo primero. Dejarlo apuntando a algo que ya no se ve haría que Enter
+  // instalara una skill que el usuario no tiene delante.
+  useEffect(() => {
+    setSelectedKey((current) => reconcileSelection(order, current));
+  }, [order]);
+
+  const selected = useMemo(
+    () => order.find((s) => keyOf(s) === selectedKey) ?? null,
+    [order, selectedKey]
+  );
+
+  const readme = useSkillReadme(selected?.registryId ?? null, selected?.id ?? null);
+  const sourceTypeOf = useCallback(
+    (registryId: string) => registries.find((r) => r.id === registryId)?.sourceType,
+    [registries]
+  );
+
+  const isInstalled = (skill: { registryId: string; id: string }) =>
+    installedOrigins.has(`${skill.registryId}\u0000${skill.id}`);
+
+  // El foco arranca en el buscador: esto es una paleta, se llega escribiendo.
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedKey((current) => moveSelection(order, current, e.key === "ArrowDown" ? 1 : -1));
+      return;
+    }
+    if (e.key === "Enter" && selected && !isInstalled(selected)) {
+      e.preventDefault();
+      handleInstall(selected.registryId, selected.id);
+    }
+  };
+
   return (
-    <main className="min-h-full px-6 py-10 bg-gray-50 dark:bg-gray-950">
-      <div className="w-full">
-        <PageHeader
-          icon={<CloudIcon className="w-5 h-5" />}
-          title={t("marketplace.title")}
-          subtitle={t("marketplace.subtitle")}
+    <div className="flex h-full min-h-0">
+      <div className="shrink-0 p-3 pr-0">
+        <RegistryFilterSidebar
+          registries={registries}
+          selected={selectedRegistry}
+          onSelect={setSelectedRegistry}
+          countByRegistry={countByRegistry}
+          totalCount={skills.length}
+          refreshingId={refreshingId}
+          onRefresh={handleRefresh}
         />
+      </div>
 
-        {/* `flex-col` hasta `md`: en pantallas angostas el orden del DOM manda, así que los
-            filtros aparecen arriba y las skills debajo, sin apretar ninguna de las dos
-            columnas contra el borde. */}
-        <div className="flex flex-col md:flex-row gap-6 items-start">
-          <RegistryFilterSidebar
-            registries={registries}
-            selected={selectedRegistry}
-            onSelect={setSelectedRegistry}
-            countByRegistry={countByRegistry}
-            totalCount={skills.length}
-            refreshingId={refreshingId}
-            onRefresh={handleRefresh}
+      {/* ══ la lista ══════════════════════════════════════════════════════ */}
+      <div className="flex flex-col flex-1 min-w-0 min-h-0">
+        <div className="flex items-center gap-3 h-[54px] shrink-0 px-4
+          border-b border-gray-200 dark:border-white/8">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
+            className="shrink-0 text-blue-500 dark:text-blue-400">
+            <path d="M5 7l5 5-5 5M13 17h6" />
+          </svg>
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={t("marketplace.searchPlaceholder")}
+            className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15px]
+              text-gray-900 dark:text-white
+              placeholder:text-gray-400 dark:placeholder:text-white/25"
           />
+          {searchingRemote && <AnimateSpin className="w-3.5 h-3.5 shrink-0 text-gray-400" />}
+          {selectedRegistry && (
+            <Badge variant="accent" size="sm" className="shrink-0">
+              {registries.find((r) => r.id === selectedRegistry)?.name ?? ""}
+            </Badge>
+          )}
+        </div>
 
-          {/* Skills remotas */}
-          <div className="flex-1 min-w-0 w-full">
-            <div className="mb-4">
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={t("marketplace.searchPlaceholder")}
-                variant="outline"
-                icon={<SearchIcon className="w-4 h-4" />}
-                clearable
-                onClear={() => setQuery("")}
-              />
+        <div className="flex-1 min-h-0 cc-scroll py-1.5">
+          {error && <div className="px-3 pb-2"><Alert variant="danger">{error}</Alert></div>}
 
-              {/* Por qué skills.sh puede figurar en 0 aunque lo refresques: no es que esté
-                  roto ni desactualizado, es que su directorio no se puede enumerar. Se dice
-                  acá, junto al buscador, que es donde el usuario se lo pregunta. */}
-              {hasSkillsSh && query.trim().length < 2 && (
-                <p className="mt-2 px-1 text-xs text-gray-400 dark:text-gray-500">
-                  {t("marketplace.skillsShNeedsQuery")}
-                </p>
+          {loading && order.length === 0 ? (
+            <div className="flex flex-col gap-2 px-4 py-2">
+              {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} variant="rounded" height={42} />)}
+            </div>
+          ) : order.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-14 text-gray-400 dark:text-white/30">
+              <CloudIcon className="w-8 h-8 opacity-30" />
+              <p className="text-sm text-center max-w-xs px-6">
+                {remoteNeedsQuery ? t("marketplace.skillsShNeedsQuery") : t("marketplace.empty")}
+              </p>
+            </div>
+          ) : (
+            groups.map((group) => (
+              <div key={group.registryId}>
+                <div className="flex items-center gap-2.5 px-4 pt-3 pb-1">
+                  <span className="text-[9.5px] font-extrabold uppercase tracking-[0.11em]
+                    text-gray-400 dark:text-white/30">
+                    {group.registryName}
+                  </span>
+                  <span className="flex-1 h-px bg-gray-200 dark:bg-white/6" />
+                </div>
+                {group.items.map((skill) => (
+                  <SkillResultRow
+                    key={keyOf(skill)}
+                    skill={skill}
+                    sourceType={sourceTypeOf(skill.registryId)}
+                    selected={keyOf(skill) === selectedKey}
+                    installed={isInstalled(skill)}
+                    installing={installingKey === `${skill.registryId}:${skill.id}`}
+                    onSelect={() => setSelectedKey(keyOf(skill))}
+                    onInstall={() => handleInstall(skill.registryId, skill.id)}
+                  />
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="flex items-center gap-4 h-[34px] shrink-0 px-4
+          border-t border-gray-200 dark:border-white/8
+          bg-gray-100/60 dark:bg-black/20
+          text-[10.5px] text-gray-400 dark:text-white/35">
+          <span><b className="text-gray-500 dark:text-gray-400">↵</b> {t("marketplace.key.install")}</span>
+          <span><b className="text-gray-500 dark:text-gray-400">↑↓</b> {t("marketplace.key.move")}</span>
+          <div className="flex-1" />
+          <span><b className="text-gray-500 dark:text-gray-400">esc</b> {t("marketplace.key.close")}</span>
+        </div>
+      </div>
+
+      {/* ══ la skill elegida, con su SKILL.md renderizado ═════════════════ */}
+      <aside className="flex flex-col w-[21rem] shrink-0 min-h-0
+        border-l border-gray-200 dark:border-white/8
+        bg-gray-100/50 dark:bg-black/20">
+        {!selected ? (
+          <p className="px-5 py-8 text-[11.5px] text-center text-gray-400 dark:text-white/30">
+            {t("marketplace.preview.none")}
+          </p>
+        ) : (
+          <>
+            <div className="flex flex-col gap-1 shrink-0 px-5 pt-5 pb-3">
+              <span className="text-[13.5px] font-bold text-gray-900 dark:text-white">
+                {selected.name}
+              </span>
+              <span className="text-[10.5px] font-mono text-gray-400 dark:text-white/35">
+                {[selected.author, selected.registryName].filter(Boolean).join(" · ")}
+              </span>
+              {selected.categories.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {selected.categories.map((c) => (
+                    <Badge key={c} variant="neutral" size="sm">{c}</Badge>
+                  ))}
+                </div>
               )}
             </div>
 
-            {error && <p className="text-sm text-red-500 dark:text-red-400 mb-4 px-1">{error}</p>}
+            <div className="flex-1 min-h-0 cc-scroll px-5 pb-4">
+              {readme.loading ? (
+                <Skeleton variant="text" lines={8} />
+              ) : readme.content ? (
+                <Markdown content={readme.content} />
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <p className="text-[12.5px] leading-relaxed text-gray-600 dark:text-gray-400">
+                    {selected.description ?? t("marketplace.preview.noDescription")}
+                  </p>
+                  {readme.unavailable && (
+                    <p className="text-[11px] text-gray-400 dark:text-white/30">
+                      {t("marketplace.preview.unavailable")}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
 
-            {/* La búsqueda en skills.sh NO vacía la grilla: los repos con cache ya
-                respondieron y tapar esos resultados durante los segundos que tarda `npx`
-                haría parecer que la búsqueda "se reinicia" en cada consulta. Se avisa que
-                sigue trabajando y los resultados del directorio se suman al llegar. */}
-            {searchingRemote && (
-              <div className="flex items-center gap-2 mb-3 px-1 text-xs
-                text-gray-400 dark:text-gray-500">
-                <AnimateSpin className="w-3 h-3" />
-                {t("marketplace.searchingRemote")}
-              </div>
-            )}
-
-            {loading ? (
-              <div className="flex items-center justify-center gap-2 py-6 text-sm
-                text-gray-400 dark:text-gray-500">
-                <AnimateSpin className="w-4 h-4" />
-                {t("marketplace.loading")}
-              </div>
-            ) : visible.length === 0 && !searchingRemote ? (
-              <div className="flex flex-col items-center gap-2 py-14 text-gray-400 dark:text-gray-500">
-                <CloudIcon className="w-8 h-8 opacity-30" />
-                <p className="text-sm text-center max-w-xs">
-                  {/* Un repo de skills.sh vacío no está roto ni desactualizado: es que
-                      todavía no se buscó nada. Decirlo evita que parezca lo primero. */}
-                  {remoteNeedsQuery
-                    ? t("marketplace.remoteNeedsQuery")
-                    : selectedRegistry
-                      ? t("marketplace.emptyForRegistry")
-                      : t("marketplace.empty")}
-                </p>
-                {selectedRegistry && (
-                  <Button variant="outline" onClick={() => setSelectedRegistry(null)} className="!text-xs">
-                    {t("marketplace.allRegistries")}
-                  </Button>
-                )}
-              </div>
-            ) : (
-              // Se suman columnas a medida que hay ancho real, en vez de estirar dos
-              // tarjetas gigantes: el salto arranca en `sm` porque a partir de ahí ya
-              // sobra lugar aunque el sidebar esté al costado.
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4
-                gap-4 items-start">
-                {visible.map((skill) => {
-                  const key = `${skill.registryId}:${skill.id}`;
-                  return (
-                    <MarketplaceSkillCard
-                      key={key}
-                      skill={skill}
-                      installed={installedOrigins.has(`${skill.registryId}\u0000${skill.id}`)}
-                      installing={installingKey === key}
-                      onInstall={() => handleInstall(skill.registryId, skill.id)}
-                    />
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </main>
+            <div className="shrink-0 px-5 py-3 border-t border-gray-200 dark:border-white/8">
+              <Button
+                variant={isInstalled(selected) ? "outline" : "primary"}
+                fullWidth
+                disabled={isInstalled(selected) || installingKey !== null}
+                isLoading={installingKey === `${selected.registryId}:${selected.id}`}
+                onClick={() => handleInstall(selected.registryId, selected.id)}
+              >
+                {isInstalled(selected) ? t("marketplace.installed") : t("marketplace.install")}
+              </Button>
+            </div>
+          </>
+        )}
+      </aside>
+    </div>
   );
 }

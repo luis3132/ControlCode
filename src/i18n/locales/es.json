@@ -319,7 +319,7 @@
   "marketplace.loading": "Cargando…",
   "marketplace.searchingRemote": "Buscando en skills.sh…",
   "marketplace.remoteNeedsQuery": "skills.sh se busca junto con tus repos, pero su catálogo no se puede listar: no hay forma de traerlo entero. Escribí algo arriba para ver lo que tiene.",
-  "marketplace.installs": "{{count}} instalaciones",
+  "marketplace.installs": "{{n}} instalaciones",
   "marketplace.empty": "No hay skills para mostrar. Agregá un repositorio y refrescalo, o probá otra búsqueda.",
   "marketplace.install": "Instalar",
   "marketplace.installing": "Instalando…",
@@ -429,5 +429,11 @@
   "marketplace.registries.collapse": "Plegar repositorios",
   "marketplace.registries.expand": "Repositorios",
   "settings.terminal.gpu": "Dibujar el texto por GPU",
-  "settings.terminal.gpu.desc": "Texto más nítido y scroll más fluido. Depende del driver de video: si ves parpadeos o terminales en blanco, apagalo y se vuelve al dibujado normal."
+  "settings.terminal.gpu.desc": "Texto más nítido y scroll más fluido. Depende del driver de video: si ves parpadeos o terminales en blanco, apagalo y se vuelve al dibujado normal.",
+  "marketplace.key.install": "instalar",
+  "marketplace.key.move": "moverse",
+  "marketplace.key.close": "cerrar",
+  "marketplace.preview.none": "Elegí una skill para leerla antes de instalarla.",
+  "marketplace.preview.noDescription": "Esta entrada no trae descripción.",
+  "marketplace.preview.unavailable": "Este repositorio no deja leer la skill sin instalarla, así que solo se muestra lo que trae el listado."
 }

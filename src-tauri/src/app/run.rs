@@ -112,6 +112,7 @@ pub fn run() {
             crate::marketplace::list_marketplace_skills,
             crate::marketplace::search_remote_registries,
             crate::marketplace::install_marketplace_skill,
+            crate::marketplace::marketplace_skill_readme,
             crate::skills::registry_skills,
             // Modo orquestador (Fase 9): consumo estimado y tabs observadas
             crate::orchestrator::orchestrator_stats,

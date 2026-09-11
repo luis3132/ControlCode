@@ -319,7 +319,7 @@
   "marketplace.loading": "Loading…",
   "marketplace.searchingRemote": "Searching skills.sh…",
   "marketplace.remoteNeedsQuery": "skills.sh is searched along with your repositories, but its catalogue can't be listed — there is no way to fetch it whole. Type something above to see what it has.",
-  "marketplace.installs": "{{count}} installs",
+  "marketplace.installs": "{{n}} installs",
   "marketplace.empty": "No skills to show. Add a repository and refresh it, or try a different search.",
   "marketplace.install": "Install",
   "marketplace.installing": "Installing…",
@@ -429,5 +429,11 @@
   "marketplace.registries.collapse": "Collapse repositories",
   "marketplace.registries.expand": "Repositories",
   "settings.terminal.gpu": "Draw text on the GPU",
-  "settings.terminal.gpu.desc": "Crisper text and smoother scrolling. It depends on your graphics driver: if you see flicker or blank terminals, turn it off and it falls back to normal drawing."
+  "settings.terminal.gpu.desc": "Crisper text and smoother scrolling. It depends on your graphics driver: if you see flicker or blank terminals, turn it off and it falls back to normal drawing.",
+  "marketplace.key.install": "install",
+  "marketplace.key.move": "move",
+  "marketplace.key.close": "close",
+  "marketplace.preview.none": "Pick a skill to read it before installing.",
+  "marketplace.preview.noDescription": "This entry has no description.",
+  "marketplace.preview.unavailable": "This repository can't serve the skill without installing it, so only the listing data is shown."
 }

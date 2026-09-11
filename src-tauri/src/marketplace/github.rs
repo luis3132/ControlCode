@@ -304,3 +304,20 @@ pub(super) async fn install_from_github(
     let _ = std::fs::remove_dir_all(&tmp_root);
     install_result
 }
+
+/// El `SKILL.md` crudo de una entrada del catálogo, para poder LEERLA antes de instalarla.
+///
+/// Baja un solo archivo, no la carpeta entera como hace la instalación: esto corre cuando
+/// alguien hace click en un resultado de la búsqueda, así que tiene que costar lo mínimo.
+pub(super) async fn fetch_github_skill_markdown(
+    location: &str,
+    entry: &MarketplaceSkillEntry,
+) -> Result<String, String> {
+    let (owner, repo, branch_opt, _subpath) = parse_github_location(location)?;
+    let client = gh_client()?;
+    let branch = resolve_branch(&client, &owner, &repo, branch_opt).await?;
+
+    let path = format!("{}/SKILL.md", entry.folder_path.trim_end_matches('/'));
+    let bytes = fetch_raw_github(&client, &owner, &repo, &branch, &path).await?;
+    String::from_utf8(bytes).map_err(|_| "SKILL.md no está en UTF-8".to_string())
+}
