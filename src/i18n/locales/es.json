@@ -188,7 +188,7 @@
   "settings.skillsDir.desc": "Dónde se guardan las skills instaladas globalmente. Cambiarlo solo afecta instalaciones futuras.",
   "settings.skillsDir.change": "Cambiar",
   "accounts.pick": "Con qué cuenta",
-  "accounts.system": "Cuenta principal",
+  "accounts.system": "cuenta principal",
   "accounts.system.hint": "La de siempre",
   "accounts.ready": "Lista para usar",
   "accounts.needsLogin": "Falta loguearse",
@@ -435,5 +435,16 @@
   "marketplace.key.close": "cerrar",
   "marketplace.preview.none": "Elegí una skill para leerla antes de instalarla.",
   "marketplace.preview.noDescription": "Esta entrada no trae descripción.",
-  "marketplace.preview.unavailable": "Este repositorio no deja leer la skill sin instalarla, así que solo se muestra lo que trae el listado."
+  "marketplace.preview.unavailable": "Este repositorio no deja leer la skill sin instalarla, así que solo se muestra lo que trae el listado.",
+  "accounts.usage.failed": "No se pudo leer el consumo de esta cuenta.",
+  "accounts.usage.unsupported": "Esta TUI no deja el consumo en disco, así que no hay nada real que mostrar.",
+  "accounts.usage.none": "Sin actividad en los últimos siete días.",
+  "accounts.usage.window.5h": "Últimas 5 h",
+  "accounts.usage.window.today": "Últimas 24 h",
+  "accounts.usage.window.7d": "Últimos 7 días",
+  "accounts.usage.input": "Entrada",
+  "accounts.usage.output": "Salida",
+  "accounts.usage.cache": "Leído de caché",
+  "accounts.usage.sessions": "Conversaciones",
+  "accounts.usage.source": "Sumado de {{files}} transcripts de la propia TUI. Las barras comparan cada ventana contra la semana, no contra el límite de tu plan — ese dato no está en ningún lado."
 }

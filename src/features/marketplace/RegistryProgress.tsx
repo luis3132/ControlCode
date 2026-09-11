@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
-import { AnimateSpin, CheckIcon } from "neogestify-ui-components";
+import { AnimateSpin, CheckIcon, Progress } from "neogestify-ui-components";
 import type { RegistryProgress } from "@/features/marketplace/types";
 
 /**
@@ -57,20 +57,15 @@ export function RegistryProgressBar({ progress, compact = false }: RegistryProgr
         )}
       </div>
 
-      <div className={`w-full rounded-full overflow-hidden bg-gray-200 dark:bg-white/10
-        ${compact ? "h-1" : "h-1.5"}`}>
-        {pct !== null ? (
-          <div
-            className="h-full rounded-full bg-linear-to-r from-blue-500 to-violet-500
-              transition-[width] duration-150 ease-out"
-            style={{ width: `${done ? 100 : pct}%` }}
-          />
-        ) : (
-          // Indeterminada: no hay un total todavía, la barra solo indica actividad.
-          <div className="h-full w-1/3 rounded-full bg-linear-to-r from-blue-500 to-violet-500
-            animate-[cc-indeterminate_1.2s_ease-in-out_infinite]" />
-        )}
-      </div>
+      {/* La barra es la de la librería: trae el estado indeterminado, respeta
+          `prefers-reduced-motion` y se mueve con los mismos tiempos que el resto. */}
+      <Progress
+        value={done ? 100 : (pct ?? 0)}
+        max={100}
+        size={compact ? "xs" : "sm"}
+        variant={done ? "success" : "accent"}
+        indeterminate={pct === null && !done}
+      />
 
       {progress?.detail && !compact && (
         <p className="text-[11px] font-mono text-gray-400 dark:text-gray-500 truncate">

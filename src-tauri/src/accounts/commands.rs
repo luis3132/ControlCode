@@ -156,3 +156,44 @@ pub fn agent_account_env(
 ) -> Result<HashMap<String, String>, String> {
     env_for_account(&db, &account_id).ok_or_else(|| "Cuenta no encontrada".to_string())
 }
+
+/// La cuenta PRINCIPAL de cada TUI instalada: la que usa cuando no se le apunta la variable
+/// a ningún perfil.
+///
+/// Va por separado de `list_agent_accounts` porque no es una fila de la base: no la creó
+/// esta app, existía antes. Sin esto, la barra de cuentas mostraba los perfiles alternativos
+/// y escondía justo la que el usuario usa siempre.
+#[tauri::command]
+pub async fn system_accounts() -> Result<Vec<AgentAccount>, String> {
+    tokio::task::spawn_blocking(|| {
+        PROFILES
+            .iter()
+            .filter(|spec| {
+                crate::agents::agent_command(spec.agent_id)
+                    .map(crate::agents::command_exists)
+                    .unwrap_or(false)
+            })
+            .filter_map(|spec| {
+                let dir = super::profiles::default_dir(spec)?;
+                let (logged_in, label) = super::profiles::read_identity(&dir, spec);
+                Some(AgentAccount {
+                    // Id sintético y estable: no hay fila, pero el frontend necesita una
+                    // clave y el backend tiene que poder distinguirla de un perfil real.
+                    id: format!("system:{}", spec.agent_id),
+                    agent_id: spec.agent_id.to_string(),
+                    name: crate::agents::agent_label(spec.agent_id)
+                        .unwrap_or(spec.agent_id)
+                        .to_string(),
+                    dir: dir.to_string_lossy().to_string(),
+                    env_var: spec.env_var.to_string(),
+                    login_command: spec.login_command.to_string(),
+                    logged_in,
+                    label,
+                    created_at: 0,
+                })
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())
+}

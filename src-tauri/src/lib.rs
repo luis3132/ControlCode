@@ -14,6 +14,7 @@ mod prelaunch;
 mod session;
 mod skills;
 mod terminal;
+mod usage;
 mod util;
 mod window;
 

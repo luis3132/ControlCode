@@ -188,7 +188,7 @@
   "settings.skillsDir.desc": "Where installed skills are stored globally. Changing it only affects future installs.",
   "settings.skillsDir.change": "Change",
   "accounts.pick": "Which account",
-  "accounts.system": "Main account",
+  "accounts.system": "main account",
   "accounts.system.hint": "Your usual one",
   "accounts.ready": "Ready to use",
   "accounts.needsLogin": "Needs sign-in",
@@ -435,5 +435,16 @@
   "marketplace.key.close": "close",
   "marketplace.preview.none": "Pick a skill to read it before installing.",
   "marketplace.preview.noDescription": "This entry has no description.",
-  "marketplace.preview.unavailable": "This repository can't serve the skill without installing it, so only the listing data is shown."
+  "marketplace.preview.unavailable": "This repository can't serve the skill without installing it, so only the listing data is shown.",
+  "accounts.usage.failed": "Couldn't read this account's usage.",
+  "accounts.usage.unsupported": "This TUI does not record usage on disk, so there is nothing real to show.",
+  "accounts.usage.none": "No activity in the last seven days.",
+  "accounts.usage.window.5h": "Last 5 h",
+  "accounts.usage.window.today": "Last 24 h",
+  "accounts.usage.window.7d": "Last 7 days",
+  "accounts.usage.input": "Input",
+  "accounts.usage.output": "Output",
+  "accounts.usage.cache": "Read from cache",
+  "accounts.usage.sessions": "Conversations",
+  "accounts.usage.source": "Summed from {{files}} of the TUI's own transcripts. The bars compare each window against the week, not against your plan limit — that number isn't available anywhere."
 }
