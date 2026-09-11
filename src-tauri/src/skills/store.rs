@@ -255,6 +255,23 @@ pub(crate) fn link_orphan_installs(conn: &rusqlite::Connection, registry_id: &st
     let entries: Vec<crate::marketplace::MarketplaceSkillEntry> =
         serde_json::from_str(&cache).unwrap_or_default();
 
+    // Las entradas que YA tienen dueño no se vuelven a repartir. Si otra fila del mismo
+    // repositorio salió de esta entrada, la huérfana es otra copia —una instalación vieja
+    // que quedó al lado de la nueva— y darles el mismo origen a las dos haría que
+    // actualizar una tocara a cualquiera de ellas.
+    let claimed: std::collections::HashSet<String> = {
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT origin_skill_id FROM skills
+             WHERE registry_id = ?1 AND origin_skill_id IS NOT NULL",
+        ) else {
+            return;
+        };
+        let Ok(rows) = stmt.query_map([registry_id], |r| r.get::<_, String>(0)) else {
+            return;
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
     let orphans: Vec<(String, String)> = {
         let Ok(mut stmt) = conn.prepare(
             "SELECT id, name FROM skills WHERE registry_id = ?1 AND origin_skill_id IS NULL",
@@ -272,6 +289,9 @@ pub(crate) fn link_orphan_installs(conn: &rusqlite::Connection, registry_id: &st
         let Some(entry) = matches.next() else { continue };
         if matches.next().is_some() {
             // Ambigua: hay dos o más entradas con ese nombre en el repositorio.
+            continue;
+        }
+        if claimed.contains(&entry.id) {
             continue;
         }
         let _ = conn.execute(

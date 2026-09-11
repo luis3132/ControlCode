@@ -1,4 +1,4 @@
-mod containment;
+pub(crate) mod containment;
 #[cfg(test)]
 mod test;
 mod pty_manager;

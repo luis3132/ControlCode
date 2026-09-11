@@ -5,6 +5,7 @@ import { WorkspacesPage } from "@/features/workspaces/WorkspacesPage";
 import { SkillsPage } from "@/features/skills/SkillsPage";
 import { SkillDetailPage } from "@/features/skills/SkillDetailPage";
 import { SessionsPage } from "@/features/sessions/SessionsPage";
+import { FleetPage } from "@/features/runs/FleetPage";
 import { MarketplacePage } from "@/features/marketplace/MarketplacePage";
 import { RegistriesPage } from "@/features/marketplace/RegistriesPage";
 
@@ -19,6 +20,7 @@ export const router = createHashRouter([
       { path: "skills", element: <SkillsPage /> },
       { path: "skills/:id", element: <SkillDetailPage /> },
       { path: "sessions", element: <SessionsPage /> },
+      { path: "fleet", element: <FleetPage /> },
       { path: "marketplace", element: <MarketplacePage /> },
       { path: "marketplace/registries", element: <RegistriesPage /> },
     ],

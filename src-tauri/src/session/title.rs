@@ -1,4 +1,5 @@
 use serde::Serialize;
+use crate::agents::SessionSource;
 use serde_json::Value;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -836,6 +837,16 @@ pub(super) fn custom_title(path: &Path, fallback: &str) -> SessionTitleResult {
     codex_title(path, fallback)
 }
 
+/// Qué estrategia de descubrimiento le toca a esta TUI.
+///
+/// El mapeo agente → formato sale del registro (`agents/registry.rs`), así que la tabla de
+/// "quién guarda sus sesiones de qué forma" vive en un solo lado; los algoritmos, acá. Una
+/// TUI que no está en el registro cae en `None`, que es la rama de las TUIs custom: son
+/// justamente las que declaran a mano dónde buscar.
+fn source_of(agent_id: &str) -> SessionSource {
+    crate::agents::agent_def(agent_id).map_or(SessionSource::None, |d| d.sessions)
+}
+
 /// Archivo de sesión de una entrada del historial, resolviendo por el camino propio de
 /// cada agente. A diferencia de `get_session_title`, acá interesa el archivo en sí (para
 /// leer la conversación entera), y se acepta el "más reciente del cwd" cuando no hay
@@ -848,28 +859,28 @@ pub fn session_file_for(
     profile: Option<&Path>,
     db: &tauri::State<crate::database::DbConnection>,
 ) -> Option<PathBuf> {
-    match agent_id {
-        "claude-code" => claude_session_file(cwd, session_id, None, profile),
-        "gemini-cli" => match session_id {
+    match source_of(agent_id) {
+        SessionSource::ClaudeProjects => claude_session_file(cwd, session_id, None, profile),
+        SessionSource::GeminiTmp => match session_id {
             Some(id) => gemini_session_file_by_id(&gemini_home(), cwd, id),
             None => gemini_session_file(cwd, None),
         },
-        "codex" => codex_session_file(cwd, None, profile),
+        SessionSource::CodexRollouts => codex_session_file(cwd, None, profile),
         // OpenCode no expone un archivo de sesión legible; su transcripción se pide con
         // `opencode export <id>` y la maneja `export::opencode_transcript` aparte.
-        "opencode" => None,
+        SessionSource::ProcessQuery => None,
         // Kimi guarda la conversación en el wire del agente principal, no en un archivo
         // por sesión: se resuelve primero la carpeta y de ahí se baja al `wire.jsonl`.
-        "kimi-code" => {
+        SessionSource::KimiSessions => {
             let dir = match session_id {
                 Some(id) => kimi_session_dir_by_id(id),
                 None => kimi_session_dir(Some(cwd), None),
             }?;
             kimi_wire_file(&dir)
         }
-        other => {
+        SessionSource::None => {
             let conn = db.lock().ok()?;
-            let agent = crate::agents::find(&conn, other)?;
+            let agent = crate::agents::find(&conn, agent_id)?;
             drop(conn);
             match session_id {
                 Some(id) => custom_session_file_by_id(&agent, id),
@@ -932,12 +943,12 @@ pub(crate) fn discover_session_id_sync(
     custom: Option<&crate::agents::CustomAgent>,
 ) -> Option<String> {
     let cwd = cwd.to_string();
-    match agent_id {
-        "claude-code" => {
+    match source_of(agent_id) {
+        SessionSource::ClaudeProjects => {
             let path = claude_session_file(&cwd, None, Some(started_after), profile)?;
             path.file_stem().map(|s| s.to_string_lossy().to_string())
         }
-        "gemini-cli" => {
+        SessionSource::GeminiTmp => {
             let path = gemini_session_file(&cwd, Some(started_after))?;
             // `sessionId` está en la cabecera; `find_string_field` queda de respaldo por si
             // una versión emite el archivo sin ella.
@@ -945,7 +956,7 @@ pub(crate) fn discover_session_id_sync(
                 .and_then(|m| m.session_id)
                 .or_else(|| find_string_field(&path, &["sessionId", "session_id"]))
         }
-        "codex" => {
+        SessionSource::CodexRollouts => {
             let path = codex_session_file(&cwd, Some(started_after), profile)?;
             // La cabecera `session_meta` trae el id; `find_string_field` queda como respaldo
             // por si una versión emite el rollout sin cabecera reconocible.
@@ -953,13 +964,15 @@ pub(crate) fn discover_session_id_sync(
                 .and_then(|m| m.id)
                 .or_else(|| find_string_field(&path, &["session_id", "id"]))
         }
-        "opencode" => opencode_session(&cwd, Some(started_after), profile).map(|s| s.id),
-        "kimi-code" => {
+        SessionSource::ProcessQuery => {
+            opencode_session(&cwd, Some(started_after), profile).map(|s| s.id)
+        }
+        SessionSource::KimiSessions => {
             let dir = kimi_session_dir(Some(&cwd), Some(started_after))?;
             kimi_session_id(&dir)
         }
         // TUI custom: solo si el usuario declaró dónde guarda sus sesiones.
-        _ => {
+        SessionSource::None => {
             let agent = custom?;
             let path = custom_session_file(agent, Some(started_after))?;
             custom_session_id(agent, &path)
@@ -1009,12 +1022,12 @@ pub(crate) fn get_session_title_sync(
     custom: Option<&crate::agents::CustomAgent>,
 ) -> SessionTitleResult {
     let cwd = cwd.to_string();
-    match agent_id {
-        "claude-code" => match claude_session_file(&cwd, session_id.as_deref(), None, profile) {
+    match source_of(agent_id) {
+        SessionSource::ClaudeProjects => match claude_session_file(&cwd, session_id.as_deref(), None, profile) {
             Some(path) => claude_title(&path, &fallback),
             None => fallback_result(&fallback),
         },
-        "gemini-cli" => {
+        SessionSource::GeminiTmp => {
             let found = match session_id.as_deref() {
                 Some(id) => gemini_session_file_by_id(&gemini_home(), &cwd, id),
                 None => gemini_session_file(&cwd, None),
@@ -1024,7 +1037,7 @@ pub(crate) fn get_session_title_sync(
                 None => fallback_result(&fallback),
             }
         }
-        "codex" => {
+        SessionSource::CodexRollouts => {
             let found = match session_id.as_deref() {
                 Some(id) => codex_session_file_by_id(id, profile),
                 None => codex_session_file(&cwd, None, profile),
@@ -1034,7 +1047,7 @@ pub(crate) fn get_session_title_sync(
                 None => fallback_result(&fallback),
             }
         }
-        "kimi-code" => {
+        SessionSource::KimiSessions => {
             let found = match session_id.as_deref() {
                 Some(id) => kimi_session_dir_by_id(id),
                 None => kimi_session_dir(Some(&cwd), None),
@@ -1046,7 +1059,7 @@ pub(crate) fn get_session_title_sync(
         }
         // Se busca por id exacto cuando se conoce: "la más reciente del cwd" podría ser la
         // de otra tab abierta en la misma carpeta y el título quedaría cruzado.
-        "opencode" => {
+        SessionSource::ProcessQuery => {
             let found = match session_id.as_deref() {
                 Some(id) => opencode_sessions(&cwd, profile).into_iter().find(|s| s.id == id),
                 None => opencode_session(&cwd, None, profile),
@@ -1061,7 +1074,7 @@ pub(crate) fn get_session_title_sync(
         // TUI custom: se busca el archivo por su id exacto, nunca "el más reciente" — sin
         // saber cómo esa TUI mapea proyectos a carpetas, "el más reciente" podría ser la
         // sesión de otra tab y el título quedaría cruzado.
-        _ => {
+        SessionSource::None => {
             let Some(id) = session_id else { return fallback_result(&fallback) };
             let Some(agent) = custom else { return fallback_result(&fallback) };
             match custom_session_file_by_id(agent, &id) {

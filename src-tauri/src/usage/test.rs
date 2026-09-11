@@ -241,67 +241,129 @@ fn de_un_modelo_repetido_gana_la_ultima_pintada() {
     assert_eq!(u.week_models[0].meter.percent, 44);
 }
 
-// ── En qué carpeta se puede abrir el sondeo ──────────────────────
+// ── La carpeta del sondeo ────────────────────────────────────────
 //
-// Acá estaba el fallo con las cuentas alternativas: cada perfil lleva su propia lista de
-// carpetas de confianza, y uno recién creado no confía en ninguna.
+// Acá estaba el fallo del panel de consumo: se buscaba una carpeta que la cuenta ya
+// hubiera aceptado, y una cuenta nueva no tiene ninguna. Ahora la carpeta la pone la app
+// y se pre-aprueba sola; lo que se prueba es que ese remiendo no le rompa la
+// configuración a nadie.
 
-use super::trust::{pick_trusted, trusted_paths};
+use super::trust::{config_file, trust_dir, with_trusted};
 
 fn config(json: &str) -> serde_json::Value {
     serde_json::from_str(json).unwrap()
 }
 
-#[test]
-fn lee_solo_las_carpetas_aceptadas() {
-    let c = config(r#"{"projects":{
-        "/a":{"hasTrustDialogAccepted":true},
-        "/b":{"hasTrustDialogAccepted":false},
-        "/c":{}
-    }}"#);
-    assert_eq!(trusted_paths(&c), vec!["/a".to_string()]);
+fn accepted(config: &serde_json::Value, dir: &str) -> bool {
+    config["projects"][dir]["hasTrustDialogAccepted"] == serde_json::json!(true)
 }
 
 #[test]
-fn una_cuenta_nueva_no_confia_en_nada() {
-    assert!(trusted_paths(&config(r#"{}"#)).is_empty());
-    assert!(trusted_paths(&config(r#"{"projects":{}}"#)).is_empty());
+fn el_archivo_de_la_cuenta_principal_esta_en_el_home_y_no_en_claude() {
+    // El fallo original: `~/.claude/.claude.json` no existe, así que la cuenta principal
+    // figuraba sin ninguna carpeta aceptada teniendo decenas.
+    let home = dirs::home_dir().unwrap();
+    assert_eq!(config_file(None), Some(home.join(".claude.json")));
 }
 
 #[test]
-fn el_orden_es_estable() {
-    // Sin ordenar, el sondeo elegiría una carpeta distinta en cada arranque según cómo se
-    // haya deserializado el mapa, y un fallo sería imposible de reproducir.
-    let c = config(r#"{"projects":{
-        "/z":{"hasTrustDialogAccepted":true},
-        "/a":{"hasTrustDialogAccepted":true}
-    }}"#);
-    assert_eq!(trusted_paths(&c), vec!["/a".to_string(), "/z".to_string()]);
+fn el_de_un_perfil_esta_adentro_de_su_directorio() {
+    assert_eq!(
+        config_file(Some("/perfiles/trabajo")),
+        Some(std::path::PathBuf::from("/perfiles/trabajo/.claude.json"))
+    );
 }
 
 #[test]
-fn gana_la_carpeta_pedida_si_la_cuenta_confia_en_ella() {
-    let trusted = vec!["/a".to_string(), "/proyecto".to_string()];
-    assert_eq!(pick_trusted(&trusted, Some("/proyecto"), |_| true), Some("/proyecto"));
+fn una_cuenta_nueva_queda_confiando_en_la_carpeta_del_sondeo() {
+    let next = with_trusted(&config("{}"), "/sonda").expect("hay algo que escribir");
+    assert!(accepted(&next, "/sonda"));
 }
 
 #[test]
-fn si_la_pedida_no_es_de_confianza_se_usa_otra_de_la_cuenta() {
-    // Es el caso de la cuenta alternativa: el proyecto abierto no está en SU lista.
-    let trusted = vec!["/otra".to_string()];
-    assert_eq!(pick_trusted(&trusted, Some("/proyecto"), |_| true), Some("/otra"));
+fn no_se_reescribe_si_ya_estaba_aceptada() {
+    // Devolver `None` es lo que evita tocar el archivo en cada sondeo: esa config la
+    // escribe también la TUI mientras corre.
+    let c = config(r#"{"projects":{"/sonda":{"hasTrustDialogAccepted":true}}}"#);
+    assert!(with_trusted(&c, "/sonda").is_none());
 }
 
 #[test]
-fn se_saltean_las_carpetas_que_ya_no_existen() {
-    // La lista de confianza guarda rutas viejas para siempre; abrir el sondeo en una que
-    // se borró dejaría a la TUI protestando.
-    let trusted = vec!["/borrada".to_string(), "/viva".to_string()];
-    assert_eq!(pick_trusted(&trusted, None, |p| p == "/viva"), Some("/viva"));
+fn se_conserva_todo_lo_demas_de_la_configuracion() {
+    // Lo importante del merge: ahí adentro está el login del usuario y el historial de sus
+    // proyectos. Agregar una carpeta no puede costarle nada de eso.
+    let c = config(r#"{
+        "oauthAccount": {"emailAddress": "quien@ejemplo.com"},
+        "projects": {"/proyecto": {"hasTrustDialogAccepted": true, "allowedTools": ["Bash"]}}
+    }"#);
+    let next = with_trusted(&c, "/sonda").expect("hay algo que escribir");
+    assert_eq!(next["oauthAccount"]["emailAddress"], "quien@ejemplo.com");
+    assert_eq!(next["projects"]["/proyecto"]["allowedTools"][0], "Bash");
+    assert!(accepted(&next, "/proyecto"), "la carpeta que ya estaba sigue aceptada");
+    assert!(accepted(&next, "/sonda"));
 }
 
 #[test]
-fn sin_ninguna_carpeta_de_confianza_no_se_sondea() {
-    assert_eq!(pick_trusted(&[], Some("/proyecto"), |_| true), None);
-    assert_eq!(pick_trusted(&["/borrada".to_string()], None, |_| false), None);
+fn una_carpeta_rechazada_antes_se_acepta() {
+    // El caso de quien dijo que no alguna vez en esa misma ruta: el sondeo la necesita
+    // aceptada, y es una carpeta de la app, vacía.
+    let c = config(r#"{"projects":{"/sonda":{"hasTrustDialogAccepted":false}}}"#);
+    let next = with_trusted(&c, "/sonda").expect("hay algo que escribir");
+    assert!(accepted(&next, "/sonda"));
+}
+
+#[test]
+fn la_escritura_deja_el_archivo_valido_y_con_sus_permisos() {
+    // La parte que no se ve en el merge: el archivo real. Se escribe a un temporal y se
+    // renombra, y ese temporal nace con los permisos por defecto — sin corregirlos, el
+    // `~/.claude.json` del usuario (0600, con su login adentro) terminaría legible para
+    // todo el sistema.
+    let dir = std::env::temp_dir().join(format!("cc-trust-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(".claude.json");
+    std::fs::write(&path, r#"{"oauthAccount":{"emailAddress":"quien@ejemplo.com"}}"#).unwrap();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    trust_dir(&path, "/sonda").unwrap();
+
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(accepted(&written, "/sonda"));
+    assert_eq!(written["oauthAccount"]["emailAddress"], "quien@ejemplo.com");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "no se aflojan los permisos del archivo");
+    }
+
+    // Segunda pasada: ya está aceptada, así que no se vuelve a tocar el archivo.
+    let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+    trust_dir(&path, "/sonda").unwrap();
+    assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn una_cuenta_sin_archivo_todavia_lo_estrena() {
+    // Una cuenta recién creada: la TUI no escribió su config aún, y el sondeo igual tiene
+    // que poder abrirse.
+    let dir = std::env::temp_dir().join(format!("cc-trust-nuevo-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(".claude.json");
+
+    trust_dir(&path, "/sonda").unwrap();
+
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(accepted(&written, "/sonda"));
+
+    std::fs::remove_dir_all(&dir).ok();
 }

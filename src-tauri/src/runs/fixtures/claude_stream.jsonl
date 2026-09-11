@@ -1,0 +1,7 @@
+{"type": "system", "subtype": "hook_started", "session_id": "11111111-2222-3333-4444-555555555555"}
+{"type": "system", "subtype": "hook_response", "session_id": "11111111-2222-3333-4444-555555555555"}
+{"type": "system", "subtype": "init", "session_id": "11111111-2222-3333-4444-555555555555"}
+{"type": "rate_limit_event"}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "I'll read the file."}]}}
+{"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "/tmp/claude-1000/-home-luis-Documents-XD-ControlCode/730ca39f-c423-451d-8eda-25923f60bf03/scratchpad/probe/nota.txt"}}]}}
+{"type": "result", "subtype": "error_max_budget_usd", "is_error": true, "result": null, "total_cost_usd": 0.075284, "usage": {"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}

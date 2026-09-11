@@ -113,10 +113,15 @@ export function SkillPalette({ target: initial, onClose }: {
   useEffect(() => {
     if (!searching) return;
     loadRemote(query);
-    // Con espera aparte, porque cada disparo puede levantar un proceso.
-    const handle = setTimeout(() => searchRemote(query), 700);
+    // Con espera aparte, porque cada disparo puede levantar un proceso. Al volver se relee
+    // lo instalado: la búsqueda es la que le permite al backend reconocer instalaciones
+    // viejas sin origen anotado, y sin esto seguirían ofreciéndose como no instaladas.
+    const handle = setTimeout(
+      () => searchRemote(query).then(() => loadSkills()).catch(() => {}),
+      700
+    );
     return () => clearTimeout(handle);
-  }, [query, searching, loadRemote, searchRemote]);
+  }, [query, searching, loadRemote, searchRemote, loadSkills]);
 
   const installed = useMemo(() => {
     const compatible = target.agentId === null

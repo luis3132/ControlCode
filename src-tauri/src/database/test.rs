@@ -846,3 +846,64 @@ fn un_workspace_cerrado_sobrevive_a_que_borren_su_workspace() {
         .unwrap();
     assert_eq!(quedan, 1, "el recuerdo no puede irse con el workspace");
 }
+
+/// Una base ya migrada, a la que se le vuelve a estampar una versión anterior para simular
+/// la instalación de un usuario que actualiza. Es más fiel que escribir el DDL viejo a
+/// mano: las tablas son exactamente las que la app venía creando.
+fn base_v10_poblada() -> Connection {
+    let conn = schema::in_memory();
+    conn.execute_batch(
+        "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+         INSERT INTO windows (id, label, workspace_id, last_active) VALUES ('wi', 'main', 'ws', 0);
+         INSERT INTO tabs (id, window_id, agent_id, agent_label, command, cwd,
+                           opened_at, created_at, last_active)
+             VALUES ('t1', 'wi', 'claude-code', 'Claude Code', 'claude', '/tmp/p', 0, 0, 0);
+         INSERT INTO skills (id, name, source_path, installed_at, updated_at)
+             VALUES ('sk', 'una', '/tmp/una', 0, 0);
+         INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, created_at)
+             VALUES ('ps', 'sk', 'ws', 'tab', 't1', 0);
+         INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd,
+                                      opened_at, closed_at)
+             VALUES ('h1', 'ws', 'codex', 'Codex', 'codex', '/tmp/p', 0, 0);
+         PRAGMA user_version = 10;",
+    )
+    .expect("base v10 poblada");
+    conn
+}
+
+/// Actualizar la app no puede costarle al usuario una sola tab, sesión ni skill. Es lo
+/// único que una migración no tiene permitido romper.
+#[test]
+fn migrar_de_v10_a_v11_no_pierde_nada_del_usuario() {
+    let conn = base_v10_poblada();
+    schema::migrate(&conn).expect("migrar de v10 a v11");
+
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM tabs"), 1);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM skills"), 1);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM project_skills"), 1);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM session_history"), 1);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM workspaces"), 1);
+
+    // Y las tablas nuevas quedaron creadas y vacías.
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM runs"), 0);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM tasks"), 0);
+}
+
+/// Las tareas headless cuelgan de su run, y el run de su workspace: olvidar un workspace
+/// no puede dejar filas de tareas apuntando a la nada.
+#[test]
+fn borrar_un_workspace_se_lleva_sus_runs_y_tareas() {
+    let conn = schema::in_memory();
+    conn.execute_batch(
+        "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+         INSERT INTO runs (id, workspace_id, objective, cwd, created_at)
+             VALUES ('r', 'ws', 'obj', '/tmp/p', 0);
+         INSERT INTO tasks (id, run_id, title, prompt, agent_id, cwd, created_at)
+             VALUES ('t', 'r', 'tit', 'pr', 'claude-code', '/tmp/p', 0);",
+    )
+    .unwrap();
+
+    conn.execute("DELETE FROM workspaces WHERE id = 'ws'", []).unwrap();
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM runs"), 0);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM tasks"), 0);
+}

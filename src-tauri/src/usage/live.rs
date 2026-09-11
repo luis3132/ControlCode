@@ -21,7 +21,7 @@ use crate::database::DbConnection;
 use serde::{Deserialize, Serialize};
 
 use super::parse::parse_usage_screen;
-use super::trust::{pick_trusted, trusted_paths};
+use super::trust::{config_file, probe_dir, trust_dir};
 
 /// Cuánto se espera a que el panel termine de dibujarse antes de rendirse.
 const TIMEOUT: Duration = Duration::from_secs(25);
@@ -172,7 +172,6 @@ fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Result<String,
 pub async fn claude_live_usage(
     // `account_key`: con qué cuenta se preguntó. Es la clave de la caché.
     account_key: String,
-    cwd: String,
     env: HashMap<String, String>,
     // `force`: volver a preguntar aunque haya algo guardado. Es el botón de refrescar.
     force: bool,
@@ -205,30 +204,23 @@ pub async fn claude_live_usage(
         return Ok(LiveUsage::failed("Claude Code no está instalado"));
     }
 
-    // La carpeta la decide LA CUENTA, no quien llama: cada perfil lleva su propia lista de
-    // carpetas de confianza, y abrir el sondeo fuera de ella deja a la TUI esperando una
-    // confirmación que nadie puede darle desde acá.
-    let config_dir = env
-        .get("CLAUDE_CONFIG_DIR")
-        .map(std::path::PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")));
-    let Some(config_dir) = config_dir else {
-        return Ok(LiveUsage::failed("No se pudo resolver la carpeta de la cuenta"));
+    // El sondeo se abre SIEMPRE en la misma carpeta: una vacía de la app, que la app
+    // pre-aprueba en la config de esta cuenta antes de arrancar. Ver `trust.rs`: dependía
+    // de encontrar alguna carpeta que la cuenta ya hubiera aceptado, y una cuenta nueva no
+    // tiene ninguna.
+    let Some(config_path) = config_file(env.get("CLAUDE_CONFIG_DIR").map(String::as_str)) else {
+        return Ok(LiveUsage::failed("No se pudo resolver la configuración de la cuenta"));
     };
-
-    let trusted = std::fs::read_to_string(config_dir.join(".claude.json"))
-        .ok()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .map(|json| trusted_paths(&json))
-        .unwrap_or_default();
-
-    let Some(cwd) = pick_trusted(&trusted, Some(cwd.as_str()), |p| std::path::Path::new(p).is_dir())
-        .map(str::to_string)
-    else {
-        return Ok(LiveUsage::failed(
-            "Esta cuenta todavía no confía en ninguna carpeta. Abrí un agente con ella una vez y aceptá el aviso.",
-        ));
+    let cwd = match probe_dir() {
+        Ok(dir) => dir,
+        Err(problem) => return Ok(LiveUsage::failed(problem)),
     };
+    let Some(cwd) = cwd.to_str().map(str::to_string) else {
+        return Ok(LiveUsage::failed("La carpeta del sondeo tiene un nombre ilegible"));
+    };
+    if let Err(problem) = trust_dir(&config_path, &cwd) {
+        return Ok(LiveUsage::failed(problem));
+    }
 
     let env: Vec<(String, String)> = env.into_iter().collect();
     let fresh = tauri::async_runtime::spawn_blocking(move || match capture(command, &cwd, &env) {

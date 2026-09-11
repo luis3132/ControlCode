@@ -151,15 +151,15 @@ export interface LiveUsage {
  * modelo, así que no gasta tokens — y evita adivinar endpoints internos, que es la otra
  * forma de conseguir el dato y la mala.
  *
- * `cwd` tiene que ser una carpeta que la TUI ya considere de confianza: si no, se queda
- * esperando una confirmación que nadie puede darle desde acá.
+ * En qué carpeta se abre no se decide desde acá: el backend usa siempre una carpeta vacía
+ * de la app y la deja pre-aprobada en la configuración de esa cuenta, porque si la TUI
+ * pregunta "¿confiás en esta carpeta?" nadie puede contestarle desde una PTY sin pantalla.
  */
 export const claudeLiveUsage = (
   accountKey: string,
-  cwd: string,
   env: Record<string, string>,
   force = false
-) => invoke<LiveUsage>("claude_live_usage", { accountKey, cwd, env, force });
+) => invoke<LiveUsage>("claude_live_usage", { accountKey, env, force });
 
 /**
  * La antigüedad de lo que se está mostrando, en piezas.

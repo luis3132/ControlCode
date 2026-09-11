@@ -40,6 +40,54 @@
 //! sí o sí como hijo del `cmd` que lo lanzó. Sin el Job Object, matar la tab dejaría vivo
 //! al agente; con él, el envoltorio es indistinto.
 
+/// Lo mínimo que hace falta de un proceso recién lanzado para poder adoptarlo.
+///
+/// Existe porque los procesos de la app vienen de dos lados: las tabs los lanzan con
+/// `portable-pty` (necesitan una terminal de verdad) y los agentes headless con
+/// `tokio::process` (necesitan el stdout redirigido, no un PTY). Las dos clases de hijo
+/// tienen que quedar contenidas igual, y de las dos se usa exactamente lo mismo: el pid en
+/// unix, el handle en Windows.
+pub trait Adoptable {
+    fn pid(&self) -> Option<u32>;
+    #[cfg(windows)]
+    fn raw_handle(&self) -> Option<std::os::windows::io::RawHandle>;
+}
+
+/// El hijo de una tab: `portable-pty` lo entrega como objeto de trait.
+impl Adoptable for dyn portable_pty::Child + Send + Sync {
+    fn pid(&self) -> Option<u32> {
+        self.process_id()
+    }
+    #[cfg(windows)]
+    fn raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+        self.as_raw_handle()
+    }
+}
+
+/// El hijo de un agente headless: `tokio::process`, con el stdout redirigido.
+impl Adoptable for tokio::process::Child {
+    fn pid(&self) -> Option<u32> {
+        self.id()
+    }
+    #[cfg(windows)]
+    fn raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+        self.raw_handle()
+    }
+}
+
+/// Un proceso pelado. Lo usa el test de contención, que ejercita `adopt` sin montar un
+/// pty entero.
+impl Adoptable for std::process::Child {
+    fn pid(&self) -> Option<u32> {
+        Some(self.id())
+    }
+    #[cfg(windows)]
+    fn raw_handle(&self) -> Option<std::os::windows::io::RawHandle> {
+        use std::os::windows::io::AsRawHandle;
+        Some(AsRawHandle::as_raw_handle(self))
+    }
+}
+
 /// Contenedor de ciclo de vida de una tab.
 ///
 /// Se crea **antes** de lanzar el proceso, para que exista ya cuando el hijo empiece a
@@ -61,7 +109,7 @@ impl ProcessGroup {
     /// en teoría podría haber lanzado un hijo en ese intervalo. Es la misma ventana que
     /// aceptan VS Code y node, y no se puede cerrar sin `CREATE_SUSPENDED`/`posix_spawn`
     /// propios, que `portable-pty` no expone.
-    pub fn adopt<C: portable_pty::Child + ?Sized>(&mut self, child: &C) {
+    pub fn adopt<C: Adoptable + ?Sized>(&mut self, child: &C) {
         imp::adopt(&mut self.imp, child);
     }
 
@@ -129,8 +177,8 @@ pub(crate) mod imp {
         Group { dir, leader: None }
     }
 
-    pub fn adopt<C: portable_pty::Child + ?Sized>(g: &mut Group, child: &C) {
-        let Some(pid) = child.process_id() else { return };
+    pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
+        let Some(pid) = child.pid() else { return };
         g.leader = Some(pid);
         if let Some(dir) = &g.dir {
             // Mover el pid al cgroup arrastra al proceso entero; lo que nazca de él
@@ -213,8 +261,8 @@ pub(crate) mod imp {
         Group { leader: None }
     }
 
-    pub fn adopt<C: portable_pty::Child + ?Sized>(g: &mut Group, child: &C) {
-        g.leader = child.process_id();
+    pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
+        g.leader = child.pid();
     }
 
     #[cfg(test)]
@@ -330,13 +378,13 @@ pub(crate) mod imp {
         Group { job }
     }
 
-    pub fn adopt<C: portable_pty::Child + ?Sized>(g: &mut Group, child: &C) {
+    pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
         if g.job.is_null() {
             return;
         }
         // Se usa el handle que ya tiene `portable-pty` en vez de reabrir por pid: evita la
         // carrera de que ese pid haya sido reutilizado, que en Windows pasa seguido.
-        let Some(handle) = child.as_raw_handle() else { return };
+        let Some(handle) = child.raw_handle() else { return };
         unsafe {
             AssignProcessToJobObject(g.job, handle as RawHandle as HANDLE);
         }
