@@ -485,7 +485,7 @@ export function Terminal({
 
   return (
     <div className="relative flex flex-col h-full w-full">
-      <StatusBadge status={status} command={command} isDark={isDark} />
+      <StatusBadge status={status} isDark={isDark} />
 
       {/* Contenedor de xterm.
           Sin `height: 100%`: con `flex: 1` dentro de un padre `flex-col` ya recibe el alto
