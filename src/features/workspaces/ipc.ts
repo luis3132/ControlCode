@@ -26,12 +26,3 @@ export const defaultWorkspaceHasContent = () => invoke<boolean>("default_workspa
 /** Ventanas VIVAS del workspace (`is_open = 1`). */
 export const openWindowsOf = (workspaceId: string) =>
   invoke<{ label: string }[]>("db_get_workspace_windows", { workspaceId });
-
-export const closeWorkspaceWindows = (workspaceId: string) =>
-  invoke<void>("close_workspace_windows", { workspaceId });
-
-export const liveWindowCount = (workspaceId: string) =>
-  invoke<number>("live_workspace_window_count", { workspaceId });
-
-export const getWorkspace = (workspaceId: string) =>
-  invoke<{ id: string; name: string }>("db_get_workspace", { workspaceId });

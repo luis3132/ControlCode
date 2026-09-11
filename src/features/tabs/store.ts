@@ -9,7 +9,6 @@ interface TabsState {
   tabs: Tab[];
   activeTabId: string | null;
   detectedAgents: AgentInfo[];
-  sidebarCollapsed: boolean;
   /** Workspace (layout guardado de ventanas/tabs) al que pertenece ESTA ventana. */
   workspaceId: string;
   hydrated: boolean;
@@ -37,7 +36,6 @@ interface TabsState {
   setSessionId: (tabId: string, sessionId: string) => void;
   updateTab: (tabId: string, patch: Partial<Tab>) => void;
   setDetectedAgents: (agents: AgentInfo[]) => void;
-  toggleSidebar: () => void;
   setWorkspaceId: (workspaceId: string) => void;
   hydrateFromBackend: (tabs: Tab[], workspaceId?: string) => void;
   setHydrated: (hydrated: boolean) => void;
@@ -52,7 +50,6 @@ export const useTabsStore = create<TabsState>((set) => ({
   activeTabId: null,
   // bash siempre disponible como fallback mientras detect_agents carga
   detectedAgents: [{ id: "bash", label: "Terminal (bash)", command: "bash", available: true }],
-  sidebarCollapsed: false,
   workspaceId: DEFAULT_WORKSPACE_ID,
   hydrated: false,
 
@@ -128,8 +125,6 @@ export const useTabsStore = create<TabsState>((set) => ({
 
   setDetectedAgents: (agents) => set({ detectedAgents: agents }),
 
-  toggleSidebar: () =>
-    set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
 
   setWorkspaceId: (workspaceId) => set({ workspaceId }),
 

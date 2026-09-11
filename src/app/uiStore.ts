@@ -1,9 +1,5 @@
 import { create } from "zustand";
 
-/** Qué muestra el panel de la izquierda. Por ahora solo workspaces tiene panel propio;
- *  el resto del riel navega a su página. */
-export type RailView = "workspaces";
-
 interface UiState {
   /** Panel izquierdo (workspaces) plegado: queda solo el riel de iconos. */
   workspacesCollapsed: boolean;
@@ -13,7 +9,6 @@ interface UiState {
    *  todo el ancho: gestionar repos es algo que se hace de vez en cuando. */
   marketplaceReposCollapsed: boolean;
   settingsOpen: boolean;
-  railView: RailView;
 
   toggleWorkspaces: () => void;
   toggleExplorer: () => void;
@@ -57,7 +52,6 @@ function persist(state: UiState) {
 export const useUiStore = create<UiState>((set, get) => ({
   ...load(),
   settingsOpen: false,
-  railView: "workspaces",
 
   toggleWorkspaces: () => {
     set({ workspacesCollapsed: !get().workspacesCollapsed });

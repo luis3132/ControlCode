@@ -303,8 +303,8 @@ export function Terminal({
           pollSessionId(attachCwd, openedAt ?? Math.floor(Date.now() / 1000));
 
           await attachListeners(attachPtyId);
-          // La ventana a la que se reconecta puede tener un tamaño distinto al de la
-          // ventana donde el PTY nació (tear-off, merge entre ventanas) — sincronizarlo.
+          // El área de terminal puede medir distinto que cuando el PTY nació (paneles
+          // plegados, ventana redimensionada mientras la tab estaba en segundo plano).
           if (!cancelled) {
             ptyResize(attachPtyId, term.cols, term.rows).catch(console.error);
           }

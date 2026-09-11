@@ -1,7 +1,7 @@
 use crate::database::{self, DbConnection, WindowRow};
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Tamaño mínimo para toda ventana nueva (tear-off, restaurada, o por workspace).
+/// Tamaño mínimo para toda ventana nueva (restaurada o por workspace).
 /// Debe coincidir con `minWidth`/`minHeight` de la ventana "main" en tauri.conf.json.
 const MIN_WINDOW_WIDTH: f64 = 900.0;
 const MIN_WINDOW_HEIGHT: f64 = 600.0;
@@ -23,7 +23,7 @@ const MIN_WINDOW_HEIGHT: f64 = 600.0;
 /// label es único a nivel de proceso, y el frontend de la ventana nueva carga su estado
 /// buscando por su propio label nativo, así que renombrar la fila es suficiente.
 ///
-/// Ventanas tear-off sin tabs guardadas se omiten para no resucitar ventanas vacías.
+/// Las filas sin tabs guardadas se omiten para no resucitar ventanas vacías.
 pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) -> Result<(), String> {
     let db = app.state::<DbConnection>();
     // Mutable: los labels que se generan dentro del loop se van agregando, para que dos
@@ -110,7 +110,7 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
 /// cuando un workspace se queda sin ninguna ventana viva que mostrar: al cerrar la única
 /// ventana que le quedaba (ver `close_and_forget_window`), o al intentar "abrir" un
 /// workspace guardado cuyas filas están todas vacías o inexistentes (`restore_windows`
-/// se salta a propósito las filas sin tabs, para no resucitar tear-offs vacíos — así que
+/// se salta a propósito las filas sin tabs, para no resucitar ventanas vacías — así que
 /// si eso deja al workspace sin ninguna ventana recreada, hay que abrirle una en blanco).
 fn spawn_blank_window(app: &AppHandle, db: &DbConnection, workspace_id: &str) -> Result<(), String> {
     let label = database::create_blank_window_row(db, workspace_id)?;
@@ -184,7 +184,7 @@ pub async fn open_workspace(
     }
 
     // Si el workspace no tenía filas (0 ventanas guardadas) o todas sus filas eran
-    // tear-offs vacíos que `restore_windows` se saltó, no quedó ninguna ventana viva
+    // filas vacías que `restore_windows` se saltó, no quedó ninguna ventana viva
     // para este workspace pese a haberlo "abierto" — se le abre una en blanco en vez de
     // dejar al usuario sin nada visible.
     let live_now = database::db_get_workspace_windows(workspace_id.clone(), app.state::<DbConnection>())?;
@@ -196,29 +196,8 @@ pub async fn open_workspace(
     Ok(())
 }
 
-/// Cierra solo las ventanas (nativas) que pertenecen a `workspace_id` — usado por el
-/// botón de cerrar del TopBar cuando hay más de una ventana en el workspace actual y el
-/// usuario elige "cerrar todo". A diferencia de `confirm_exit_all`, esto NO mata el
-/// proceso ni toca ventanas de otros workspaces que puedan estar abiertas a la vez (ej.
-/// si se abrió otro workspace eligiendo "mantener actuales"). Cada `win.close()` dispara
-/// el `WindowEvent::CloseRequested` normal, que ya persiste `is_open = 0` por su cuenta.
-#[tauri::command]
-pub async fn close_workspace_windows(
-    app: tauri::AppHandle,
-    workspace_id: String,
-) -> Result<(), String> {
-    let rows = database::db_get_workspace_windows(workspace_id, app.state::<DbConnection>())?;
-    for w in &rows {
-        if let Some(win) = app.get_webview_window(&w.label) {
-            let _ = win.close();
-        }
-    }
-    let _ = app.emit("cc-workspace-changed", ());
-    Ok(())
-}
-
-/// "Nuevo workspace" del TopBar: el bucket `default` (oculto, nunca se guarda con
-/// nombre) se vacía por completo — cierra sus ventanas abiertas y borra sus filas
+/// "Nuevo workspace" del encabezado lateral: el bucket `default` (oculto, nunca se
+/// guarda con nombre) se vacía por completo — cierra sus ventanas abiertas y borra sus filas
 /// guardadas — y se abre una ventana nueva en blanco en ese mismo `default` recién
 /// reseteado. Si el usuario quiere conservar lo que había, primero debe usar
 /// "Guardar workspace" (que mueve esas ventanas a un workspace con id propio antes
@@ -268,8 +247,8 @@ pub fn confirm_exit_all(app: tauri::AppHandle) {
 }
 
 /// Cierra una única ventana que el usuario eligió cerrar explícitamente, dejando el resto
-/// corriendo (botón de cerrar del TopBar, o "cerrar solo esta ventana" en cualquiera de
-/// los diálogos de confirmación) — a diferencia de un cierre en bloque (todo un workspace,
+/// corriendo (el botón de cerrar de la ventana, o "cerrar solo esta ventana" en
+/// cualquiera de los diálogos de confirmación) — a diferencia de un cierre en bloque (todo un workspace,
 /// cambiar de workspace, salir de la app entera), acá si el workspace todavía tiene otras
 /// ventanas vivas la fila se borra de inmediato en vez de solo marcarse `is_open = 0`. Ver
 /// `forget_or_close_single_window` para el detalle de esa decisión.
@@ -294,29 +273,6 @@ pub async fn close_and_forget_window(app: tauri::AppHandle, label: String) -> Re
 
     let _ = app.emit("cc-workspace-changed", ());
     Ok(())
-}
-
-/// Cuántas ventanas NATIVAS vivas tiene un workspace en este instante.
-///
-/// La fuente de verdad son las ventanas reales del proceso, no la columna `is_open`: esa
-/// columna se escribe en el `CloseRequested`, así que va un paso por detrás durante un
-/// cierre, y si la app se cae queda en `1` para ventanas que ya no existen. El botón de
-/// cerrar del TopBar decide con este número si ofrece "cerrar todo el workspace" o cierra
-/// esta ventana directamente, así que tiene que ser exacto.
-///
-/// Se cruzan las filas guardadas del workspace (sin filtrar por `is_open`, justamente para
-/// no heredar su desincronización) con los labels nativos vivos.
-#[tauri::command]
-pub fn live_workspace_window_count(
-    app: tauri::AppHandle,
-    workspace_id: String,
-) -> Result<usize, String> {
-    let db = app.state::<DbConnection>();
-    let rows = database::db_get_all_workspace_windows(&workspace_id, &db)?;
-    Ok(rows
-        .iter()
-        .filter(|r| app.get_webview_window(&r.label).is_some())
-        .count())
 }
 
 /// Trae al frente una ventana nativa ya abierta (des-minimiza + foco). Usado cuando el
@@ -359,36 +315,6 @@ pub async fn broadcast_event(
     payload: String,
 ) -> Result<(), String> {
     app.emit(&event, payload).map_err(|e: tauri::Error| e.to_string())
-}
-
-/// Retorna los labels de todas las ventanas abiertas.
-#[tauri::command]
-pub fn get_window_labels(app: tauri::AppHandle) -> Vec<String> {
-    app.webview_windows().into_keys().collect()
-}
-
-/// Retorna los bounds físicos (x, y, width, height) de cada ventana abierta.
-/// Las coordenadas son en píxeles físicos (sin escalar), igual que screenX/Y * devicePixelRatio.
-#[tauri::command]
-pub fn get_all_window_bounds(
-    app: tauri::AppHandle,
-) -> std::collections::HashMap<String, (i32, i32, u32, u32)> {
-    app.webview_windows()
-        .iter()
-        .filter_map(|(label, win)| {
-            let pos = win.outer_position().ok()?;
-            let size = win.outer_size().ok()?;
-            Some((label.clone(), (pos.x, pos.y, size.width, size.height)))
-        })
-        .collect()
-}
-
-/// Retorna la posición del cursor en píxeles físicos (funciona en Wayland).
-#[tauri::command]
-pub fn get_cursor_position(app: tauri::AppHandle) -> Result<(f64, f64), String> {
-    app.cursor_position()
-        .map(|p| (p.x, p.y))
-        .map_err(|e| e.to_string())
 }
 
 /// Retorna el directorio home del usuario.

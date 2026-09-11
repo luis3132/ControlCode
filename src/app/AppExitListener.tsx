@@ -10,10 +10,9 @@ import { closeAndForgetWindow, confirmExitAll } from "@/shared/ipc/window";
  * el SO intenta cerrar la app entera (ej. Alt+F4, Cmd+Q, cerrar la última ventana) mientras
  * hay varias ventanas abiertas. Montado en AppShell, vive en todas las ventanas.
  *
- * Nota: el botón de cerrar custom del TopBar (sin decoraciones nativas) NO pasa por aquí —
- * ese caso se resuelve directamente en TopBar.tsx, ya que cerrar una ventana cualquiera
- * mientras otras siguen abiertas no dispara ExitRequested (solo se dispara al intentar
- * salir del proceso completo).
+ * Nota: el botón de cerrar propio (`WindowLights`, la ventana es sin decoración) NO pasa
+ * por aquí — cierra su ventana directo, porque cerrar una cualquiera mientras otras siguen
+ * abiertas no dispara ExitRequested (solo se dispara al intentar salir del proceso).
  */
 export function AppExitListener() {
   const { t } = useTranslation();

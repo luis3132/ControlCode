@@ -293,11 +293,3 @@ html:not(.dark) .cc-term-scrollable .xterm-scrollable-element > .scrollbar {
   transition-duration: var(--cc-fast);
   transition-timing-function: var(--cc-ease);
 }
-
-/* Para lo que sí se mueve o cambia de tamaño. Se declara aparte para que quede
-   explícito cuáles son: son las que hay que mirar si algo va a trompicones. */
-.cc-t-move {
-  transition-property: transform, opacity;
-  transition-duration: var(--cc-base);
-  transition-timing-function: var(--cc-ease);
-}

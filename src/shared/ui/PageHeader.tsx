@@ -8,10 +8,9 @@ interface PageHeaderProps {
 }
 
 /** Encabezado estándar de las páginas de sección (Skills, Marketplace, Sesiones,
- * Workspaces, detalle de skill). Sin botón de "atrás": todas son alcanzables desde el
- * TopBar (nav o logo→Home), así que un back-button propio era una segunda forma de
- * navegar que además quedaba huérfana en páginas sin ícono en el TopBar. El ícono acá
- * es el mismo que identifica a la sección en el TopBar — ancla visual, no un botón. */
+ * Workspaces, detalle de skill). Sin botón de "atrás": todas son alcanzables desde el riel
+ * de la izquierda, así que un back-button propio era una segunda forma de navegar. El
+ * ícono acá es el mismo que identifica a la sección en el riel — ancla visual, no botón. */
 export function PageHeader({ icon, title, subtitle, action }: PageHeaderProps) {
   return (
     <div className="flex items-center justify-between gap-3 mb-8">

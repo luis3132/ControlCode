@@ -265,25 +265,6 @@ pub fn db_load_window_state(
     Ok(Some(RestoredWindowState { window, tabs }))
 }
 
-/// Workspace al que pertenece una ventana nativa viva, buscando por su label. Usado antes
-/// de aceptar un "merge" de tab entre ventanas (arrastrar una tab al tab bar de otra
-/// ventana): si el workspace de destino no coincide con el de origen, el merge se rechaza
-/// para no mezclar tabs de distintos workspaces por accidente.
-#[tauri::command]
-pub fn db_get_window_workspace(
-    label: String,
-    db: tauri::State<DbConnection>,
-) -> Result<Option<String>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    conn.query_row(
-        "SELECT workspace_id FROM windows WHERE label = ?1",
-        [&label],
-        |row| row.get(0),
-    )
-    .optional()
-    .map_err(|e| e.to_string())
-}
-
 /// Marca una ventana como cerrada (is_open = 0) sin borrar su fila. Es el comportamiento
 /// por defecto de CUALQUIER cierre nativo, incluidos los cierres EN BLOQUE (cerrar todo un
 /// workspace, cambiar de workspace cerrando las anteriores, salida completa de la app) —
@@ -437,8 +418,8 @@ pub fn rename_window_label(db: &DbConnection, window_id: &str, new_label: &str) 
     Ok(())
 }
 
-/// Cuántas tabs tiene guardadas una ventana. Se usa al restaurar para no recrear
-/// ventanas tear-off que se quedaron sin tabs (el usuario las cerró todas sin cerrar la ventana).
+/// Cuántas tabs tiene guardadas una ventana. Se usa al restaurar para no recrear ventanas
+/// que se quedaron sin tabs (el usuario las cerró todas sin cerrar la ventana).
 pub fn count_tabs_for_window(db: &DbConnection, window_id: &str) -> Result<i64, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.query_row("SELECT COUNT(*) FROM tabs WHERE window_id = ?1", [window_id], |row| row.get(0))

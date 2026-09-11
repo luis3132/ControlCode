@@ -56,27 +56,6 @@ pub fn default_workspace_has_content(db: tauri::State<DbConnection>) -> Result<b
 }
 
 #[tauri::command]
-pub fn db_get_workspace(
-    workspace_id: String,
-    db: tauri::State<DbConnection>,
-) -> Result<Workspace, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    conn.query_row(
-        "SELECT id, name, created_at, last_active FROM workspaces WHERE id = ?1",
-        [&workspace_id],
-        |row| {
-            Ok(Workspace {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                created_at: row.get(2)?,
-                last_active: row.get(3)?,
-            })
-        },
-    )
-    .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<WorkspaceSummary>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn

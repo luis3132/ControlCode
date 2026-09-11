@@ -12,7 +12,7 @@ interface WorkspacesState {
   loading: boolean;
   loadWorkspaces: () => Promise<void>;
   /** Vacía el bucket "default" (cierra sus ventanas y borra lo guardado) y abre una
-   *  ventana nueva en blanco ahí — "Nuevo workspace" del TopBar. Si el usuario quería
+   *  ventana nueva en blanco ahí — "Nuevo workspace" del encabezado lateral. Si quería
    *  conservar lo anterior debía guardarlo antes con "Guardar workspace". */
   resetDefaultWorkspace: () => Promise<void>;
   /** Guarda bajo un nombre nuevo todas las ventanas abiertas que comparten el workspace

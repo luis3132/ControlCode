@@ -38,18 +38,6 @@ export function BranchIcon({ className }: IconProps) {
   );
 }
 
-/** Lista con tildes: las tareas del proyecto. */
-export function TasksIcon({ className }: IconProps) {
-  return (
-    <svg {...BASE} className={className}>
-      <path d="M4 6.4l1.5 1.5L8.3 5.1" />
-      <path d="M4 13l1.5 1.5L8.3 11.7" />
-      <path d="M4 19.6l1.5 1.5L8.3 18.3" />
-      <path d="M12 6.8h8M12 13.4h8M12 20h8" />
-    </svg>
-  );
-}
-
 export function RefreshIcon({ className }: IconProps) {
   return (
     <svg {...BASE} className={className} strokeWidth={1.8}>
@@ -66,28 +54,6 @@ export function DotsIcon({ className }: IconProps) {
       <circle cx="5" cy="12" r="1.7" />
       <circle cx="12" cy="12" r="1.7" />
       <circle cx="19" cy="12" r="1.7" />
-    </svg>
-  );
-}
-
-/** Servidores MCP. */
-export function PlugIcon({ className }: IconProps) {
-  return (
-    <svg {...BASE} className={className}>
-      <rect x="3" y="7" width="18" height="12" rx="2" />
-      <path d="M8 7V4M16 7V4M8 12h8" />
-    </svg>
-  );
-}
-
-/** Cuadrícula: la vista de tablero. */
-export function GridIcon({ className }: IconProps) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className={className}>
-      <rect x="3" y="3" width="7.5" height="7.5" rx="1.6" />
-      <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6" />
-      <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6" />
-      <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6" />
     </svg>
   );
 }

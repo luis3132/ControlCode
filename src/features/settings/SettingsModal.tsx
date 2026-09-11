@@ -59,7 +59,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="flex-1 min-h-0 cc-scroll">
-          <SettingsPage embedded />
+          <SettingsPage />
         </div>
       </div>
     </div>
