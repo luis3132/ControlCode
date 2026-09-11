@@ -37,11 +37,7 @@ function Row({ label, value }: { label: string; value: string }) {
  * parte de lo que gastaste en la semana cayó en cada ventana. Sirve para ver si la tarde
  * viene cargada; no es un medidor de límite, y por eso la etiqueta no lo insinúa.
  */
-export function AccountUsagePopover({ account, cwd }: {
-  account: AgentAccount;
-  /** Carpeta de confianza donde abrir el sondeo. Sin una, no se pregunta. */
-  cwd: string | null;
-}) {
+export function AccountUsagePopover({ account }: { account: AgentAccount }) {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<AccountUsage | null>(null);
   const [failed, setFailed] = useState(false);
@@ -69,12 +65,12 @@ export function AccountUsagePopover({ account, cwd }: {
   // al cierre de la app— y recién después, si venció o si lo pidió el usuario, se vuelve a
   // preguntar. El panel nunca queda en blanco esperando.
   useEffect(() => {
-    if (account.agentId !== "claude-code" || !cwd) return;
+    if (account.agentId !== "claude-code") return;
     let stale = false;
 
     const ask = async (force: boolean) => {
       const env = realAccountId(account) ? await accountEnv(account.id) : {};
-      return claudeLiveUsage(account.id, cwd, env, force);
+      return claudeLiveUsage(account.id, env, force);
     };
     const asFailure = (problem: string): LiveUsage => ({
       available: false, session: null, week: null, weekModels: [],
@@ -104,7 +100,7 @@ export function AccountUsagePopover({ account, cwd }: {
     })();
 
     return () => { stale = true; };
-  }, [account, cwd, reload]);
+  }, [account, reload]);
 
   const week = usage?.windows.find((w) => w.key === "7d");
   const reference = week ? totalOf(week) : 0;
@@ -233,8 +229,6 @@ export function AccountUsagePopover({ account, cwd }: {
             </>
           ) : live ? (
             <Alert variant="neutral">{live.problem ?? t("accounts.plan.failed")}</Alert>
-          ) : !cwd ? (
-            <Alert variant="neutral">{t("accounts.plan.noFolder")}</Alert>
           ) : null}
         </div>
       )}

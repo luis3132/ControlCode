@@ -403,7 +403,6 @@
   "accounts.plan.session": "Ventana actual",
   "accounts.plan.week": "Semana",
   "accounts.plan.failed": "No se pudo leer el cupo del plan.",
-  "accounts.plan.noFolder": "Hace falta una carpeta de confianza para poder preguntarle el cupo a la TUI.",
   "accounts.plan.weekModel": "Semana ({{model}})",
   "accounts.plan.refresh": "Volver a preguntarle a la TUI",
   "accounts.plan.ago.now": "Consultado recién",
