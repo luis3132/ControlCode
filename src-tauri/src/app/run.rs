@@ -27,10 +27,13 @@ pub fn run() {
             crate::database::db_get_workspace_windows,
             crate::database::db_rename_workspace,
             crate::database::db_delete_workspace,
-            crate::database::db_get_workspace,
             crate::database::default_workspace_has_content,
-            crate::database::db_get_window_workspace,
             crate::database::db_list_session_history,
+            // Workspaces cerrados a mano (v10)
+            crate::database::save_workspace_snapshot,
+            crate::database::list_workspace_snapshots,
+            crate::database::take_workspace_snapshot,
+            crate::database::forget_workspace_snapshot,
             crate::database::find_open_tab_for_session,
             // Persistencia SQLite — ventanas y tabs
             crate::database::db_save_window_state,
@@ -42,17 +45,15 @@ pub fn run() {
             // Gestión de ventanas
             crate::window::open_new_window,
             crate::window::broadcast_event,
-            crate::window::get_window_labels,
-            crate::window::get_all_window_bounds,
-            crate::window::get_cursor_position,
             crate::window::get_home_dir,
             crate::window::open_workspace,
-            crate::window::close_workspace_windows,
             crate::window::focus_window,
-            crate::window::live_workspace_window_count,
             crate::window::close_and_forget_window,
             crate::window::reset_default_workspace,
             crate::window::confirm_exit_all,
+            // Explorador de archivos del workspace (panel derecho)
+            crate::explorer::explorer_read_dir,
+            crate::explorer::explorer_repo_info,
             // Detección de agentes
             crate::agents::detect_agents,
             // Cuentas múltiples por TUI
@@ -61,6 +62,9 @@ pub fn run() {
             crate::accounts::create_agent_account,
             crate::accounts::delete_agent_account,
             crate::accounts::agent_account_env,
+            crate::accounts::system_accounts,
+            crate::usage::agent_account_usage,
+            crate::usage::claude_live_usage,
             // Comandos previos al lanzamiento del agente (entornos aislados)
             crate::prelaunch::list_prelaunch_presets,
             crate::prelaunch::save_prelaunch_preset,
@@ -109,6 +113,7 @@ pub fn run() {
             crate::marketplace::list_marketplace_skills,
             crate::marketplace::search_remote_registries,
             crate::marketplace::install_marketplace_skill,
+            crate::marketplace::marketplace_skill_readme,
             crate::skills::registry_skills,
             // Modo orquestador (Fase 9): consumo estimado y tabs observadas
             crate::orchestrator::orchestrator_stats,

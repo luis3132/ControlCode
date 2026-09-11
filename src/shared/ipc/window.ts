@@ -6,10 +6,6 @@ import { invoke } from "@tauri-apps/api/core";
 
 export const homeDir = () => invoke<string>("get_home_dir");
 
-export const windowLabels = () => invoke<string[]>("get_window_labels");
-
-export const openNewWindow = (label: string) => invoke<void>("open_new_window", { label });
-
 export const focusWindow = (label: string) => invoke<void>("focus_window", { label });
 
 /**
@@ -25,10 +21,3 @@ export const confirmExitAll = () => invoke<void>("confirm_exit_all");
 /** Emite un evento a TODAS las ventanas (incluida la que llama). */
 export const broadcastEvent = (event: string, payload: string) =>
   invoke<void>("broadcast_event", { event, payload });
-
-/** Posición del cursor en píxeles físicos — para saber sobre qué ventana se soltó una tab. */
-export const cursorPosition = () => invoke<[number, number]>("get_cursor_position");
-
-/** `label → [x, y, ancho, alto]` de cada ventana viva, en píxeles físicos. */
-export const allWindowBounds = () =>
-  invoke<Record<string, [number, number, number, number]>>("get_all_window_bounds");

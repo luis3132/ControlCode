@@ -57,7 +57,7 @@ export function AccountPickerStep({ agentId, value, onChange }: AccountPickerSte
   return (
     <div className="flex flex-col gap-2">
       <span className="text-[11px] font-semibold uppercase tracking-widest
-        text-gray-400 dark:text-gray-500">
+        text-gray-400 dark:text-white/35">
         {t("accounts.pick")}
       </span>
 
@@ -71,10 +71,10 @@ export function AccountPickerStep({ agentId, value, onChange }: AccountPickerSte
               onClick={() => onChange(option.id)}
               className={`
                 flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg border text-left
-                transition-all duration-200 min-w-32
+                transition-colors duration-200 min-w-32
                 ${isSelected
                   ? "border-blue-500 bg-linear-to-br from-blue-50 to-violet-50 dark:from-blue-500/10 dark:to-violet-500/10 shadow-sm"
-                  : "border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-white/[0.02] hover:border-gray-300 dark:hover:border-gray-600"}
+                  : "border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] hover:border-gray-300 dark:hover:border-white/20"}
               `}
             >
               <span className={`text-xs font-semibold truncate max-w-40
@@ -86,7 +86,7 @@ export function AccountPickerStep({ agentId, value, onChange }: AccountPickerSte
               <span className={`text-[10px] truncate max-w-40
                 ${option.warn
                   ? "text-amber-600 dark:text-amber-400"
-                  : "text-gray-400 dark:text-gray-500"}`}>
+                  : "text-gray-400 dark:text-white/35"}`}>
                 {option.hint}
               </span>
             </button>

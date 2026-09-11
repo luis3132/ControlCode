@@ -4,11 +4,13 @@
 //! `database::schema`); acá solo hay lecturas y escrituras sobre tablas ya creadas.
 
 mod sessions;
+mod snapshots;
 mod settings;
 mod windows;
 mod workspaces;
 
 pub use sessions::*;
+pub use snapshots::*;
 pub use settings::*;
 pub use windows::*;
 pub use workspaces::*;

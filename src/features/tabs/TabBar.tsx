@@ -1,34 +1,33 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTranslation } from "react-i18next";
+import { AddIcon } from "neogestify-ui-components";
+
 import { useTabsStore } from "@/features/tabs/store";
 import { TabItem } from "@/features/tabs/TabItem";
-import { TabContextMenu } from "@/features/tabs/TabContextMenu";
-import { NewTabWizard } from "@/features/tabs/wizard/NewTabWizard";
+import { ContextMenu } from "@/shared/ui/ContextMenu";
+import { SkillPalette, type SkillScopeTarget } from "@/features/skills/SkillPalette";
+import { BoxIcon, CloseIcon } from "neogestify-ui-components";
+import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
 import { refreshSessionTitle } from "@/features/sessions/sessionTitle";
-import { markPtyTransferring } from "@/features/tabs/ptyTransfer";
-import { flushPendingSave } from "@/features/tabs/persistence";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
-import { AddIcon } from "neogestify-ui-components";
-import {
-  allWindowBounds,
-  cursorPosition,
-  openNewWindow,
-  windowLabels,
-} from "@/shared/ipc/window";
-import { windowWorkspace } from "./ipc";
-import { sendTab, waitForWindow } from "./transfer";
+import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
+import { WindowLights } from "@/app/WindowLights";
 
-interface ContextMenuState {
-  tabId: string;
-  x: number;
-  y: number;
-  otherWindows: string[];
-}
-
-export function TabBar() {
+/**
+ * Las tabs del workspace activo, dentro de la barra de título.
+ *
+ * Solo las de ESE workspace: el workspace es el tab de orden superior y sus agentes son
+ * las tabs de adentro. Mostrar las de todas las carpetas a la vez volvía a mezclar lo que
+ * el panel izquierdo separa, y con varios proyectos abiertos la barra no entraba.
+ *
+ * Arrastrar reordena, y nada más. Sacar una tab para abrir otra ventana ya no existe: se
+ * cambia de workspace en el lugar, desde el panel de la izquierda.
+ */
+/** `showLights`: con el panel izquierdo plegado su encabezado queda en 48px y los tres
+ *  botones de ventana no entran, así que se mudan acá, al principio de la tira. */
+export function TabBar({ showLights = false }: { showLights?: boolean }) {
   const { t } = useTranslation();
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
@@ -41,112 +40,33 @@ export function TabBar() {
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const navigate = useNavigate();
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const barRef = useRef<HTMLDivElement>(null);
+  // El arrastre se sigue por ID y no por índice: la lista visible es un subconjunto, así
+  // que un índice de acá no es el mismo que el que espera `reorderTabs`.
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [contextTab, setContextTab] = useState<{ tabId: string; x: number; y: number } | null>(null);
+  const [skillTarget, setSkillTarget] = useState<SkillScopeTarget | null>(null);
 
-  const handleDrop = (toIndex: number) => {
-    if (draggedIndex !== null && draggedIndex !== toIndex) {
-      reorderTabs(draggedIndex, toIndex);
-    }
-    setDraggedIndex(null);
-    setDragOverIndex(null);
+  const visible = tabsOfWorkspace(tabs, activeTabId);
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+
+  const clearDrag = () => {
+    setDraggedId(null);
+    setDragOverId(null);
   };
 
-  const handleDragEnd = async (e: React.DragEvent, tabIdx: number) => {
-    const rect = barRef.current?.getBoundingClientRect();
-    const insideBar = rect &&
-      e.clientX >= rect.left && e.clientX <= rect.right &&
-      e.clientY >= rect.top && e.clientY <= rect.bottom;
-
-    // Soltado dentro del TabBar → reorder (ya manejado por onDrop), nada más
-    if (insideBar) {
-      setDraggedIndex(null);
-      setDragOverIndex(null);
-      return;
-    }
-
-    if (draggedIndex === null) { setDraggedIndex(null); setDragOverIndex(null); return; }
-
-    const tab = tabs[tabIdx];
-    if (!tab) { setDraggedIndex(null); setDragOverIndex(null); return; }
-
-    // Coordenadas absolutas del cursor en píxeles físicos (funciona en Wayland)
-    const [physX, physY] = await cursorPosition();
-
-    // TopBar (h-10 = 40px lógicos) + TabBar (h-9 = 36px lógicos) = 76px lógicos → físicos
-    const scale = window.devicePixelRatio ?? 1;
-    const TAB_BAR_PHYSICAL = Math.round(76 * scale);
-
-    // Buscar si el cursor cayó sobre el TabBar de otra ventana
-    const bounds = await allWindowBounds();
-    const myLabel = getCurrentWindow().label;
-    let mergeTarget: string | null = null;
-
-    for (const [label, [x, y, w]] of Object.entries(bounds)) {
-      if (label === myLabel) continue;
-      if (physX >= x && physX <= x + w && physY >= y && physY <= y + TAB_BAR_PHYSICAL) {
-        mergeTarget = label;
-        break;
-      }
-    }
-
-    if (mergeTarget) {
-      // No mezclar tabs entre ventanas de distintos workspaces por accidente — si el
-      // destino pertenece a otro workspace, no se hace merge, pero el drop sigue siendo
-      // un detach válido: cae al mismo camino de "nueva ventana" de abajo en vez de no
-      // hacer nada (que dejaba la tab sin ningún destino).
-      const targetWorkspaceId = await windowWorkspace(mergeTarget).catch(() => null);
-      if (targetWorkspaceId !== null && targetWorkspaceId !== workspaceId) {
-        mergeTarget = null;
-      }
-    }
-
-    // Solo se cierra la tab de origen si el destino (merge u open_new_window) confirmó
-    // éxito — si cualquiera de los dos falla (ventana destino recién cerrada, error del
-    // backend), cerrar igual dejaría el PTY vivo huérfano: sin ninguna tab en memoria que
-    // lo referencie, invisible para el autosave de cualquier ventana.
-    try {
-      if (mergeTarget) {
-        // Merge: la tab (con su PTY vivo) viaja entera a la otra ventana.
-        await sendTab({ targetLabel: mergeTarget, tab, workspaceId });
-      } else {
-        // Fuera de cualquier ventana → ventana nueva, llevándose el mismo PTY. Se espera a
-        // que esté escuchando antes de mandarle la tab: el evento es efímero y mandarlo
-        // apenas vuelve `open_new_window` lo perdería.
-        const label = `cc-window-${Date.now()}`;
-        await openNewWindow(label);
-        if (!(await waitForWindow(label))) {
-          throw new Error(`la ventana ${label} no respondió a tiempo`);
-        }
-        // La ventana nueva está vacía, así que adopta el workspace de esta: si no, la tab
-        // destacada quedaría huérfana en el bucket `default`.
-        await sendTab({ targetLabel: label, tab, workspaceId });
-      }
-    } catch (err) {
-      console.error("No se pudo mover la tab a otra ventana, se conserva en el origen", err);
-      setDraggedIndex(null);
-      setDragOverIndex(null);
-      return;
-    }
-
-    if (tab.ptyId != null) markPtyTransferring(tab.ptyId);
-    closeTab(tab.id);
-    if (tabs.length === 1) {
-      // Sin este flush, la ventana se cierra con el autosave de "sin tabs" todavía
-      // pendiente en el debounce — su fila en SQLite queda con la tab que se acaba de
-      // mover, duplicada con la copia que ya persistió el destino.
-      await flushPendingSave();
-      await getCurrentWindow().close();
-    }
-
-    setDraggedIndex(null);
-    setDragOverIndex(null);
+  const moveTo = (targetId: string) => {
+    if (draggedId === null || draggedId === targetId) return clearDrag();
+    const from = tabs.findIndex((tab) => tab.id === draggedId);
+    const to = tabs.findIndex((tab) => tab.id === targetId);
+    if (from >= 0 && to >= 0) reorderTabs(from, to);
+    clearDrag();
   };
 
+  // El título de una sesión se resuelve leyendo su transcript, y cerrar la tab es la
+  // última chance de hacerlo: después el proceso ya no está para preguntarle.
   const closeTabWithTitleRefresh = async (tabId: string) => {
-    const tab = tabs.find((t) => t.id === tabId);
+    const tab = tabs.find((x) => x.id === tabId);
     if (tab) {
       const title = await refreshSessionTitle(tab);
       if (title !== tab.title) updateTab(tab.id, { title });
@@ -154,54 +74,34 @@ export function TabBar() {
     closeTab(tabId);
   };
 
-  const handleContextMenu = async (e: React.MouseEvent, tabId: string) => {
-    const allLabels = await windowLabels();
-    const myLabel = getCurrentWindow().label;
-    const others = allLabels.filter((l) => l !== myLabel);
-    setContextMenu({ tabId, x: e.clientX, y: e.clientY, otherWindows: others });
-  };
-
-  const handleMoveToWindow = async (targetLabel: string, tabId: string) => {
-    const tab = tabs.find((t) => t.id === tabId);
-    if (!tab) return;
-    try {
-      await sendTab({ targetLabel, tab, workspaceId });
-    } catch (err) {
-      console.error("No se pudo mover la tab a otra ventana, se conserva en el origen", err);
-      return;
-    }
-    if (tab.ptyId != null) markPtyTransferring(tab.ptyId);
-    closeTab(tabId);
-    // Auto-cierre si era la última tab. Flush explícito por la misma razón que en
-    // handleDragEnd: sin esto, la ventana se cierra con el guardado de "sin tabs"
-    // todavía pendiente en el debounce, y su fila queda duplicando la tab movida.
-    if (tabs.length === 1) {
-      await flushPendingSave();
-      await getCurrentWindow().close();
-    }
-  };
-
   return (
     <>
       <div
-        ref={barRef}
-        className="cc-scroll-x flex items-stretch h-10 shrink-0
+        data-tauri-drag-region
+        className="cc-scroll-x flex items-stretch flex-1 min-w-0 h-10
           bg-gray-100 dark:bg-gray-900
-          border-b border-gray-200 dark:border-white/8"
+          border-b border-gray-200 dark:border-gray-800"
+        style={{ position: "relative", zIndex: 0 }}
         onDragOver={(e) => e.preventDefault()}
         onDrop={() => {
-          if (draggedIndex !== null) reorderTabs(draggedIndex, tabs.length - 1);
-          setDraggedIndex(null);
-          setDragOverIndex(null);
+          // Soltar en el vacío = al final de ESTE workspace, no al final de todo.
+          const last = visible[visible.length - 1];
+          if (last) moveTo(last.id);
+          else clearDrag();
         }}
       >
+        {showLights && (
+          <div className="flex items-center shrink-0 pl-3.5 pr-2" data-tauri-drag-region>
+            <WindowLights />
+          </div>
+        )}
 
-        {tabs.map((tab, index) => (
+        {visible.map((tab) => (
           <TabItem
             key={tab.id}
             tab={tab}
             isActive={tab.id === activeTabId}
-            isDragOver={dragOverIndex === index && draggedIndex !== index}
+            isDragOver={dragOverId === tab.id && draggedId !== tab.id}
             onActivate={() => {
               activateTab(tab.id);
               navigate("/workspace");
@@ -211,50 +111,87 @@ export function TabBar() {
               closeTabWithTitleRefresh(tab.id);
             }}
             onRenameCommit={(title) => renameTab(tab.id, title)}
-            onDragStart={() => setDraggedIndex(index)}
-            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverIndex(index); }}
-            onDrop={() => handleDrop(index)}
-            onDragEnd={(e) => handleDragEnd(e, index)}
-            onContextMenu={(e) => handleContextMenu(e, tab.id)}
+            onDragStart={() => setDraggedId(tab.id)}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              setDragOverId(tab.id);
+            }}
+            onDrop={() => moveTo(tab.id)}
+            onDragEnd={clearDrag}
+            onContextMenu={(e) => setContextTab({ tabId: tab.id, x: e.clientX, y: e.clientY })}
           />
         ))}
 
         <button
-          onClick={() => setWizardOpen(true)}
+          // Sin workspace abierto no hay carpeta donde abrir un agente: eso es empezar uno
+          // nuevo, y eso vive en Home.
+          onClick={() => (activeTab ? setWizardOpen(true) : navigate("/"))}
           title={t("tabs.new")}
-          className="flex items-center justify-center w-9 h-9 shrink-0
+          data-tauri-drag-region="false"
+          className="flex items-center justify-center w-9 h-10 shrink-0
             text-gray-400 dark:text-white/30
             hover:text-gray-600 dark:hover:text-white/70
-            hover:bg-gray-200 dark:hover:bg-white/6
+            hover:bg-gray-200/60 dark:hover:bg-white/6
             transition-colors duration-150"
         >
-          <AddIcon className="w-6 h-6" />
+          <AddIcon className="w-5 h-5" />
         </button>
 
-        <div className="flex-1 h-full" />
+        {/* El resto de la franja es para arrastrar la ventana. */}
+        <div className="flex-1 h-full" data-tauri-drag-region />
       </div>
 
-      {contextMenu && (
-        <TabContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          otherWindows={contextMenu.otherWindows}
-          onClose={() => setContextMenu(null)}
-          onMoveToWindow={(label) => handleMoveToWindow(label, contextMenu.tabId)}
-          onCloseTab={() => closeTabWithTitleRefresh(contextMenu.tabId)}
-        />
+      {contextTab && (() => {
+        const tab = tabs.find((x) => x.id === contextTab.tabId);
+        if (!tab) return null;
+        return (
+          <ContextMenu
+            x={contextTab.x}
+            y={contextTab.y}
+            onClose={() => setContextTab(null)}
+            items={[
+              {
+                key: "skills",
+                label: t("skills.scope.tabAction"),
+                icon: <BoxIcon className="w-4 h-4" />,
+                onSelect: () => setSkillTarget({
+                  scope: "tab",
+                  workspaceId,
+                  tabId: tab.id,
+                  agentId: tab.agentId,
+                  label: tab.title,
+                }),
+              },
+              {
+                key: "close",
+                label: t("tabs.close"),
+                icon: <CloseIcon className="w-4 h-4" />,
+                danger: true,
+                onSelect: () => closeTabWithTitleRefresh(tab.id),
+              },
+            ]}
+          />
+        );
+      })()}
+
+      {skillTarget && (
+        <SkillPalette target={skillTarget} onClose={() => setSkillTarget(null)} />
       )}
 
-      <NewTabWizard
-        isOpen={wizardOpen}
+      <NewAgentDialog
+        isOpen={wizardOpen && activeTab !== undefined}
+        cwd={activeTab?.cwd ?? ""}
         onClose={() => setWizardOpen(false)}
-        onConfirm={({ cwd, agent, skillIds, accountId, prelaunch }) => {
+        onConfirm={({ agent, skillIds, accountId, prelaunch }) => {
+          const cwd = activeTab?.cwd;
+          if (!cwd) return;
           const tabId = addTab({ cwd, agent, accountId, prelaunch });
           navigate("/workspace");
 
-          // Los symlinks de las skills elegidas tienen que existir en el cwd ANTES de
-          // que el agente arranque (algunos solo escanean su carpeta de skills al
-          // boot) — Terminal.tsx espera esta promesa antes de invocar pty_create.
+          // Los symlinks de las skills elegidas tienen que existir en el cwd ANTES de que
+          // el agente arranque (varias TUIs solo escanean su carpeta al boot) —
+          // Terminal.tsx espera esta promesa antes de invocar pty_create.
           registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, skillIds));
         }}
       />

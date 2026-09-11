@@ -1,38 +1,41 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Modal } from "neogestify-ui-components";
+import {
+  Badge, Button, Input,
+} from "neogestify-ui-components";
+
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
-import { AgentPicker } from "@/features/agents/AgentPicker";
+import { agentIcon } from "@/features/agents/agentIcons";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface AddAccountDialogProps {
-  /** TUI ya elegida en la sección; el diálogo abre con esa seleccionada. */
-  agentId?: string;
+  /** El servicio para el que se crea. Viene de la sección en la que estás parado, y no se
+   *  vuelve a preguntar: ya lo elegiste al entrar ahí. */
+  agentId: string;
   onClose: () => void;
 }
 
 /**
- * Alta de una cuenta en dos pasos: elegir TUI + nombre, y después loguearse.
+ * Alta de una cuenta: ponerle nombre y loguearse.
  *
- * El segundo paso es una terminal de verdad, no un formulario de mail y contraseña: el
- * login de estas CLIs es un flujo propio (abre el navegador, pide un código, elige plan) y
- * cambia entre versiones. Reimplementarlo significaría manejar credenciales acá adentro y
- * romperse en la próxima actualización de la TUI. Corriendo el login real, la app nunca ve
- * una credencial y el flujo es exactamente el que documenta cada CLI.
+ * Antes preguntaba OTRA VEZ de qué TUI era, con un selector igual al de la pantalla desde
+ * la que se abre. Estando en la sección de Claude Code, el botón de agregar solo puede
+ * querer decir una cosa — y peor, el selector dejaba crear la cuenta en otro servicio y
+ * aparecer en una sección distinta de la que estabas mirando.
+ *
+ * El login es una terminal de verdad y no un formulario de mail y contraseña: el de estas
+ * CLIs es un flujo propio (abre el navegador, pide un código, elige plan) y cambia entre
+ * versiones. Reimplementarlo significaría manejar credenciales acá adentro y romperse en la
+ * próxima actualización de la TUI. Corriendo el login real, la app nunca ve una credencial.
  */
-export function AddAccountDialog({ agentId: initialAgentId, onClose }: AddAccountDialogProps) {
+export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
   const { t } = useTranslation();
   const capable = useAccountsStore((s) => s.capable);
   const accounts = useAccountsStore((s) => s.accounts);
   const create = useAccountsStore((s) => s.create);
   const load = useAccountsStore((s) => s.load);
-  const installed = useMemo(() => capable.filter((c) => c.installed), [capable]);
-  const [agentId, setAgentId] = useState(
-    initialAgentId && installed.some((c) => c.agentId === initialAgentId)
-      ? initialAgentId
-      : installed[0]?.agentId ?? ""
-  );
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -57,7 +60,7 @@ export function AddAccountDialog({ agentId: initialAgentId, onClose }: AddAccoun
   // ── Paso 2: login ─────────────────────────────────────────
   if (created) {
     return (
-      <Modal
+      <AppDialog
         title={t("settings.accounts.login.title", { name: created.name })}
         onClose={onClose}
         size="lg"
@@ -77,20 +80,24 @@ export function AddAccountDialog({ agentId: initialAgentId, onClose }: AddAccoun
           </Button>
         }
       >
-        <p className="text-xs text-gray-500 dark:text-white/50 mb-3">
+        <p className="text-[11.5px] text-gray-500 dark:text-white/45 mb-3">
           {t("settings.accounts.login.helper", { command: created.loginCommand })}
         </p>
         <LoginTerminal account={created} />
-      </Modal>
+      </AppDialog>
     );
   }
 
-  // ── Paso 1: TUI + nombre ──────────────────────────────────
+  // ── Paso 1: el nombre ─────────────────────────────────────
+  const Icon = agent ? agentIcon(agent.agentId, agent.label) : null;
+
   return (
-    <Modal
-      title={t("settings.accounts.add.title")}
+    <AppDialog
+      title={agent
+        ? t("settings.accounts.add.titleFor", { agent: agent.label })
+        : t("settings.accounts.add.title")}
       onClose={onClose}
-      size="md"
+      size="sm"
       closeOnBackdrop={!busy}
       closeOnEsc={!busy}
       footer={
@@ -100,7 +107,7 @@ export function AddAccountDialog({ agentId: initialAgentId, onClose }: AddAccoun
           </Button>
           <Button
             variant="primary"
-            disabled={busy || !agentId || !name.trim() || taken}
+            disabled={busy || !agent || !name.trim() || taken}
             onClick={handleCreate}
           >
             {t("settings.accounts.add.next")}
@@ -108,56 +115,48 @@ export function AddAccountDialog({ agentId: initialAgentId, onClose }: AddAccoun
         </>
       }
     >
-      {installed.length === 0 ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+      {!agent ? (
+        <p className="text-[12px] text-gray-500 dark:text-gray-400">
           {t("settings.accounts.add.noneInstalled")}
         </p>
       ) : (
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-col gap-3">
-            <span className="text-[11px] font-semibold uppercase tracking-widest
-              text-gray-400 dark:text-gray-500">
-              {t("settings.accounts.add.agent")}
+        <div className="flex flex-col gap-3">
+          {/* Para qué servicio es. Va como dato, no como elección: es lo que estabas
+              mirando, y decirlo acá evita tener que confiar en haber leído el título. */}
+          <div className="flex items-center gap-2 h-9 px-3 rounded-lg
+            bg-gray-100/70 dark:bg-white/4">
+            {Icon && <Icon className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-gray-400" />}
+            <span className="flex-1 min-w-0 truncate text-[12px]
+              text-gray-700 dark:text-gray-300">
+              {agent.label}
             </span>
-            <AgentPicker
-              value={agentId}
-              onChange={setAgentId}
-              options={installed.map((c) => ({
-                agentId: c.agentId,
-                label: c.label,
-                hint: c.envVar,
-              }))}
-            />
+            <Badge variant="info" size="sm" className="font-mono shrink-0">
+              {agent.envVar}
+            </Badge>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-widest
-              text-gray-400 dark:text-gray-500">
-              {t("settings.accounts.add.name")}
-            </span>
-            <Input
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                setError("");
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && name.trim() && !taken && !busy) handleCreate();
-              }}
-              placeholder="trabajo"
-              variant="outline"
-              error={taken ? t("settings.accounts.add.taken") : undefined}
-            />
-            <p className="text-[11px] text-gray-400 dark:text-white/40">
-              {agent
-                ? t("settings.accounts.add.nameHelper", { envVar: agent.envVar })
-                : t("settings.accounts.add.nameRules")}
-            </p>
-          </div>
+          <Input
+            label={t("settings.accounts.add.name")}
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setError("");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && name.trim() && !taken && !busy) handleCreate();
+            }}
+            placeholder="trabajo"
+            variant="outline"
+            autoFocus
+            error={taken ? t("settings.accounts.add.taken") : undefined}
+            helperText={t("settings.accounts.add.nameHelper", { envVar: agent.envVar })}
+          />
         </div>
       )}
 
-      {error && <p className="text-xs text-red-500 dark:text-red-400 mt-3">{error}</p>}
-    </Modal>
+      {error && (
+        <p className="mt-3 text-[11.5px] text-red-500 dark:text-red-400">{error}</p>
+      )}
+    </AppDialog>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Select } from "neogestify-ui-components";
 import { getSetting, setSetting } from "@/shared/ipc/settings";
+import { SettingsSection } from "@/features/settings/SettingsSection";
 
 /** Misma clave que lee el backend (`orchestrator::WATCH_LIMIT_KEY`). */
 const WATCH_LIMIT_KEY = "orchestrator_watch_limit";
@@ -36,17 +37,7 @@ export function OrchestratorSection() {
   };
 
   return (
-    <section className="bg-linear-to-br from-white to-gray-50
-      dark:from-gray-800 dark:to-gray-900
-      rounded-xl border border-gray-200 dark:border-gray-700
-      shadow-sm hover:shadow-md transition-shadow duration-300 p-6">
-
-      <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">
-        {t("settings.orchestrator")}
-      </h3>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
-        {t("settings.orchestrator.desc")}
-      </p>
+    <SettingsSection title={t("settings.orchestrator")} description={t("settings.orchestrator.desc")}>
 
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
@@ -74,6 +65,6 @@ export function OrchestratorSection() {
           {t("settings.orchestrator.watchLimitWarning")}
         </p>
       )}
-    </section>
+    </SettingsSection>
   );
 }

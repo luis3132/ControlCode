@@ -265,25 +265,6 @@ pub fn db_load_window_state(
     Ok(Some(RestoredWindowState { window, tabs }))
 }
 
-/// Workspace al que pertenece una ventana nativa viva, buscando por su label. Usado antes
-/// de aceptar un "merge" de tab entre ventanas (arrastrar una tab al tab bar de otra
-/// ventana): si el workspace de destino no coincide con el de origen, el merge se rechaza
-/// para no mezclar tabs de distintos workspaces por accidente.
-#[tauri::command]
-pub fn db_get_window_workspace(
-    label: String,
-    db: tauri::State<DbConnection>,
-) -> Result<Option<String>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    conn.query_row(
-        "SELECT workspace_id FROM windows WHERE label = ?1",
-        [&label],
-        |row| row.get(0),
-    )
-    .optional()
-    .map_err(|e| e.to_string())
-}
-
 /// Marca una ventana como cerrada (is_open = 0) sin borrar su fila. Es el comportamiento
 /// por defecto de CUALQUIER cierre nativo, incluidos los cierres EN BLOQUE (cerrar todo un
 /// workspace, cambiar de workspace cerrando las anteriores, salida completa de la app) —
@@ -437,8 +418,8 @@ pub fn rename_window_label(db: &DbConnection, window_id: &str, new_label: &str) 
     Ok(())
 }
 
-/// Cuántas tabs tiene guardadas una ventana. Se usa al restaurar para no recrear
-/// ventanas tear-off que se quedaron sin tabs (el usuario las cerró todas sin cerrar la ventana).
+/// Cuántas tabs tiene guardadas una ventana. Se usa al restaurar para no recrear ventanas
+/// que se quedaron sin tabs (el usuario las cerró todas sin cerrar la ventana).
 pub fn count_tabs_for_window(db: &DbConnection, window_id: &str) -> Result<i64, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.query_row("SELECT COUNT(*) FROM tabs WHERE window_id = ?1", [window_id], |row| row.get(0))
@@ -463,4 +444,25 @@ fn resolve_tabs_of_window(db: &DbConnection, label: &str) -> HashMap<String, Res
         let resolved = resolve_for_archive(db, &id);
         (id, resolved)
     }).collect()
+}
+
+/// Borra las filas de ventana cerradas que no guardan ninguna tab.
+///
+/// Una fila así no representa nada: `restore_windows` la saltea (no tiene qué restaurar) y
+/// `live_workspace_window_count` solo mira las abiertas. Pero se acumulan — cada ventana
+/// que se cierra deja la suya, y un arranque que falle en bucle deja una por intento. Se
+/// vieron 15 de golpe después de que un error de renderizado tumbara la ventana una y otra
+/// vez, y sin barrerlas la tabla crece para siempre.
+///
+/// Solo toca filas CERRADAS y VACÍAS, así que no hay nada que perder: una ventana viva
+/// tiene `is_open = 1` (incluida la que se acaba de crear en blanco, ver
+/// `create_blank_window_row`), y una cerrada con tabs es justo la que hay que conservar
+/// para poder restaurarla.
+pub(crate) fn purge_empty_closed_windows(conn: &rusqlite::Connection) -> rusqlite::Result<usize> {
+    conn.execute(
+        "DELETE FROM windows
+         WHERE is_open = 0
+           AND NOT EXISTS (SELECT 1 FROM tabs WHERE tabs.window_id = windows.id)",
+        [],
+    )
 }

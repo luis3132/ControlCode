@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Modal } from "neogestify-ui-components";
+import {
+  Button,
+} from "neogestify-ui-components";
 import { useWorkspacesStore } from "@/features/workspaces/store";
 import type { WorkspaceSummary } from "@/features/workspaces/types";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface OpenWorkspaceDialogProps {
   workspace: WorkspaceSummary;
@@ -25,7 +28,7 @@ export function OpenWorkspaceDialog({ workspace, onClose }: OpenWorkspaceDialogP
   };
 
   return (
-    <Modal
+    <AppDialog
       title={t("workspace.open.title", { name: workspace.name })}
       onClose={onClose}
       size="sm"
@@ -45,6 +48,6 @@ export function OpenWorkspaceDialog({ workspace, onClose }: OpenWorkspaceDialogP
       <p className="text-sm text-gray-600 dark:text-gray-300">
         {t("workspace.open.body")}
       </p>
-    </Modal>
+    </AppDialog>
   );
 }

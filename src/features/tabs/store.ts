@@ -9,7 +9,6 @@ interface TabsState {
   tabs: Tab[];
   activeTabId: string | null;
   detectedAgents: AgentInfo[];
-  sidebarCollapsed: boolean;
   /** Workspace (layout guardado de ventanas/tabs) al que pertenece ESTA ventana. */
   workspaceId: string;
   hydrated: boolean;
@@ -37,7 +36,6 @@ interface TabsState {
   setSessionId: (tabId: string, sessionId: string) => void;
   updateTab: (tabId: string, patch: Partial<Tab>) => void;
   setDetectedAgents: (agents: AgentInfo[]) => void;
-  toggleSidebar: () => void;
   setWorkspaceId: (workspaceId: string) => void;
   hydrateFromBackend: (tabs: Tab[], workspaceId?: string) => void;
   setHydrated: (hydrated: boolean) => void;
@@ -52,7 +50,6 @@ export const useTabsStore = create<TabsState>((set) => ({
   activeTabId: null,
   // bash siempre disponible como fallback mientras detect_agents carga
   detectedAgents: [{ id: "bash", label: "Terminal (bash)", command: "bash", available: true }],
-  sidebarCollapsed: false,
   workspaceId: DEFAULT_WORKSPACE_ID,
   hydrated: false,
 
@@ -128,19 +125,30 @@ export const useTabsStore = create<TabsState>((set) => ({
 
   setDetectedAgents: (agents) => set({ detectedAgents: agents }),
 
-  toggleSidebar: () =>
-    set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
 
   setWorkspaceId: (workspaceId) => set({ workspaceId }),
 
+  // Idempotente a propósito: hidratar dos veces tiene que dejar lo mismo que hidratar
+  // una. Antes anexaba sin mirar los ids —para el flujo de mover una tab entre ventanas,
+  // que ya no existe—, así que cualquier remontaje del árbol de React duplicaba TODAS las
+  // tabs: 5 pasaban a 10, a 15. Un error de render en una terminal bastaba para
+  // dispararlo en bucle.
+  //
+  // La regla ahora es fusionar por id: lo que viene del backend manda, y lo que había en
+  // memoria y no viene se conserva (una tab recién creada cuya fila todavía no persistió).
   hydrateFromBackend: (tabs, workspaceId) =>
     set((state) => {
       const base = workspaceId ? { workspaceId } : {};
-      if (state.tabs.length === 0) {
-        return { ...base, tabs, activeTabId: tabs[0]?.id ?? null };
-      }
-      // Ya hay tabs en memoria (flujo cc-detach/cc-receive-tab) — anexar sin pisarlas.
-      return { ...base, tabs: [...tabs, ...state.tabs] };
+      const incoming = new Set(tabs.map((tab) => tab.id));
+      const extras = state.tabs.filter((tab) => !incoming.has(tab.id));
+      const merged = [...tabs, ...extras];
+      const keepsActive = state.activeTabId !== null
+        && merged.some((tab) => tab.id === state.activeTabId);
+      return {
+        ...base,
+        tabs: merged,
+        activeTabId: keepsActive ? state.activeTabId : merged[0]?.id ?? null,
+      };
     }),
 
   setHydrated: (hydrated) => set({ hydrated }),

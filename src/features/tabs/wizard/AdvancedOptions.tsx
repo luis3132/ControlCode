@@ -32,7 +32,7 @@ export function AdvancedOptions({
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 self-start text-[11px] font-semibold
-          uppercase tracking-widest text-gray-400 dark:text-gray-500
+          uppercase tracking-widest text-gray-400 dark:text-white/35
           hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
       >
         <ChevronDownIcon

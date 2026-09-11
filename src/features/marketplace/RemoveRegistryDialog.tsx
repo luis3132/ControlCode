@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Modal, AnimateSpin, InfoIcon, StackIcon } from "neogestify-ui-components";
+import {
+  Button, AnimateSpin, InfoIcon, StackIcon,
+} from "neogestify-ui-components";
 import { useMarketplaceStore } from "@/features/marketplace/store";
 import type { RegistrySummary } from "@/features/marketplace/types";
 import { useSkillsStore } from "@/features/skills/store";
 import type { SkillSummary } from "@/features/skills/types";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface RemoveRegistryDialogProps {
   registry: RegistrySummary;
@@ -59,7 +62,7 @@ export function RemoveRegistryDialog({ registry, onClose }: RemoveRegistryDialog
   const count = affected?.length ?? 0;
 
   return (
-    <Modal
+    <AppDialog
       title={t("marketplace.registries.remove")}
       onClose={onClose}
       size="md"
@@ -91,7 +94,7 @@ export function RemoveRegistryDialog({ registry, onClose }: RemoveRegistryDialog
         </div>
 
         {loading ? (
-          <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
+          <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-white/35">
             <AnimateSpin className="w-3.5 h-3.5" />
             {t("marketplace.registries.removeChecking")}
           </div>
@@ -130,6 +133,6 @@ export function RemoveRegistryDialog({ registry, onClose }: RemoveRegistryDialog
 
         {error && <p className="text-xs text-red-500 dark:text-red-400">{error}</p>}
       </div>
-    </Modal>
+    </AppDialog>
   );
 }

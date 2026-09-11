@@ -43,14 +43,14 @@ export function LoginTerminal({ account }: LoginTerminalProps) {
   if (!env) {
     return (
       <div className="h-96 flex items-center justify-center rounded-lg
-        border border-gray-200 dark:border-gray-700">
+        border border-gray-200 dark:border-white/10">
         <Loading variant="dots" size="small" color="gray" label={t("terminal.status.connecting")} />
       </div>
     );
   }
 
   return (
-    <div className="h-96 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+    <div className="h-96 rounded-lg overflow-hidden border border-gray-200 dark:border-white/10">
       <Terminal
         command={account.loginCommand}
         env={env}

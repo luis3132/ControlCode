@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Modal, InfoIcon } from "neogestify-ui-components";
+import {
+  Button, InfoIcon,
+} from "neogestify-ui-components";
 import type { SessionHistoryEntry, SessionSkillStatus } from "@/features/sessions/types";
 import { SkillPickerStep } from "@/features/tabs/wizard/SkillPickerStep";
 import { PrelaunchChain } from "@/features/prelaunch/PrelaunchChain";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 export interface ResumeChoice {
   /** Skills con las que montar la tab (ids ya instalados). */
@@ -69,7 +72,7 @@ export function ResumeOptionsDialog({
   const changed = added > 0 || removed > 0;
 
   return (
-    <Modal
+    <AppDialog
       title={t("sessions.resumeOptions.title")}
       onClose={onCancel}
       size="md"
@@ -89,7 +92,7 @@ export function ResumeOptionsDialog({
     >
       <div className="flex flex-col gap-4">
         <div className="flex items-start gap-2">
-          <InfoIcon className="w-4 h-4 mt-0.5 shrink-0 text-gray-400 dark:text-gray-500" />
+          <InfoIcon className="w-4 h-4 mt-0.5 shrink-0 text-gray-400 dark:text-white/35" />
           <p className="text-sm text-gray-600 dark:text-gray-300">
             {t("sessions.resumeSkills.body", {
               session: entry.title ?? entry.agentLabel,
@@ -134,9 +137,9 @@ export function ResumeOptionsDialog({
             de las sesiones no los usa, pero cuando los usa hay que poder corregirlos —
             un preset renombrado o un entorno que ya no existe se arregla acá y no
             reabriendo a ciegas para que falle. */}
-        <div className="flex flex-col gap-2 pt-3 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex flex-col gap-2 pt-3 border-t border-gray-200 dark:border-white/8">
           <span className="text-[11px] font-semibold uppercase tracking-widest
-            text-gray-400 dark:text-gray-500">
+            text-gray-400 dark:text-white/30">
             {t("wizard.advanced")}
           </span>
           <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -149,6 +152,6 @@ export function ResumeOptionsDialog({
           />
         </div>
       </div>
-    </Modal>
+    </AppDialog>
   );
 }

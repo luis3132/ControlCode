@@ -131,7 +131,7 @@ export function SkillBuilderDialog({
         >
           <div className="flex flex-col gap-1">
             <SectionLabel>{t("skills.builder.section.details")}</SectionLabel>
-            <p className="text-xs text-gray-400 dark:text-gray-500">
+            <p className="text-xs text-gray-400 dark:text-white/35">
               {t("skills.builder.subtitle")}
             </p>
           </div>
@@ -187,7 +187,7 @@ export function SkillBuilderDialog({
                   </Button>
                 ))}
             </div>
-            <span className="text-xs text-gray-400 dark:text-gray-500">
+            <span className="text-xs text-gray-400 dark:text-white/35">
               {t("skills.builder.agentsHelper")}
             </span>
           </div>
@@ -199,7 +199,7 @@ export function SkillBuilderDialog({
         <section className="flex-1 min-h-0 flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between gap-3">
             <SectionLabel>{t("skills.builder.body")}</SectionLabel>
-            <span className="text-xs text-gray-400 dark:text-gray-500 truncate">
+            <span className="text-xs text-gray-400 dark:text-white/35 truncate">
               {t("skills.builder.bodyHint")}
             </span>
           </div>

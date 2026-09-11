@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Modal } from "neogestify-ui-components";
+import {
+  Button,
+} from "neogestify-ui-components";
 import { AnimateSpin, CheckIcon, InfoIcon } from "neogestify-ui-components";
 import type { SessionSkillStatus } from "@/features/sessions/types";
 import { useMarketplaceStore } from "@/features/marketplace/store";
 import { useSkillsStore } from "@/features/skills/store";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface MissingSkillsDialogProps {
   /** Título de la sesión que se está reabriendo, para dar contexto. */
@@ -59,7 +62,7 @@ export function MissingSkillsDialog({
   };
 
   return (
-    <Modal
+    <AppDialog
       title={t("sessions.missingSkills.title")}
       onClose={onCancel}
       size="md"
@@ -99,8 +102,8 @@ export function MissingSkillsDialog({
               <li
                 key={s.name}
                 className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg
-                  border border-gray-200 dark:border-gray-700
-                  bg-gray-50 dark:bg-gray-800/50"
+                  border border-gray-200 dark:border-white/8
+                  bg-gray-50 dark:bg-white/4"
               >
                 <div className="flex flex-col min-w-0 gap-0.5">
                   <span className={`text-sm font-medium truncate
@@ -116,7 +119,7 @@ export function MissingSkillsDialog({
                     className={`text-[11px] ${
                       s.substituted || s.ambiguous
                         ? "text-amber-600 dark:text-amber-400"
-                        : "text-gray-400 dark:text-gray-500"
+                        : "text-gray-400 dark:text-white/35"
                     }`}
                   >
                     {isRestored
@@ -161,6 +164,6 @@ export function MissingSkillsDialog({
 
         {error && <p className="text-xs text-red-500 dark:text-red-400">{error}</p>}
       </div>
-    </Modal>
+    </AppDialog>
   );
 }

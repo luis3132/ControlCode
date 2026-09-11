@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 8;
+const SCHEMA_VERSION: i32 = 10;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -109,6 +109,34 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         conn.execute("ALTER TABLE tabs ADD COLUMN opened_at INTEGER NOT NULL DEFAULT 0", [])?;
     }
 
+    // Va ACÁ y no más abajo a propósito: el batch de más adelante crea un índice único
+    // sobre `cwd`, y sobre una base que ya existe el `CREATE TABLE IF NOT EXISTS` de esa
+    // tabla es un no-op — sin la columna puesta primero, ese índice falla y la app no
+    // arranca. En una base nueva no se nota, porque ahí la tabla nace con la columna.
+    //
+    // v9 — las skills de scope='workspace' pasan a ser POR CARPETA.
+    //
+    // Antes valían para todas las tabs del workspace, o sea que activar una skill en un
+    // proyecto la metía también en los otros que tuvieras abiertos en la misma ventana.
+    // Con "cada carpeta es un workspace" eso deja de tener sentido. Las filas que ya
+    // existían quedan con `''` = "todas las carpetas", que es exactamente lo que
+    // significaban, así que nadie pierde una skill al actualizar.
+    if table_exists(conn, "project_skills") && !has_column(conn, "project_skills", "cwd") {
+        conn.execute("ALTER TABLE project_skills ADD COLUMN cwd TEXT NOT NULL DEFAULT ''", [])?;
+
+        // Los índices únicos nuevos no se pueden crear sobre filas repetidas, y repetidas
+        // puede haber: hasta acá el upsert de scope='workspace' nunca encontraba conflicto
+        // (ver el comentario del schema), así que cada re-attach dejaba una fila más.
+        // Se conserva la más vieja de cada grupo.
+        conn.execute(
+            "DELETE FROM project_skills WHERE rowid NOT IN (
+                 SELECT MIN(rowid) FROM project_skills
+                 GROUP BY skill_id, workspace_id, scope, IFNULL(tab_id, ''), cwd
+             )",
+            [],
+        )?;
+    }
+
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS workspaces (
              id          TEXT PRIMARY KEY,
@@ -194,14 +222,49 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              tab_id       TEXT REFERENCES tabs(id) ON DELETE CASCADE,
              enabled      INTEGER NOT NULL DEFAULT 1,
              created_at   INTEGER NOT NULL,
+             -- Con scope='workspace': la CARPETA a la que aplica. Un workspace es una
+             -- copia de trabajo, y sus skills valen ahí y no en las otras carpetas que
+             -- estén abiertas en la misma ventana. La cadena vacía significa \"todas\",
+             -- que es lo único que existía antes de la v9.
+             cwd          TEXT NOT NULL DEFAULT '',
              UNIQUE (skill_id, workspace_id, scope, tab_id)
          );
          CREATE INDEX IF NOT EXISTS idx_project_skills_workspace ON project_skills(workspace_id);
          CREATE INDEX IF NOT EXISTS idx_project_skills_skill ON project_skills(skill_id);
 
+         -- La UNIQUE de arriba no alcanza y no se puede cambiar sin recrear la tabla: con
+         -- scope='workspace' el `tab_id` es NULL, y SQLite considera distintos a dos NULL,
+         -- así que nunca dispara — attachear dos veces la misma skill dejaba dos filas y
+         -- el ON CONFLICT del upsert no se activaba jamás. Estos índices parciales no
+         -- tienen NULLs en sus columnas, así que sí garantizan una fila por caso.
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_project_skills_ws_cwd
+             ON project_skills(skill_id, workspace_id, cwd) WHERE scope = 'workspace';
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_project_skills_tab
+             ON project_skills(skill_id, tab_id) WHERE scope = 'tab';
+
          CREATE TABLE IF NOT EXISTS settings (
              key   TEXT PRIMARY KEY,
              value TEXT NOT NULL
+         );
+
+         -- v10 — Workspaces cerrados a mano, para poder volver a abrirlos.
+         --
+         -- Sin esto, cerrar todas las tabs de una carpeta hacía desaparecer al workspace
+         -- del panel: se deriva de las tabs abiertas, así que sin ninguna no queda nada
+         -- que mostrar ni a qué volver.
+         --
+         -- La clave es el `cwd` y no un id: un workspace ES una carpeta, y al reabrirlo
+         -- hay que encontrarlo por la carpeta que el usuario vuelve a elegir. Las tabs se
+         -- guardan desnormalizadas como JSON por el mismo motivo que en `session_history`:
+         -- las filas de `tabs` se borran al cerrarlas y se llevarían el recuerdo puesto.
+         --
+         -- No hay FK hacia `workspaces`: un snapshot tiene que sobrevivir al reseteo del
+         -- bucket `default`, que es justo donde vive casi todo.
+         CREATE TABLE IF NOT EXISTS workspace_snapshots (
+             cwd          TEXT PRIMARY KEY,
+             workspace_id TEXT NOT NULL,
+             tabs_json    TEXT NOT NULL,
+             closed_at    INTEGER NOT NULL
          );
 
          -- TUIs que el usuario agrega a mano (las soportadas de fábrica están hardcodeadas

@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Modal } from "neogestify-ui-components";
+import {
+  Button, Input,
+} from "neogestify-ui-components";
 import { useWorkspacesStore } from "@/features/workspaces/store";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface SaveWorkspaceDialogProps {
   onClose: () => void;
@@ -32,7 +35,7 @@ export function SaveWorkspaceDialog({ onClose }: SaveWorkspaceDialogProps) {
   };
 
   return (
-    <Modal
+    <AppDialog
       title={t("workspace.save.title")}
       onClose={onClose}
       size="sm"
@@ -58,6 +61,6 @@ export function SaveWorkspaceDialog({ onClose }: SaveWorkspaceDialogProps) {
         variant="outline"
         error={error}
       />
-    </Modal>
+    </AppDialog>
   );
 }

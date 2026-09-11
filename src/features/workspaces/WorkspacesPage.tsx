@@ -80,7 +80,7 @@ export function WorkspacesPage() {
   };
 
   return (
-    <main className="min-h-full px-6 py-10 bg-gray-50 dark:bg-gray-950">
+    <main className="cc-scroll h-full px-6 py-10 bg-gray-50 dark:bg-gray-950">
       <div className="max-w-2xl mx-auto">
 
         <PageHeader

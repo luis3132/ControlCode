@@ -9,6 +9,63 @@
 
 @variant dark (&:where(.dark, .dark *)) {}
 
+/* ── La paleta de la librería ──────────────────────────────────────────────
+   `neogestify-ui-components` pinta sus superficies, bordes y textos con variables
+   `--nui-*` que traen un valor por defecto. Esos valores son grises de Tailwind
+   (gray-800 de fondo, gray-700 de borde) con acento índigo — razonables sueltos, pero
+   al lado de los paneles casi negros de esta app un modal parecía de otra aplicación.
+
+   Declararlas acá las cambia TODAS de una vez: modales, botones, inputs, badges,
+   skeletons. La alternativa era pisar clases diálogo por diálogo, que además de tedioso
+   se desincroniza en cuanto se agrega uno nuevo.
+
+   Se definen las dos variantes juntas porque el modo oscuro de esta app va por clase
+   (`.dark`): las reglas de los dos temas existen siempre en el CSS y solo aplica una, así
+   que un único bloque en `:root` alcanza.
+
+   Los semánticos (danger, success, warning, info) se dejan como vienen: ya son el rojo,
+   verde, ámbar y azul que usa el resto de la app. */
+:root {
+  /* Superficies. `surface` es el panel de un modal y va igual que el shell; las bandas de
+     cabecera y pie se HUNDEN respecto del panel, no se elevan. */
+  --nui-surface-dark: #0d1117;
+  --nui-surface-muted-dark: #0a0f16;
+  --nui-surface-sunken-dark: #080b0f;
+  --nui-surface-band-dark: #0a0f16;
+  --nui-surface-hover-dark: rgba(255, 255, 255, 0.06);
+  --nui-skeleton-dark: rgba(255, 255, 255, 0.08);
+  --nui-surface-band: rgba(243, 244, 246, 0.6);
+
+  /* Bordes: los mismos `white/8` y `white/12` que usan los paneles de la app. */
+  --nui-border-dark: rgba(255, 255, 255, 0.12);
+  --nui-border-subtle-dark: rgba(255, 255, 255, 0.08);
+
+  /* Texto, en la misma escala que el resto de la UI. */
+  --nui-text-dark: #f9fafb;
+  --nui-text-muted-dark: #d1d5db;
+  --nui-text-subtle-dark: rgba(255, 255, 255, 0.45);
+  --nui-text-faint-dark: rgba(255, 255, 255, 0.3);
+
+  /* Acento: la librería viene en índigo y la app es azul. Se cambia en los dos temas —
+     un botón primario índigo al lado de una fila seleccionada azul se ve como un error. */
+  --nui-accent: #2563eb;
+  --nui-accent-hover: #1d4ed8;
+  --nui-accent-text: #2563eb;
+  --nui-accent-text-hover: #1d4ed8;
+  --nui-accent-soft: rgba(59, 130, 246, 0.1);
+  --nui-ring: #3b82f6;
+  --nui-accent-dark: #3b82f6;
+  --nui-accent-hover-dark: #2563eb;
+  --nui-accent-text-dark: #60a5fa;
+  --nui-accent-text-hover-dark: #93c5fd;
+  --nui-accent-soft-dark: rgba(96, 165, 250, 0.13);
+  --nui-ring-dark: #60a5fa;
+
+  /* El velo detrás de un diálogo, igual que el de `ShellModal` y `RouteModal`. */
+  --nui-scrim: rgba(17, 24, 39, 0.45);
+  --nui-scrim-dark: rgba(0, 0, 0, 0.65);
+}
+
 /* ── Tipografía ────────────────────────────────────────────────────────────
    El stack nombra fuentes que EXISTEN en cada plataforma en vez de confiar en que
    `system-ui` caiga en algo bien hinteado: en Linux, `system-ui` resuelve a lo que diga
@@ -206,4 +263,90 @@ html:not(.dark) .cc-term-scrollable .xterm-scrollable-element > .scrollbar {
   max-height: 100%;
   /* Pegado a los bordes de la vista, las esquinas redondeadas se ven cortadas. */
   border-radius: 0;
+}
+
+/* ── Movimiento ────────────────────────────────────────────────────────────
+   Una sola escala de tiempos y una sola curva para toda la app. Antes cada
+   componente elegía la suya —de 100ms a 300ms, con la curva por defecto del
+   navegador— y el resultado era que dos cosas que pasan juntas (abrir un panel y
+   que su contenido aparezca) se movían a distinta velocidad. Eso es lo que se lee
+   como "trabado": no es que sea lento, es que no está sincronizado.
+
+   La curva arranca rápido y frena suave (`0.2, 0, 0, 1`). Es la que usan los
+   sistemas de diseño de escritorio para entradas, y sirve justo para esto: lo que
+   aparece se ve inmediato aunque tarde 180ms en asentarse.
+
+   Las duraciones son cortas a propósito. Esta es una app de trabajo donde se abre
+   y se cierra lo mismo cien veces al día; a 300ms, la décima vez ya molesta.
+   La librería tiene su propio sistema de movimiento y lee TRES variables CSS
+   (`--nui-duration`, `--nui-duration-fast`, `--nui-blur`). Se declaran acá para que
+   sus componentes y los nuestros se muevan con los mismos tiempos: si no, un modal
+   de la librería y un panel nuestro abriéndose a la vez van a distinta velocidad, y
+   eso es lo que se lee como "trabado".
+
+   `--nui-blur: 0px` apaga el desenfoque del velo. No es un gusto: en WebKitGTK
+   (el motor de Tauri en Linux) desenfocar el fondo obliga a re-muestrear en cada
+   cuadro lo que haya detrás, y detrás hay terminales dibujando. Un velo un poco más
+   opaco cumple la misma función y no cuesta nada. Se pone a 0px y no a `none`
+   porque `none` no es interpolable. */
+:root {
+  --nui-duration: 170ms;
+  --nui-duration-fast: 110ms;
+  --nui-blur: 0px;
+
+  --cc-fast: var(--nui-duration-fast);
+  --cc-base: var(--nui-duration);
+  --cc-slow: 240ms;
+  --cc-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Quien pidió menos movimiento en su sistema lo pidió en serio: hay gente a la que
+   una animación de entrada le produce mareo. Se apaga todo, no se "suaviza". */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes cc-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Sube unos píxeles al aparecer: da la sensación de que el panel viene desde
+   atrás en vez de materializarse. El `scale` es mínimo — más que esto se lee como
+   un rebote de página web, no como una ventana. */
+@keyframes cc-rise {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes cc-pop {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* SIN `both`, a diferencia de las otras dos. Una animación de opacidad que queda "en
+   efecto" (que es lo que hace `both`/`forwards`) le crea al elemento un contexto de
+   apilamiento PERMANENTE, y todo lo que se dibuje adentro queda encerrado ahí por más
+   z-index que tenga — así quedaba tapado el menú de click derecho de los paneles. Sin
+   fill, la animación termina y el elemento vuelve a su opacidad normal, que ya es 1: se ve
+   igual y no encierra nada. */
+.cc-fade { animation: cc-fade var(--cc-base) var(--cc-ease); }
+.cc-rise { animation: cc-rise var(--cc-base) var(--cc-ease) both; }
+.cc-pop  { animation: cc-pop  var(--cc-fast) var(--cc-ease) both; }
+
+/* Transiciones de interfaz: color y opacidad, nunca `all`.
+   `transition-all` incluye propiedades de layout (width, padding, top…), y animar
+   layout obliga al motor a recalcularlo en cada cuadro. Es la diferencia entre una
+   animación que corre en el compositor y una que reflowea la ventana entera. */
+.cc-t {
+  transition-property: color, background-color, border-color, opacity, box-shadow;
+  transition-duration: var(--cc-fast);
+  transition-timing-function: var(--cc-ease);
 }

@@ -4,6 +4,9 @@ export interface SkillUsageEntry {
   scope: "workspace" | "tab";
   tabId?: string | null;
   tabTitle?: string | null;
+  /** Con `scope: "workspace"`: la carpeta a la que aplica. Cadena vacía = todas las del
+   *  workspace (las filas de antes de la v9). */
+  cwd: string;
 }
 
 export interface SkillSummary {

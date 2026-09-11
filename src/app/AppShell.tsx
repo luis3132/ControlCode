@@ -1,14 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabsStore } from "@/features/tabs/store";
 import type { Tab } from "@/features/tabs/types";
 import { initTabsPersistence } from "@/features/tabs/persistence";
-import { TopBar } from "@/app/TopBar";
+import { SideHead } from "@/app/SideHead";
+import { ActivityRail } from "@/app/ActivityRail";
+import { StatusBar } from "@/app/StatusBar";
 import { TabBar } from "@/features/tabs/TabBar";
-import { PathBar } from "@/features/workspaces/PathBar";
+import { WorkspacesPanel } from "@/features/workspaces/WorkspacesPanel";
+import { ExplorerPanel } from "@/features/explorer/ExplorerPanel";
+import { SettingsModal } from "@/features/settings/SettingsModal";
+import { AccountsModal } from "@/features/accounts/AccountsModal";
+import { RouteModal } from "@/app/RouteModal";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
+import { useUiStore } from "@/app/uiStore";
+import { buildWorkspaceTree } from "@/features/workspaces/workspaceTree";
+import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
+import { useSnapshotsStore } from "@/features/workspaces/snapshotsStore";
 import { ResizeHandles } from "@/app/ResizeHandles";
 import { useGlobalShortcuts } from "@/app/useGlobalShortcuts";
 import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
@@ -17,11 +27,9 @@ import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
 import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
-import {
-  announceWindowReady,
-  newWindowWorkspaceKey,
-  onTabReceived,
-} from "@/features/tabs/transfer";
+
+/** Las rutas que se muestran como modal encima de las terminales en vez de reemplazarlas. */
+const MODAL_ROUTES = ["/skills", "/marketplace"];
 
 function toFrontendTab(row: RestoredTabRow): Tab {
   return {
@@ -45,7 +53,6 @@ function toFrontendTab(row: RestoredTabRow): Tab {
 export function AppShell() {
   const tabs = useTabsStore((s) => s.tabs);
   const setDetectedAgents = useTabsStore((s) => s.setDetectedAgents);
-  const addTab = useTabsStore((s) => s.addTab);
   const activateTab = useTabsStore((s) => s.activateTab);
   const hydrateFromBackend = useTabsStore((s) => s.hydrateFromBackend);
   const setHydrated = useTabsStore((s) => s.setHydrated);
@@ -53,7 +60,42 @@ export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const isWorkspace = location.pathname === "/workspace";
+  // Skills y Marketplace se pintan ENCIMA en vez de reemplazar el centro: la regla del
+  // entorno es que nada tape el trabajo. Las rutas no cambian — adentro se sigue
+  // navegando igual (el detalle de una skill, los repos del marketplace).
+  const asModal = MODAL_ROUTES.some((p) => location.pathname.startsWith(p));
   const [isMaximized, setIsMaximized] = useState(false);
+  const activeTabId = useTabsStore((s) => s.activeTabId);
+  const workspacesCollapsed = useUiStore((s) => s.workspacesCollapsed);
+  const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const accountsOpen = useUiStore((s) => s.accountsOpen);
+  const setAccountsOpen = useUiStore((s) => s.setAccountsOpen);
+
+  // El árbol del panel izquierdo se DERIVA de las tabs abiertas más lo que git diga de
+  // cada `cwd`. No hay tabla nueva: un workspace es una carpeta con agentes adentro.
+  const snapshots = useSnapshotsStore((s) => s.snapshots);
+  const loadSnapshots = useSnapshotsStore((s) => s.load);
+  useEffect(() => { loadSnapshots().catch(console.error); }, [loadSnapshots]);
+
+  // Las carpetas de los cerrados también se resuelven contra git: si no, un workspace
+  // cerrado no muestra su rama ni cae en el grupo de su repo.
+  const repos = useRepoInfo(useMemo(
+    () => [...tabs.map((tab) => tab.cwd), ...snapshots.map((s) => s.cwd)],
+    [tabs, snapshots]
+  ));
+  const groups = useMemo(
+    () => buildWorkspaceTree(tabs, repos, activeTabId, snapshots),
+    [tabs, repos, activeTabId, snapshots]
+  );
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
+  const activeRepo = activeTab ? repos.get(activeTab.cwd) ?? null : null;
+
+  // El encabezado del lateral mide exactamente lo mismo que el riel más el panel, para
+  // que la división vertical sea una sola línea de arriba a abajo.
+  const RAIL_W = 48;
+  const PANEL_W = 272;
+  const sideWidth = RAIL_W + (workspacesCollapsed ? 0 : PANEL_W);
 
   useGlobalShortcuts();
 
@@ -99,16 +141,6 @@ export function AppShell() {
             hydrateFromBackend(restored.tabs.map(toFrontendTab));
             navigate("/workspace");
           }
-        } else {
-          // Ventana genuinamente nueva (sin fila en la DB todavía): si el menú "Nueva
-          // ventana"/"Nuevo workspace" del TopBar dejó un workspaceId destino, adoptarlo
-          // antes de que arranque el autosave (si no, esta ventana quedaría en "default").
-          const key = newWindowWorkspaceKey(myLabel);
-          const handoff = localStorage.getItem(key);
-          if (handoff) {
-            localStorage.removeItem(key);
-            setWorkspaceId(handoff);
-          }
         }
       })
       // `hydrated` habilita el autosave, y el autosave BORRA las tabs que no vengan en su
@@ -123,45 +155,6 @@ export function AppShell() {
       .catch((e) => {
         console.error("No se pudo cargar el estado de esta ventana; el autosave queda desactivado", e);
       });
-  }, []);
-
-  // Recibir una tab de otra ventana: por arrastre fuera de la ventana (que crea esta) o
-  // por "Mover a ventana" del menú contextual. Llega ENTERA — ver `transfer.ts`.
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    const myLabel = getCurrentWindow().label;
-
-    onTabReceived(({ targetLabel, tab, workspaceId }) => {
-      if (targetLabel !== myLabel) return;
-      // Una ventana vacía es la que acaba de crear este arrastre: adopta el workspace del
-      // origen para que la tab no quede huérfana en el bucket `default`. Una que ya tiene
-      // tabs conserva el suyo (el merge entre workspaces distintos ya se rechazó antes).
-      if (useTabsStore.getState().tabs.length === 0) setWorkspaceId(workspaceId);
-      addTab({
-        cwd: tab.cwd,
-        agent: {
-          id: tab.agentId,
-          label: tab.agentLabel,
-          command: tab.command,
-          available: true,
-        },
-        title: tab.title,
-        titleIsCustom: tab.titleIsCustom,
-        ptyId: tab.ptyId,
-        sessionId: tab.sessionId,
-        historyId: tab.historyId,
-        accountId: tab.accountId,
-        prelaunch: tab.prelaunch,
-        openedAt: tab.openedAt,
-      });
-      navigate("/workspace");
-    }).then((fn) => { unlisten = fn; });
-
-    // Recién ahora esta ventana puede recibir tabs. Quien la creó está esperando este
-    // aviso para mandarle la suya (ver `waitForWindow`).
-    announceWindowReady(myLabel).catch(console.error);
-
-    return () => unlisten?.();
   }, []);
 
   // "Reabrir" desde Sesiones: si esa conversación ya está abierta en ESTA ventana, la
@@ -194,45 +187,78 @@ export function AppShell() {
 
       <ResizeHandles />
       <AppExitListener />
-      <TopBar />
 
-      {/* TabBar siempre visible si hay tabs (estilo Chrome: se ve aunque estés en Home,
-          y es la forma de volver a una terminal). PathBar solo tiene sentido en /workspace. */}
-      {tabs.length > 0 && <TabBar />}
-      {isWorkspace && tabs.length > 0 && <PathBar />}
+      {/* Fila 0: encabezado del lateral (controles de ventana + nombre) y, a partir de
+          donde ese lateral termina, las tabs de agente. Nada más — lo que antes vivía a
+          la derecha de la barra de título se mudó al riel y a la barra de abajo. */}
+      <div className="flex shrink-0">
+        <SideHead width={sideWidth} />
+        <TabBar showLights={workspacesCollapsed} />
+      </div>
 
-      <div className="relative flex-1 min-h-0 overflow-hidden">
-        {/* TerminalPanel siempre montado para preservar PTYs */}
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            visibility: isWorkspace ? "visible" : "hidden",
-            zIndex: 0,
-          }}
-        >
-          <TerminalPanel />
+      <div className="flex flex-1 min-h-0">
+        {/* Izquierda: los AGENTES. Es lo primero que se ve porque en un entorno de
+            desarrollo para agentes lo primero es qué está corriendo; el árbol de
+            archivos es el panel secundario y va del otro lado. */}
+        <ActivityRail agentCount={tabs.length} />
+        {!workspacesCollapsed && <WorkspacesPanel groups={groups} width={PANEL_W} />}
+
+        <div className="relative flex-1 min-w-0 overflow-hidden">
+          {/* TerminalPanel siempre montado para preservar PTYs */}
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              // También visible detrás de un modal de ruta: es el punto de que sea modal.
+              visibility: isWorkspace || asModal ? "visible" : "hidden",
+              zIndex: 0,
+            }}
+          >
+            <TerminalPanel />
+          </div>
+
+          {/* `overflow-hidden` y no `cc-scroll`: cada página arma su propio alto y
+              scrollea por dentro (encabezado fijo arriba, atajos fijos abajo, la lista en
+              el medio). Un scroll acá afuera además reservaría su carril a la derecha de
+              TODAS las páginas, incluidas las que no lo necesitan. */}
+          {!isWorkspace && !asModal && (
+            <div className="absolute inset-0 z-10 overflow-hidden">
+              <Outlet />
+            </div>
+          )}
+
+          {asModal && (
+            <RouteModal onClose={() => navigate(tabs.length > 0 ? "/workspace" : "/")}>
+              <Outlet />
+            </RouteModal>
+          )}
+
+          {/* Donde se montan los modales de las vistas (ver `ViewModal`). Va acá dentro y
+              no en el body para que queden ENCERRADOS en el área de contenido: un modal
+              de una página no tiene por qué tapar las tabs ni los paneles, que son la
+              forma de salir de donde estás.
+
+              El `transform` no es decorativo: hace que el `position: fixed` del modal se
+              resuelva contra este contenedor en vez de contra la ventana. */}
+          <div
+            id={VIEW_OVERLAY_ID}
+            className="absolute inset-0 z-20 pointer-events-none"
+            style={{ transform: "translateZ(0)" }}
+          />
         </div>
 
-        {!isWorkspace && (
-          <div className="absolute inset-0 z-10 cc-scroll">
-            <Outlet />
-          </div>
-        )}
-
-        {/* Donde se montan los modales de las vistas (ver `ViewModal`). Va acá dentro y no
-            en el body para que queden ENCERRADOS en el área de contenido: un modal de una
-            página no tiene por qué tapar la barra de título ni la de tabs, que son la
-            forma de salir de donde estás.
-
-            El `transform` no es decorativo: hace que el `position: fixed` del modal se
-            resuelva contra este contenedor en vez de contra la ventana. */}
-        <div
-          id={VIEW_OVERLAY_ID}
-          className="absolute inset-0 z-20 pointer-events-none"
-          style={{ transform: "translateZ(0)" }}
+        {/* Derecha: los archivos del workspace activo. */}
+        <ExplorerPanel
+          cwd={activeTab?.cwd ?? null}
+          repo={activeRepo}
+          title={activeRepo?.branch ?? activeTab?.cwd.split(/[\\/]/).filter(Boolean).pop() ?? ""}
         />
       </div>
+
+      <StatusBar repo={activeRepo} />
+
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {accountsOpen && <AccountsModal onClose={() => setAccountsOpen(false)} />}
     </div>
   );
 }

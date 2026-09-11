@@ -59,6 +59,24 @@ pub(super) fn spec_for(agent_id: &str) -> Option<&'static ProfileSpec> {
     PROFILES.iter().find(|p| p.agent_id == agent_id)
 }
 
+/// El directorio que usa la TUI cuando NADIE le apunta su variable a otro lado.
+///
+/// Es la cuenta principal: la que ya tenías antes de crear ningún perfil. No tiene fila en
+/// `agent_accounts` —no la creó esta app— y por eso no aparecía en ninguna lista, aunque es
+/// justamente la que se usa casi siempre.
+pub(super) fn default_dir(spec: &ProfileSpec) -> Option<std::path::PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(match spec.env_var {
+        // Es la raíz de datos XDG, no una carpeta de opencode: su marcador ya incluye el
+        // subdirectorio (`opencode/auth.json`).
+        "XDG_DATA_HOME" => std::env::var_os("XDG_DATA_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| home.join(".local/share")),
+        "CODEX_HOME" => home.join(".codex"),
+        _ => home.join(".claude"),
+    })
+}
+
 // ── Identidad leída del disco ───────────────────────────────────
 
 /// Lee del perfil quién está logueado. Devuelve `(logueado, etiqueta)`.

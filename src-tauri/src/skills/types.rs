@@ -13,6 +13,9 @@ pub struct SkillUsageEntry {
     pub scope: String,
     pub tab_id: Option<String>,
     pub tab_title: Option<String>,
+    /// Con `scope = "workspace"`: la carpeta a la que aplica. Cadena vacía = todas las
+    /// del workspace (las filas de antes de la v9).
+    pub cwd: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

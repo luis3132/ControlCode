@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { Input, Select } from "neogestify-ui-components";
-import { SearchIcon, CloseIcon } from "neogestify-ui-components";
+import { CloseIcon, Select } from "neogestify-ui-components";
+
 import type { SessionHistoryEntry } from "@/features/sessions/types";
 
 import {
@@ -20,6 +20,13 @@ interface SessionFiltersProps {
   resultCount: number;
 }
 
+/**
+ * La franja de filtros, debajo del buscador.
+ *
+ * El texto no está acá: se escribe en el buscador grande del encabezado, que es por donde
+ * se entra a esta pantalla. Acá quedan los cortes que no se pueden tipear — agente,
+ * carpeta, fecha, skill — en una sola fila que no le roba alto a la lista.
+ */
 export function SessionFilters({ entries, value, onChange, resultCount }: SessionFiltersProps) {
   const { t } = useTranslation();
   const patch = (p: Partial<SessionFilterState>) => onChange({ ...value, ...p });
@@ -34,85 +41,85 @@ export function SessionFilters({ entries, value, onChange, resultCount }: Sessio
     new Set(entries.flatMap((e) => e.skills.map((s) => s.name)))
   ).sort();
 
+  const active = hasActiveFilters(value);
+
   return (
-    <div className="flex flex-col gap-2 mb-4">
-      <div className="relative">
-        <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4
-          text-gray-400 dark:text-gray-500 pointer-events-none z-10" />
-        <Input
-          value={value.query}
-          onChange={(e) => patch({ query: e.target.value })}
-          placeholder={t("sessions.filters.search")}
-          variant="outline"
-          className="pl-9!"
+    <div className="flex items-center gap-1.5 shrink-0 px-3 py-1.5
+      border-b border-gray-200 dark:border-white/8
+      bg-gray-100/40 dark:bg-white/2">
+
+      <Select
+        value={value.agentId}
+        onChange={(e) => patch({ agentId: e.target.value })}
+        options={[
+          { value: "", label: t("sessions.filters.allAgents") },
+          ...agents.map(([id, label]) => ({ value: id, label })),
+        ]}
+        variant="minimal"
+        size="sm"
+        className="min-w-0"
+      />
+
+      {cwds.length > 1 && (
+        <Select
+          value={value.cwd}
+          onChange={(e) => patch({ cwd: e.target.value })}
+          options={[
+            { value: "", label: t("sessions.filters.allFolders") },
+            ...cwds.map((c) => ({ value: c, label: shortenPath(c) })),
+          ]}
+          variant="minimal"
+          size="sm"
+          className="min-w-0"
         />
-      </div>
+      )}
 
-      <div className="flex flex-wrap gap-2">
-        <div className="min-w-[9rem] flex-1">
-          <Select
-            value={value.agentId}
-            onChange={(e) => patch({ agentId: e.target.value })}
-            options={[
-              { value: "", label: t("sessions.filters.allAgents") },
-              ...agents.map(([id, label]) => ({ value: id, label })),
-            ]}
-            variant="outline"
-          />
-        </div>
+      <Select
+        value={value.dateRange}
+        onChange={(e) => patch({ dateRange: e.target.value as DateRange })}
+        options={[
+          { value: "all", label: t("sessions.filters.anyDate") },
+          { value: "today", label: t("sessions.filters.today") },
+          { value: "week", label: t("sessions.filters.week") },
+          { value: "month", label: t("sessions.filters.month") },
+        ]}
+        variant="minimal"
+        size="sm"
+        className="min-w-0"
+      />
 
-        <div className="min-w-[9rem] flex-1">
-          <Select
-            value={value.cwd}
-            onChange={(e) => patch({ cwd: e.target.value })}
-            options={[
-              { value: "", label: t("sessions.filters.allFolders") },
-              ...cwds.map((c) => ({ value: c, label: shortenPath(c) })),
-            ]}
-            variant="outline"
-          />
-        </div>
+      {skills.length > 0 && (
+        <Select
+          value={value.skill}
+          onChange={(e) => patch({ skill: e.target.value })}
+          options={[
+            { value: "", label: t("sessions.filters.anySkill") },
+            ...skills.map((s) => ({ value: s, label: s })),
+          ]}
+          variant="minimal"
+          size="sm"
+          className="min-w-0"
+        />
+      )}
 
-        <div className="min-w-[9rem] flex-1">
-          <Select
-            value={value.dateRange}
-            onChange={(e) => patch({ dateRange: e.target.value as DateRange })}
-            options={[
-              { value: "all", label: t("sessions.filters.anyDate") },
-              { value: "today", label: t("sessions.filters.today") },
-              { value: "week", label: t("sessions.filters.week") },
-              { value: "month", label: t("sessions.filters.month") },
-            ]}
-            variant="outline"
-          />
-        </div>
+      <div className="flex-1" />
 
-        {skills.length > 0 && (
-          <div className="min-w-[9rem] flex-1">
-            <Select
-              value={value.skill}
-              onChange={(e) => patch({ skill: e.target.value })}
-              options={[
-                { value: "", label: t("sessions.filters.anySkill") },
-                ...skills.map((s) => ({ value: s, label: s })),
-              ]}
-              variant="outline"
-            />
-          </div>
-        )}
-      </div>
-
-      {hasActiveFilters(value) && (
-        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-          <span>{t("sessions.filters.results", { count: resultCount })}</span>
+      {active && (
+        <>
+          <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
+            {t("sessions.filters.results", { count: resultCount })}
+          </span>
           <button
             onClick={() => onChange(EMPTY_FILTERS)}
-            className="flex items-center gap-1 text-blue-500 dark:text-blue-400 hover:underline"
+            className="cc-t flex items-center gap-1 shrink-0 px-1.5 h-5.5 rounded-md
+              text-[10.5px] text-gray-500 dark:text-white/45
+              hover:text-gray-800 dark:hover:text-white
+              hover:bg-gray-200 dark:hover:bg-white/10"
           >
             <CloseIcon className="w-3 h-3" />
             {t("sessions.filters.clear")}
           </button>
-        </div>
+        </>
       )}
     </div>
   );

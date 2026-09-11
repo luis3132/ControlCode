@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 import { AnimateSpin, CheckCircleIcon, InfoIcon } from "neogestify-ui-components";
 import { cliInstallStatus, installCli, uninstallCli, type CliInstallStatus } from "./ipc";
+import { SettingsSection } from "@/features/settings/SettingsSection";
 
 /**
  * Instala la CLI `ccode` en el PATH del usuario.
@@ -40,17 +41,7 @@ export function CliInstallSection() {
   };
 
   return (
-    <section className="bg-linear-to-br from-white to-gray-50
-      dark:from-gray-800 dark:to-gray-900
-      rounded-xl border border-gray-200 dark:border-gray-700
-      shadow-sm hover:shadow-md transition-shadow duration-300 p-6">
-
-      <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">
-        {t("settings.cli")}
-      </h3>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
-        {t("settings.cli.desc")}
-      </p>
+    <SettingsSection title={t("settings.cli")} description={t("settings.cli.desc")}>
 
       {status && (
         <div className="flex flex-col gap-3">
@@ -139,6 +130,6 @@ export function CliInstallSection() {
       )}
 
       {error && <p className="text-xs text-red-500 dark:text-red-400 mt-3">{error}</p>}
-    </section>
+    </SettingsSection>
   );
 }

@@ -67,10 +67,3 @@ export interface RestoredWindowState {
 /** Estado guardado de ESTA ventana, buscado por su label nativo. */
 export const loadWindowState = (label: string) =>
   invoke<RestoredWindowState | null>("db_load_window_state", { label });
-
-/**
- * Workspace de una ventana viva. Se consulta antes de aceptar que una tab se arrastre a
- * otra ventana: si no coinciden, el merge se rechaza para no mezclar workspaces.
- */
-export const windowWorkspace = (label: string) =>
-  invoke<string | null>("db_get_window_workspace", { label });

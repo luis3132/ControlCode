@@ -101,7 +101,8 @@ pub(super) fn desired_skills_for_link_dir(
          JOIN windows w ON w.id = t.window_id AND w.is_open = 1
          JOIN project_skills ps ON ps.skill_id = s.id AND ps.workspace_id = w.workspace_id
          WHERE ps.enabled = 1
-           AND (ps.scope = 'workspace' OR (ps.scope = 'tab' AND ps.tab_id = t.id))"
+           AND ((ps.scope = 'tab' AND ps.tab_id = t.id)
+                OR (ps.scope = 'workspace' AND (ps.cwd = '' OR ps.cwd = ?1)))"
     );
     let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
     let rows = stmt
@@ -249,6 +250,7 @@ pub(super) fn tabs_for_scope(
     conn: &rusqlite::Connection,
     workspace_id: &str,
     tab_id: Option<&str>,
+    cwd: Option<&str>,
 ) -> Result<Vec<(String, String, String)>, String> {
     if let Some(tab_id) = tab_id {
         let row: Option<(String, String, String)> = conn
@@ -263,15 +265,21 @@ pub(super) fn tabs_for_scope(
             .map_err(|e| e.to_string())?;
         Ok(row.into_iter().collect())
     } else {
+        // Con `cwd`, solo las tabs de ESA carpeta: un workspace es una copia de trabajo,
+        // y sus skills no tienen por qué aparecer en los otros proyectos que estén
+        // abiertos en la misma ventana. Sin `cwd` (las filas de antes de la v9) se
+        // conserva el alcance viejo: todo el bucket.
         let mut stmt = conn
             .prepare(
                 "SELECT t.id, t.cwd, t.agent_id FROM tabs t
                  JOIN windows w ON w.id = t.window_id AND w.is_open = 1
-                 WHERE w.workspace_id = ?1",
+                 WHERE w.workspace_id = ?1 AND (?2 IS NULL OR t.cwd = ?2)",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map([workspace_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .query_map(rusqlite::params![workspace_id, cwd], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
             .map_err(|e| e.to_string())?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
@@ -321,6 +329,9 @@ pub fn attach_skill(
     workspace_id: String,
     scope: String,
     tab_id: Option<String>,
+    // `cwd`, con scope='workspace': la carpeta a la que aplica. `None` = todas las del
+    // workspace, que es lo único que existía antes de la v9.
+    cwd: Option<String>,
     db: tauri::State<DbConnection>,
 ) -> Result<(), String> {
     if scope == "tab" && tab_id.is_none() {
@@ -329,7 +340,8 @@ pub fn attach_skill(
 
     let conn = db.lock().map_err(|e| e.to_string())?;
     let skill = fetch_skill_row(&conn, &skill_id)?;
-    let tabs = tabs_for_scope(&conn, &workspace_id, tab_id.as_deref())?;
+    let scope_cwd = if scope == "tab" { None } else { cwd.as_deref() };
+    let tabs = tabs_for_scope(&conn, &workspace_id, tab_id.as_deref(), scope_cwd)?;
 
     // Si una tab falla a mitad del loop (ej. destino ya existe y no es symlink), las
     // symlinks ya creadas para tabs anteriores no deben quedar huérfanas en disco sin
@@ -349,12 +361,26 @@ pub fn attach_skill(
         created.push((cwd.as_str(), agent_id.as_str()));
     }
 
+    // El destino del ON CONFLICT es un índice PARCIAL distinto por scope, así que la
+    // sentencia cambia con él. No es cosmético: la UNIQUE de la tabla incluye `tab_id`,
+    // que es NULL en scope='workspace', y SQLite considera distintos a dos NULL — con esa
+    // sola nunca había conflicto y cada re-attach dejaba una fila más.
     let now = now_ts();
+    let stored_cwd = scope_cwd.unwrap_or("");
+    let sql = if scope == "tab" {
+        "INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, cwd, enabled, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)
+         ON CONFLICT(skill_id, tab_id) WHERE scope = 'tab' DO UPDATE SET enabled = 1"
+    } else {
+        "INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, cwd, enabled, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)
+         ON CONFLICT(skill_id, workspace_id, cwd) WHERE scope = 'workspace' DO UPDATE SET enabled = 1"
+    };
     conn.execute(
-        "INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, enabled, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)
-         ON CONFLICT(skill_id, workspace_id, scope, tab_id) DO UPDATE SET enabled = 1",
-        rusqlite::params![Uuid::new_v4().to_string(), skill_id, workspace_id, scope, tab_id, now],
+        sql,
+        rusqlite::params![
+            Uuid::new_v4().to_string(), skill_id, workspace_id, scope, tab_id, stored_cwd, now
+        ],
     )
     .map_err(|e| e.to_string())?;
 
@@ -374,15 +400,19 @@ pub fn detach_skill(
     workspace_id: String,
     scope: String,
     tab_id: Option<String>,
+    // Ver `attach_skill`: identifica CUÁL de las filas de workspace hay que sacar.
+    cwd: Option<String>,
     db: tauri::State<DbConnection>,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let tabs = tabs_for_scope(&conn, &workspace_id, tab_id.as_deref())?;
+    let scope_cwd = if scope == "tab" { None } else { cwd.as_deref() };
+    let tabs = tabs_for_scope(&conn, &workspace_id, tab_id.as_deref(), scope_cwd)?;
 
     conn.execute(
         "DELETE FROM project_skills WHERE skill_id = ?1 AND workspace_id = ?2 AND scope = ?3
-         AND ((tab_id IS NULL AND ?4 IS NULL) OR tab_id = ?4)",
-        rusqlite::params![skill_id, workspace_id, scope, tab_id],
+         AND ((tab_id IS NULL AND ?4 IS NULL) OR tab_id = ?4)
+         AND cwd = ?5",
+        rusqlite::params![skill_id, workspace_id, scope, tab_id, scope_cwd.unwrap_or("")],
     )
     .map_err(|e| e.to_string())?;
 
@@ -405,7 +435,7 @@ pub fn detach_skill(
 #[tauri::command]
 pub fn sync_workspace_skills(workspace_id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let tabs = tabs_for_scope(&conn, &workspace_id, None)?;
+    let tabs = tabs_for_scope(&conn, &workspace_id, None, None)?;
     let pairs: Vec<(String, String)> =
         tabs.into_iter().map(|(_, cwd, agent)| (cwd, agent)).collect();
     reconcile_link_dirs(&conn, &pairs);
@@ -436,7 +466,7 @@ pub fn check_symlinks_health(
     for (skill_id, _scope, project_skill_id, scoped_tab_id) in attachments {
         let skill = fetch_skill_row(&conn, &skill_id)?;
         let slug = slug_from_source_path(&skill.source_path);
-        let tabs = tabs_for_scope(&conn, &workspace_id, scoped_tab_id.as_deref())?;
+        let tabs = tabs_for_scope(&conn, &workspace_id, scoped_tab_id.as_deref(), None)?;
         let _ = project_skill_id;
 
         for (tab_id, cwd, agent_id) in tabs {

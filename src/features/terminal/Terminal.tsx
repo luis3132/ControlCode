@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "neogestify-ui-components";
@@ -11,7 +13,6 @@ import { isResumable } from "@/features/sessions/agentResume";
 import { registerCapabilityResponders } from "@/features/terminal/terminalCapabilities";
 import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
-import { consumePtyTransferring } from "@/features/tabs/ptyTransfer";
 import { awaitSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { useAgentsStore } from "@/features/agents/store";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
@@ -101,6 +102,51 @@ export function Terminal({
   // cambiar el tema — leerlo por ref evita meterlo en las dependencias y matar el PTY.
   const themeRef = useRef(theme);
   themeRef.current = theme;
+  /** Se apaga solo si el contexto se pierde: reintentar es lo que encadena el desastre. */
+  const gpuBrokenRef = useRef(false);
+  // Reactivo (no `getState()`): apagarlo en Configuración tiene que soltar el contexto de
+  // la terminal que estés mirando en ese momento, no en la próxima que abras.
+  const gpuRenderer = useTerminalPrefsStore((s) => s.gpuRenderer);
+
+  // ── Renderizador por GPU, SOLO en la terminal activa ─────────────────────
+  //
+  // Por defecto xterm dibuja con el DOM: un `<span>` por tramo de texto. Es el camino más
+  // compatible y el más borroso — el navegador redondea cada celda a píxeles CSS, y con
+  // escalado fraccionario (Wayland al 125%) la grilla queda corrida. WebGL rasteriza los
+  // glifos a la resolución REAL del dispositivo.
+  //
+  // Lo importante es el "solo en la activa". Cada terminal viva pedía su propio contexto
+  // WebGL, y acá TODAS las tabs quedan montadas para no matar sus procesos: con unas
+  // pocas abiertas se llega al tope de contextos del motor, y a partir de ahí se pierden
+  // en cadena — parpadeos, paneles en blanco, terminales que dejan de pintar. Atado a la
+  // tab que se está mirando, nunca hay más de uno.
+  //
+  // Y si el contexto igual se pierde, no se reintenta: se queda en DOM para siempre. Un
+  // reintento en bucle es peor que el problema que arregla.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term || !isActive || !gpuRenderer || gpuBrokenRef.current) return;
+
+    let addon: WebglAddon | null = null;
+    try {
+      addon = new WebglAddon();
+      addon.onContextLoss(() => {
+        gpuBrokenRef.current = true;
+        addon?.dispose();
+        addon = null;
+      });
+      term.loadAddon(addon);
+    } catch {
+      // Sin WebGL en esta máquina se sigue con el DOM, que es el camino de siempre.
+      gpuBrokenRef.current = true;
+      addon = null;
+    }
+
+    return () => {
+      addon?.dispose();
+      addon = null;
+    };
+  }, [isActive, gpuRenderer]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -115,8 +161,35 @@ export function Terminal({
       cursorBlink: true,
       cursorStyle: "bar",
       scrollback: 5000,
-      allowTransparency: true,
+      // `allowTransparency` estaba en true y era la causa del texto borroso: apaga el
+      // camino rápido de fondo opaco y obliga a compositar cada celda, lo que se lleva
+      // puesto el antialiasing de subpíxel. No servía para nada — los dos temas de la
+      // terminal tienen fondo 100% opaco (ver theme.ts).
+      allowTransparency: false,
+      // Lo exige el addon de Unicode 11: `term.unicode` es API propuesta de xterm y sin
+      // esta opción `loadAddon` LANZA. Faltaba, así que cada terminal reventaba al
+      // montarse y se llevaba puesta la app entera.
+      allowProposedApi: true,
+      // Un glifo más ancho que su celda (los de Nerd Font, las líneas de Powerline) se
+      // escala en vez de invadir la celda siguiente. Sin esto, una barra de progreso o un
+      // prompt con iconos corre todo lo que tiene a la derecha.
+      rescaleOverlappingGlyphs: true,
     });
+
+    // Unicode 11 ANTES de escribir nada: xterm trae las tablas de ancho de Unicode 6, que
+    // no conocen los emoji modernos ni varios rangos CJK. Con las viejas, un emoji ocupa
+    // una celda cuando en pantalla ocupa dos, y a partir de ahí toda la línea queda
+    // corrida. Los agentes imprimen emoji todo el tiempo, así que se nota enseguida.
+    //
+    // Va en try/catch por lo que acaba de pasar: un addon que solo mejora cómo se ve el
+    // texto no puede tumbar la aplicación si falla. Sin él las tablas viejas siguen
+    // funcionando; es peor, no es fatal.
+    try {
+      term.loadAddon(new Unicode11Addon());
+      term.unicode.activeVersion = "11";
+    } catch (e) {
+      console.error("no se pudo activar Unicode 11; se siguen usando las tablas de ancho viejas", e);
+    }
 
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();
@@ -152,6 +225,16 @@ export function Terminal({
 
     // Ajuste de la grilla al contenedor real (ver `fit.ts`: el PTY nace con este tamaño).
     const { fit: fitAndTrim, fitOnce } = createFitter(term, fitAddon, () => containerRef.current);
+
+    // Mover la ventana a un monitor con otro factor de escala cambia el tamaño real de un
+    // píxel, y el atlas de glifos ya rasterizado queda a la resolución vieja — que es
+    // exactamente cómo se ve "borroso de repente". Se tira el atlas y se vuelve a medir.
+    const dpr = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    const onDprChange = () => {
+      term.clearTextureAtlas();
+      fitAndTrim();
+    };
+    dpr.addEventListener("change", onDprChange);
 
     // ── 2. Crear la sesión PTY en Rust ───────────────────────
     let unlistenData: UnlistenFn | null = null;
@@ -220,8 +303,8 @@ export function Terminal({
           pollSessionId(attachCwd, openedAt ?? Math.floor(Date.now() / 1000));
 
           await attachListeners(attachPtyId);
-          // La ventana a la que se reconecta puede tener un tamaño distinto al de la
-          // ventana donde el PTY nació (tear-off, merge entre ventanas) — sincronizarlo.
+          // El área de terminal puede medir distinto que cuando el PTY nació (paneles
+          // plegados, ventana redimensionada mientras la tab estaba en segundo plano).
           if (!cancelled) {
             ptyResize(attachPtyId, term.cols, term.rows).catch(console.error);
           }
@@ -364,10 +447,12 @@ export function Terminal({
       disposeScrollbar();
       unlistenData?.();
       unlistenExit?.();
+      dpr.removeEventListener("change", onDprChange);
       if (ptyIdRef.current !== null) {
-        if (!consumePtyTransferring(ptyIdRef.current)) {
-          ptyKill(ptyIdRef.current).catch(console.error);
-        }
+        // Antes había un guardia acá para no matar un PTY que estaba viajando a otra
+        // ventana. Ese camino ya no existe: se cambia de workspace en el lugar, así que
+        // desmontar una terminal siempre significa cerrarla.
+        ptyKill(ptyIdRef.current).catch(console.error);
         ptyIdRef.current = null;
       }
       termRef.current = null;

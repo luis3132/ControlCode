@@ -42,7 +42,7 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
             key={agent.id}
             onClick={() => onSelect(agent)}
             className={`
-              flex flex-col gap-1 p-3 rounded-lg border text-left transition-all
+              flex flex-col gap-1 p-3 rounded-lg border text-left transition-colors
               ${isSelected
                 ? (AGENT_SELECTED[agent.id] ?? "border-violet-500 bg-violet-500/10")
                 : (AGENT_COLORS[agent.id] ?? "border-white/20 hover:border-white/50")}

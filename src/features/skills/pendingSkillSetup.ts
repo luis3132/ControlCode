@@ -2,7 +2,7 @@
  * Gate para que una tab recién creada no lance su proceso (pty_create) hasta que los
  * symlinks de las skills elegidas en el wizard ya estén en disco — si el agente arranca
  * primero, escanea su cwd sin encontrarlas (algunos solo las leen al boot). Ver
- * NewTabWizard/TabBar (donde se registra) y Terminal.tsx (donde se espera).
+ * quien abre la tab (donde se registra) y Terminal.tsx (donde se espera).
  */
 /**
  * La promesa resuelve con los errores de montaje (una línea por skill que falló), no con

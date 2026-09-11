@@ -1,11 +1,20 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button, AddIcon, CloudIcon, AnimateSpin, ArrowLeftIcon } from "neogestify-ui-components";
+import {
+  AddIcon,
+  AnimateSpin,
+  ArrowLeftIcon,
+  Button,
+  CloudIcon,
+  EmptyState,
+  IconReset,
+  Tooltip,
+} from "neogestify-ui-components";
+
 import { useMarketplaceStore } from "@/features/marketplace/store";
 import { AddRegistryDialog } from "@/features/marketplace/AddRegistryDialog";
 import { RegistryRow } from "@/features/marketplace/RegistryRow";
-import { PageHeader } from "@/shared/ui/PageHeader";
 
 /**
  * Gestión de repositorios de skills: agregar, renombrar, activar/desactivar, refrescar y
@@ -42,84 +51,91 @@ export function RegistriesPage() {
   };
 
   return (
-    <main className="min-h-full px-6 py-10 bg-gray-50 dark:bg-gray-950">
-      <div className="max-w-3xl mx-auto">
-        <Button
-          variant="link"
-          onClick={() => navigate("/marketplace")}
-          className="!text-xs flex items-center gap-1 mb-3"
-        >
-          <ArrowLeftIcon className="w-3.5 h-3.5" />
-          {t("marketplace.registries.backToMarketplace")}
-        </Button>
+    <div className="flex flex-col h-full min-h-0">
 
-        <PageHeader
-          icon={<CloudIcon className="w-5 h-5" />}
-          title={t("marketplace.registries.pageTitle")}
-          subtitle={t("marketplace.registries.pageSubtitle")}
-          action={
-            <Button
-              variant="primary"
-              onClick={() => setAddOpen(true)}
-              className="flex items-center gap-1.5 !text-sm w-fit"
+      <div className="flex items-center gap-3 h-[54px] shrink-0 pl-4 pr-14
+        border-b border-gray-200 dark:border-white/8">
+        <Tooltip content={t("marketplace.registries.backToMarketplace")} placement="bottom">
+          <button
+            onClick={() => navigate("/marketplace")}
+            aria-label={t("marketplace.registries.backToMarketplace")}
+            className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
+              text-gray-400 dark:text-white/35
+              hover:text-gray-700 dark:hover:text-white
+              hover:bg-gray-200 dark:hover:bg-white/10"
+          >
+            <ArrowLeftIcon className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
+        <CloudIcon className="w-[15px] h-[15px] shrink-0 text-blue-500 dark:text-blue-400" />
+        <span className="flex-1 min-w-0 truncate text-[13.5px] font-bold
+          text-gray-900 dark:text-white">
+          {t("marketplace.registries.pageTitle")}
+        </span>
+        {registries.length > 0 && (
+          <Tooltip content={t("marketplace.refreshAll")} placement="bottom">
+            <button
+              onClick={handleRefreshAll}
+              disabled={refreshingAll}
+              aria-label={t("marketplace.refreshAll")}
+              className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
+                text-gray-400 dark:text-white/35
+                hover:text-gray-700 dark:hover:text-white
+                hover:bg-gray-200 dark:hover:bg-white/10
+                disabled:opacity-40 disabled:hover:bg-transparent"
             >
-              <AddIcon className="w-4 h-4" />
-              {t("marketplace.addRegistry")}
-            </Button>
-          }
-        />
+              {refreshingAll
+                ? <AnimateSpin className="w-3.5 h-3.5" />
+                : <IconReset className="w-3.5 h-3.5" />}
+            </button>
+          </Tooltip>
+        )}
+        <Tooltip content={t("marketplace.addRegistry")} placement="bottom">
+          <button
+            onClick={() => setAddOpen(true)}
+            aria-label={t("marketplace.addRegistry")}
+            className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
+              text-gray-400 dark:text-white/35
+              hover:text-gray-700 dark:hover:text-white
+              hover:bg-gray-200 dark:hover:bg-white/10"
+          >
+            <AddIcon className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
+      </div>
 
-        <section className="rounded-xl border border-gray-200 dark:border-gray-700
-          bg-white dark:bg-gray-800/50 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2.5
-            border-b border-gray-100 dark:border-white/5 bg-gray-50/60 dark:bg-white/[0.02]">
-            <span className="text-xs font-semibold uppercase tracking-wide
-              text-gray-500 dark:text-gray-400">
-              {t("marketplace.registries")}
-              {registries.length > 0 && (
-                <span className="ml-1.5 font-normal normal-case text-gray-400 dark:text-gray-500">
-                  ({registries.length})
-                </span>
-              )}
-            </span>
-            {registries.length > 0 && (
-              <Button
-                variant="link"
-                onClick={handleRefreshAll}
-                disabled={refreshingAll}
-                className="!text-xs flex items-center gap-1.5"
-              >
-                {refreshingAll && <AnimateSpin className="w-3 h-3" />}
-                {t("marketplace.refreshAll")}
-              </Button>
-            )}
-          </div>
-
-          {registries.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-10 px-4 text-center">
-              <CloudIcon className="w-6 h-6 text-gray-300 dark:text-white/15" />
-              <p className="text-sm text-gray-400 dark:text-gray-500">
-                {t("marketplace.registries.empty")}
-              </p>
-              <Button variant="outline" onClick={() => setAddOpen(true)} className="!text-xs mt-1">
+      <div className="flex-1 min-h-0 cc-scroll py-1.5">
+        {registries.length === 0 ? (
+          <EmptyState
+            className="py-14"
+            icon={<CloudIcon className="w-8 h-8" />}
+            title={t("marketplace.registries.empty")}
+            action={
+              <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
                 {t("marketplace.addRegistry")}
               </Button>
-            </div>
-          ) : (
-            <ul className="divide-y divide-gray-100 dark:divide-white/5">
-              {registries.map((r) => (
-                <RegistryRow key={r.id} registry={r} />
-              ))}
-            </ul>
-          )}
-        </section>
+            }
+          />
+        ) : (
+          <ul className="divide-y divide-gray-200 dark:divide-white/6">
+            {registries.map((r) => (
+              <RegistryRow key={r.id} registry={r} />
+            ))}
+          </ul>
+        )}
+      </div>
 
-        <p className="mt-4 text-[11px] text-gray-400 dark:text-white/40">
-          {t("marketplace.registries.deleteHint")}
-        </p>
+      <div className="flex items-center gap-4 h-[34px] shrink-0 px-4
+        border-t border-gray-200 dark:border-white/8
+        bg-gray-100/60 dark:bg-black/20
+        text-[10.5px] text-gray-400 dark:text-white/35">
+        <span className="tabular-nums shrink-0">
+          {t("marketplace.registries.count", { n: registries.length })}
+        </span>
+        <span className="flex-1 truncate">{t("marketplace.registries.deleteHint")}</span>
       </div>
 
       {addOpen && <AddRegistryDialog onClose={() => setAddOpen(false)} />}
-    </main>
+    </div>
   );
 }

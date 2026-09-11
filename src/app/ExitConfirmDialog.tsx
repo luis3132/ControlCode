@@ -1,5 +1,7 @@
 import { useTranslation } from "react-i18next";
-import { Button, Modal } from "neogestify-ui-components";
+import { Button } from "neogestify-ui-components";
+
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface ExitConfirmDialogProps {
   title: string;
@@ -18,7 +20,7 @@ export function ExitConfirmDialog({ title, body, onCloseAll, onCloseCurrent, onC
   const { t } = useTranslation();
 
   return (
-    <Modal
+    <AppDialog
       title={title}
       onClose={onCancel}
       size="sm"
@@ -37,6 +39,6 @@ export function ExitConfirmDialog({ title, body, onCloseAll, onCloseCurrent, onC
       <p className="text-sm text-gray-600 dark:text-gray-300">
         {body}
       </p>
-    </Modal>
+    </AppDialog>
   );
 }

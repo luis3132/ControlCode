@@ -52,7 +52,7 @@ export function WorkspaceList({ workspaces, onSelect }: WorkspaceListProps) {
             className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border text-left
               border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-white/[0.02]
               hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm
-              transition-all duration-150"
+              transition-colors duration-150"
           >
             <div className="flex flex-col min-w-0">
               <span className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">

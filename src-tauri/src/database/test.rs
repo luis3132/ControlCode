@@ -640,3 +640,209 @@ fn el_modelo_viejo_se_aparta_en_vez_de_borrarse() {
     );
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM workspaces"), 0, "y la tabla nueva arranca vacía");
 }
+
+// ── Migraciones sobre una base que ya existía ────────────────────
+//
+// `schema::in_memory()` crea todo de cero, así que no puede ver los errores que solo
+// aparecen cuando la tabla YA está: un `CREATE TABLE IF NOT EXISTS` es un no-op ahí, y
+// todo lo que dependa de una columna nueva tiene que venir de un ALTER antes.
+
+/// Una base con la forma de la v8: `project_skills` sin la columna `cwd`.
+fn base_v8() -> Connection {
+    let conn = Connection::open_in_memory().expect("base en memoria");
+    conn.execute_batch(
+        "PRAGMA foreign_keys = ON;
+         PRAGMA user_version = 8;
+         CREATE TABLE workspaces (
+             id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+             created_at INTEGER NOT NULL, last_active INTEGER NOT NULL
+         );
+         CREATE TABLE windows (
+             id TEXT PRIMARY KEY, label TEXT NOT NULL,
+             workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+             is_open INTEGER NOT NULL DEFAULT 1, last_active INTEGER NOT NULL
+         );
+         CREATE TABLE tabs (
+             id TEXT PRIMARY KEY,
+             window_id TEXT NOT NULL REFERENCES windows(id) ON DELETE CASCADE,
+             title TEXT, agent_id TEXT NOT NULL, agent_label TEXT NOT NULL,
+             command TEXT NOT NULL, cwd TEXT NOT NULL,
+             opened_at INTEGER NOT NULL DEFAULT 0,
+             created_at INTEGER NOT NULL, last_active INTEGER NOT NULL
+         );
+         CREATE TABLE skills (
+             id TEXT PRIMARY KEY, name TEXT NOT NULL, source_path TEXT NOT NULL
+         );
+         CREATE TABLE project_skills (
+             id           TEXT PRIMARY KEY,
+             skill_id     TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+             workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+             scope        TEXT NOT NULL DEFAULT 'workspace',
+             tab_id       TEXT REFERENCES tabs(id) ON DELETE CASCADE,
+             enabled      INTEGER NOT NULL DEFAULT 1,
+             created_at   INTEGER NOT NULL,
+             UNIQUE (skill_id, workspace_id, scope, tab_id)
+         );
+         INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+         INSERT INTO skills (id, name, source_path) VALUES ('sk', 'una', '/tmp/una');",
+    )
+    .expect("base v8");
+    conn
+}
+
+/// El bug que tiró la app al arrancar: la migración corría los índices sobre `cwd` antes
+/// del ALTER que la agrega, y sobre una base existente eso es `no such column: cwd`.
+#[test]
+fn migrar_una_base_v8_no_explota() {
+    let conn = base_v8();
+    schema::migrate(&conn).expect("migrar de v8 a v9");
+
+    let tiene_cwd: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('project_skills') WHERE name = 'cwd'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(tiene_cwd, 1, "la columna cwd debería existir tras migrar");
+
+    let indices: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index'
+             AND name IN ('idx_project_skills_ws_cwd', 'idx_project_skills_tab')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(indices, 2, "los dos índices parciales deberían quedar creados");
+}
+
+/// Las filas que ya existían significaban "todas las carpetas del workspace", y eso es
+/// exactamente lo que guarda la cadena vacía. Actualizar no debe cambiarles el alcance.
+#[test]
+fn las_filas_v8_conservan_su_alcance() {
+    let conn = base_v8();
+    conn.execute(
+        "INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, enabled, created_at)
+         VALUES ('ps1', 'sk', 'ws', 'workspace', NULL, 1, 0)",
+        [],
+    )
+    .unwrap();
+
+    schema::migrate(&conn).expect("migrar");
+
+    let cwd: String = conn
+        .query_row("SELECT cwd FROM project_skills WHERE id = 'ps1'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(cwd, "", "una fila vieja tiene que seguir valiendo para todas las carpetas");
+}
+
+/// Hasta la v8 el upsert de scope='workspace' nunca encontraba conflicto (la UNIQUE
+/// incluye `tab_id`, que ahí es NULL, y SQLite considera distintos a dos NULL), así que
+/// re-attachear dejaba filas repetidas. El índice único nuevo no se puede crear sobre
+/// ellas: la migración tiene que barrerlas primero.
+#[test]
+fn migrar_deduplica_las_filas_repetidas_de_la_v8() {
+    let conn = base_v8();
+    for id in ["ps1", "ps2", "ps3"] {
+        conn.execute(
+            "INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, enabled, created_at)
+             VALUES (?1, 'sk', 'ws', 'workspace', NULL, 1, 0)",
+            [id],
+        )
+        .expect("la v8 dejaba meter duplicados");
+    }
+
+    schema::migrate(&conn).expect("migrar con duplicados");
+
+    let filas: i64 = conn
+        .query_row("SELECT COUNT(*) FROM project_skills", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(filas, 1, "quedaron {filas} filas; la migración debería dejar una");
+}
+
+/// Migrar dos veces seguidas no puede fallar: la app corre `migrate` en cada arranque.
+#[test]
+fn migrar_es_idempotente() {
+    let conn = base_v8();
+    schema::migrate(&conn).expect("primera migración");
+    schema::migrate(&conn).expect("segunda migración sobre la ya migrada");
+}
+
+/// Un bucle de arranques fallidos deja una fila de ventana por intento, todas cerradas y
+/// sin tabs. No rompen nada (nadie las restaura), pero se acumulan para siempre.
+#[test]
+fn se_barren_las_ventanas_cerradas_y_vacias() {
+    let conn = setup();
+    conn.execute_batch(
+        "INSERT INTO windows (id, label, workspace_id, is_open, last_active)
+             VALUES ('muerta-1', 'w1', 'ws', 0, 0), ('muerta-2', 'w2', 'ws', 0, 0);",
+    )
+    .unwrap();
+
+    let borradas = queries::purge_empty_closed_windows(&conn).unwrap();
+    assert_eq!(borradas, 2);
+
+    let quedan: i64 = conn
+        .query_row("SELECT COUNT(*) FROM windows", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(quedan, 1, "la ventana abierta del setup tiene que seguir ahí");
+}
+
+/// Lo único que no se puede tirar: una ventana cerrada que todavía guarda sus tabs, que es
+/// justo la que hay que poder restaurar al reabrir el workspace.
+#[test]
+fn no_se_barre_una_ventana_cerrada_que_conserva_sus_tabs() {
+    let conn = setup();
+    conn.execute_batch(
+        "INSERT INTO windows (id, label, workspace_id, is_open, last_active)
+             VALUES ('cerrada', 'w1', 'ws', 0, 0);
+         INSERT INTO tabs (id, window_id, title, agent_id, agent_label, command, cwd,
+                           opened_at, created_at, last_active)
+             VALUES ('t1', 'cerrada', 'Una', 'claude-code', 'Claude Code', 'claude', '/p', 0, 0, 0);",
+    )
+    .unwrap();
+
+    assert_eq!(queries::purge_empty_closed_windows(&conn).unwrap(), 0);
+    let quedan: i64 = conn
+        .query_row("SELECT COUNT(*) FROM windows WHERE id = 'cerrada'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(quedan, 1);
+}
+
+/// v10 sobre una base que ya existía: la tabla de workspaces cerrados es nueva y se crea
+/// con el batch, pero el que se equivocó una vez con el orden de las migraciones conviene
+/// que lo compruebe siempre.
+#[test]
+fn migrar_una_base_v8_crea_la_tabla_de_workspaces_cerrados() {
+    let conn = base_v8();
+    schema::migrate(&conn).expect("migrar");
+
+    let existe: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'workspace_snapshots'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(existe, 1);
+}
+
+/// Un workspace cerrado tiene que sobrevivir al reseteo del bucket `default`, que es donde
+/// vive casi todo: por eso no lleva FK hacia `workspaces`.
+#[test]
+fn un_workspace_cerrado_sobrevive_a_que_borren_su_workspace() {
+    let conn = setup();
+    conn.execute(
+        "INSERT INTO workspace_snapshots (cwd, workspace_id, tabs_json, closed_at)
+         VALUES ('/p', 'ws', '[]', 0)",
+        [],
+    )
+    .unwrap();
+    conn.execute("DELETE FROM workspaces WHERE id = 'ws'", []).unwrap();
+
+    let quedan: i64 = conn
+        .query_row("SELECT COUNT(*) FROM workspace_snapshots", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(quedan, 1, "el recuerdo no puede irse con el workspace");
+}

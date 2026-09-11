@@ -49,3 +49,13 @@ export const installMarketplaceSkill = (registryId: string, skillId: string) =>
 /** Valida una ubicación mientras el usuario tipea, sin llegar a crear el repo. */
 export const previewRegistryLocation = (sourceType: RegistrySourceType, location: string) =>
   invoke<string>("preview_registry_location", { sourceType, location });
+
+/**
+ * El `SKILL.md` de una entrada del catálogo, para leerla ANTES de instalarla.
+ *
+ * Falla a propósito en los repos que no pueden servir el archivo sin instalar la skill
+ * (skills.sh baja la carpeta con `npx`, que tarda segundos): quien llama se queda con la
+ * descripción que ya tiene del listado.
+ */
+export const marketplaceSkillReadme = (registryId: string, skillId: string) =>
+  invoke<string>("marketplace_skill_readme", { registryId, skillId });

@@ -6,6 +6,7 @@ mod accounts;
 mod agents;
 mod app;
 mod database;
+mod explorer;
 pub mod ipc;
 mod marketplace;
 mod orchestrator;
@@ -13,6 +14,7 @@ mod prelaunch;
 mod session;
 mod skills;
 mod terminal;
+mod usage;
 mod util;
 mod window;
 
