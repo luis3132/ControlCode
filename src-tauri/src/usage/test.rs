@@ -92,3 +92,94 @@ fn no_importa_en_que_orden_vengan_las_marcas() {
 fn sin_mensajes_no_hay_ventana() {
     assert_eq!(current_window_start(vec![], NOW), None);
 }
+
+// ── El panel de `/usage`, leído de la pantalla ───────────────────
+//
+// La captura de abajo es real: salió de abrir `claude` en una PTY y mandarle el comando.
+// Se conserva con sus rarezas —el "3%used" sin espacio, los bloques de las barras, los
+// encabezados repetidos por el redibujado— porque son justo las que rompen un parseo
+// escrito de memoria.
+
+use super::parse::{parse_usage_screen, strip_ansi};
+
+const PANTALLA: &str = "\
+   Settings  Status   Config   Usage   Stats
+ Session
+Total cost:            $0.0000
+Usage:                 0 input, 0 output, 0 cache read, 0 cache write
+Current session
+█▌                                                3%used
+Resets 12:50pm (America/Bogota)
+Current week (all models)
+   ██████████████████████████████████▌                69% used
+  Resets Sep 13, 11am (America/Bogota)
+   +50% weekly limits promo through Sep 13 · clau.de/cc-50-promo
+What's contributing to your limits usage?
+Current week (Fable)
+████████████▌                                      25% used
+";
+
+#[test]
+fn lee_las_tres_barras_de_una_captura_real() {
+    let u = parse_usage_screen(PANTALLA);
+    assert!(u.available);
+
+    let s = u.session.expect("la ventana corta");
+    assert_eq!(s.percent, 3, "el '3%used' sin espacio tiene que leerse igual");
+    assert_eq!(s.resets.as_deref(), Some("12:50pm (America/Bogota)"));
+
+    let w = u.week.expect("la semana");
+    assert_eq!(w.percent, 69);
+    assert_eq!(w.resets.as_deref(), Some("Sep 13, 11am (America/Bogota)"));
+
+    assert_eq!(u.week_model.as_deref(), Some("Fable"));
+    assert_eq!(u.week_model_meter.expect("la semana del modelo").percent, 25);
+}
+
+#[test]
+fn el_promo_con_porcentaje_no_se_confunde_con_una_barra() {
+    // "+50% weekly limits promo" tiene un porcentaje y está justo debajo de la semana.
+    // Sin exigir la palabra "used", se leería como el consumo semanal.
+    let u = parse_usage_screen(PANTALLA);
+    assert_eq!(u.week.unwrap().percent, 69);
+}
+
+#[test]
+fn all_models_no_es_un_modelo() {
+    let u = parse_usage_screen(PANTALLA);
+    assert_eq!(u.week_model.as_deref(), Some("Fable"), "el modelo es Fable, no 'all models'");
+}
+
+#[test]
+fn una_salida_sin_panel_no_inventa_ceros() {
+    // Mostrar 0% se leería como "no gastaste nada", que es una mentira distinta a
+    // "no se pudo preguntar".
+    let u = parse_usage_screen("bienvenido a la TUI\n> \n");
+    assert!(!u.available);
+    assert!(u.problem.is_some());
+    assert!(u.session.is_none() && u.week.is_none());
+}
+
+#[test]
+fn descarta_un_porcentaje_imposible() {
+    let u = parse_usage_screen("Current session\n999% used\n");
+    assert!(u.session.is_none());
+}
+
+#[test]
+fn quita_los_escapes_y_los_bloques_de_las_barras() {
+    let raw = "\x1b[32m\x1b[1mCurrent session\x1b[0m\n\x1b]0;titulo\x07█▌ 7% used\n";
+    let limpio = strip_ansi(raw);
+    assert!(limpio.contains("Current session"));
+    assert!(limpio.contains("7% used"));
+    assert!(!limpio.contains('\x1b'), "quedaron escapes: {limpio:?}");
+    assert!(!limpio.contains('█'));
+}
+
+#[test]
+fn un_encabezado_sin_su_barra_no_arrastra_la_de_abajo() {
+    // Si una sección quedó cortada, su porcentaje no puede salir de la siguiente.
+    let u = parse_usage_screen("Current session\n\n\n\n\n\nCurrent week (all models)\n42% used\n");
+    assert!(u.session.is_none());
+    assert_eq!(u.week.unwrap().percent, 42);
+}

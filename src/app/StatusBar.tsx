@@ -9,6 +9,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { OrchestratorIndicator } from "@/features/orchestrator/OrchestratorIndicator";
 import { BranchIcon } from "@/app/icons";
+import { homeDir } from "@/shared/ipc/window";
 import type { RepoInfo } from "@/features/explorer/types";
 
 /**
@@ -29,12 +30,14 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const [system, setSystem] = useState<AgentAccount[]>([]);
+  const [home, setHome] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const popRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     load().catch(console.error);
     systemAccounts().then(setSystem).catch(console.error);
+    homeDir().then(setHome).catch(() => setHome(null));
   }, [load]);
 
   useEffect(() => {
@@ -49,6 +52,11 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
   // La principal de cada TUI instalada, más los perfiles con sesión iniciada: un perfil
   // creado y nunca logueado no dice nada acá y solo llenaría la barra.
   const shown = [...system, ...profiles.filter((a) => a.loggedIn)];
+
+  /** Preguntarle el cupo a la TUI necesita una carpeta que ella ya considere de confianza.
+   *  La de una tab abierta de ese mismo agente lo es con certeza — está corriendo ahí. */
+  const probeCwd = (agentId: string): string | null =>
+    tabs.find((tab) => tab.agentId === agentId)?.cwd ?? home;
 
   return (
     <footer className="relative flex items-center gap-2.5 h-[26px] shrink-0 px-3
@@ -88,7 +96,10 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
             border border-gray-200 dark:border-white/12
             shadow-2xl"
         >
-          <AccountUsagePopover account={shown.find((a) => a.id === open)!} />
+          <AccountUsagePopover
+            account={shown.find((a) => a.id === open)!}
+            cwd={probeCwd(shown.find((a) => a.id === open)!.agentId)}
+          />
         </div>
       )}
 

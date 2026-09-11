@@ -95,3 +95,33 @@ export function formatTokens(n: number): string {
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
+
+/** Una de las barras del panel de `/usage`. */
+export interface Meter {
+  percent: number;
+  /** Cuándo se reinicia, con el texto que muestra la TUI (incluye su zona horaria). */
+  resets: string | null;
+}
+
+export interface LiveUsage {
+  /** `false` = no se pudo preguntar; `problem` dice por qué. */
+  available: boolean;
+  session: Meter | null;
+  week: Meter | null;
+  weekModel: string | null;
+  weekModelMeter: Meter | null;
+  problem: string | null;
+}
+
+/**
+ * El consumo del PLAN, preguntado en vivo a la propia TUI.
+ *
+ * Abre `claude` en una PTY y le manda `/usage`. Ese comando lo resuelve el cliente, no el
+ * modelo, así que no gasta tokens — y evita adivinar endpoints internos, que es la otra
+ * forma de conseguir el dato y la mala.
+ *
+ * `cwd` tiene que ser una carpeta que la TUI ya considere de confianza: si no, se queda
+ * esperando una confirmación que nadie puede darle desde acá.
+ */
+export const claudeLiveUsage = (cwd: string, env: Record<string, string>) =>
+  invoke<LiveUsage>("claude_live_usage", { cwd, env });

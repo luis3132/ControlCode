@@ -4,9 +4,10 @@ import { Alert, Badge, Progress, Skeleton } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import {
-  WINDOW_SECS, agentAccountUsage, formatRemaining, formatTokens, planLabel, totalOf,
-  type AccountUsage,
+  WINDOW_SECS, agentAccountUsage, claudeLiveUsage, formatRemaining, formatTokens, planLabel,
+  totalOf, type AccountUsage, type LiveUsage,
 } from "./usage";
+import { accountEnv } from "./ipc";
 import type { AgentAccount } from "./types";
 
 /** Un perfil sintético (`system:*`) no tiene fila en la base: para el backend es `null`. */
@@ -35,10 +36,16 @@ function Row({ label, value }: { label: string; value: string }) {
  * parte de lo que gastaste en la semana cayó en cada ventana. Sirve para ver si la tarde
  * viene cargada; no es un medidor de límite, y por eso la etiqueta no lo insinúa.
  */
-export function AccountUsagePopover({ account }: { account: AgentAccount }) {
+export function AccountUsagePopover({ account, cwd }: {
+  account: AgentAccount;
+  /** Carpeta de confianza donde abrir el sondeo. Sin una, no se pregunta. */
+  cwd: string | null;
+}) {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<AccountUsage | null>(null);
   const [failed, setFailed] = useState(false);
+  const [live, setLive] = useState<LiveUsage | null>(null);
+  const [asking, setAsking] = useState(false);
   const Icon = agentIcon(account.agentId, account.agentId);
 
   useEffect(() => {
@@ -50,6 +57,27 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
       .catch(() => { if (!stale) setFailed(true); });
     return () => { stale = true; };
   }, [account]);
+
+  // El cupo del plan no está en ningún archivo: hay que preguntárselo a la TUI. Cuesta
+  // unos segundos y levanta un proceso, así que se hace al abrir el panel y una sola vez.
+  useEffect(() => {
+    if (account.agentId !== "claude-code" || !cwd) return;
+    let stale = false;
+    setLive(null);
+    setAsking(true);
+
+    const vars = realAccountId(account) ? accountEnv(account.id) : Promise.resolve({});
+    vars
+      .then((env) => claudeLiveUsage(cwd, env))
+      .then((l) => { if (!stale) setLive(l); })
+      .catch((e) => { if (!stale) setLive({
+        available: false, session: null, week: null,
+        weekModel: null, weekModelMeter: null, problem: String(e),
+      }); })
+      .finally(() => { if (!stale) setAsking(false); });
+
+    return () => { stale = true; };
+  }, [account, cwd]);
 
   const week = usage?.windows.find((w) => w.key === "7d");
   const reference = week ? totalOf(week) : 0;
@@ -82,6 +110,78 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
             ${account.loggedIn ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/20"}`} />
         )}
       </div>
+
+      {/* ══ el cupo del plan, preguntado en vivo ══════════════════════ */}
+      {account.agentId === "claude-code" && (
+        <div className="flex flex-col gap-2">
+          {asking ? (
+            <Progress indeterminate size="sm" label={
+              <span className="text-[10.5px] text-gray-500 dark:text-gray-400">
+                {t("accounts.plan.asking")}
+              </span>
+            } />
+          ) : live?.available ? (
+            <>
+              {live.session && (
+                <Progress
+                  value={live.session.percent}
+                  max={100}
+                  size="sm"
+                  showValue
+                  variant={live.session.percent >= 80 ? "warning" : "accent"}
+                  label={
+                    <span className="text-[10.5px] text-gray-500 dark:text-gray-400">
+                      {t("accounts.plan.session")}
+                      {live.session.resets && (
+                        <span className="ml-1.5 text-gray-400 dark:text-white/30">
+                          · {live.session.resets}
+                        </span>
+                      )}
+                    </span>
+                  }
+                />
+              )}
+              {live.week && (
+                <Progress
+                  value={live.week.percent}
+                  max={100}
+                  size="sm"
+                  showValue
+                  variant={live.week.percent >= 80 ? "warning" : "info"}
+                  label={
+                    <span className="text-[10.5px] text-gray-500 dark:text-gray-400">
+                      {t("accounts.plan.week")}
+                      {live.week.resets && (
+                        <span className="ml-1.5 text-gray-400 dark:text-white/30">
+                          · {live.week.resets}
+                        </span>
+                      )}
+                    </span>
+                  }
+                />
+              )}
+              {live.weekModelMeter && live.weekModel && (
+                <Progress
+                  value={live.weekModelMeter.percent}
+                  max={100}
+                  size="xs"
+                  showValue
+                  variant="info"
+                  label={
+                    <span className="text-[10.5px] text-gray-500 dark:text-gray-400">
+                      {t("accounts.plan.weekModel", { model: live.weekModel })}
+                    </span>
+                  }
+                />
+              )}
+            </>
+          ) : live ? (
+            <Alert variant="neutral">{live.problem ?? t("accounts.plan.failed")}</Alert>
+          ) : !cwd ? (
+            <Alert variant="neutral">{t("accounts.plan.noFolder")}</Alert>
+          ) : null}
+        </div>
+      )}
 
       {failed ? (
         <Alert variant="danger">{t("accounts.usage.failed")}</Alert>

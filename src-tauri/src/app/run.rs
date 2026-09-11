@@ -66,6 +66,7 @@ pub fn run() {
             crate::accounts::agent_account_env,
             crate::accounts::system_accounts,
             crate::usage::agent_account_usage,
+            crate::usage::claude_live_usage,
             // Comandos previos al lanzamiento del agente (entornos aislados)
             crate::prelaunch::list_prelaunch_presets,
             crate::prelaunch::save_prelaunch_preset,

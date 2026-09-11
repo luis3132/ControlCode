@@ -450,5 +450,11 @@
   "accounts.usage.resetFromServer": "Reset time reported by the server.",
   "accounts.usage.resetDerived": "Derived from the window's first message.",
   "accounts.usage.sessionsShort": "conv.",
-  "accounts.usage.noQuota": "Token counts come from the TUI's own transcripts, so they're exact. How much the plan allows is NOT in any local file — Claude Code asks the API and doesn't store it — so there's no percentage to show without making it up."
+  "accounts.usage.noQuota": "Token counts come from the TUI's own transcripts, so they're exact. How much the plan allows is NOT in any local file — Claude Code asks the API and doesn't store it — so there's no percentage to show without making it up.",
+  "accounts.plan.asking": "Asking the TUI for your quota…",
+  "accounts.plan.session": "Current window",
+  "accounts.plan.week": "This week",
+  "accounts.plan.weekModel": "This week ({{model}})",
+  "accounts.plan.failed": "Couldn't read the plan quota.",
+  "accounts.plan.noFolder": "A trusted folder is needed before the TUI can be asked for the quota."
 }

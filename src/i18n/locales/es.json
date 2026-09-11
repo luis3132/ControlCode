@@ -450,5 +450,11 @@
   "accounts.usage.resetFromServer": "Hora de reinicio informada por el servidor.",
   "accounts.usage.resetDerived": "Deducido del primer mensaje de la ventana.",
   "accounts.usage.sessionsShort": "conv.",
-  "accounts.usage.noQuota": "Los tokens salen de los transcripts de la propia TUI, así que son exactos. Cuánto cupo te da el plan NO está en ningún archivo local — Claude Code se lo pide a la API y no lo guarda — así que no hay porcentaje que mostrar sin inventarlo."
+  "accounts.usage.noQuota": "Los tokens salen de los transcripts de la propia TUI, así que son exactos. Cuánto cupo te da el plan NO está en ningún archivo local — Claude Code se lo pide a la API y no lo guarda — así que no hay porcentaje que mostrar sin inventarlo.",
+  "accounts.plan.asking": "Preguntándole el cupo a la TUI…",
+  "accounts.plan.session": "Ventana actual",
+  "accounts.plan.week": "Semana",
+  "accounts.plan.weekModel": "Semana ({{model}})",
+  "accounts.plan.failed": "No se pudo leer el cupo del plan.",
+  "accounts.plan.noFolder": "Hace falta una carpeta de confianza para poder preguntarle el cupo a la TUI."
 }
