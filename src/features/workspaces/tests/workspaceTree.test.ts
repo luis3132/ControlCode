@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { baseName, buildWorkspaceTree, cwdsToResolve, fleetCounts } from "../workspaceTree";
+import {
+  baseName, buildWorkspaceTree, cwdsToResolve, flattenWorkspaces, fleetCounts,
+} from "../workspaceTree";
+import type { RepoGroup, WorkspaceNode } from "../workspaceTree";
 import type { RepoInfo } from "@/features/explorer/types";
 import type { Tab } from "@/features/tabs/types";
 
@@ -200,5 +203,37 @@ describe("cwdsToResolve con cerrados", () => {
     // Sin esto, un workspace cerrado nunca muestra su rama ni su grupo de repo.
     const snaps = [{ cwd: "/cerrada", workspaceId: "ws", closedAt: 0, tabs: [] }];
     expect(cwdsToResolve([tab("/viva")], new Map(), snaps).sort()).toEqual(["/cerrada", "/viva"]);
+  });
+});
+
+describe("flattenWorkspaces", () => {
+  const ws = (key: string, closed = false): WorkspaceNode => ({
+    key, cwd: key, title: key, subtitle: key,
+    isPrimary: false, isWorktree: false, changedCount: 0,
+    agents: [], closed, savedAgents: 0,
+  });
+  const group = (name: string, workspaces: WorkspaceNode[]): RepoGroup => ({
+    key: name, name, isRepo: true, workspaces, agentCount: 0,
+  });
+
+  it("mantiene juntos los workspaces del mismo repo", () => {
+    const flat = flattenWorkspaces([
+      group("alfa", [ws("alfa/main"), ws("alfa/fix")]),
+      group("beta", [ws("beta/main")]),
+    ]);
+    expect(flat.map((w) => w.key)).toEqual(["alfa/main", "alfa/fix", "beta/main"]);
+  });
+
+  it("manda los cerrados al final de todo, no al final de su repo", () => {
+    // Sin encabezados que separen los grupos, un apagado en el medio se lee como un hueco.
+    const flat = flattenWorkspaces([
+      group("alfa", [ws("alfa/main"), ws("alfa/viejo", true)]),
+      group("beta", [ws("beta/main")]),
+    ]);
+    expect(flat.map((w) => w.key)).toEqual(["alfa/main", "beta/main", "alfa/viejo"]);
+  });
+
+  it("sin grupos devuelve una lista vacía", () => {
+    expect(flattenWorkspaces([])).toEqual([]);
   });
 });

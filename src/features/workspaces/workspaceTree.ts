@@ -207,3 +207,20 @@ export function fleetCounts(groups: RepoGroup[]): { running: number; starting: n
   }
   return { running, starting };
 }
+
+/**
+ * La lista plana que dibuja el panel.
+ *
+ * El panel ya no muestra el repo como sección: el nombre de la carpeta se repetía arriba de
+ * cada grupo y volvía a aparecer en cada fila, y el plegable que lo acompañaba partía la
+ * lista en bloques para esconder algo que casi nunca sobra. Pero AGRUPAR sigue sirviendo,
+ * aunque no se vea: al aplanar respetando los grupos, dos worktrees del mismo proyecto
+ * quedan pegados en vez de separados por todo lo que caiga en el medio del alfabeto.
+ *
+ * Los cerrados van al final de TODO, no al final de su repo: sin encabezados que marquen
+ * dónde empieza cada grupo, un apagado en el medio se lee como un hueco.
+ */
+export function flattenWorkspaces(groups: RepoGroup[]): WorkspaceNode[] {
+  const all = groups.flatMap((g) => g.workspaces);
+  return [...all.filter((w) => !w.closed), ...all.filter((w) => w.closed)];
+}

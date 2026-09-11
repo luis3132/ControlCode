@@ -2,14 +2,14 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
-  AddIcon, ArchiveIcon, Badge, BoxIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon,
-  TrashIcon, Tooltip,
+  AddIcon, ArchiveIcon, Badge, BoxIcon, CloseIcon, TrashIcon, Tooltip,
 } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { agentIcon } from "@/features/agents/agentIcons";
-import { BranchIcon, RunningIcon } from "@/app/icons";
+import { RunningIcon } from "@/app/icons";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
+import { flattenWorkspaces } from "@/features/workspaces/workspaceTree";
 import type { RepoGroup, WorkspaceAgent, WorkspaceNode } from "@/features/workspaces/workspaceTree";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { SkillPalette, type SkillScopeTarget } from "@/features/skills/SkillPalette";
@@ -57,47 +57,94 @@ function AgentRow({ agent, onClick, onContextMenu }: {
   );
 }
 
-function WorkspaceCard({ ws, onOpenAgent, onWorkspaceMenu, onAgentMenu }: {
+/**
+ * Un workspace en el panel.
+ *
+ * Es UN componente con dos tamaños, no dos componentes: el que tiene el agente activo se
+ * despliega con su lista de agentes, y el resto se encoge a una línea. Antes eran dos
+ * piezas distintas y se notaba el salto — al cambiar de workspace parecía que la fila se
+ * reemplazaba por otra cosa en vez de crecer.
+ */
+function WorkspaceItem({ ws, expanded, onActivate, onOpenAgent, onWorkspaceMenu, onAgentMenu }: {
   ws: WorkspaceNode;
+  expanded: boolean;
+  onActivate: () => void;
   onOpenAgent: (id: string) => void;
   onWorkspaceMenu: (e: React.MouseEvent, ws: WorkspaceNode) => void;
   onAgentMenu: (e: React.MouseEvent, agent: WorkspaceAgent) => void;
 }) {
   const { t } = useTranslation();
+  const running = ws.agents.some((a) => a.status === "running");
+
+  // El mismo encabezado en los dos tamaños, para que al desplegarse se lea como la misma
+  // fila creciendo: cambian los cuerpos de letra, no los elementos ni su orden.
+  const head = (
+    <>
+      {ws.closed ? (
+        <ArchiveIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/25" />
+      ) : (
+        <span className={`shrink-0 rounded-full ${expanded ? "w-2 h-2" : "w-1.5 h-1.5"}
+          ${running ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/20"}`} />
+      )}
+      <span className="flex flex-col gap-px min-w-0 flex-1">
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className={`truncate
+            ${expanded ? "text-[12.5px] font-semibold" : "text-[11.5px]"}
+            ${ws.closed
+              ? "text-gray-400 dark:text-white/35"
+              : expanded
+                ? "text-gray-900 dark:text-white"
+                : "text-gray-700 dark:text-gray-300"}`}>
+            {ws.title}
+          </span>
+          {expanded && ws.isPrimary && (
+            <Badge variant="outline" size="sm" className="shrink-0">
+              {t("workspaces.primary")}
+            </Badge>
+          )}
+        </span>
+        <span className="flex items-center gap-2 min-w-0">
+          <span className="flex-1 min-w-0 truncate font-mono text-[10px]
+            text-gray-400 dark:text-white/30">
+            {ws.closed ? t("workspaces.saved", { n: ws.savedAgents }) : ws.subtitle}
+          </span>
+          {expanded && ws.changedCount > 0 && (
+            <span className="shrink-0 font-mono text-[9.5px] text-amber-600 dark:text-amber-400">
+              {t("workspaces.changed", { n: ws.changedCount })}
+            </span>
+          )}
+        </span>
+      </span>
+      {!ws.closed && !expanded && (
+        <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
+          {ws.agents.length}
+        </span>
+      )}
+    </>
+  );
+
+  if (!expanded) {
+    return (
+      <button
+        onClick={onActivate}
+        onContextMenu={(e) => { e.preventDefault(); onWorkspaceMenu(e, ws); }}
+        className="cc-t flex items-center gap-2.5 mx-2 px-2 py-1.5 rounded-lg
+          w-[calc(100%-1rem)] text-left
+          hover:bg-gray-200/60 dark:hover:bg-white/5"
+      >
+        {head}
+      </button>
+    );
+  }
+
   return (
     <div
       onContextMenu={(e) => { e.preventDefault(); onWorkspaceMenu(e, ws); }}
-      className="mx-2 my-0.5 px-1.5 pt-1.5 pb-1 rounded-[10px] flex flex-col gap-1
-      bg-gray-200/50 dark:bg-white/5
-      border border-gray-200 dark:border-white/10"
+      className="cc-t mx-2 my-0.5 px-2 pt-2 pb-1 rounded-[10px] flex flex-col gap-1.5
+        bg-gray-200/50 dark:bg-white/5
+        border border-gray-200 dark:border-white/10"
     >
-
-      <div className="flex items-center gap-1.5 px-0.5">
-        <BranchIcon className="w-3.5 h-3.5 shrink-0 text-blue-500 dark:text-blue-400" />
-        <span className="flex-1 min-w-0 truncate text-xs font-semibold text-gray-900 dark:text-white">
-          {ws.title}
-        </span>
-        {ws.isPrimary && (
-          <Badge variant="outline" size="sm" className="shrink-0">
-            {t("workspaces.primary")}
-          </Badge>
-        )}
-      </div>
-
-      <div className="flex items-center gap-2 pl-[21px] pr-0.5">
-        <span className="flex-1 min-w-0 truncate font-mono text-[10px] text-gray-400 dark:text-white/35">
-          {ws.subtitle}
-        </span>
-        {ws.changedCount > 0 && (
-          <span className="shrink-0 font-mono text-[9.5px] text-amber-600 dark:text-amber-400">
-            {t("workspaces.changed", { n: ws.changedCount })}
-          </span>
-        )}
-      </div>
-
-      <div className="pl-[21px] text-[10px] text-gray-400 dark:text-white/35">
-        {t("workspaces.agentCount", { n: ws.agents.length })}
-      </div>
+      <div className="flex items-center gap-2.5">{head}</div>
 
       <div className="flex flex-col gap-px">
         {ws.agents.map((a) => (
@@ -113,44 +160,6 @@ function WorkspaceCard({ ws, onOpenAgent, onWorkspaceMenu, onAgentMenu }: {
   );
 }
 
-function WorkspaceRow({ ws, onClick, onContextMenu }: {
-  ws: WorkspaceNode;
-  onClick: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
-}) {
-  const { t } = useTranslation();
-  const running = ws.agents.some((a) => a.status === "running");
-  return (
-    <button
-      onClick={onClick}
-      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e); }}
-      className="flex items-center gap-2.5 mx-2 px-2 py-1.5 rounded-lg w-[calc(100%-1rem)] text-left
-        hover:bg-gray-200/60 dark:hover:bg-white/5 transition-colors duration-150"
-    >
-      {ws.closed ? (
-        <ArchiveIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/25" />
-      ) : (
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0
-          ${running ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/20"}`} />
-      )}
-      <span className="flex flex-col gap-px min-w-0 flex-1">
-        <span className={`truncate text-[11.5px]
-          ${ws.closed ? "text-gray-400 dark:text-white/35" : "text-gray-700 dark:text-gray-300"}`}>
-          {ws.title}
-        </span>
-        <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30">
-          {ws.closed ? t("workspaces.saved", { n: ws.savedAgents }) : ws.subtitle}
-        </span>
-      </span>
-      {!ws.closed && (
-        <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
-          {ws.agents.length}
-        </span>
-      )}
-    </button>
-  );
-}
-
 /**
  * El panel de la izquierda: repos → workspaces → agentes.
  *
@@ -163,7 +172,6 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
   const navigate = useNavigate();
   const activateTab = useTabsStore((s) => s.activateTab);
   const activeTabId = useTabsStore((s) => s.activeTabId);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<
     { x: number; y: number; ws: WorkspaceNode | null; target: SkillScopeTarget } | null
   >(null);
@@ -176,6 +184,10 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
   const saveSnapshot = useSnapshotsStore((s) => s.save);
   const takeSnapshot = useSnapshotsStore((s) => s.take);
   const forgetSnapshot = useSnapshotsStore((s) => s.forget);
+
+  // El panel dibuja una lista plana: el repo sigue agrupando el orden, pero ya no se
+  // muestra como sección. Ver `flattenWorkspaces`.
+  const workspaces = useMemo(() => flattenWorkspaces(groups), [groups]);
 
   const running = useMemo(
     () => groups.flatMap((g) => g.workspaces).flatMap((w) => w.agents).filter((a) => a.status === "running").length,
@@ -279,14 +291,6 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
     }
   };
 
-  const toggleGroup = (key: string) => {
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(key)) next.add(key);
-      return next;
-    });
-  };
-
   return (
     <aside
       style={{ width }}
@@ -330,55 +334,25 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
       </div>
 
       <div className="flex-1 min-h-0 cc-scroll py-1">
-        {groups.length === 0 ? (
+        {workspaces.length === 0 ? (
           <p className="px-3 py-6 text-center text-[11.5px] leading-relaxed
             text-gray-400 dark:text-white/30">
             {t("workspaces.empty")}
           </p>
         ) : (
-          groups.map((group) => {
-            const collapsed = collapsedGroups.has(group.key);
-            return (
-              <div key={group.key} className="mt-1.5 first:mt-0">
-                <button
-                  onClick={() => toggleGroup(group.key)}
-                  className="flex items-center gap-2 h-7 w-full px-3 text-left
-                    hover:bg-gray-200/50 dark:hover:bg-white/4 transition-colors"
-                >
-                  {collapsed
-                    ? <ChevronRightIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/35" />
-                    : <ChevronDownIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/35" />}
-                  <span className="flex-1 min-w-0 truncate text-[11.5px] font-semibold
-                    text-gray-700 dark:text-gray-300">
-                    {group.name}
-                  </span>
-                  <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
-                    {group.workspaces.length}
-                  </span>
-                </button>
-
-                {!collapsed && group.workspaces.map((ws) => {
-                  const hasActive = ws.agents.some((a) => a.tabId === activeTabId);
-                  return hasActive
-                    ? <WorkspaceCard
-                        key={ws.key}
-                        ws={ws}
-                        onOpenAgent={openAgent}
-                        onWorkspaceMenu={onWorkspaceMenu}
-                        onAgentMenu={onAgentMenu}
-                      />
-                    : <WorkspaceRow
-                        key={ws.key}
-                        ws={ws}
-                        onClick={() => (ws.closed
-                          ? reopenWorkspace(ws).catch(console.error)
-                          : openAgent(ws.agents[0].tabId))}
-                        onContextMenu={(e) => onWorkspaceMenu(e, ws)}
-                      />;
-                })}
-              </div>
-            );
-          })
+          workspaces.map((ws) => (
+            <WorkspaceItem
+              key={ws.key}
+              ws={ws}
+              expanded={ws.agents.some((a) => a.tabId === activeTabId)}
+              onActivate={() => (ws.closed
+                ? reopenWorkspace(ws).catch(console.error)
+                : openAgent(ws.agents[0].tabId))}
+              onOpenAgent={openAgent}
+              onWorkspaceMenu={onWorkspaceMenu}
+              onAgentMenu={onAgentMenu}
+            />
+          ))
         )}
       </div>
 

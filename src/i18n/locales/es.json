@@ -367,7 +367,6 @@
   "rail.workspaces": "Workspaces",
   "workspaces.primary": "PRINCIPAL",
   "workspaces.changed": "{{n}} sin commitear",
-  "workspaces.agentCount": "{{n}} agentes",
   "workspaces.new": "Abrir un agente nuevo",
   "workspaces.empty": "Todavía no hay ningún agente abierto. Abrí uno y su carpeta aparece acá.",
   "explorer.changes": "Cambios sin commitear",

@@ -367,7 +367,6 @@
   "rail.workspaces": "Workspaces",
   "workspaces.primary": "PRIMARY",
   "workspaces.changed": "{{n}} uncommitted",
-  "workspaces.agentCount": "{{n}} agents",
   "workspaces.new": "Open a new agent",
   "workspaces.empty": "No agents open yet. Open one and its folder shows up here.",
   "explorer.changes": "Uncommitted changes",
