@@ -118,7 +118,7 @@ export function TabItem({
           opacity-0 group-hover:opacity-100
           hover:text-gray-700 dark:hover:text-white
           hover:bg-gray-200 dark:hover:bg-white/15
-          transition-all duration-100
+          transition-opacity duration-100
         "
       >
         <svg width="8" height="8" viewBox="0 0 8 8" fill="none">

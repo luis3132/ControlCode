@@ -32,10 +32,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       <button
         onClick={onClose}
         aria-label={t("btn.close")}
-        className="absolute inset-0 bg-gray-900/40 dark:bg-black/62 backdrop-blur-[2px]"
+        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/65"
       />
 
-      <div className="relative flex flex-col w-full max-w-4xl h-full max-h-[42rem]
+      <div className="cc-rise relative flex flex-col w-full max-w-4xl h-full max-h-[42rem]
         rounded-2xl overflow-hidden
         bg-white dark:bg-gray-900
         border border-gray-200 dark:border-white/12

@@ -60,7 +60,7 @@ export function ContextMenu({ x, y, items, onClose }: {
     <div
       ref={ref}
       style={{ position: "fixed", top: pos.y, left: pos.x, zIndex: 10000 }}
-      className="min-w-52 py-1 rounded-lg border shadow-xl overflow-hidden
+      className="cc-pop min-w-52 py-1 rounded-lg border shadow-xl overflow-hidden
         bg-white dark:bg-gray-800
         border-gray-200 dark:border-white/10
         text-gray-800 dark:text-gray-100

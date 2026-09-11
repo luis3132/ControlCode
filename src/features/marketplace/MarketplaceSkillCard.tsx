@@ -22,7 +22,7 @@ export function MarketplaceSkillCard({
       className="flex flex-col gap-3 px-4 py-3 rounded-xl border
         border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50
         hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm
-        transition-all"
+        transition-colors"
     >
       <div className="flex items-start gap-3">
         <span

@@ -94,7 +94,7 @@ export function PrelaunchSection() {
     <section className="bg-linear-to-br from-white to-gray-50
       dark:from-gray-800 dark:to-gray-900
       rounded-xl border border-gray-200 dark:border-gray-700
-      shadow-sm hover:shadow-md transition-shadow duration-300 p-6">
+      shadow-sm hover:shadow-md transition-shadow duration-150 p-6">
 
       <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-1">
         {t("settings.prelaunch")}

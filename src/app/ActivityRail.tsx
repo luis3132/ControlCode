@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BoxIcon, ClockIcon, CloudIcon, GearIcon, StackIcon, UserIcon } from "neogestify-ui-components";
+import { Badge, BoxIcon, ClockIcon, CloudIcon, GearIcon, StackIcon, Tooltip, UserIcon } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
 import { shortcutForPath } from "@/app/shortcuts";
@@ -22,11 +22,10 @@ function RailButton({
   children: React.ReactNode;
 }) {
   return (
+    <Tooltip content={withShortcut(label, path)} placement="right" delay={400}>
     <button
       onClick={onClick}
-      title={withShortcut(label, path)}
-      className={`relative flex items-center justify-center w-9 h-9 rounded-[9px] shrink-0
-        transition-colors duration-150
+      className={`cc-t relative flex items-center justify-center w-9 h-9 rounded-[9px] shrink-0
         ${active
           ? "text-gray-900 dark:text-white bg-gray-200/70 dark:bg-white/7"
           : "text-gray-400 dark:text-white/40 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200/60 dark:hover:bg-white/6"}`}
@@ -39,12 +38,17 @@ function RailButton({
       )}
       {children}
       {badge != null && badge > 0 && (
-        <span className="absolute top-0.5 right-0.5 min-w-3.5 h-3.5 px-1 rounded-full
-          bg-blue-600 text-white text-[9px] font-bold leading-[14px] text-center tabular-nums">
+        <Badge
+          variant="accent"
+          size="sm"
+          pill
+          className="absolute -top-0.5 -right-0.5 pointer-events-none"
+        >
           {badge}
-        </span>
+        </Badge>
       )}
     </button>
+    </Tooltip>
   );
 }
 

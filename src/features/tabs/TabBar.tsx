@@ -79,7 +79,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
       <div
         data-tauri-drag-region
         className="cc-scroll-x flex items-stretch flex-1 min-w-0 h-10
-          bg-white/80 dark:bg-gray-900/80 backdrop-blur-md
+          bg-gray-100 dark:bg-gray-900
           border-b border-gray-200 dark:border-gray-800"
         style={{ position: "relative", zIndex: 0 }}
         onDragOver={(e) => e.preventDefault()}

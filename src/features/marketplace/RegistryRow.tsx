@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "neogestify-ui-components";
+import { Switch, Button } from "neogestify-ui-components";
 import { EditIcon, TrashIcon, CloudIcon, FolderIcon, AnimateSpin, IconReset } from "neogestify-ui-components";
-import { Switch } from "@/shared/ui/Switch";
 import { RegistryProgressBar, useRegistryProgress } from "@/features/marketplace/RegistryProgress";
 import { useMarketplaceStore } from "@/features/marketplace/store";
 import type { RegistrySummary } from "@/features/marketplace/types";
@@ -125,7 +124,8 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
           <Switch
             checked={r.enabled}
             onChange={(enabled) => setRegistryEnabled(r.id, enabled)}
-            title={r.enabled ? t("marketplace.registries.enabled") : t("marketplace.registries.disabled")}
+            size="sm"
+            aria-label={r.enabled ? t("marketplace.registries.enabled") : t("marketplace.registries.disabled")}
           />
           <Button
             variant="icon"

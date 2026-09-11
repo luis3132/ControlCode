@@ -71,7 +71,7 @@ export function AccountPickerStep({ agentId, value, onChange }: AccountPickerSte
               onClick={() => onChange(option.id)}
               className={`
                 flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg border text-left
-                transition-all duration-200 min-w-32
+                transition-colors duration-200 min-w-32
                 ${isSelected
                   ? "border-blue-500 bg-linear-to-br from-blue-50 to-violet-50 dark:from-blue-500/10 dark:to-violet-500/10 shadow-sm"
                   : "border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-white/[0.02] hover:border-gray-300 dark:hover:border-gray-600"}

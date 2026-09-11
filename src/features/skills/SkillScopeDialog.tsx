@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Modal } from "neogestify-ui-components";
+import { Alert, Button, Modal } from "neogestify-ui-components";
 
 import { useSkillsStore } from "@/features/skills/store";
 import { SkillPickerStep } from "@/features/tabs/wizard/SkillPickerStep";
@@ -115,15 +115,15 @@ export function SkillScopeDialog({ target, onClose }: { target: SkillScopeTarget
         {/* Se avisa que el agente ya corriendo puede no enterarse: varias TUIs escanean su
             carpeta de skills solo al arrancar, así que el symlink existe pero no se usa. */}
         {dirty && target.scope === "tab" && (
-          <p className="text-xs text-amber-700 dark:text-amber-400">
-            {t("skills.scope.restartHint")}
-          </p>
+          <Alert variant="warning">{t("skills.scope.restartHint")}</Alert>
         )}
 
         {errors.length > 0 && (
-          <ul className="flex flex-col gap-1 text-xs text-red-600 dark:text-red-400">
-            {errors.map((e) => <li key={e}>{e}</li>)}
-          </ul>
+          <Alert variant="danger" title={t("skills.scope.failed")}>
+            <ul className="flex flex-col gap-1">
+              {errors.map((e) => <li key={e}>{e}</li>)}
+            </ul>
+          </Alert>
         )}
       </div>
     </Modal>

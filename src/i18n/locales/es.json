@@ -422,5 +422,10 @@
   "skills.scope.workspaceHelp": "Valen para todos los agentes que abras en esta carpeta, incluidos los que abras después.",
   "skills.scope.tabHelp": "Valen solo para este agente. Las del workspace se suman a estas.",
   "skills.scope.confirm": "Guardar",
-  "skills.scope.restartHint": "Varias TUIs solo leen su carpeta de skills al arrancar: puede que este agente no vea el cambio hasta reabrirlo."
+  "skills.scope.restartHint": "Varias TUIs solo leen su carpeta de skills al arrancar: puede que este agente no vea el cambio hasta reabrirlo.",
+  "explorer.tab.files": "Archivos",
+  "explorer.tab.changes": "Cambios",
+  "skills.scope.failed": "No se pudieron aplicar todos los cambios",
+  "marketplace.registries.collapse": "Plegar repositorios",
+  "marketplace.registries.expand": "Repositorios"
 }

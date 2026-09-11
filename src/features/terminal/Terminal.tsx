@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "neogestify-ui-components";
@@ -114,8 +116,24 @@ export function Terminal({
       cursorBlink: true,
       cursorStyle: "bar",
       scrollback: 5000,
-      allowTransparency: true,
+      // `allowTransparency` estaba en true y era la causa del texto borroso: apaga el
+      // camino rápido de fondo opaco y obliga a compositar cada celda, lo que se lleva
+      // puesto el antialiasing de subpíxel. No servía para nada — los dos temas de la
+      // terminal tienen fondo 100% opaco (ver theme.ts).
+      allowTransparency: false,
+      // Un glifo más ancho que su celda (los de Nerd Font, las líneas de Powerline) se
+      // escala en vez de invadir la celda siguiente. Sin esto, una barra de progreso o un
+      // prompt con iconos corre todo lo que tiene a la derecha.
+      rescaleOverlappingGlyphs: true,
     });
+
+    // Unicode 11 ANTES de escribir nada: xterm trae las tablas de ancho de Unicode 6, que
+    // no conocen los emoji modernos ni varios rangos CJK. Con las viejas, un emoji ocupa
+    // una celda cuando en pantalla ocupa dos, y a partir de ahí toda la línea queda
+    // corrida. Los agentes imprimen emoji todo el tiempo, así que se nota enseguida.
+    const unicode11 = new Unicode11Addon();
+    term.loadAddon(unicode11);
+    term.unicode.activeVersion = "11";
 
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();
@@ -124,6 +142,30 @@ export function Terminal({
     term.loadAddon(webLinksAddon);
     term.open(containerRef.current);
     termRef.current = term;
+
+    // ── Renderizador WebGL ───────────────────────────────────
+    //
+    // Por defecto xterm dibuja con el DOM: un `<span>` por tramo de texto. Es el camino
+    // más compatible y el más borroso — el navegador redondea cada celda a píxeles CSS, y
+    // con escalado fraccionario (Wayland al 125%) eso deja el texto desalineado y sucio.
+    // WebGL rasteriza los glifos a una textura a la resolución REAL del dispositivo.
+    //
+    // Va después de `open()` (necesita el canvas) y con plan B explícito: el contexto se
+    // puede perder (el compositor lo recicla, o se llega al tope de contextos vivos si hay
+    // muchas tabs abiertas). Al perderlo se descarta el addon y xterm vuelve solo al DOM:
+    // peor aspecto, pero nunca una terminal en blanco.
+    let webgl: WebglAddon | null = null;
+    try {
+      webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        webgl?.dispose();
+        webgl = null;
+      });
+      term.loadAddon(webgl);
+    } catch {
+      // Sin WebGL disponible se sigue con el DOM. No es un error que valga la pena contar.
+      webgl = null;
+    }
 
     // Las TUIs modernas preguntan qué sabe hacer la terminal y ESPERAN respuesta antes de
     // dibujar. xterm.js no contesta varias de esas consultas, y sin respuesta OpenCode se
@@ -151,6 +193,16 @@ export function Terminal({
 
     // Ajuste de la grilla al contenedor real (ver `fit.ts`: el PTY nace con este tamaño).
     const { fit: fitAndTrim, fitOnce } = createFitter(term, fitAddon, () => containerRef.current);
+
+    // Mover la ventana a un monitor con otro factor de escala cambia el tamaño real de un
+    // píxel, y el atlas de glifos ya rasterizado queda a la resolución vieja — que es
+    // exactamente cómo se ve "borroso de repente". Se tira el atlas y se vuelve a medir.
+    const dpr = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    const onDprChange = () => {
+      term.clearTextureAtlas();
+      fitAndTrim();
+    };
+    dpr.addEventListener("change", onDprChange);
 
     // ── 2. Crear la sesión PTY en Rust ───────────────────────
     let unlistenData: UnlistenFn | null = null;
@@ -363,6 +415,8 @@ export function Terminal({
       disposeScrollbar();
       unlistenData?.();
       unlistenExit?.();
+      dpr.removeEventListener("change", onDprChange);
+      webgl?.dispose();
       if (ptyIdRef.current !== null) {
         // Antes había un guardia acá para no matar un PTY que estaba viajando a otra
         // ventana. Ese camino ya no existe: se cambia de workspace en el lugar, así que

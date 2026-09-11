@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { ChevronDownIcon, ChevronRightIcon, DocumentIcon } from "neogestify-ui-components";
+import { Badge, ChevronDownIcon, ChevronRightIcon, DocumentIcon, Skeleton, Tabs, Tooltip } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
 import { BranchIcon, DotsIcon, PanelIcon, RefreshIcon } from "@/app/icons";
@@ -20,23 +20,6 @@ const MARK_CLASS: Record<FileMark, string> = {
   "?": "text-gray-400 dark:text-white/35",
 };
 
-function HeaderTab({ active, title, onClick, children }: {
-  active: boolean; title: string; onClick: () => void; children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 transition-colors
-        ${active
-          ? "text-gray-900 dark:text-white bg-gray-200/70 dark:bg-white/8"
-          : "text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200/60 dark:hover:bg-white/6"}`}
-    >
-      {children}
-    </button>
-  );
-}
-
 /**
  * El explorador del workspace activo, a la derecha.
  *
@@ -54,14 +37,17 @@ export function ExplorerPanel({ cwd, repo, title }: {
   const toggle = useUiStore((s) => s.toggleExplorer);
   const [view, setView] = useState<View>("files");
   const [loaded, setLoaded] = useState<Map<string, DirEntry[]>>(new Map());
+  const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
 
-  const load = useCallback((dir: string) => {
+  const load = useCallback((dir: string, root = false) => {
+    if (root) setLoading(true);
     readDir(dir)
       .then((entries) => setLoaded((prev) => new Map(prev).set(dir, entries)))
       // Una carpeta sin permisos o recién borrada no puede tumbar el panel entero.
-      .catch(() => setLoaded((prev) => new Map(prev).set(dir, [])));
+      .catch(() => setLoaded((prev) => new Map(prev).set(dir, [])))
+      .finally(() => { if (root) setLoading(false); });
   }, []);
 
   // Cambiar de tab cambia de carpeta: lo leído de la anterior no sirve y mantenerlo haría
@@ -70,7 +56,7 @@ export function ExplorerPanel({ cwd, repo, title }: {
     setLoaded(new Map());
     setExpanded(new Set());
     setSelected(null);
-    if (cwd) load(cwd);
+    if (cwd) load(cwd, true);
   }, [cwd, load]);
 
   const rows = useMemo(
@@ -97,46 +83,65 @@ export function ExplorerPanel({ cwd, repo, title }: {
 
   if (collapsed) {
     return (
-      <aside className="flex flex-col items-center gap-1 w-11 shrink-0 pt-2
+      <aside className="cc-fade flex flex-col items-center gap-1 w-11 shrink-0 pt-2
         bg-gray-50 dark:bg-[#0a0f16]
         border-l border-gray-200 dark:border-white/7">
-        <HeaderTab active title={t("explorer.files")} onClick={toggle}>
-          <DocumentIcon className="w-4 h-4" />
-        </HeaderTab>
-        <HeaderTab active={false} title={t("explorer.changes")} onClick={toggle}>
-          <span className="relative flex">
+        <Tooltip content={t("panel.expand")} placement="left">
+          <button onClick={toggle} className="cc-t flex items-center justify-center w-8 h-8 rounded-lg
+            text-gray-500 dark:text-white/40
+            hover:text-gray-900 dark:hover:text-white
+            hover:bg-gray-200/60 dark:hover:bg-white/8">
+            <DocumentIcon className="w-4 h-4" />
+          </button>
+        </Tooltip>
+        <Tooltip content={t("explorer.changes")} placement="left">
+          <button onClick={toggle} className="cc-t relative flex items-center justify-center w-8 h-8 rounded-lg
+            text-gray-500 dark:text-white/40
+            hover:text-gray-900 dark:hover:text-white
+            hover:bg-gray-200/60 dark:hover:bg-white/8">
             <BranchIcon className="w-4 h-4" />
             {(repo?.changedCount ?? 0) > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-amber-500" />
+              <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-500" />
             )}
-          </span>
-        </HeaderTab>
+          </button>
+        </Tooltip>
       </aside>
     );
   }
 
   return (
-    <aside className="flex flex-col shrink-0 min-h-0 w-67
+    <aside className="cc-fade flex flex-col shrink-0 min-h-0 w-67
       bg-gray-50 dark:bg-[#0a0f16]
       border-l border-gray-200 dark:border-white/7">
 
-      <div className="flex items-center gap-0.5 h-10 shrink-0 px-2
+      <div className="flex items-center gap-1 h-10 shrink-0 pl-2 pr-1.5
         border-b border-gray-200 dark:border-white/7">
-        <HeaderTab active={view === "files"} title={t("explorer.files")} onClick={() => setView("files")}>
-          <DocumentIcon className="w-4 h-4" />
-        </HeaderTab>
-        <HeaderTab active={view === "changes"} title={t("explorer.changes")} onClick={() => setView("changes")}>
-          <span className="relative flex">
-            <BranchIcon className="w-4 h-4" />
-            {(repo?.changedCount ?? 0) > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-amber-500" />
-            )}
-          </span>
-        </HeaderTab>
-        <div className="flex-1" />
-        <HeaderTab active={false} title={t("panel.collapse")} onClick={toggle}>
-          <PanelIcon className="w-[15px] h-[15px]" />
-        </HeaderTab>
+        <Tabs
+          items={[
+            { id: "files", label: t("explorer.tab.files"), icon: <DocumentIcon className="w-3.5 h-3.5" /> },
+            {
+              id: "changes",
+              label: t("explorer.tab.changes"),
+              icon: <BranchIcon className="w-3.5 h-3.5" />,
+              badge: repo?.changedCount ? (
+                <Badge variant="warning" size="sm" pill>{repo.changedCount}</Badge>
+              ) : undefined,
+            },
+          ]}
+          value={view}
+          onChange={(id) => setView(id as View)}
+          variant="line"
+          size="sm"
+          className="flex-1 min-w-0"
+        />
+        <Tooltip content={t("panel.collapse")} placement="left">
+          <button onClick={toggle} className="cc-t flex items-center justify-center w-7 h-7 rounded-lg shrink-0
+            text-gray-400 dark:text-white/35
+            hover:text-gray-700 dark:hover:text-white
+            hover:bg-gray-200/60 dark:hover:bg-white/8">
+            <PanelIcon className="w-[15px] h-[15px]" />
+          </button>
+        </Tooltip>
       </div>
 
       <div className="flex items-center gap-2 h-8 shrink-0 pl-3.5 pr-1.5
@@ -145,30 +150,38 @@ export function ExplorerPanel({ cwd, repo, title }: {
           text-gray-800 dark:text-gray-200">
           {title}
         </span>
-        <button
-          onClick={() => { if (cwd) { setLoaded(new Map()); setExpanded(new Set()); load(cwd); } }}
-          title={t("explorer.refresh")}
-          className="flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
-            text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white
-            hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
-        >
-          <RefreshIcon className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={() => { if (selected) revealItemInDir(selected).catch(console.error); }}
-          disabled={!selected}
-          title={t("explorer.reveal")}
-          className="flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
-            text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white
-            hover:bg-gray-200 dark:hover:bg-white/10 transition-colors
-            disabled:opacity-40 disabled:hover:bg-transparent"
-        >
-          <DotsIcon className="w-3.5 h-3.5" />
-        </button>
+        <Tooltip content={t("explorer.refresh")} placement="bottom">
+          <button
+            onClick={() => { if (cwd) { setLoaded(new Map()); setExpanded(new Set()); load(cwd, true); } }}
+            className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
+              text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white
+              hover:bg-gray-200 dark:hover:bg-white/10"
+          >
+            <RefreshIcon className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
+        <Tooltip content={t("explorer.reveal")} placement="bottom" disabled={!selected}>
+          <button
+            onClick={() => { if (selected) revealItemInDir(selected).catch(console.error); }}
+            disabled={!selected}
+            className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
+              text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white
+              hover:bg-gray-200 dark:hover:bg-white/10
+              disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            <DotsIcon className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
       </div>
 
       <div className="flex-1 min-h-0 cc-scroll py-1">
-        {!cwd ? (
+        {loading && rows.length === 0 ? (
+          <div className="flex flex-col gap-1.5 px-3.5 py-2">
+            {[64, 48, 72, 40, 56, 68].map((w, i) => (
+              <Skeleton key={i} variant="text" height={12} width={`${w}%`} />
+            ))}
+          </div>
+        ) : !cwd ? (
           <p className="px-3 py-6 text-center text-[11.5px] text-gray-400 dark:text-white/30">
             {t("explorer.noTab")}
           </p>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BoxIcon, HomeIcon, SaveIcon } from "neogestify-ui-components";
+import { BoxIcon, HomeIcon, SaveIcon, Tooltip } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
 import { PanelIcon } from "@/app/icons";
@@ -73,10 +73,15 @@ export function SideHead({ width }: { width: number }) {
       <div
         data-tauri-drag-region
         style={{ width, position: "relative", zIndex: 30 }}
-        className="flex items-center gap-2.5 h-10 shrink-0 overflow-hidden pl-3.5 pr-1.5
+        className={`flex items-center h-10 shrink-0 overflow-hidden
           bg-gray-100 dark:bg-[#080b0f]
           border-r border-b border-gray-200 dark:border-white/7
-          select-none transition-[width] duration-150"
+          select-none transition-[width] duration-150
+          ${collapsed
+            // Plegado solo queda el botón, y el padding de la izquierda lo corría a un
+            // costado de los 48px que mide la columna. Centrado y sin padding.
+            ? "justify-center gap-0 px-0"
+            : "gap-2.5 pl-3.5 pr-1.5"}`}
       >
         {!collapsed && <WindowLights />}
 
@@ -119,19 +124,20 @@ export function SideHead({ width }: { width: number }) {
           </div>
         )}
 
-        <div className="flex-1" />
+        {!collapsed && <div className="flex-1" />}
 
-        <button
-          onClick={toggle}
-          title={collapsed ? t("panel.expand") : t("panel.collapse")}
-          data-tauri-drag-region="false"
-          className="flex items-center justify-center w-6.5 h-6.5 rounded-lg shrink-0
-            text-gray-400 dark:text-white/35
-            hover:text-gray-700 dark:hover:text-white
-            hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
-        >
-          <PanelIcon className="w-3.5 h-3.5" />
-        </button>
+        <Tooltip content={collapsed ? t("panel.expand") : t("panel.collapse")} placement="right">
+          <button
+            onClick={toggle}
+            data-tauri-drag-region="false"
+            className="cc-t flex items-center justify-center w-6.5 h-6.5 rounded-lg shrink-0
+              text-gray-400 dark:text-white/35
+              hover:text-gray-700 dark:hover:text-white
+              hover:bg-gray-200 dark:hover:bg-white/10"
+          >
+            <PanelIcon className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
       </div>
 
       {showSave && <SaveWorkspaceDialog onClose={() => setShowSave(false)} />}

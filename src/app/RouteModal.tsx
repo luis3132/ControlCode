@@ -33,10 +33,10 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
       <button
         onClick={onClose}
         aria-label={t("btn.close")}
-        className="absolute inset-0 bg-gray-900/40 dark:bg-black/62 backdrop-blur-[2px]"
+        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/65"
       />
 
-      <div className="relative flex flex-col w-full max-w-5xl h-full
+      <div className="cc-rise relative flex flex-col w-full max-w-5xl h-full
         rounded-2xl overflow-hidden
         bg-gray-50 dark:bg-gray-950
         border border-gray-200 dark:border-white/12
@@ -47,7 +47,7 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
           title={t("btn.close")}
           className="absolute top-3 right-3 z-10 flex items-center justify-center w-8 h-8 rounded-lg
             text-gray-400 dark:text-gray-500
-            bg-white/70 dark:bg-white/5 backdrop-blur-sm
+            bg-white/80 dark:bg-white/8
             hover:text-gray-700 dark:hover:text-white
             hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
         >

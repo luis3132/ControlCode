@@ -62,7 +62,7 @@ export function RegistryProgressBar({ progress, compact = false }: RegistryProgr
         {pct !== null ? (
           <div
             className="h-full rounded-full bg-linear-to-r from-blue-500 to-violet-500
-              transition-[width] duration-300 ease-out"
+              transition-[width] duration-150 ease-out"
             style={{ width: `${done ? 100 : pct}%` }}
           />
         ) : (

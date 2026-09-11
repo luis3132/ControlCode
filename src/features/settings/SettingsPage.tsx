@@ -53,7 +53,7 @@ function Section({ id, children }: { id: string; children: React.ReactNode }) {
 const CARD = `bg-linear-to-br from-white to-gray-50
   dark:from-gray-800 dark:to-gray-900
   rounded-xl border border-gray-200 dark:border-gray-700
-  shadow-sm hover:shadow-md transition-shadow duration-300 p-6`;
+  shadow-sm hover:shadow-md transition-shadow duration-150 p-6`;
 
 /** `embedded`: dentro del modal, que ya pone su propio marco, título y scroll. */
 export function SettingsPage({ embedded = false }: { embedded?: boolean } = {}) {

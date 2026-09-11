@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AddIcon, BoxIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon } from "neogestify-ui-components";
+import { AddIcon, Badge, BoxIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon, Tooltip } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { agentIcon } from "@/features/agents/agentIcons";
@@ -70,11 +70,9 @@ function WorkspaceCard({ ws, onOpenAgent, onWorkspaceMenu, onAgentMenu }: {
           {ws.title}
         </span>
         {ws.isPrimary && (
-          <span className="shrink-0 h-[15px] px-1.5 rounded text-[9px] font-bold tracking-wide
-            flex items-center bg-gray-300/70 dark:bg-white/10
-            text-gray-600 dark:text-gray-400">
+          <Badge variant="outline" size="sm" className="shrink-0">
             {t("workspaces.primary")}
-          </span>
+          </Badge>
         )}
       </div>
 
@@ -198,7 +196,7 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
   return (
     <aside
       style={{ width }}
-      className="flex flex-col shrink-0 min-h-0
+      className="cc-fade flex flex-col shrink-0 min-h-0
         bg-gray-50 dark:bg-[#0a0f16]
         border-r border-gray-200 dark:border-white/7"
     >
@@ -224,16 +222,17 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
             )}
           </span>
         )}
-        <button
-          onClick={() => navigate("/")}
-          title={t("workspaces.new")}
-          className="flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
-            text-gray-400 dark:text-white/35
-            hover:text-gray-700 dark:hover:text-white
-            hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
-        >
-          <AddIcon className="w-3.5 h-3.5" />
-        </button>
+        <Tooltip content={t("workspaces.new")} placement="bottom">
+          <button
+            onClick={() => navigate("/")}
+            className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
+              text-gray-400 dark:text-white/35
+              hover:text-gray-700 dark:hover:text-white
+              hover:bg-gray-200 dark:hover:bg-white/10"
+          >
+            <AddIcon className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
       </div>
 
       <div className="flex-1 min-h-0 cc-scroll py-1">

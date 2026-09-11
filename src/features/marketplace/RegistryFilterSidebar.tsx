@@ -1,6 +1,9 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AnimateSpin, Button, CloudIcon, FolderIcon, GearIcon, IconReset } from "neogestify-ui-components";
+import { AnimateSpin, Button, CloudIcon, FolderIcon, GearIcon, IconReset, Tooltip } from "neogestify-ui-components";
+
+import { useUiStore } from "@/app/uiStore";
+import { PanelIcon } from "@/app/icons";
 
 import type { RegistrySummary } from "./types";
 
@@ -31,6 +34,8 @@ export function RegistryFilterSidebar({
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const collapsed = useUiStore((s) => s.marketplaceReposCollapsed);
+  const toggle = useUiStore((s) => s.toggleMarketplaceRepos);
 
   const itemClass = (active: boolean) =>
     `transition-colors ${
@@ -43,19 +48,57 @@ export function RegistryFilterSidebar({
     // `sticky` desde md: con listas largas de skills, perder los filtros al scrollear
     // obliga a volver arriba para cambiar de repo.
     <aside
-      className="w-full md:w-56 lg:w-64 shrink-0 flex flex-col gap-2
-        md:sticky md:top-10 md:self-start"
+      className={`shrink-0 flex flex-col gap-2 md:sticky md:top-10 md:self-start
+        ${collapsed ? "w-full md:w-10" : "w-full md:w-56 lg:w-64"}`}
     >
-      <Button
+      {/* Lo que se viene a hacer acá es mirar skills; los repos son la herramienta, no el
+          contenido. Plegada, la grilla se lleva esos 256px — que a 1440 son dos tarjetas
+          más por fila. El estado se recuerda. */}
+      <Tooltip content={collapsed ? t("marketplace.registries.expand") : t("marketplace.registries.collapse")}>
+        <button
+          onClick={toggle}
+          className={`cc-t flex items-center gap-1.5 h-8 rounded-lg shrink-0
+            border border-gray-200 dark:border-gray-700
+            text-gray-500 dark:text-gray-400
+            hover:text-gray-800 dark:hover:text-white
+            hover:bg-gray-100 dark:hover:bg-white/5
+            ${collapsed ? "w-full md:w-10 justify-center" : "w-full px-2.5"}`}
+        >
+          <PanelIcon className="w-3.5 h-3.5 shrink-0" />
+          {!collapsed && (
+            <span className="text-xs truncate">{t("marketplace.registries.collapse")}</span>
+          )}
+          {collapsed && selected !== null && (
+            <span className="absolute w-1.5 h-1.5 rounded-full bg-violet-500 translate-x-3 -translate-y-2.5" />
+          )}
+        </button>
+      </Tooltip>
+
+      {collapsed && (
+        <Tooltip content={t("marketplace.manageRegistries")}>
+          <button
+            onClick={() => navigate("/marketplace/registries")}
+            className="cc-t hidden md:flex items-center justify-center w-10 h-8 rounded-lg shrink-0
+              border border-gray-200 dark:border-gray-700
+              text-gray-500 dark:text-gray-400
+              hover:text-gray-800 dark:hover:text-white
+              hover:bg-gray-100 dark:hover:bg-white/5"
+          >
+            <GearIcon className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
+      )}
+
+      {!collapsed && <Button
         variant="outline"
         onClick={() => navigate("/marketplace/registries")}
         className="!text-xs flex items-center justify-center gap-1.5 w-full"
       >
         <GearIcon className="w-3.5 h-3.5" />
         {t("marketplace.manageRegistries")}
-      </Button>
+      </Button>}
 
-      <nav
+      {!collapsed && <nav
         className="rounded-xl border border-gray-200 dark:border-gray-700
           bg-white dark:bg-gray-800/50 overflow-hidden"
       >
@@ -131,7 +174,7 @@ export function RegistryFilterSidebar({
             })}
           </ul>
         )}
-      </nav>
+      </nav>}
     </aside>
   );
 }

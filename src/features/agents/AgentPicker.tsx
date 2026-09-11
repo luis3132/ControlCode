@@ -35,7 +35,7 @@ export function AgentPicker({ options, value, onChange }: AgentPickerProps) {
             onClick={() => onChange(option.agentId)}
             className={`
               group flex items-center gap-3 px-4 py-3 rounded-xl border text-left
-              transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed
+              transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed
               ${isSelected
                 ? "border-blue-500 bg-linear-to-br from-blue-50 to-violet-50 dark:from-blue-500/10 dark:to-violet-500/10 shadow-sm"
                 : "border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-white/[0.02] hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm"}
