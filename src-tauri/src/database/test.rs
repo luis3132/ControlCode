@@ -809,3 +809,40 @@ fn no_se_barre_una_ventana_cerrada_que_conserva_sus_tabs() {
         .unwrap();
     assert_eq!(quedan, 1);
 }
+
+/// v10 sobre una base que ya existía: la tabla de workspaces cerrados es nueva y se crea
+/// con el batch, pero el que se equivocó una vez con el orden de las migraciones conviene
+/// que lo compruebe siempre.
+#[test]
+fn migrar_una_base_v8_crea_la_tabla_de_workspaces_cerrados() {
+    let conn = base_v8();
+    schema::migrate(&conn).expect("migrar");
+
+    let existe: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'workspace_snapshots'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(existe, 1);
+}
+
+/// Un workspace cerrado tiene que sobrevivir al reseteo del bucket `default`, que es donde
+/// vive casi todo: por eso no lleva FK hacia `workspaces`.
+#[test]
+fn un_workspace_cerrado_sobrevive_a_que_borren_su_workspace() {
+    let conn = setup();
+    conn.execute(
+        "INSERT INTO workspace_snapshots (cwd, workspace_id, tabs_json, closed_at)
+         VALUES ('/p', 'ws', '[]', 0)",
+        [],
+    )
+    .unwrap();
+    conn.execute("DELETE FROM workspaces WHERE id = 'ws'", []).unwrap();
+
+    let quedan: i64 = conn
+        .query_row("SELECT COUNT(*) FROM workspace_snapshots", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(quedan, 1, "el recuerdo no puede irse con el workspace");
+}

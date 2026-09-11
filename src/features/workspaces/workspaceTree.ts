@@ -8,6 +8,7 @@
  */
 import type { Tab } from "@/features/tabs/types";
 import type { RepoInfo } from "@/features/explorer/types";
+import type { WorkspaceSnapshot } from "@/features/workspaces/snapshots";
 
 export type AgentStatus = "starting" | "running";
 
@@ -34,6 +35,10 @@ export interface WorkspaceNode {
   isWorktree: boolean;
   changedCount: number;
   agents: WorkspaceAgent[];
+  /** Cerrado a mano: no tiene agentes vivos, pero recuerda los que tenía. */
+  closed: boolean;
+  /** Cuántos agentes va a reabrir. Solo con `closed`. */
+  savedAgents: number;
 }
 
 export interface RepoGroup {
@@ -75,7 +80,10 @@ function agentOf(tab: Tab, activeTabId: string | null): WorkspaceAgent {
 export function buildWorkspaceTree(
   tabs: Tab[],
   repos: Map<string, RepoInfo>,
-  activeTabId: string | null
+  activeTabId: string | null,
+  /** Workspaces cerrados a mano: se listan igual, apagados, para poder reabrirlos. Sin
+   *  esto desaparecerían del panel al cerrar su última tab y no habría a qué volver. */
+  snapshots: WorkspaceSnapshot[] = []
 ): RepoGroup[] {
   const groups = new Map<string, RepoGroup>();
 
@@ -109,6 +117,8 @@ export function buildWorkspaceTree(
         isWorktree,
         changedCount: info?.changedCount ?? 0,
         agents: [],
+        closed: false,
+        savedAgents: 0,
       };
       group.workspaces.push(ws);
     }
@@ -117,10 +127,48 @@ export function buildWorkspaceTree(
     group.agentCount += 1;
   }
 
+  // Los cerrados entran DESPUÉS de las tabs vivas: si una carpeta se volvió a abrir por
+  // otro camino, manda lo que está corriendo y el recuerdo no la duplica.
+  for (const snap of snapshots) {
+    const info = repos.get(snap.cwd);
+    const root = info?.root ?? null;
+    const groupKey = root ?? snap.cwd;
+
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = {
+        key: groupKey,
+        name: baseName(groupKey),
+        isRepo: root !== null,
+        workspaces: [],
+        agentCount: 0,
+      };
+      groups.set(groupKey, group);
+    }
+    if (group.workspaces.some((w) => w.key === snap.cwd)) continue;
+
+    const folder = baseName(snap.cwd);
+    const isWorktree = info?.isWorktree ?? false;
+    group.workspaces.push({
+      key: snap.cwd,
+      cwd: snap.cwd,
+      title: info?.branch ?? folder,
+      subtitle: isWorktree ? `worktree · ${folder}` : folder,
+      isPrimary: root !== null && !isWorktree && snap.cwd === root,
+      isWorktree,
+      changedCount: info?.changedCount ?? 0,
+      agents: [],
+      closed: true,
+      savedAgents: snap.tabs.length,
+    });
+  }
+
   for (const group of groups.values()) {
     // El checkout principal primero: es donde se trabaja por defecto, y dejarlo mezclado
     // alfabéticamente entre worktrees lo esconde.
     group.workspaces.sort((a, b) => {
+      // Lo cerrado al fondo: lo que está corriendo es lo que se mira.
+      if (a.closed !== b.closed) return a.closed ? 1 : -1;
       if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
       return a.title.localeCompare(b.title);
     });
@@ -133,10 +181,14 @@ export function buildWorkspaceTree(
 }
 
 /** Los `cwd` distintos que hay que resolver contra git. */
-export function cwdsToResolve(tabs: Tab[], resolved: Map<string, RepoInfo>): string[] {
+export function cwdsToResolve(
+  tabs: Tab[],
+  resolved: Map<string, RepoInfo>,
+  snapshots: WorkspaceSnapshot[] = []
+): string[] {
   const seen = new Set<string>();
-  for (const tab of tabs) {
-    if (!resolved.has(tab.cwd)) seen.add(tab.cwd);
+  for (const cwd of [...tabs.map((t) => t.cwd), ...snapshots.map((s) => s.cwd)]) {
+    if (!resolved.has(cwd)) seen.add(cwd);
   }
   return [...seen];
 }

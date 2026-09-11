@@ -462,5 +462,8 @@
   "skills.palette.key.scope": "change scope",
   "skills.palette.key.close": "close",
   "skills.palette.searchHint": "Type to search the repositories too.",
-  "newAgent.title": "Open another agent here"
+  "newAgent.title": "Open another agent here",
+  "workspaces.close": "Close workspace",
+  "workspaces.forget": "Forget this workspace",
+  "workspaces.saved": "{{n}} agents saved"
 }

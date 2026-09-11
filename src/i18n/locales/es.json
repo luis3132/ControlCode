@@ -462,5 +462,8 @@
   "skills.palette.key.scope": "cambiar alcance",
   "skills.palette.key.close": "cerrar",
   "skills.palette.searchHint": "Escribí para buscar también en los repositorios.",
-  "newAgent.title": "Abrir otro agente acá"
+  "newAgent.title": "Abrir otro agente acá",
+  "workspaces.close": "Cerrar workspace",
+  "workspaces.forget": "Olvidar este workspace",
+  "workspaces.saved": "{{n}} agentes guardados"
 }

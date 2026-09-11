@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 9;
+const SCHEMA_VERSION: i32 = 10;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -245,6 +245,26 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
          CREATE TABLE IF NOT EXISTS settings (
              key   TEXT PRIMARY KEY,
              value TEXT NOT NULL
+         );
+
+         -- v10 — Workspaces cerrados a mano, para poder volver a abrirlos.
+         --
+         -- Sin esto, cerrar todas las tabs de una carpeta hacía desaparecer al workspace
+         -- del panel: se deriva de las tabs abiertas, así que sin ninguna no queda nada
+         -- que mostrar ni a qué volver.
+         --
+         -- La clave es el `cwd` y no un id: un workspace ES una carpeta, y al reabrirlo
+         -- hay que encontrarlo por la carpeta que el usuario vuelve a elegir. Las tabs se
+         -- guardan desnormalizadas como JSON por el mismo motivo que en `session_history`:
+         -- las filas de `tabs` se borran al cerrarlas y se llevarían el recuerdo puesto.
+         --
+         -- No hay FK hacia `workspaces`: un snapshot tiene que sobrevivir al reseteo del
+         -- bucket `default`, que es justo donde vive casi todo.
+         CREATE TABLE IF NOT EXISTS workspace_snapshots (
+             cwd          TEXT PRIMARY KEY,
+             workspace_id TEXT NOT NULL,
+             tabs_json    TEXT NOT NULL,
+             closed_at    INTEGER NOT NULL
          );
 
          -- TUIs que el usuario agrega a mano (las soportadas de fábrica están hardcodeadas

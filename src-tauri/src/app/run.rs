@@ -31,6 +31,11 @@ pub fn run() {
             crate::database::default_workspace_has_content,
             crate::database::db_get_window_workspace,
             crate::database::db_list_session_history,
+            // Workspaces cerrados a mano (v10)
+            crate::database::save_workspace_snapshot,
+            crate::database::list_workspace_snapshots,
+            crate::database::take_workspace_snapshot,
+            crate::database::forget_workspace_snapshot,
             crate::database::find_open_tab_for_session,
             // Persistencia SQLite — ventanas y tabs
             crate::database::db_save_window_state,

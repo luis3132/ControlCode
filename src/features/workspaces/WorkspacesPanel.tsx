@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AddIcon, Badge, BoxIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon, Tooltip } from "neogestify-ui-components";
+import {
+  AddIcon, ArchiveIcon, Badge, BoxIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon,
+  TrashIcon, Tooltip,
+} from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { agentIcon } from "@/features/agents/agentIcons";
@@ -10,6 +13,11 @@ import { elapsed } from "@/features/workspaces/useRepoInfo";
 import type { RepoGroup, WorkspaceAgent, WorkspaceNode } from "@/features/workspaces/workspaceTree";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { SkillPalette, type SkillScopeTarget } from "@/features/skills/SkillPalette";
+import { useSnapshotsStore } from "@/features/workspaces/snapshotsStore";
+import { useSkillsStore } from "@/features/skills/store";
+import { attachSkillsToTab } from "@/features/skills/attachSkills";
+import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
+import { flushPendingSave } from "@/features/tabs/persistence";
 
 function AgentRow({ agent, onClick, onContextMenu }: {
   agent: WorkspaceAgent;
@@ -110,6 +118,7 @@ function WorkspaceRow({ ws, onClick, onContextMenu }: {
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation();
   const running = ws.agents.some((a) => a.status === "running");
   return (
     <button
@@ -118,15 +127,26 @@ function WorkspaceRow({ ws, onClick, onContextMenu }: {
       className="flex items-center gap-2.5 mx-2 px-2 py-1.5 rounded-lg w-[calc(100%-1rem)] text-left
         hover:bg-gray-200/60 dark:hover:bg-white/5 transition-colors duration-150"
     >
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0
-        ${running ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/20"}`} />
+      {ws.closed ? (
+        <ArchiveIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/25" />
+      ) : (
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0
+          ${running ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/20"}`} />
+      )}
       <span className="flex flex-col gap-px min-w-0 flex-1">
-        <span className="truncate text-[11.5px] text-gray-700 dark:text-gray-300">{ws.title}</span>
-        <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30">{ws.subtitle}</span>
+        <span className={`truncate text-[11.5px]
+          ${ws.closed ? "text-gray-400 dark:text-white/35" : "text-gray-700 dark:text-gray-300"}`}>
+          {ws.title}
+        </span>
+        <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30">
+          {ws.closed ? t("workspaces.saved", { n: ws.savedAgents }) : ws.subtitle}
+        </span>
       </span>
-      <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
-        {ws.agents.length}
-      </span>
+      {!ws.closed && (
+        <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
+          {ws.agents.length}
+        </span>
+      )}
     </button>
   );
 }
@@ -144,10 +164,18 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
   const activateTab = useTabsStore((s) => s.activateTab);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [menu, setMenu] = useState<{ x: number; y: number; target: SkillScopeTarget } | null>(null);
+  const [menu, setMenu] = useState<
+    { x: number; y: number; ws: WorkspaceNode | null; target: SkillScopeTarget } | null
+  >(null);
   const [skillTarget, setSkillTarget] = useState<SkillScopeTarget | null>(null);
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const closeTab = useTabsStore((s) => s.closeTab);
+  const tabs = useTabsStore((s) => s.tabs);
+  const addTab = useTabsStore((s) => s.addTab);
+  const skills = useSkillsStore((s) => s.skills);
+  const saveSnapshot = useSnapshotsStore((s) => s.save);
+  const takeSnapshot = useSnapshotsStore((s) => s.take);
+  const forgetSnapshot = useSnapshotsStore((s) => s.forget);
 
   const running = useMemo(
     () => groups.flatMap((g) => g.workspaces).flatMap((w) => w.agents).filter((a) => a.status === "running").length,
@@ -169,6 +197,7 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
     setMenu({
       x: e.clientX,
       y: e.clientY,
+      ws,
       target: { scope: "workspace", workspaceId, cwd: ws.cwd, agentId: null, label: ws.title },
     });
 
@@ -176,6 +205,7 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
     setMenu({
       x: e.clientX,
       y: e.clientY,
+      ws: null,
       target: {
         scope: "tab",
         workspaceId,
@@ -184,6 +214,70 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
         label: agent.title,
       },
     });
+
+  /**
+   * Cerrar un workspace entero: se guarda lo que tenía y recién después se cierran sus
+   * tabs. En ese orden, porque cerrar una tab se lleva puesto lo que hay que recordar —
+   * su sesión y, por cascada en la base, las skills que tenía adjuntas.
+   */
+  const closeWorkspace = async (ws: WorkspaceNode) => {
+    const mine = tabs.filter((tab) => tab.cwd === ws.cwd);
+    if (mine.length === 0) return;
+
+    await saveSnapshot(ws.cwd, workspaceId, mine.map((tab) => ({
+      title: tab.title,
+      titleIsCustom: tab.titleIsCustom ?? null,
+      agentId: tab.agentId,
+      agentLabel: tab.agentLabel,
+      command: tab.command,
+      sessionId: tab.sessionId ?? null,
+      accountId: tab.accountId ?? null,
+      prelaunch: tab.prelaunch ?? [],
+      skillIds: skills
+        .filter((s) => s.usedBy.some((u) => u.scope === "tab" && u.tabId === tab.id))
+        .map((s) => s.id),
+    })));
+
+    for (const tab of mine) closeTab(tab.id);
+  };
+
+  /** Reabrirlo: se recrean sus agentes con su conversación y sus skills. */
+  const reopenWorkspace = async (ws: WorkspaceNode) => {
+    const snapshot = await takeSnapshot(ws.cwd);
+    if (!snapshot) return;
+
+    let first: string | null = null;
+    for (const saved of snapshot.tabs) {
+      const tabId = addTab({
+        cwd: snapshot.cwd,
+        agent: {
+          id: saved.agentId,
+          label: saved.agentLabel,
+          command: saved.command,
+          available: true,
+        },
+        title: saved.title,
+        titleIsCustom: saved.titleIsCustom ?? undefined,
+        sessionId: saved.sessionId ?? undefined,
+        accountId: saved.accountId ?? undefined,
+        prelaunch: saved.prelaunch,
+      });
+      first ??= tabId;
+
+      if (saved.skillIds.length > 0) {
+        // Los symlinks tienen que existir ANTES de que arranque el agente: varias TUIs
+        // solo leen su carpeta de skills al boot. `flushPendingSave` va adentro de
+        // `attachSkillsToTab`, que es lo que hace que la fila de la tab exista en SQLite.
+        registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, saved.skillIds));
+      }
+    }
+
+    if (first) {
+      await flushPendingSave();
+      activateTab(first);
+      navigate("/workspace");
+    }
+  };
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups((prev) => {
@@ -276,7 +370,9 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
                     : <WorkspaceRow
                         key={ws.key}
                         ws={ws}
-                        onClick={() => openAgent(ws.agents[0].tabId)}
+                        onClick={() => (ws.closed
+                          ? reopenWorkspace(ws).catch(console.error)
+                          : openAgent(ws.agents[0].tabId))}
                         onContextMenu={(e) => onWorkspaceMenu(e, ws)}
                       />;
                 })}
@@ -305,6 +401,26 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
                   icon: <CloseIcon className="w-4 h-4" />,
                   danger: true,
                   onSelect: () => closeTab(menu.target.tabId!),
+                }]
+              : []),
+            // Sobre un workspace CERRADO no hay nada que cerrar: lo que se puede es
+            // olvidarlo, que es lo único destructivo de verdad acá.
+            ...(menu.ws && !menu.ws.closed
+              ? [{
+                  key: "close-ws",
+                  label: t("workspaces.close"),
+                  icon: <CloseIcon className="w-4 h-4" />,
+                  danger: true,
+                  onSelect: () => { closeWorkspace(menu.ws!).catch(console.error); },
+                }]
+              : []),
+            ...(menu.ws?.closed
+              ? [{
+                  key: "forget-ws",
+                  label: t("workspaces.forget"),
+                  icon: <TrashIcon className="w-4 h-4" />,
+                  danger: true,
+                  onSelect: () => { forgetSnapshot(menu.ws!.cwd).catch(console.error); },
                 }]
               : []),
           ]}

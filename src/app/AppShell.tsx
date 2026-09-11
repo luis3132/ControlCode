@@ -17,6 +17,7 @@ import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { useUiStore } from "@/app/uiStore";
 import { buildWorkspaceTree } from "@/features/workspaces/workspaceTree";
 import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
+import { useSnapshotsStore } from "@/features/workspaces/snapshotsStore";
 import { ResizeHandles } from "@/app/ResizeHandles";
 import { useGlobalShortcuts } from "@/app/useGlobalShortcuts";
 import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
@@ -76,10 +77,19 @@ export function AppShell() {
 
   // El árbol del panel izquierdo se DERIVA de las tabs abiertas más lo que git diga de
   // cada `cwd`. No hay tabla nueva: un workspace es una carpeta con agentes adentro.
-  const repos = useRepoInfo(useMemo(() => tabs.map((tab) => tab.cwd), [tabs]));
+  const snapshots = useSnapshotsStore((s) => s.snapshots);
+  const loadSnapshots = useSnapshotsStore((s) => s.load);
+  useEffect(() => { loadSnapshots().catch(console.error); }, [loadSnapshots]);
+
+  // Las carpetas de los cerrados también se resuelven contra git: si no, un workspace
+  // cerrado no muestra su rama ni cae en el grupo de su repo.
+  const repos = useRepoInfo(useMemo(
+    () => [...tabs.map((tab) => tab.cwd), ...snapshots.map((s) => s.cwd)],
+    [tabs, snapshots]
+  ));
   const groups = useMemo(
-    () => buildWorkspaceTree(tabs, repos, activeTabId),
-    [tabs, repos, activeTabId]
+    () => buildWorkspaceTree(tabs, repos, activeTabId, snapshots),
+    [tabs, repos, activeTabId, snapshots]
   );
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const activeRepo = activeTab ? repos.get(activeTab.cwd) ?? null : null;

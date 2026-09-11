@@ -144,3 +144,61 @@ describe("fleetCounts", () => {
     expect(fleetCounts(tree)).toEqual({ running: 2, starting: 1 });
   });
 });
+
+describe("workspaces cerrados", () => {
+  const snap = (cwd: string, tabs = 2) => ({
+    cwd, workspaceId: "ws", closedAt: 0,
+    tabs: Array.from({ length: tabs }, () => ({
+      title: "t", agentId: "claude-code", agentLabel: "Claude Code", command: "claude",
+      prelaunch: [], skillIds: [],
+    })),
+  });
+
+  it("un workspace cerrado sigue en el panel", () => {
+    // Sin esto desaparece al cerrar su última tab y no queda a qué volver.
+    const tree = buildWorkspaceTree([], new Map(), null, [snap("/p")]);
+    expect(tree).toHaveLength(1);
+    expect(tree[0].workspaces[0].closed).toBe(true);
+    expect(tree[0].workspaces[0].savedAgents).toBe(2);
+  });
+
+  it("entra en el grupo de su repo, junto a los abiertos", () => {
+    const abierta = tab("/p");
+    const repos = new Map([
+      ["/p", repo("/p", "main")],
+      ["/wt", repo("/p", "feat", true)],
+    ]);
+    const tree = buildWorkspaceTree([abierta], repos, null, [snap("/wt")]);
+    expect(tree).toHaveLength(1);
+    expect(tree[0].workspaces.map((w) => w.closed)).toEqual([false, true]);
+  });
+
+  it("lo cerrado va al fondo aunque sea PRIMARY", () => {
+    const repos = new Map([
+      ["/p", repo("/p", "main")],
+      ["/wt", repo("/p", "feat", true)],
+    ]);
+    const tree = buildWorkspaceTree([tab("/wt")], repos, null, [snap("/p")]);
+    expect(tree[0].workspaces.map((w) => w.cwd)).toEqual(["/wt", "/p"]);
+  });
+
+  it("una carpeta que se volvió a abrir no aparece dos veces", () => {
+    // El recuerdo puede quedar si se reabrió por otro camino; manda lo que corre.
+    const tree = buildWorkspaceTree([tab("/p")], new Map(), null, [snap("/p")]);
+    expect(tree[0].workspaces).toHaveLength(1);
+    expect(tree[0].workspaces[0].closed).toBe(false);
+  });
+
+  it("sin agentes vivos, el grupo no cuenta ninguno", () => {
+    const tree = buildWorkspaceTree([], new Map(), null, [snap("/p", 3)]);
+    expect(tree[0].agentCount).toBe(0);
+  });
+});
+
+describe("cwdsToResolve con cerrados", () => {
+  it("también resuelve las carpetas de los cerrados", () => {
+    // Sin esto, un workspace cerrado nunca muestra su rama ni su grupo de repo.
+    const snaps = [{ cwd: "/cerrada", workspaceId: "ws", closedAt: 0, tabs: [] }];
+    expect(cwdsToResolve([tab("/viva")], new Map(), snaps).sort()).toEqual(["/cerrada", "/viva"]);
+  });
+});
