@@ -11,6 +11,7 @@ pub mod ipc;
 mod marketplace;
 mod orchestrator;
 mod prelaunch;
+mod runs;
 mod session;
 mod skills;
 mod terminal;

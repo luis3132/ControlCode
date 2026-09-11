@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 10;
+const SCHEMA_VERSION: i32 = 11;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -367,7 +367,63 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              name       TEXT NOT NULL UNIQUE,
              command    TEXT NOT NULL,
              created_at INTEGER NOT NULL
-         );",
+         );
+
+         -- v11 — Agentes headless: los que corren sin terminal y sin que nadie los mire.
+         --
+         -- Son OTRA COSA que las tabs, aunque lancen la misma TUI. Una tab es un PTY que
+         -- el usuario mira y tipea, y su fuente de verdad mientras la app corre es el
+         -- store del frontend (SQLite es su reflejo con debounce). Una tarea headless es
+         -- un proceso con el stdout redirigido del que la app es dueña de punta a punta,
+         -- así que acá SQLite sí es la fuente de verdad: sobrevive a cerrar la ventana y
+         -- es lo que la consola de flota lee.
+         CREATE TABLE IF NOT EXISTS runs (
+             id           TEXT PRIMARY KEY,
+             workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+             objective    TEXT NOT NULL,
+             cwd          TEXT NOT NULL,
+             -- running | done | failed | cancelled
+             status       TEXT NOT NULL DEFAULT 'running',
+             max_parallel INTEGER NOT NULL DEFAULT 2,
+             budget_usd   REAL,
+             spent_usd    REAL NOT NULL DEFAULT 0,
+             created_at   INTEGER NOT NULL,
+             ended_at     INTEGER
+         );
+
+         -- Una fila = una tarjeta de la consola.
+         CREATE TABLE IF NOT EXISTS tasks (
+             id         TEXT PRIMARY KEY,
+             run_id     TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+             title      TEXT NOT NULL,
+             prompt     TEXT NOT NULL,
+             agent_id   TEXT NOT NULL,
+             account_id TEXT,
+             model      TEXT,
+             cwd        TEXT NOT NULL,
+             budget_usd REAL,
+             -- ready | running | done | failed | cancelled
+             status     TEXT NOT NULL DEFAULT 'ready',
+             -- Lo fija la app ANTES de lanzar (--session-id), así que la fila y la sesión
+             -- de la TUI quedan atadas desde el principio. Es lo que después permite
+             -- reabrir la tarea como tab con --resume sin tener que descubrir nada.
+             session_id TEXT,
+             attempt    INTEGER NOT NULL DEFAULT 0,
+             result     TEXT,
+             error      TEXT,
+             cost_usd   REAL,
+             tokens_in  INTEGER,
+             tokens_out INTEGER,
+             -- El NDJSON crudo que escupió la TUI. El detalle vive en ese archivo y no en
+             -- la base: son miles de eventos por tarea que nadie consulta dos veces, y
+             -- meterlos acá sería inflar `data.db` con ruido.
+             events_path TEXT,
+             started_at INTEGER,
+             ended_at   INTEGER,
+             created_at INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
+         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);",
     )?;
 
     // Columna agregada después de que `tabs` ya existía en instalaciones reales, así que

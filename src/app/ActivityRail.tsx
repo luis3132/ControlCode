@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Badge, BoxIcon, ClockIcon, CloudIcon, GearIcon, StackIcon, Tooltip, UserIcon } from "neogestify-ui-components";
+import { Badge, BoxIcon, ClockIcon, CloudIcon, GearIcon, NetworkIcon, StackIcon, Tooltip, UserIcon } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
 import { shortcutForPath } from "@/app/shortcuts";
@@ -90,6 +90,10 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
 
       <RailButton label={t("sidebar.sessions")} path="/sessions" active={on("/sessions")} onClick={() => navigate("/sessions")}>
         <ClockIcon className="w-[18px] h-[18px]" />
+      </RailButton>
+
+      <RailButton label={t("sidebar.fleet")} path="/fleet" active={on("/fleet")} onClick={() => navigate("/fleet")}>
+        <NetworkIcon className="w-[18px] h-[18px]" />
       </RailButton>
 
       <RailButton label={t("sidebar.skills")} path="/skills" active={on("/skills")} onClick={() => navigate("/skills")}>

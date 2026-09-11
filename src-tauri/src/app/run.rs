@@ -57,6 +57,11 @@ pub fn run() {
             // Detección de agentes
             crate::agents::agent_registry,
             crate::agents::detect_agents,
+            // Agentes headless (consola de flota)
+            crate::runs::run_list_tasks,
+            crate::runs::run_list_runs,
+            crate::runs::run_start_task,
+            crate::runs::run_cancel_task,
             // Cuentas múltiples por TUI
             crate::accounts::account_capable_agents,
             crate::accounts::list_agent_accounts,
@@ -157,6 +162,15 @@ pub fn run() {
             // antes de que haya ventanas, así la lista de skills ya la muestra al abrir.
             // Nunca falla el arranque — ver `crate::skills::bundled`.
             crate::skills::ensure_bundled_skills(app.handle(), &db);
+
+            // Las tareas headless que quedaron `running` son de una ejecución anterior:
+            // sus procesos eran hijos de la app y murieron con ella. Si no se cierran acá,
+            // la consola las muestra trabajando para siempre.
+            if let Ok(n) = crate::runs::sweep_orphans(&db) {
+                if n > 0 {
+                    eprintln!("[runs] {n} tarea(s) headless quedaron colgadas del cierre anterior");
+                }
+            }
 
             let active_id = crate::database::db_get_last_active_workspace_id(&db)?;
             let windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;
