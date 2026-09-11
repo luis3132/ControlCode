@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useAccountsStore } from "@/features/accounts/store";
+import type { AgentAccount } from "@/features/accounts/types";
 
 interface AccountPickerStepProps {
   /** TUI elegida. Sin ella no hay cuentas que ofrecer. */
@@ -8,6 +9,39 @@ interface AccountPickerStepProps {
   /** `undefined` = la cuenta del sistema. */
   value: string | undefined;
   onChange: (accountId: string | undefined) => void;
+  /**
+   * Rotularse a sí mismo. Se apaga donde el contenedor ya puso el título —el panel de
+   * "Cuenta" del diálogo de agente nuevo— para no repetir la misma palabra dos veces
+   * seguidas.
+   */
+  showLabel?: boolean;
+}
+
+/**
+ * Las cuentas creadas para una TUI, cargando el store si todavía nadie lo hizo.
+ *
+ * Vive acá y no adentro del componente porque quien lo ENVUELVE también necesita el dato:
+ * si no hay ninguna cuenta, este paso no existe, y el wizard tiene que saberlo para no
+ * ofrecer un paso con una sola respuesta posible. Con la carga adentro del hook, preguntar
+ * por las cuentas alcanza para que lleguen.
+ */
+export function useAgentAccounts(agentId: string | null, preload = false): AgentAccount[] {
+  const accounts = useAccountsStore((s) => s.accounts);
+  const loaded = useAccountsStore((s) => s.loaded);
+  const load = useAccountsStore((s) => s.load);
+  // Sin TUI no se carga nada: quien pregunta por las cuentas de `null` suele ser un
+  // diálogo que todavía no se abrió, y leer el disco por una pantalla que nadie está
+  // mirando es trabajo al pedo en el arranque de cada ventana. `preload` es para el caso
+  // contrario: una pantalla que YA está abierta y necesita las cuentas cargadas antes de
+  // saber de qué TUI van a ser.
+  useEffect(() => {
+    if ((preload || agentId !== null) && !loaded) load().catch(console.error);
+  }, [preload, agentId, loaded, load]);
+
+  return useMemo(
+    () => (agentId === null ? [] : accounts.filter((a) => a.agentId === agentId)),
+    [accounts, agentId]
+  );
 }
 
 /**
@@ -22,20 +56,12 @@ interface AccountPickerStepProps {
  * configuración al arrancar, así que cambiarla en caliente no haría nada. Para otra cuenta,
  * otra tab.
  */
-export function AccountPickerStep({ agentId, value, onChange }: AccountPickerStepProps) {
+export function AccountPickerStep({ agentId, value, onChange, showLabel = true }: AccountPickerStepProps) {
   const { t } = useTranslation();
-  const accounts = useAccountsStore((s) => s.accounts);
-  const loaded = useAccountsStore((s) => s.loaded);
-  const load = useAccountsStore((s) => s.load);
-  useEffect(() => { if (!loaded) load().catch(console.error); }, [loaded, load]);
+  const forAgent = useAgentAccounts(agentId);
 
-  const forAgent = useMemo(
-    () => accounts.filter((a) => a.agentId === agentId),
-    [accounts, agentId]
-  );
-
-  // Una cuenta elegida antes puede haber desaparecido (se borró desde Settings mientras el
-  // wizard estaba abierto, o se cambió de agente) — se vuelve a la del sistema en vez de
+  // Una cuenta elegida antes puede haber desaparecido (se borró desde Cuentas mientras el
+  // diálogo estaba abierto, o se cambió de agente) — se vuelve a la del sistema en vez de
   // dejar seleccionada una que ya no existe.
   useEffect(() => {
     if (value && !forAgent.some((a) => a.id === value)) onChange(undefined);
@@ -56,10 +82,12 @@ export function AccountPickerStep({ agentId, value, onChange }: AccountPickerSte
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-[11px] font-semibold uppercase tracking-widest
-        text-gray-400 dark:text-white/35">
-        {t("accounts.pick")}
-      </span>
+      {showLabel && (
+        <span className="text-[11px] font-semibold uppercase tracking-widest
+          text-gray-400 dark:text-white/35">
+          {t("accounts.pick")}
+        </span>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {options.map((option) => {
@@ -69,6 +97,7 @@ export function AccountPickerStep({ agentId, value, onChange }: AccountPickerSte
               key={option.id ?? "system"}
               type="button"
               onClick={() => onChange(option.id)}
+              aria-pressed={isSelected}
               className={`
                 flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg border text-left
                 transition-colors duration-200 min-w-32
