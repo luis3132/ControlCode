@@ -427,5 +427,7 @@
   "explorer.tab.changes": "Changes",
   "skills.scope.failed": "Some changes couldn't be applied",
   "marketplace.registries.collapse": "Collapse repositories",
-  "marketplace.registries.expand": "Repositories"
+  "marketplace.registries.expand": "Repositories",
+  "settings.terminal.gpu": "Draw text on the GPU",
+  "settings.terminal.gpu.desc": "Crisper text and smoother scrolling. It depends on your graphics driver: if you see flicker or blank terminals, turn it off and it falls back to normal drawing."
 }

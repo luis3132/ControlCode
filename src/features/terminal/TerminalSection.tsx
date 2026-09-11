@@ -6,6 +6,8 @@ export function TerminalSection() {
   const { t } = useTranslation();
   const inputMarks = useTerminalPrefsStore((s) => s.inputMarks);
   const setInputMarks = useTerminalPrefsStore((s) => s.setInputMarks);
+  const gpuRenderer = useTerminalPrefsStore((s) => s.gpuRenderer);
+  const setGpuRenderer = useTerminalPrefsStore((s) => s.setGpuRenderer);
   return (
     <section className="bg-linear-to-br from-white to-gray-50
       dark:from-gray-800 dark:to-gray-900
@@ -24,6 +26,16 @@ export function TerminalSection() {
         onChange={setInputMarks}
         label={t("settings.terminal.marks")}
         description={t("settings.terminal.marks.desc")}
+        labelPosition="left"
+      />
+
+      <div className="h-4" />
+
+      <Switch
+        checked={gpuRenderer}
+        onChange={setGpuRenderer}
+        label={t("settings.terminal.gpu")}
+        description={t("settings.terminal.gpu.desc")}
         labelPosition="left"
       />
 

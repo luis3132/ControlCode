@@ -427,5 +427,7 @@
   "explorer.tab.changes": "Cambios",
   "skills.scope.failed": "No se pudieron aplicar todos los cambios",
   "marketplace.registries.collapse": "Plegar repositorios",
-  "marketplace.registries.expand": "Repositorios"
+  "marketplace.registries.expand": "Repositorios",
+  "settings.terminal.gpu": "Dibujar el texto por GPU",
+  "settings.terminal.gpu.desc": "Texto más nítido y scroll más fluido. Depende del driver de video: si ves parpadeos o terminales en blanco, apagalo y se vuelve al dibujado normal."
 }

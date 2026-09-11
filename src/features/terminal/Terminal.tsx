@@ -102,6 +102,51 @@ export function Terminal({
   // cambiar el tema — leerlo por ref evita meterlo en las dependencias y matar el PTY.
   const themeRef = useRef(theme);
   themeRef.current = theme;
+  /** Se apaga solo si el contexto se pierde: reintentar es lo que encadena el desastre. */
+  const gpuBrokenRef = useRef(false);
+  // Reactivo (no `getState()`): apagarlo en Configuración tiene que soltar el contexto de
+  // la terminal que estés mirando en ese momento, no en la próxima que abras.
+  const gpuRenderer = useTerminalPrefsStore((s) => s.gpuRenderer);
+
+  // ── Renderizador por GPU, SOLO en la terminal activa ─────────────────────
+  //
+  // Por defecto xterm dibuja con el DOM: un `<span>` por tramo de texto. Es el camino más
+  // compatible y el más borroso — el navegador redondea cada celda a píxeles CSS, y con
+  // escalado fraccionario (Wayland al 125%) la grilla queda corrida. WebGL rasteriza los
+  // glifos a la resolución REAL del dispositivo.
+  //
+  // Lo importante es el "solo en la activa". Cada terminal viva pedía su propio contexto
+  // WebGL, y acá TODAS las tabs quedan montadas para no matar sus procesos: con unas
+  // pocas abiertas se llega al tope de contextos del motor, y a partir de ahí se pierden
+  // en cadena — parpadeos, paneles en blanco, terminales que dejan de pintar. Atado a la
+  // tab que se está mirando, nunca hay más de uno.
+  //
+  // Y si el contexto igual se pierde, no se reintenta: se queda en DOM para siempre. Un
+  // reintento en bucle es peor que el problema que arregla.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term || !isActive || !gpuRenderer || gpuBrokenRef.current) return;
+
+    let addon: WebglAddon | null = null;
+    try {
+      addon = new WebglAddon();
+      addon.onContextLoss(() => {
+        gpuBrokenRef.current = true;
+        addon?.dispose();
+        addon = null;
+      });
+      term.loadAddon(addon);
+    } catch {
+      // Sin WebGL en esta máquina se sigue con el DOM, que es el camino de siempre.
+      gpuBrokenRef.current = true;
+      addon = null;
+    }
+
+    return () => {
+      addon?.dispose();
+      addon = null;
+    };
+  }, [isActive, gpuRenderer]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -142,30 +187,6 @@ export function Terminal({
     term.loadAddon(webLinksAddon);
     term.open(containerRef.current);
     termRef.current = term;
-
-    // ── Renderizador WebGL ───────────────────────────────────
-    //
-    // Por defecto xterm dibuja con el DOM: un `<span>` por tramo de texto. Es el camino
-    // más compatible y el más borroso — el navegador redondea cada celda a píxeles CSS, y
-    // con escalado fraccionario (Wayland al 125%) eso deja el texto desalineado y sucio.
-    // WebGL rasteriza los glifos a una textura a la resolución REAL del dispositivo.
-    //
-    // Va después de `open()` (necesita el canvas) y con plan B explícito: el contexto se
-    // puede perder (el compositor lo recicla, o se llega al tope de contextos vivos si hay
-    // muchas tabs abiertas). Al perderlo se descarta el addon y xterm vuelve solo al DOM:
-    // peor aspecto, pero nunca una terminal en blanco.
-    let webgl: WebglAddon | null = null;
-    try {
-      webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        webgl?.dispose();
-        webgl = null;
-      });
-      term.loadAddon(webgl);
-    } catch {
-      // Sin WebGL disponible se sigue con el DOM. No es un error que valga la pena contar.
-      webgl = null;
-    }
 
     // Las TUIs modernas preguntan qué sabe hacer la terminal y ESPERAN respuesta antes de
     // dibujar. xterm.js no contesta varias de esas consultas, y sin respuesta OpenCode se
@@ -416,7 +437,6 @@ export function Terminal({
       unlistenData?.();
       unlistenExit?.();
       dpr.removeEventListener("change", onDprChange);
-      webgl?.dispose();
       if (ptyIdRef.current !== null) {
         // Antes había un guardia acá para no matar un PTY que estaba viajando a otra
         // ventana. Ese camino ya no existe: se cambia de workspace en el lugar, así que
