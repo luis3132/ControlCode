@@ -6,7 +6,7 @@ import { RefreshIcon } from "@/app/icons";
 import { agentIcon } from "@/features/agents/agentIcons";
 import {
   WINDOW_SECS, agentAccountUsage, claudeLiveUsage, formatAgo, formatRemaining, formatTokens,
-  planLabel, totalOf, type AccountUsage, type LiveUsage,
+  isUsageFresh, planLabel, totalOf, type AccountUsage, type LiveUsage,
 } from "./usage";
 import { accountEnv } from "./ipc";
 import type { AgentAccount } from "./types";
@@ -46,7 +46,10 @@ export function AccountUsagePopover({ account, cwd }: {
   const [usage, setUsage] = useState<AccountUsage | null>(null);
   const [failed, setFailed] = useState(false);
   const [live, setLive] = useState<LiveUsage | null>(null);
+  /** Sin nada que mostrar todavía. */
   const [asking, setAsking] = useState(false);
+  /** Hay un dato en pantalla y se está pidiendo uno nuevo por detrás. */
+  const [refreshing, setRefreshing] = useState(false);
   /** Sube al apretar refrescar: obliga a preguntar de nuevo en vez de releer la caché. */
   const [reload, setReload] = useState(0);
   const Icon = agentIcon(account.agentId, account.agentId);
@@ -61,23 +64,44 @@ export function AccountUsagePopover({ account, cwd }: {
     return () => { stale = true; };
   }, [account]);
 
-  // El cupo del plan no está en ningún archivo: hay que preguntárselo a la TUI. Cuesta
-  // unos segundos y levanta un proceso, así que se hace al abrir el panel y una sola vez.
+  // El cupo del plan no está en ningún archivo: hay que preguntárselo a la TUI, y eso
+  // cuesta levantarla entera. Así que primero se muestra lo último guardado —que sobrevive
+  // al cierre de la app— y recién después, si venció o si lo pidió el usuario, se vuelve a
+  // preguntar. El panel nunca queda en blanco esperando.
   useEffect(() => {
     if (account.agentId !== "claude-code" || !cwd) return;
     let stale = false;
-    setLive(null);
-    setAsking(true);
 
-    const vars = realAccountId(account) ? accountEnv(account.id) : Promise.resolve({});
-    vars
-      .then((env) => claudeLiveUsage(account.id, cwd, env, reload > 0))
-      .then((l) => { if (!stale) setLive(l); })
-      .catch((e) => { if (!stale) setLive({
-        available: false, session: null, week: null, weekModels: [],
-        fetchedAt: 0, cached: false, problem: String(e),
-      }); })
-      .finally(() => { if (!stale) setAsking(false); });
+    const ask = async (force: boolean) => {
+      const env = realAccountId(account) ? await accountEnv(account.id) : {};
+      return claudeLiveUsage(account.id, cwd, env, force);
+    };
+    const asFailure = (problem: string): LiveUsage => ({
+      available: false, session: null, week: null, weekModels: [],
+      fetchedAt: 0, cached: false, problem,
+    });
+
+    (async () => {
+      const forced = reload > 0;
+
+      if (!forced) {
+        setAsking(true);
+        const stored = await ask(false).catch(() => null);
+        if (stale) return;
+        if (stored) setLive(stored);
+        setAsking(false);
+        // Lo guardado todavía sirve: no hay nada más que hacer.
+        if (stored?.available && isUsageFresh(stored.fetchedAt, Math.floor(Date.now() / 1000))) {
+          return;
+        }
+      }
+
+      setRefreshing(true);
+      const fresh = await ask(true).catch((e) => asFailure(String(e)));
+      if (stale) return;
+      setLive(fresh);
+      setRefreshing(false);
+    })();
 
     return () => { stale = true; };
   }, [account, cwd, reload]);
@@ -117,7 +141,7 @@ export function AccountUsagePopover({ account, cwd }: {
       {/* ══ el cupo del plan, preguntado en vivo ══════════════════════ */}
       {account.agentId === "claude-code" && (
         <div className="flex flex-col gap-2">
-          {asking ? (
+          {asking && !live ? (
             <Progress indeterminate size="sm" label={
               <span className="text-[10.5px] text-gray-500 dark:text-gray-400">
                 {t("accounts.plan.asking")}
@@ -188,13 +212,20 @@ export function AccountUsagePopover({ account, cwd }: {
                     return t(`accounts.plan.ago.${ago.unit}`, { n: ago.value });
                   })()}
                 </span>
+                {refreshing && (
+                  <span className="text-[10px] text-gray-400 dark:text-white/30">
+                    {t("accounts.plan.asking")}
+                  </span>
+                )}
                 <button
                   onClick={() => setReload((n) => n + 1)}
+                  disabled={refreshing}
                   title={t("accounts.plan.refresh")}
                   className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
                     text-gray-400 dark:text-white/35
                     hover:text-gray-700 dark:hover:text-white
-                    hover:bg-gray-200 dark:hover:bg-white/10"
+                    hover:bg-gray-200 dark:hover:bg-white/10
+                    disabled:opacity-40"
                 >
                   <RefreshIcon className="w-3.5 h-3.5" />
                 </button>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatAgo, formatRemaining, formatTokens, planLabel, totalOf } from "../usage";
+import { formatAgo, formatRemaining, formatTokens, isUsageFresh, planLabel, totalOf } from "../usage";
 
 describe("formatTokens", () => {
   it("deja los números chicos como están", () => {
@@ -78,5 +78,29 @@ describe("formatAgo", () => {
 
   it("no arma texto: eso es cosa de i18n", () => {
     expect(typeof formatAgo(300)).toBe("object");
+  });
+});
+
+describe("isUsageFresh", () => {
+  const now = 1_800_000_000;
+
+  it("lo recién consultado sirve", () => {
+    expect(isUsageFresh(now, now)).toBe(true);
+    expect(isUsageFresh(now - 299, now)).toBe(true);
+  });
+
+  it("a los cinco minutos se vuelve a preguntar", () => {
+    expect(isUsageFresh(now - 300, now)).toBe(false);
+    expect(isUsageFresh(now - 3600, now)).toBe(false);
+  });
+
+  it("un reloj corrido hacia atrás no deja la entrada viva para siempre", () => {
+    // Pasa con NTP o al volver de suspensión: si solo se compara contra el plazo, una
+    // diferencia negativa nunca vence.
+    expect(isUsageFresh(now + 500, now)).toBe(false);
+  });
+
+  it("lo que nunca se consultó está vencido", () => {
+    expect(isUsageFresh(0, now)).toBe(false);
   });
 });

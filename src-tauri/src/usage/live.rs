@@ -16,9 +16,12 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-use serde::Serialize;
+
+use crate::database::DbConnection;
+use serde::{Deserialize, Serialize};
 
 use super::parse::parse_usage_screen;
+use super::trust::{pick_trusted, trusted_paths};
 
 /// Cuánto se espera a que el panel termine de dibujarse antes de rendirse.
 const TIMEOUT: Duration = Duration::from_secs(25);
@@ -27,29 +30,22 @@ const TIMEOUT: Duration = Duration::from_secs(25);
 /// el `/usage` se escribe mientras todavía está montando la pantalla, y se pierde.
 const SETTLE: Duration = Duration::from_millis(2500);
 
-/// Cuánto vale una respuesta antes de volver a preguntar.
-///
-/// Preguntar cuesta levantar la TUI entera: son segundos, y con el usuario esperando. Cinco
-/// minutos es corto para que el número siga siendo representativo y largo para que abrir y
-/// cerrar el panel tres veces seguidas no levante tres procesos.
-const TTL: i64 = 5 * 60;
 
-/// Lo último que respondió cada cuenta. Vive en el backend y no en la ventana: así dos
-/// ventanas abiertas comparten la misma respuesta en vez de preguntar cada una por su lado.
+/// Lo último que respondió cada cuenta, en memoria. Vive en el backend y no en la ventana:
+/// así dos ventanas abiertas comparten la misma respuesta en vez de preguntar cada una por
+/// su lado. La copia de SQLite es la que sobrevive al cierre de la app.
 static CACHE: LazyLock<Mutex<HashMap<String, LiveUsage>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// ¿Sigue sirviendo lo que se guardó?
-///
-/// Un reloj que se corrió hacia atrás (NTP, volver de suspensión) daría una diferencia
-/// negativa; eso se trata como vencido en vez de dejar la entrada viva para siempre.
-pub(super) fn is_fresh(fetched_at: i64, now: i64, ttl: i64) -> bool {
-    let age = now - fetched_at;
-    (0..ttl).contains(&age)
+/// Dónde se guarda, para que al abrir la app el panel muestre lo último sabido en vez de
+/// una barra vacía mientras se levanta la TUI.
+fn stored_key(account_key: &str) -> String {
+    format!("usage.live.{account_key}")
 }
 
+
 /// Una de las barras del panel.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Meter {
     /// Del 0 al 100, tal como lo informa la TUI.
@@ -59,15 +55,15 @@ pub struct Meter {
 }
 
 /// La semana de un modelo concreto, cuando el plan lo mide aparte.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelMeter {
     pub model: String,
     pub meter: Meter,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct LiveUsage {
     /// `false` = no se pudo preguntar (no está instalada, tardó demasiado, pidió confiar
     /// en la carpeta, o cambió el formato del panel).
@@ -180,13 +176,24 @@ pub async fn claude_live_usage(
     env: HashMap<String, String>,
     // `force`: volver a preguntar aunque haya algo guardado. Es el botón de refrescar.
     force: bool,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<LiveUsage, String> {
+    // Sin `force` se devuelve lo guardado TAL CUAL, viejo o no. Quien decide si hace falta
+    // volver a preguntar es la UI, que para eso recibe `fetchedAt`: así al abrir la app el
+    // panel muestra el último dato al instante y se actualiza después, en vez de dejar al
+    // usuario mirando un hueco mientras arranca la TUI.
     if !force {
         if let Ok(cache) = CACHE.lock() {
             if let Some(hit) = cache.get(&account_key) {
-                if is_fresh(hit.fetched_at, crate::util::now_ts(), TTL) {
-                    return Ok(LiveUsage { cached: true, ..hit.clone() });
+                return Ok(LiveUsage { cached: true, ..hit.clone() });
+            }
+        }
+        if let Ok(Some(raw)) = crate::database::get_setting(&db, &stored_key(&account_key)) {
+            if let Ok(stored) = serde_json::from_str::<LiveUsage>(&raw) {
+                if let Ok(mut cache) = CACHE.lock() {
+                    cache.insert(account_key.clone(), stored.clone());
                 }
+                return Ok(LiveUsage { cached: true, ..stored });
             }
         }
     }
@@ -197,6 +204,31 @@ pub async fn claude_live_usage(
     if !crate::agents::command_exists(command) {
         return Ok(LiveUsage::failed("Claude Code no está instalado"));
     }
+
+    // La carpeta la decide LA CUENTA, no quien llama: cada perfil lleva su propia lista de
+    // carpetas de confianza, y abrir el sondeo fuera de ella deja a la TUI esperando una
+    // confirmación que nadie puede darle desde acá.
+    let config_dir = env
+        .get("CLAUDE_CONFIG_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")));
+    let Some(config_dir) = config_dir else {
+        return Ok(LiveUsage::failed("No se pudo resolver la carpeta de la cuenta"));
+    };
+
+    let trusted = std::fs::read_to_string(config_dir.join(".claude.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .map(|json| trusted_paths(&json))
+        .unwrap_or_default();
+
+    let Some(cwd) = pick_trusted(&trusted, Some(cwd.as_str()), |p| std::path::Path::new(p).is_dir())
+        .map(str::to_string)
+    else {
+        return Ok(LiveUsage::failed(
+            "Esta cuenta todavía no confía en ninguna carpeta. Abrí un agente con ella una vez y aceptá el aviso.",
+        ));
+    };
 
     let env: Vec<(String, String)> = env.into_iter().collect();
     let fresh = tauri::async_runtime::spawn_blocking(move || match capture(command, &cwd, &env) {
@@ -212,7 +244,10 @@ pub async fn claude_live_usage(
     // acaba de confiar), y cachearlo dejaría el panel roto cinco minutos sin motivo.
     if fresh.available {
         if let Ok(mut cache) = CACHE.lock() {
-            cache.insert(account_key, fresh.clone());
+            cache.insert(account_key.clone(), fresh.clone());
+        }
+        if let Ok(raw) = serde_json::to_string(&fresh) {
+            let _ = crate::database::set_setting(&db, &stored_key(&account_key), &raw);
         }
     }
     Ok(fresh)

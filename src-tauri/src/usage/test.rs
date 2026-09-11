@@ -210,27 +210,98 @@ fn contra_una_captura_cruda_en_disco() {
     assert!(u.session.is_some() && u.week.is_some());
 }
 
-// ── La caché de cinco minutos ────────────────────────────────────
 
-use super::live::is_fresh;
-
-const TTL: i64 = 5 * 60;
+// ── El desglose por modelo ───────────────────────────────────────
 
 #[test]
-fn una_respuesta_recien_hecha_sirve() {
-    assert!(is_fresh(1000, 1000, TTL));
-    assert!(is_fresh(1000, 1000 + TTL - 1, TTL));
+fn lee_las_semanas_por_modelo() {
+    // El plan mide Fable aparte y con su propio número: sale JUNTO a la semana completa,
+    // no en lugar de ella.
+    let u = parse_usage_screen(PANTALLA);
+    assert_eq!(u.week.unwrap().percent, 69, "la semana completa no cambia");
+    assert_eq!(u.week_models.len(), 1);
+    assert_eq!(u.week_models[0].model, "Fable");
+    assert_eq!(u.week_models[0].meter.percent, 25);
 }
 
 #[test]
-fn al_cumplirse_el_plazo_se_vuelve_a_preguntar() {
-    assert!(!is_fresh(1000, 1000 + TTL, TTL));
-    assert!(!is_fresh(1000, 1000 + TTL + 60, TTL));
+fn el_desglose_no_incluye_la_semana_completa() {
+    let u = parse_usage_screen(PANTALLA);
+    assert!(
+        !u.week_models.iter().any(|m| m.model.eq_ignore_ascii_case("all models")),
+        "'all models' es la semana entera, no un modelo"
+    );
 }
 
 #[test]
-fn un_reloj_corrido_hacia_atras_no_deja_la_entrada_viva_para_siempre() {
-    // Pasa de verdad con NTP o al volver de suspensión: si la diferencia sale negativa y
-    // solo se compara contra el plazo, la entrada nunca vence.
-    assert!(!is_fresh(5000, 1000, TTL));
+fn de_un_modelo_repetido_gana_la_ultima_pintada() {
+    let texto = "Current week (Fable)\r1% used\rCurrent week (Fable)\r44% used\r";
+    let u = parse_usage_screen(texto);
+    assert_eq!(u.week_models.len(), 1, "no se duplica el modelo");
+    assert_eq!(u.week_models[0].meter.percent, 44);
+}
+
+// ── En qué carpeta se puede abrir el sondeo ──────────────────────
+//
+// Acá estaba el fallo con las cuentas alternativas: cada perfil lleva su propia lista de
+// carpetas de confianza, y uno recién creado no confía en ninguna.
+
+use super::trust::{pick_trusted, trusted_paths};
+
+fn config(json: &str) -> serde_json::Value {
+    serde_json::from_str(json).unwrap()
+}
+
+#[test]
+fn lee_solo_las_carpetas_aceptadas() {
+    let c = config(r#"{"projects":{
+        "/a":{"hasTrustDialogAccepted":true},
+        "/b":{"hasTrustDialogAccepted":false},
+        "/c":{}
+    }}"#);
+    assert_eq!(trusted_paths(&c), vec!["/a".to_string()]);
+}
+
+#[test]
+fn una_cuenta_nueva_no_confia_en_nada() {
+    assert!(trusted_paths(&config(r#"{}"#)).is_empty());
+    assert!(trusted_paths(&config(r#"{"projects":{}}"#)).is_empty());
+}
+
+#[test]
+fn el_orden_es_estable() {
+    // Sin ordenar, el sondeo elegiría una carpeta distinta en cada arranque según cómo se
+    // haya deserializado el mapa, y un fallo sería imposible de reproducir.
+    let c = config(r#"{"projects":{
+        "/z":{"hasTrustDialogAccepted":true},
+        "/a":{"hasTrustDialogAccepted":true}
+    }}"#);
+    assert_eq!(trusted_paths(&c), vec!["/a".to_string(), "/z".to_string()]);
+}
+
+#[test]
+fn gana_la_carpeta_pedida_si_la_cuenta_confia_en_ella() {
+    let trusted = vec!["/a".to_string(), "/proyecto".to_string()];
+    assert_eq!(pick_trusted(&trusted, Some("/proyecto"), |_| true), Some("/proyecto"));
+}
+
+#[test]
+fn si_la_pedida_no_es_de_confianza_se_usa_otra_de_la_cuenta() {
+    // Es el caso de la cuenta alternativa: el proyecto abierto no está en SU lista.
+    let trusted = vec!["/otra".to_string()];
+    assert_eq!(pick_trusted(&trusted, Some("/proyecto"), |_| true), Some("/otra"));
+}
+
+#[test]
+fn se_saltean_las_carpetas_que_ya_no_existen() {
+    // La lista de confianza guarda rutas viejas para siempre; abrir el sondeo en una que
+    // se borró dejaría a la TUI protestando.
+    let trusted = vec!["/borrada".to_string(), "/viva".to_string()];
+    assert_eq!(pick_trusted(&trusted, None, |p| p == "/viva"), Some("/viva"));
+}
+
+#[test]
+fn sin_ninguna_carpeta_de_confianza_no_se_sondea() {
+    assert_eq!(pick_trusted(&[], Some("/proyecto"), |_| true), None);
+    assert_eq!(pick_trusted(&["/borrada".to_string()], None, |_| false), None);
 }

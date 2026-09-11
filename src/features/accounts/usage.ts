@@ -38,6 +38,28 @@ export interface AccountUsage {
   serverSeenAt: number | null;
 }
 
+/**
+ * Cuánto vale una consulta del cupo antes de volver a preguntar.
+ *
+ * Preguntar cuesta levantar la TUI entera: son segundos. Cinco minutos es corto para que
+ * el número siga siendo representativo y largo para que abrir el panel tres veces seguidas
+ * no levante tres procesos. La decisión vive acá y no en el backend porque el backend
+ * devuelve lo guardado SIEMPRE —para que al abrir la app se vea al instante— y quien mira
+ * la antigüedad para decidir si refrescar es la pantalla.
+ */
+export const USAGE_TTL = 5 * 60;
+
+/**
+ * ¿Sigue sirviendo lo que se guardó?
+ *
+ * Una diferencia negativa cuenta como vencida: un reloj corrido hacia atrás (NTP, volver de
+ * suspensión) dejaría la entrada viva para siempre si solo se comparara contra el plazo.
+ */
+export function isUsageFresh(fetchedAt: number, now: number, ttl = USAGE_TTL): boolean {
+  const age = now - fetchedAt;
+  return age >= 0 && age < ttl;
+}
+
 /** Cuánto dura la ventana de límite de Claude, en segundos. */
 export const WINDOW_SECS = 5 * 3600;
 
