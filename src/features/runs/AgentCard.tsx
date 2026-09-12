@@ -64,7 +64,7 @@ export function AgentCard({ task, activity, approval, focused, onCancel, onOpenP
   onCancel: () => void;
   onOpenPane: () => void;
   onShowResult: () => void;
-  onDecide: (allow: boolean) => void;
+  onDecide: (allow: boolean, remember: boolean) => void;
 }) {
   const { t } = useTranslation();
   const Icon = agentIcon(task.agentId);

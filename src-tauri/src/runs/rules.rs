@@ -127,9 +127,43 @@ pub fn decide(rules: &[PermissionRule], tool: &str, input: &serde_json::Value) -
     }
 }
 
-/// Las reglas de un run, tal como se guardan en su columna.
-pub fn parse_rules(json: &str) -> Vec<PermissionRule> {
-    // Una columna ilegible no puede dejar a un agente sin supervisión: sin reglas se
-    // pregunta todo, que es el lado seguro.
-    serde_json::from_str(json).unwrap_or_default()
+/// La regla que deja escrita "recordar": **exactamente** lo que se vio en la tarjeta.
+///
+/// No se generaliza nada. Aprobar `cargo test --lib` no puede terminar autorizando
+/// `cargo test` a secas, ni aprobar la edición de un archivo autorizar la carpeta entera:
+/// una regla más amplia que lo que el usuario leyó es una regla que no aprobó. Quien
+/// quiera algo más general lo escribe a mano, sabiendo lo que escribe.
+///
+/// Por eso hay dos casos en los que NO se ofrece recordar:
+///
+/// - **La herramienta no expone un dato que se pueda fijar** (la de un MCP, por ejemplo).
+///   La única regla posible sería la herramienta entera, y eso es aprobar de antemano
+///   cualquier cosa que haga en el futuro con cualquier input.
+/// - **El dato tiene un `*`.** En una regla `*` es comodín, así que `Bash(rm *.log)`
+///   aprobaría también `rm -rf /tmp/x.log`. Sin forma de escaparlo, recordar ese comando
+///   sería recordar uno bastante más peligroso que el que se aprobó.
+pub fn exact_rule_for(tool: &str, input: &serde_json::Value) -> Option<String> {
+    let arg = rule_arg(tool, input)?;
+    if arg.contains('*') || arg.trim().is_empty() {
+        return None;
+    }
+    Some(format!("{tool}({arg})"))
+}
+
+/// Si un patrón escrito a mano tiene la forma de una regla.
+///
+/// No valida que la herramienta exista: las de un MCP se llaman como se les antoje, y
+/// rechazar lo que no conocemos dejaría afuera justo lo que más conviene poder regular.
+pub fn is_valid_pattern(pattern: &str) -> bool {
+    let p = pattern.trim();
+    if p.is_empty() {
+        return false;
+    }
+    let (tool, arg) = split(p);
+    let tool_ok = !tool.is_empty() && !tool.contains(char::is_whitespace);
+    // Un paréntesis abierto sin cerrar no es un patrón con argumento vacío: es un error de
+    // tipeo, y aceptarlo dejaría una regla que parece acotada y vale para toda la
+    // herramienta.
+    let parens_ok = p.contains('(') == p.ends_with(')');
+    tool_ok && parens_ok && arg.is_none_or(|a| !a.trim().is_empty())
 }

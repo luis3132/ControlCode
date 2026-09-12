@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
-import { AddIcon, EmptyState, NetworkIcon, SearchIcon } from "neogestify-ui-components";
+import { AddIcon, EmptyState, NetworkIcon, SearchIcon, ShieldIcon, Tooltip } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { AppDialog } from "@/shared/ui/AppDialog";
@@ -9,6 +9,7 @@ import { AppDialog } from "@/shared/ui/AppDialog";
 import { AgentCard } from "./AgentCard";
 import { countByGroup, filterFleet, FLEET_GROUPS, sortFleet, type FleetGroup } from "./fleetOrder";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { RulesDialog } from "./RulesDialog";
 import { useRunsStore } from "./store";
 import type { PendingApproval, TaskEventPayload } from "./types";
 
@@ -45,6 +46,7 @@ export function FleetPage() {
   const [group, setGroup] = useState<FleetGroup | null>(null);
   const [query, setQuery] = useState("");
   const [newOpen, setNewOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [detail, setDetail] = useState<string | null>(null);
 
   // La carpeta donde se lanza: la de la tab activa, igual que el "+" de la barra de tabs.
@@ -120,6 +122,22 @@ export function FleetPage() {
 
         <div className="flex-1" />
 
+        {/* Las reglas son de la carpeta en la que se lanza, la misma que usa "Nuevo agente". */}
+        <Tooltip content={t("fleet.rules.title")} placement="bottom">
+          <button
+            onClick={() => setRulesOpen(true)}
+            disabled={!cwd}
+            aria-label={t("fleet.rules.title")}
+            className="cc-t flex items-center justify-center w-7 h-7 rounded-lg shrink-0
+              text-gray-400 dark:text-white/35
+              hover:text-gray-700 dark:hover:text-white
+              hover:bg-gray-200 dark:hover:bg-white/10
+              disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            <ShieldIcon className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
+
         <div className="flex items-center gap-1.5 px-2 h-7 rounded-lg shrink-0
           bg-gray-100 dark:bg-white/5
           border border-gray-200 dark:border-white/10">
@@ -153,9 +171,9 @@ export function FleetPage() {
                 activity={activity[task.id] ?? []}
                 approval={byTask.get(task.id)}
                 focused={task.id === focusedId}
-                onDecide={(allow) => {
+                onDecide={(allow, remember) => {
                   const a = byTask.get(task.id);
-                  if (a) decideApproval(a.id, allow).catch(console.error);
+                  if (a) decideApproval(a.id, allow, remember).catch(console.error);
                 }}
                 onCancel={() => cancelTask(task.id).catch(console.error)}
                 onShowResult={() => setDetail(task.id)}
@@ -208,6 +226,7 @@ export function FleetPage() {
       )}
 
       {detailTask && <TaskDetail task={detailTask} onClose={() => setDetail(null)} />}
+      {rulesOpen && cwd && <RulesDialog cwd={cwd} onClose={() => setRulesOpen(false)} />}
     </div>
   );
 }

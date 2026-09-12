@@ -22,7 +22,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Condvar, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use uuid::Uuid;
@@ -30,7 +30,8 @@ use uuid::Uuid;
 use crate::database::DbConnection;
 use crate::util::now_ts;
 
-use super::rules::{self, Decision};
+use super::rules::{self, Decision, PermissionRule};
+use super::store;
 
 /// Lo que un agente está esperando que le contesten.
 #[derive(Serialize, Clone, Debug)]
@@ -42,14 +43,43 @@ pub struct PendingApproval {
     /// El `input` crudo de la herramienta. De acá sale el diff.
     pub input: serde_json::Value,
     pub asked_at: i64,
+    /// La regla que dejaría escrita "recordar", tal cual se va a guardar. `None` = para
+    /// este pedido no se ofrece (ver `rules::exact_rule_for`). Viaja ya armada para que la
+    /// consola muestre EXACTAMENTE lo que se va a recordar, en vez de describirlo.
+    pub suggested_rule: Option<String>,
 }
 
-/// Lo que se le contesta.
+/// Quién resolvió un pedido. Es lo que queda en `task_approvals.decided_by`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DecidedBy {
+    User,
+    Rule,
+    /// Nadie contestó a tiempo.
+    Timeout,
+    /// La tarea se canceló (o la app se cerró) mientras esperaba.
+    Cancelled,
+}
+
+impl DecidedBy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DecidedBy::User => "user",
+            DecidedBy::Rule => "rule",
+            DecidedBy::Timeout => "timeout",
+            DecidedBy::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// Lo que se le contesta al agente, y quién lo decidió.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Verdict {
     pub allow: bool,
     pub reason: Option<String>,
+    pub by: DecidedBy,
 }
+
+const RULE_DENIED: &str = "una regla de esta carpeta lo tiene denegado";
 
 struct Waiting {
     pending: PendingApproval,
@@ -73,68 +103,99 @@ pub fn pending() -> Vec<PendingApproval> {
     rows
 }
 
+/// Un pedido que sigue esperando, por id.
+pub fn get(id: &str) -> Option<PendingApproval> {
+    queue().get(id).filter(|w| w.verdict.is_none()).map(|w| w.pending.clone())
+}
+
 /// Registra el pedido y espera la decisión.
 ///
-/// Devuelve `None` si venció el tiempo sin que nadie contestara. Quien llama decide qué
-/// hacer con eso; acá no se inventa un veredicto, porque "nadie contestó" y "te dijeron
-/// que no" son cosas distintas y el agente merece saber cuál fue.
+/// Siempre devuelve un veredicto, y el `by` dice de dónde salió. Que un pedido venza se
+/// traduce en denegar — el agente corre sin que nadie lo mire, y ante la duda no toca
+/// nada — pero anotado como `Timeout` y no como decisión de nadie: "nadie contestó" y
+/// "te dijeron que no" son cosas distintas, y el agente las repite en su salida.
 pub fn ask(
     id: &str,
     task_id: &str,
     tool_name: &str,
     input: serde_json::Value,
     timeout: Duration,
-) -> Option<Verdict> {
+) -> Verdict {
     let id = id.to_string();
     let pending = PendingApproval {
         id: id.clone(),
         task_id: task_id.to_string(),
         tool_name: tool_name.to_string(),
+        suggested_rule: rules::exact_rule_for(tool_name, &input),
         input,
         asked_at: now_ts(),
     };
 
-    let mut q = queue();
-    q.insert(id.clone(), Waiting { pending, verdict: None });
-    drop(q);
+    // Fecha límite fija, no un `timeout` que se renueva. `notify_all` despierta a TODOS
+    // los que esperan cada vez que se decide cualquier pedido, así que con un
+    // `wait_timeout(timeout)` en cada vuelta el plazo de un agente volvía a empezar de cero
+    // cada vez que se contestaba el de otro — y con varios agentes activos no vencía nunca.
+    let deadline = Instant::now() + timeout;
 
     let mut q = queue();
+    q.insert(id.clone(), Waiting { pending, verdict: None });
+
     loop {
         match q.get(&id) {
-            // Alguien decidió.
             Some(w) if w.verdict.is_some() => {
-                let verdict = q.remove(&id).and_then(|w| w.verdict);
-                return verdict;
+                return q.remove(&id).and_then(|w| w.verdict).expect("recién comprobado");
             }
-            // La entrada desapareció: la tarea se canceló o la app está cerrando.
-            None => return None,
+            // La entrada desapareció sin veredicto: la tarea se canceló o la app cierra.
+            None => {
+                return Verdict {
+                    allow: false,
+                    reason: Some("la tarea se canceló mientras esperaba".into()),
+                    by: DecidedBy::Cancelled,
+                };
+            }
             Some(_) => {}
         }
-        let (guard, wait) = DECIDED
-            .wait_timeout(q, timeout)
+
+        let now = Instant::now();
+        if now >= deadline {
+            q.remove(&id);
+            return Verdict {
+                allow: false,
+                reason: Some("nadie contestó el pedido de permiso a tiempo".into()),
+                by: DecidedBy::Timeout,
+            };
+        }
+        let (guard, _) = DECIDED
+            .wait_timeout(q, deadline - now)
             .unwrap_or_else(|e| e.into_inner());
         q = guard;
-        if wait.timed_out() {
-            q.remove(&id);
-            return None;
-        }
     }
 }
 
-/// Contesta un pedido. `false` si ya no existe (venció, o la tarea se canceló).
-pub fn decide(id: &str, allow: bool, reason: Option<String>) -> bool {
+fn decide_with(id: &str, verdict: Verdict) -> bool {
     let mut q = queue();
     let Some(w) = q.get_mut(id) else { return false };
-    w.verdict = Some(Verdict { allow, reason });
+    if w.verdict.is_some() {
+        // Ya lo resolvió otro (una regla nueva, o un segundo click): la primera respuesta
+        // es la que el agente ya está leyendo, y no se le cambia por debajo.
+        return false;
+    }
+    w.verdict = Some(verdict);
     drop(q);
     DECIDED.notify_all();
     true
 }
 
+/// Contesta un pedido como decisión de una persona. `false` si ya no existe (venció, o la
+/// tarea se canceló) o si ya estaba resuelto.
+pub fn decide(id: &str, allow: bool, reason: Option<String>) -> bool {
+    decide_with(id, Verdict { allow, reason, by: DecidedBy::User })
+}
+
 /// Descarta lo que esté esperando de una tarea.
 ///
-/// Se llama al cancelarla y al cerrar la app. Un pedido sin dueño no lo va a contestar
-/// nadie nunca, y dejarlo en la cola lo mostraría en la consola para siempre.
+/// Se llama al cancelarla y al terminar su proceso. Un pedido sin dueño no lo va a
+/// contestar nadie nunca, y dejarlo en la cola lo mostraría en la consola para siempre.
 pub fn drop_task(task_id: &str) -> usize {
     let mut q = queue();
     let ids: Vec<String> =
@@ -158,8 +219,8 @@ pub(crate) fn clear() {
 
 /// Qué se le contesta a un agente que pide permiso.
 ///
-/// Primero miran las reglas del run; solo lo que ninguna cubre sube a la consola. Sin eso,
-/// cinco agentes llenan la pantalla de preguntas y el usuario termina apretando "sí" a
+/// Primero miran las reglas de la carpeta; solo lo que ninguna cubre sube a la consola. Sin
+/// eso, cinco agentes llenan la pantalla de preguntas y el usuario termina apretando "sí" a
 /// todo — que es peor que no haber preguntado.
 pub fn resolve(
     db: &DbConnection,
@@ -168,104 +229,113 @@ pub fn resolve(
     input: serde_json::Value,
     timeout: Duration,
 ) -> Verdict {
-    let rules = rules_of_task(db, task_id);
+    let rules = rules_for_task(db, task_id);
 
     match rules::decide(&rules, tool_name, &input) {
         Decision::Allow => {
-            record(db, task_id, tool_name, &input, Some(true), "rule");
-            Verdict { allow: true, reason: None }
+            record(db, &Uuid::new_v4().to_string(), task_id, tool_name, &input, Some(true), DecidedBy::Rule);
+            Verdict { allow: true, reason: None, by: DecidedBy::Rule }
         }
         Decision::Deny => {
-            record(db, task_id, tool_name, &input, Some(false), "rule");
-            Verdict {
-                allow: false,
-                reason: Some("una regla de este run lo tiene denegado".into()),
-            }
+            record(db, &Uuid::new_v4().to_string(), task_id, tool_name, &input, Some(false), DecidedBy::Rule);
+            Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule }
         }
         Decision::Ask => {
             let id = Uuid::new_v4().to_string();
-            record_with_id(db, &id, task_id, tool_name, &input, None, "");
-            let answered = ask(&id, task_id, tool_name, input, timeout);
-
-            // Quién decidió queda anotado de verdad: un pedido que venció no fue una
-            // decisión de nadie, y el registro de "qué le autorizaste a quién" no sirve si
-            // le atribuye al usuario algo que no contestó.
-            let by = if answered.is_some() { "user" } else { "timeout" };
-            let verdict = answered.unwrap_or(Verdict {
-                allow: false,
-                // Se deniega, pero diciendo que fue por falta de respuesta y no por una
-                // decisión: el agente lo repite en su salida, y "nadie contestó" es lo que
-                // el usuario necesita leer ahí.
-                reason: Some("nadie contestó el pedido de permiso a tiempo".into()),
-            });
-
-            close_row(db, &id, verdict.allow, verdict.reason.as_deref(), by);
+            record(db, &id, task_id, tool_name, &input, None, DecidedBy::User);
+            let verdict = ask(&id, task_id, tool_name, input, timeout);
+            close_row(db, &id, &verdict);
             verdict
         }
     }
 }
 
-fn rules_of_task(db: &DbConnection, task_id: &str) -> Vec<rules::PermissionRule> {
-    let Ok(conn) = db.lock() else { return Vec::new() };
-    conn.query_row(
-        "SELECT r.permission_rules FROM runs r JOIN tasks t ON t.run_id = r.id WHERE t.id = ?1",
-        [task_id],
-        |row| row.get::<_, String>(0),
-    )
-    .map(|json| rules::parse_rules(&json))
-    .unwrap_or_default()
+/// Resuelve con las reglas de la carpeta los pedidos que siguen esperando en ella.
+///
+/// Se llama después de guardar una regla. Sin esto, "permitir siempre `cargo test`" en un
+/// agente dejaría esperando a otro agente de la misma carpeta que pidió exactamente lo
+/// mismo un segundo antes — y el usuario tendría que contestarle a mano algo que acaba de
+/// decir que no quiere contestar más.
+pub fn release_matching(db: &DbConnection, cwd: &str) -> usize {
+    let candidates = pending();
+    if candidates.is_empty() {
+        return 0;
+    }
+
+    let (rules, owned): (Vec<PermissionRule>, Vec<PendingApproval>) = {
+        let Ok(conn) = db.lock() else { return 0 };
+        let rules = store::list_rules(&conn, cwd)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| PermissionRule { pattern: r.pattern, allow: r.allow })
+            .collect();
+        let owned = candidates
+            .into_iter()
+            .filter(|p| store::project_cwd_of_task(&conn, &p.task_id).as_deref() == Some(cwd))
+            .collect();
+        (rules, owned)
+    };
+
+    owned
+        .into_iter()
+        .filter(|p| match rules::decide(&rules, &p.tool_name, &p.input) {
+            Decision::Allow => decide_with(&p.id, Verdict { allow: true, reason: None, by: DecidedBy::Rule }),
+            Decision::Deny => decide_with(
+                &p.id,
+                Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule },
+            ),
+            Decision::Ask => false,
+        })
+        .count()
 }
 
-/// Deja el pedido anotado con un id ya elegido.
-fn record_with_id(
+fn rules_for_task(db: &DbConnection, task_id: &str) -> Vec<PermissionRule> {
+    let Ok(conn) = db.lock() else { return Vec::new() };
+    let Some(cwd) = store::project_cwd_of_task(&conn, task_id) else { return Vec::new() };
+    store::list_rules(&conn, &cwd)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| PermissionRule { pattern: r.pattern, allow: r.allow })
+        .collect()
+}
+
+/// Deja el pedido anotado. `allowed = None` = queda pendiente.
+///
+/// Best-effort: no poder anotar un pedido no puede frenar la respuesta al agente. El
+/// registro es para mirar después; la decisión es lo que el agente necesita ahora.
+fn record(
     db: &DbConnection,
     id: &str,
     task_id: &str,
     tool_name: &str,
     input: &serde_json::Value,
     allowed: Option<bool>,
-    decided_by: &str,
-) -> Option<()> {
+    by: DecidedBy,
+) {
     let now = now_ts();
-    let (status, by, decided_at) = match allowed {
-        Some(true) => ("allowed", Some(decided_by), Some(now)),
-        Some(false) => ("denied", Some(decided_by), Some(now)),
+    let (status, decided_by, decided_at) = match allowed {
+        Some(true) => ("allowed", Some(by.as_str()), Some(now)),
+        Some(false) => ("denied", Some(by.as_str()), Some(now)),
         None => ("pending", None, None),
     };
-
-    let conn = db.lock().ok()?;
-    conn.execute(
+    let Ok(conn) = db.lock() else { return };
+    let _ = conn.execute(
         "INSERT INTO task_approvals (id, task_id, tool_name, input_json, status, decided_by,
                                      asked_at, decided_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        rusqlite::params![id, task_id, tool_name, input.to_string(), status, by, now, decided_at],
-    )
-    .ok()?;
-    Some(())
+        rusqlite::params![id, task_id, tool_name, input.to_string(), status, decided_by, now, decided_at],
+    );
 }
 
-/// Lo mismo, para las decisiones que no pasan por la cola (las que resolvió una regla).
-fn record(
-    db: &DbConnection,
-    task_id: &str,
-    tool_name: &str,
-    input: &serde_json::Value,
-    allowed: Option<bool>,
-    decided_by: &str,
-) {
-    let id = Uuid::new_v4().to_string();
-    record_with_id(db, &id, task_id, tool_name, input, allowed, decided_by);
-}
-
-fn close_row(db: &DbConnection, id: &str, allow: bool, reason: Option<&str>, by: &str) {
+fn close_row(db: &DbConnection, id: &str, verdict: &Verdict) {
     let Ok(conn) = db.lock() else { return };
     let _ = conn.execute(
         "UPDATE task_approvals SET status = ?1, decided_by = ?2, reason = ?3, decided_at = ?4
          WHERE id = ?5",
         rusqlite::params![
-            if allow { "allowed" } else { "denied" },
-            by,
-            reason,
+            if verdict.allow { "allowed" } else { "denied" },
+            verdict.by.as_str(),
+            verdict.reason,
             now_ts(),
             id,
         ],
@@ -280,7 +350,7 @@ fn close_row(db: &DbConnection, id: &str, allow: bool, reason: Option<&str>, by:
 pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE task_approvals SET status = 'denied', decided_by = 'timeout',
+        "UPDATE task_approvals SET status = 'denied', decided_by = 'cancelled',
                                    reason = ?1, decided_at = ?2
          WHERE status = 'pending'",
         rusqlite::params!["la app se cerró antes de que se decidiera", now_ts()],

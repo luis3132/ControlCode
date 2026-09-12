@@ -138,30 +138,93 @@ pub fn run_pending_approvals() -> Vec<broker::PendingApproval> {
 
 /// Contesta un pedido. `false` si ya no existe: venció, o la tarea se canceló mientras
 /// tanto, y en los dos casos el usuario tiene que enterarse en vez de creer que decidió.
+///
+/// Con `remember`, además deja escrita la regla exacta del pedido para su carpeta, y
+/// resuelve con ella lo que otros agentes de esa carpeta estuvieran esperando.
 #[tauri::command]
 pub fn run_decide_approval(
     app: AppHandle,
     approval_id: String,
     allow: bool,
-    reason: Option<String>,
+    remember: bool,
+    db: tauri::State<DbConnection>,
 ) -> Result<bool, String> {
-    let decided = broker::decide(&approval_id, allow, reason);
+    let Some(pending) = broker::get(&approval_id) else {
+        supervisor::notify_approvals(&app);
+        return Ok(false);
+    };
+
+    // La regla se guarda ANTES de contestar: si guardarla falla, el usuario tiene que
+    // enterarse ahí, no después de que el agente ya siguió creyendo que quedó recordado.
+    let remembered_in = if remember {
+        remember_rule(&db, &pending, allow)?
+    } else {
+        None
+    };
+
+    let decided = broker::decide(&approval_id, allow, None);
+    if let Some(cwd) = remembered_in {
+        broker::release_matching(&db, &cwd);
+    }
     supervisor::notify_approvals(&app);
     Ok(decided)
 }
 
-/// Las reglas de permisos de un run.
-#[tauri::command]
-pub fn run_set_permission_rules(
-    run_id: String,
-    rules: Vec<rules::PermissionRule>,
-    db: tauri::State<DbConnection>,
-) -> Result<(), String> {
-    let json = serde_json::to_string(&rules).map_err(|e| e.to_string())?;
+/// Guarda la regla exacta de un pedido. Devuelve la carpeta en la que quedó.
+fn remember_rule(
+    db: &DbConnection,
+    pending: &broker::PendingApproval,
+    allow: bool,
+) -> Result<Option<String>, String> {
+    // Un pedido sin regla exacta posible no ofrece "recordar" en la consola; si igual llega
+    // acá (un click contra una tarjeta vieja), se contesta sin recordar en vez de inventar
+    // una regla más amplia que lo que se vio.
+    let Some(pattern) = rules::exact_rule_for(&pending.tool_name, &pending.input) else {
+        return Ok(None);
+    };
     let conn = db.lock().map_err(|e| e.to_string())?;
-    conn.execute("UPDATE runs SET permission_rules = ?1 WHERE id = ?2", rusqlite::params![json, run_id])
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    let Some(cwd) = store::project_cwd_of_task(&conn, &pending.task_id) else {
+        return Ok(None);
+    };
+    store::upsert_rule(&conn, &cwd, &pattern, allow)?;
+    Ok(Some(cwd))
+}
+
+/// Las reglas de una carpeta, en el orden en que se evalúan.
+#[tauri::command]
+pub fn run_list_rules(cwd: String, db: tauri::State<DbConnection>) -> Result<Vec<store::RuleRow>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    store::list_rules(&conn, &cwd)
+}
+
+/// Agrega una regla escrita a mano, y resuelve con ella lo que estuviera esperando.
+#[tauri::command]
+pub fn run_add_rule(
+    app: AppHandle,
+    cwd: String,
+    pattern: String,
+    allow: bool,
+    db: tauri::State<DbConnection>,
+) -> Result<store::RuleRow, String> {
+    if !rules::is_valid_pattern(&pattern) {
+        return Err(format!(
+            "'{pattern}' no tiene la forma de una regla: Herramienta o Herramienta(patrón)"
+        ));
+    }
+    let row = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::upsert_rule(&conn, &cwd, &pattern, allow)?
+    };
+    if broker::release_matching(&db, &cwd) > 0 {
+        supervisor::notify_approvals(&app);
+    }
+    Ok(row)
+}
+
+#[tauri::command]
+pub fn run_delete_rule(id: String, db: tauri::State<DbConnection>) -> Result<bool, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    store::delete_rule(&conn, &id)
 }
 
 /// Cierra los pedidos que quedaron colgados de una ejecución anterior de la app.

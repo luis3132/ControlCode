@@ -64,7 +64,9 @@ pub fn run() {
             crate::runs::run_cancel_task,
             crate::runs::run_pending_approvals,
             crate::runs::run_decide_approval,
-            crate::runs::run_set_permission_rules,
+            crate::runs::run_list_rules,
+            crate::runs::run_add_rule,
+            crate::runs::run_delete_rule,
             // Cuentas múltiples por TUI
             crate::accounts::account_capable_agents,
             crate::accounts::list_agent_accounts,

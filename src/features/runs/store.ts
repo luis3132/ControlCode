@@ -31,7 +31,7 @@ interface RunsState {
   refreshTask: (workspaceId: string, taskId: string) => Promise<void>;
   setApprovals: (approvals: PendingApproval[]) => void;
   loadApprovals: () => Promise<void>;
-  decideApproval: (approvalId: string, allow: boolean) => Promise<void>;
+  decideApproval: (approvalId: string, allow: boolean, remember: boolean) => Promise<void>;
 }
 
 /** La línea que se muestra para un evento. `null` = no aporta nada a la tarjeta. */
@@ -85,11 +85,11 @@ export const useRunsStore = create<RunsState>((set) => ({
     set({ approvals: await ipc.listApprovals() });
   },
 
-  decideApproval: async (approvalId, allow) => {
+  decideApproval: async (approvalId, allow, remember) => {
     // Se saca de la lista en el acto: el backend avisa igual por evento, pero esperar ese
     // viaje deja el botón apretado mostrando algo que ya se decidió.
     set((s) => ({ approvals: s.approvals.filter((a) => a.id !== approvalId) }));
-    await ipc.decideApproval(approvalId, allow);
+    await ipc.decideApproval(approvalId, allow, remember);
   },
 
   refreshTask: async (workspaceId, taskId) => {

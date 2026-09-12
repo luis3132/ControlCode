@@ -457,16 +457,11 @@ fn entrada(json: serde_json::Value) -> serde_json::Value {
     json
 }
 
-/// Sin reglas se pregunta todo. Es el default y es el lado seguro: una columna vacía, rota
-/// o de un run viejo no puede terminar autorizando algo sola.
+/// Sin reglas se pregunta todo. Es el default y es el lado seguro: una carpeta sin reglas
+/// no puede terminar autorizando algo sola.
 #[test]
 fn sin_reglas_se_pregunta_todo() {
     assert_eq!(decide(&[], "Edit", &entrada(serde_json::json!({}))), Decision::Ask);
-    assert_eq!(
-        super::rules::parse_rules("{no es json").len(),
-        0,
-        "una columna ilegible deja al run sin reglas, no con reglas inventadas"
-    );
 }
 
 #[test]
@@ -598,16 +593,17 @@ fn un_pedido_espera_hasta_que_alguien_contesta() {
     assert_eq!(visto[0].task_id, "t1");
 
     assert!(broker::decide(id, true, None));
-    let verdict = esperando.join().unwrap().expect("contestado");
+    let verdict = esperando.join().unwrap();
     assert!(verdict.allow);
+    assert_eq!(verdict.by, broker::DecidedBy::User);
 
     // Y deja de estar pendiente.
     assert!(broker::pending().is_empty());
 }
 
-/// Si nadie contesta, NO se inventa un permiso. Devuelve "nadie contestó", que quien llama
-/// traduce a denegado diciendo justamente eso — porque "te dijeron que no" y "no había
-/// nadie" son cosas distintas y el agente las repite en su salida.
+/// Si nadie contesta, NO se aprueba solo: se deniega, pero anotado como `Timeout` y no como
+/// decisión de nadie — "te dijeron que no" y "no había nadie" son cosas distintas y el
+/// agente las repite en su salida.
 #[test]
 fn un_pedido_que_vence_no_se_aprueba_solo() {
     let _serial = con_broker_limpio();
@@ -618,7 +614,8 @@ fn un_pedido_que_vence_no_se_aprueba_solo() {
         serde_json::json!({"command": "rm -rf /"}),
         Duration::from_millis(50),
     );
-    assert_eq!(verdict, None);
+    assert!(!verdict.allow);
+    assert_eq!(verdict.by, broker::DecidedBy::Timeout);
     assert!(broker::pending().is_empty(), "un pedido vencido no queda en la cola");
 }
 
@@ -635,7 +632,9 @@ fn cancelar_una_tarea_suelta_sus_pedidos() {
     }
 
     assert_eq!(broker::drop_task("t9"), 1);
-    assert_eq!(esperando.join().unwrap(), None);
+    let verdict = esperando.join().unwrap();
+    assert!(!verdict.allow);
+    assert_eq!(verdict.by, broker::DecidedBy::Cancelled, "cancelar no es lo mismo que vencer");
     assert!(broker::pending().is_empty());
 }
 
@@ -643,4 +642,242 @@ fn cancelar_una_tarea_suelta_sus_pedidos() {
 fn contestar_un_pedido_que_ya_no_existe_lo_dice() {
     let _serial = con_broker_limpio();
     assert!(!broker::decide("no-existe", true, None));
+}
+
+// ── Recordar: la regla exacta ───────────────────────────────────
+
+use super::rules::{exact_rule_for, is_valid_pattern};
+
+/// "Recordar" escribe EXACTAMENTE lo que se vio. Aprobar `cargo test --lib` no puede
+/// terminar autorizando `cargo test` a secas.
+#[test]
+fn recordar_fija_exactamente_lo_que_se_aprobo() {
+    let bash = serde_json::json!({"command": "cargo test --lib"});
+    let regla_escrita = exact_rule_for("Bash", &bash).expect("se puede recordar");
+    assert_eq!(regla_escrita, "Bash(cargo test --lib)");
+
+    let reglas = [regla(&regla_escrita, true)];
+    assert_eq!(decide(&reglas, "Bash", &bash), Decision::Allow);
+    assert_eq!(
+        decide(&reglas, "Bash", &serde_json::json!({"command": "cargo test"})),
+        Decision::Ask,
+        "una variante del comando no quedó aprobada"
+    );
+    assert_eq!(
+        decide(&reglas, "Bash", &serde_json::json!({"command": "cargo test --lib && rm -rf ~"})),
+        Decision::Ask,
+        "ni uno que lo contenga"
+    );
+
+    let edit = serde_json::json!({"file_path": "/p/src/a.rs", "old_string": "x", "new_string": "y"});
+    assert_eq!(exact_rule_for("Edit", &edit).as_deref(), Some("Edit(/p/src/a.rs)"));
+}
+
+/// En una regla `*` es comodín. Recordar `rm *.log` tal cual aprobaría también
+/// `rm -rf /tmp/x.log`: sin forma de escaparlo, no se ofrece.
+#[test]
+fn no_se_recuerda_un_comando_con_asterisco() {
+    assert_eq!(exact_rule_for("Bash", &serde_json::json!({"command": "rm *.log"})), None);
+}
+
+/// Sin un dato que fijar, la única regla posible sería la herramienta entera: aprobar de
+/// antemano cualquier cosa que haga en el futuro, con cualquier input.
+#[test]
+fn no_se_recuerda_una_herramienta_sin_dato_legible() {
+    assert_eq!(exact_rule_for("mcp__db__query", &serde_json::json!({"sql": "DROP TABLE x"})), None);
+    assert_eq!(exact_rule_for("Bash", &serde_json::json!({})), None);
+}
+
+#[test]
+fn un_patron_escrito_a_mano_se_valida() {
+    for bueno in ["Read", "Bash(git status*)", "Edit(src/**)", "mcp__foo__bar"] {
+        assert!(is_valid_pattern(bueno), "{bueno}");
+    }
+    // Un paréntesis sin cerrar parece acotado pero valdría para toda la herramienta.
+    for malo in ["", "   ", "Bash(git status", "Bash()", "dos palabras"] {
+        assert!(!is_valid_pattern(malo), "{malo:?}");
+    }
+}
+
+// ── Las reglas por carpeta ──────────────────────────────────────
+
+fn tarea_en(conn: &Connection, run_id: &str) -> String {
+    tarea(conn, run_id)
+}
+
+/// Una regla es de la carpeta del proyecto: la de un proyecto no puede decidir por otro.
+#[test]
+fn las_reglas_de_una_carpeta_no_valen_en_otra() {
+    let conn = test_db();
+    run_en(&conn); // w1, /tmp/proy
+    store::upsert_rule(&conn, "/tmp/proy", "Bash(git push*)", true).unwrap();
+    store::upsert_rule(&conn, "/tmp/otro", "Bash(git push*)", false).unwrap();
+
+    let de_proy = store::list_rules(&conn, "/tmp/proy").unwrap();
+    assert_eq!(de_proy.len(), 1);
+    assert!(de_proy[0].allow);
+    assert!(store::list_rules(&conn, "/tmp/nadie").unwrap().is_empty());
+}
+
+/// Cambiarle el veredicto a una regla la reemplaza EN SU LUGAR. Con "gana la primera", una
+/// regla que se mueve al final cambiaría de precedencia sin que nadie lo pidiera.
+#[test]
+fn cambiar_una_regla_no_la_mueve_de_lugar() {
+    let conn = test_db();
+    store::upsert_rule(&conn, "/p", "Bash(a)", true).unwrap();
+    store::upsert_rule(&conn, "/p", "Bash(b)", true).unwrap();
+    store::upsert_rule(&conn, "/p", "Bash(a)", false).unwrap();
+
+    let reglas = store::list_rules(&conn, "/p").unwrap();
+    assert_eq!(reglas.iter().map(|r| r.pattern.as_str()).collect::<Vec<_>>(), ["Bash(a)", "Bash(b)"]);
+    assert!(!reglas[0].allow, "quedó con el veredicto nuevo");
+}
+
+#[test]
+fn la_carpeta_de_una_tarea_es_la_de_su_run() {
+    let conn = test_db();
+    let run = run_en(&conn);
+    let id = tarea_en(&conn, &run);
+    assert_eq!(store::project_cwd_of_task(&conn, &id).as_deref(), Some("/tmp/proy"));
+    assert_eq!(store::project_cwd_of_task(&conn, "no-existe"), None);
+}
+
+fn db_compartida() -> crate::database::DbConnection {
+    std::sync::Arc::new(std::sync::Mutex::new(test_db()))
+}
+
+/// El circuito completo del broker con reglas de la base: lo que una regla cubre se
+/// contesta al instante, sin llegar a la cola, y queda anotado como decisión de la regla.
+#[test]
+fn una_regla_guardada_contesta_sin_preguntar_y_queda_anotada() {
+    let _serial = con_broker_limpio();
+    let db = db_compartida();
+    let id = {
+        let conn = db.lock().unwrap();
+        let run = run_en(&conn);
+        store::upsert_rule(&conn, "/tmp/proy", "Bash(git status)", true).unwrap();
+        tarea_en(&conn, &run)
+    };
+
+    let verdict = broker::resolve(
+        &db,
+        &id,
+        "Bash",
+        serde_json::json!({"command": "git status"}),
+        Duration::from_secs(5),
+    );
+    assert!(verdict.allow);
+    assert_eq!(verdict.by, broker::DecidedBy::Rule);
+    assert!(broker::pending().is_empty(), "no pasó por la cola");
+
+    let conn = db.lock().unwrap();
+    let (status, by): (String, String) = conn
+        .query_row("SELECT status, decided_by FROM task_approvals WHERE task_id = ?1", [&id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
+    assert_eq!((status.as_str(), by.as_str()), ("allowed", "rule"));
+}
+
+/// "Permitir siempre" en un agente tiene que destrabar a OTRO agente de la misma carpeta
+/// que pidió exactamente lo mismo — y a ninguno de otra carpeta. Sin esto, el usuario
+/// tendría que contestarle a mano algo que acaba de decir que no quiere contestar más.
+#[test]
+fn una_regla_nueva_destraba_a_los_que_esperaban_lo_mismo_en_su_carpeta() {
+    let _serial = con_broker_limpio();
+    let db = db_compartida();
+    let (misma, otra_carpeta, otro_pedido) = {
+        let conn = db.lock().unwrap();
+        let run = run_en(&conn);
+        conn.execute(
+            "INSERT INTO runs (id, workspace_id, objective, cwd, created_at)
+             VALUES ('r-otro', 'w1', 'x', '/tmp/otro', 0)",
+            [],
+        )
+        .unwrap();
+        (tarea_en(&conn, &run), tarea_en(&conn, "r-otro"), tarea_en(&conn, &run))
+    };
+
+    let test_cmd = serde_json::json!({"command": "cargo test"});
+    let esperan: Vec<_> = [
+        ("a", misma.clone(), test_cmd.clone()),
+        ("b", otra_carpeta.clone(), test_cmd.clone()),
+        ("c", otro_pedido.clone(), serde_json::json!({"command": "git push"})),
+    ]
+    .into_iter()
+    .map(|(id, task, input)| {
+        std::thread::spawn(move || broker::ask(id, &task, "Bash", input, Duration::from_secs(5)))
+    })
+    .collect();
+    while broker::pending().len() < 3 {
+        std::thread::yield_now();
+    }
+
+    {
+        let conn = db.lock().unwrap();
+        store::upsert_rule(&conn, "/tmp/proy", "Bash(cargo test)", true).unwrap();
+    }
+    assert_eq!(broker::release_matching(&db, "/tmp/proy"), 1, "solo el pedido igual, en su carpeta");
+
+    let mut restantes: Vec<String> = broker::pending().into_iter().map(|p| p.id).collect();
+    restantes.sort();
+    assert_eq!(restantes, ["b", "c"]);
+
+    // Se liberan los demás para que los hilos terminen.
+    broker::decide("b", false, None);
+    broker::decide("c", false, None);
+    let veredictos: Vec<_> = esperan.into_iter().map(|h| h.join().unwrap()).collect();
+    assert!(veredictos[0].allow);
+    assert_eq!(veredictos[0].by, broker::DecidedBy::Rule);
+}
+
+/// El plazo de un pedido es fijo. Antes se renovaba cada vez que se contestaba el pedido de
+/// OTRO agente (`notify_all` los despierta a todos), así que con varios agentes activos un
+/// pedido podía no vencer nunca.
+#[test]
+fn contestar_otros_pedidos_no_renueva_el_plazo_de_uno() {
+    let _serial = con_broker_limpio();
+    let espera = std::thread::spawn(|| {
+        let empezo = std::time::Instant::now();
+        let v = broker::ask("lento", "t1", "Bash", serde_json::json!({}), Duration::from_millis(300));
+        (v, empezo.elapsed())
+    });
+
+    // Mientras tanto, otros pedidos se contestan una y otra vez, despertando a todos.
+    let fin = std::time::Instant::now() + Duration::from_millis(900);
+    let mut n = 0;
+    while std::time::Instant::now() < fin {
+        let id = format!("ruido-{n}");
+        let id2 = id.clone();
+        let h = std::thread::spawn(move || {
+            broker::ask(&id2, "t2", "Bash", serde_json::json!({}), Duration::from_secs(5))
+        });
+        while broker::get(&id).is_none() {
+            std::thread::yield_now();
+        }
+        broker::decide(&id, true, None);
+        h.join().unwrap();
+        n += 1;
+    }
+
+    let (verdict, tardo) = espera.join().unwrap();
+    assert_eq!(verdict.by, broker::DecidedBy::Timeout);
+    assert!(tardo < Duration::from_millis(800), "venció a su hora pese al ruido: {tardo:?}");
+}
+
+/// Un segundo click (o una regla que llega justo) no puede cambiarle la respuesta a un
+/// agente que ya está leyendo la primera.
+#[test]
+fn un_pedido_ya_resuelto_no_se_vuelve_a_resolver() {
+    let _serial = con_broker_limpio();
+    let h = std::thread::spawn(|| broker::ask("x", "t1", "Edit", serde_json::json!({}), Duration::from_secs(5)));
+    while broker::get("x").is_none() {
+        std::thread::yield_now();
+    }
+    // Se toman los dos lugares antes de que el hilo despierte.
+    let primero = broker::decide("x", false, None);
+    let segundo = broker::decide("x", true, None);
+    assert!(primero);
+    assert!(!segundo);
+    assert!(!h.join().unwrap().allow, "vale la primera respuesta");
 }

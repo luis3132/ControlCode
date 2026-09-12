@@ -1,7 +1,7 @@
 /** Comandos de los agentes headless. */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { PendingApproval, Task } from "./types";
+import type { PendingApproval, PermissionRule, Task } from "./types";
 
 export const listTasks = (workspaceId: string) =>
   invoke<Task[]>("run_list_tasks", { workspaceId });
@@ -33,6 +33,16 @@ export const cancelTask = (taskId: string) => invoke<void>("run_cancel_task", { 
 
 export const listApprovals = () => invoke<PendingApproval[]>("run_pending_approvals");
 
-/** Contesta un permiso. `false` = el pedido ya no existe (venció o se canceló la tarea). */
-export const decideApproval = (approvalId: string, allow: boolean, reason?: string) =>
-  invoke<boolean>("run_decide_approval", { approvalId, allow, reason: reason ?? null });
+/**
+ * Contesta un permiso. Con `remember`, además deja escrita su regla exacta para la carpeta.
+ * `false` = el pedido ya no existe (venció, se canceló la tarea o ya estaba resuelto).
+ */
+export const decideApproval = (approvalId: string, allow: boolean, remember: boolean) =>
+  invoke<boolean>("run_decide_approval", { approvalId, allow, remember });
+
+export const listRules = (cwd: string) => invoke<PermissionRule[]>("run_list_rules", { cwd });
+
+export const addRule = (cwd: string, pattern: string, allow: boolean) =>
+  invoke<PermissionRule>("run_add_rule", { cwd, pattern, allow });
+
+export const deleteRule = (id: string) => invoke<boolean>("run_delete_rule", { id });

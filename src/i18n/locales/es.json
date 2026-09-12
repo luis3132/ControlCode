@@ -496,5 +496,15 @@
   "fleet.status.needsYou": "te necesita",
   "fleet.permission.allow": "permitir",
   "fleet.permission.deny": "rechazar",
-  "fleet.permission.blocked": "trabado {{secs}}"
+  "fleet.permission.blocked": "trabado {{secs}}",
+  "fleet.permission.remember": "recordar en esta carpeta",
+  "fleet.rules.title": "Reglas de permisos",
+  "fleet.rules.desc": "Lo que los agentes pueden hacer sin preguntarte, o que tienen prohibido, en",
+  "fleet.rules.empty": "Todavía no hay reglas: los agentes te preguntan todo.",
+  "fleet.rules.allow": "permitir",
+  "fleet.rules.deny": "rechazar",
+  "fleet.rules.delete": "Borrar regla",
+  "fleet.rules.pattern": "Patrón de la regla",
+  "fleet.rules.add": "Agregar",
+  "fleet.rules.syntax": "Herramienta o Herramienta(patrón), con * como comodín: Read · Bash(git status*) · Edit(src/**). Gana la primera que coincide."
 }

@@ -496,5 +496,15 @@
   "fleet.status.needsYou": "needs you",
   "fleet.permission.allow": "allow",
   "fleet.permission.deny": "deny",
-  "fleet.permission.blocked": "blocked {{secs}}"
+  "fleet.permission.blocked": "blocked {{secs}}",
+  "fleet.permission.remember": "remember for this folder",
+  "fleet.rules.title": "Permission rules",
+  "fleet.rules.desc": "What agents may do without asking you, or are never allowed to do, in",
+  "fleet.rules.empty": "No rules yet: agents ask you about everything.",
+  "fleet.rules.allow": "allow",
+  "fleet.rules.deny": "deny",
+  "fleet.rules.delete": "Delete rule",
+  "fleet.rules.pattern": "Rule pattern",
+  "fleet.rules.add": "Add",
+  "fleet.rules.syntax": "Tool or Tool(pattern), with * as a wildcard: Read · Bash(git status*) · Edit(src/**). The first match wins."
 }

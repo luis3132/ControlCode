@@ -67,15 +67,22 @@ function shortPath(path?: string): string {
  * `y` aprueba y `n` rechaza sin sacar las manos del teclado, que es como se contesta una
  * cola: con cinco agentes, obligar a apuntar y clickear cada permiso es lo que hace que la
  * gente termine aprobando todo junto sin leer.
+ *
+ * "Recordar" es un interruptor y no un tercer botón porque aplica a las DOS respuestas:
+ * recordar un rechazo (`git push`, nunca) vale tanto como recordar una aprobación. Y
+ * muestra la regla tal cual se va a guardar, no una descripción de ella — lo que se
+ * recuerda es exactamente lo que se ve.
  */
 export function PermissionCard({ approval, onDecide, focused }: {
   approval: PendingApproval;
-  onDecide: (allow: boolean) => void;
+  onDecide: (allow: boolean, remember: boolean) => void;
   /** Solo la tarjeta enfocada responde al teclado: con varias, `y` sería ambiguo. */
   focused: boolean;
 }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
+  const [remember, setRemember] = useState(false);
+  const canRemember = approval.suggestedRule !== null;
   const preview = useMemo(
     () => buildPreview(approval.toolName, approval.input),
     [approval.toolName, approval.input]
@@ -84,7 +91,7 @@ export function PermissionCard({ approval, onDecide, focused }: {
   const decide = (allow: boolean) => {
     if (busy) return;
     setBusy(true);
-    onDecide(allow);
+    onDecide(allow, canRemember && remember);
   };
 
   useEffect(() => {
@@ -95,11 +102,17 @@ export function PermissionCard({ approval, onDecide, focused }: {
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
       if (e.key === "y" || e.key === "Y") { e.preventDefault(); decide(true); }
       if (e.key === "n" || e.key === "N") { e.preventDefault(); decide(false); }
+      if ((e.key === "r" || e.key === "R") && canRemember) {
+        e.preventDefault();
+        setRemember((v) => !v);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // `remember` va en las dependencias: sin él, `y` usaría el valor del interruptor del
+    // momento en que se montó el listener, y "recordar" se ignoraría en silencio.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focused, busy, approval.id]);
+  }, [focused, busy, approval.id, remember, canRemember]);
 
   return (
     <div className="flex flex-col gap-2 mx-3 mb-2.5 p-2.5 rounded-lg
@@ -134,6 +147,27 @@ export function PermissionCard({ approval, onDecide, focused }: {
           bg-white/60 dark:bg-black/25 text-gray-700 dark:text-white/65">
           {preview.literal}
         </span>
+      )}
+
+      {canRemember && (
+        <label className="flex items-center gap-1.5 min-w-0 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+            disabled={busy}
+            className="shrink-0 accent-amber-600"
+          />
+          <span className="shrink-0 text-[10px] text-amber-800/80 dark:text-amber-300/70">
+            <Kbd>r</Kbd> {t("fleet.permission.remember")}
+          </span>
+          <span
+            title={approval.suggestedRule ?? undefined}
+            className="truncate font-mono text-[10px] text-amber-900/60 dark:text-amber-200/45"
+          >
+            {approval.suggestedRule}
+          </span>
+        </label>
       )}
 
       <div className="flex items-center gap-1.5">

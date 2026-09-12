@@ -53,4 +53,16 @@ export interface PendingApproval {
   /** El `input` crudo de la herramienta. De acá sale el diff. */
   input: Record<string, unknown>;
   askedAt: number;
+  /** La regla que dejaría escrita "recordar", tal cual. `null` = no se ofrece. */
+  suggestedRule: string | null;
+}
+
+/** Lo que se decide sin preguntar en una carpeta. */
+export interface PermissionRule {
+  id: string;
+  cwd: string;
+  /** `Bash(git status*)`, `Read`, `Edit(src/**)`. */
+  pattern: string;
+  allow: boolean;
+  createdAt: number;
 }

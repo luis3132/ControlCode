@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 12;
+const SCHEMA_VERSION: i32 = 13;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -445,18 +445,29 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              asked_at   INTEGER NOT NULL,
              decided_at INTEGER
          );
-         CREATE INDEX IF NOT EXISTS idx_task_approvals_task ON task_approvals(task_id);",
-    )?;
+         CREATE INDEX IF NOT EXISTS idx_task_approvals_task ON task_approvals(task_id);
 
-    // Las reglas de permisos cuelgan del run: son la política de ESE lote de trabajo, no
-    // una preferencia global. Va con ALTER porque `runs` ya existe en las bases que
-    // estrenaron la v11.
-    if !has_column(conn, "runs", "permission_rules") {
-        conn.execute(
-            "ALTER TABLE runs ADD COLUMN permission_rules TEXT NOT NULL DEFAULT '[]'",
-            [],
-        )?;
-    }
+         -- v13 — Lo que se decide sin preguntar, por carpeta de proyecto.
+         --
+         -- Van por carpeta y no por run porque hoy cada lanzamiento abre su propio run: una
+         -- regla del run duraba lo que dura UNA tarea, y un 'permitir siempre' que se olvida
+         -- al lanzar el agente siguiente no es 'siempre'. La carpeta es la del run (el
+         -- proyecto desde el que se lanzó), no la de la tarea: cuando las tareas corran en
+         -- worktrees, cada una va a tener su propio cwd, y la política tiene que seguir
+         -- siendo la del proyecto.
+         CREATE TABLE IF NOT EXISTS permission_rules (
+             id         TEXT PRIMARY KEY,
+             cwd        TEXT NOT NULL,
+             -- `Bash(git status*)`, `Read`, `Edit(src/**)`. La sintaxis de `--allowedTools`.
+             pattern    TEXT NOT NULL,
+             allow      INTEGER NOT NULL,
+             created_at INTEGER NOT NULL,
+             -- Una decisión nueva sobre el mismo patrón REEMPLAZA a la anterior: dos reglas
+             -- idénticas con veredictos opuestos harían depender el resultado del orden.
+             UNIQUE (cwd, pattern)
+         );
+         CREATE INDEX IF NOT EXISTS idx_permission_rules_cwd ON permission_rules(cwd);",
+    )?;
 
     // Columna agregada después de que `tabs` ya existía en instalaciones reales, así que
     // se suma con ALTER en vez de recrear la tabla (que perdería las tabs guardadas).
