@@ -126,6 +126,7 @@ describe("nextTabId", () => {
 describe("shortcutForPath", () => {
   it("encuentra el acorde de una sección", () => {
     expect(shortcutForPath("/settings")).toBe("Ctrl+G");
+    expect(shortcutForPath("/fleet")).toBe("Ctrl+F");
   });
 
   it("una ruta sin atajo devuelve null", () => {

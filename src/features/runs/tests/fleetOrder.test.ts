@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { countByGroup, filterFleet, groupOf, isLive, sortFleet } from "../fleetOrder";
+import { countByGroup, filterFleet, fleetSummary, groupOf, isLive, sortFleet } from "../fleetOrder";
 import { lineOf } from "../store";
-import type { Task, TaskStatus } from "../types";
+import type { PendingApproval, Task, TaskStatus } from "../types";
 
 function task(patch: Partial<Task> & { id: string }): Task {
   return {
@@ -192,5 +192,50 @@ describe("needsYou", () => {
   /// aunque la cola de permisos todavía no haya llegado.
   it("sin datos de bloqueo nada cambia", () => {
     expect(countByGroup(flota)).toEqual({ needsYou: 0, running: 2, idle: 1 });
+  });
+});
+
+describe("handed_off", () => {
+  /// Pasada a una terminal, la tarea deja de ser trabajo en segundo plano: no está parada
+  /// esperando ni avanzando sola, así que va con las terminadas y no suma a "trabajando".
+  it("una tarea pasada a terminal cuenta como terminada y ya no está viva", () => {
+    expect(groupOf(task({ id: "t", status: "handed_off" }))).toBe("idle");
+    expect(isLive("handed_off")).toBe(false);
+  });
+});
+
+function pedido(taskId: string): PendingApproval {
+  return { id: `ap-${taskId}`, taskId, toolName: "Edit", input: {}, askedAt: 0, suggestedRule: null };
+}
+
+describe("fleetSummary", () => {
+  const flota = [
+    task({ id: "a", status: "running", costUsd: 0.1 }),
+    task({ id: "b", status: "running", costUsd: 0.25 }),
+    task({ id: "c", status: "done", costUsd: 0.05 }),
+  ];
+
+  /// Una tarea trabada no puede contar dos veces: está en "te espera", no en "trabajando".
+  /// Sumarla a los dos lados haría que la barra prometa más agentes de los que hay.
+  it("la trabada cuenta como que te espera, no como trabajando", () => {
+    expect(fleetSummary(flota, [pedido("a")])).toMatchObject({ running: 1, needsYou: 1 });
+  });
+
+  /// La cola de permisos es de toda la app, pero la barra lleva a la consola de ESTE
+  /// workspace: contar un pedido que al abrirla no aparece sería mentirle al que hace click.
+  it("no cuenta pedidos de tareas que no están en la lista", () => {
+    expect(fleetSummary(flota, [pedido("de-otro-workspace")]).needsYou).toBe(0);
+  });
+
+  it("varios pedidos de la misma tarea son una sola tarea esperando", () => {
+    expect(fleetSummary(flota, [pedido("a"), { ...pedido("a"), id: "otro" }]).needsYou).toBe(1);
+  });
+
+  it("suma lo gastado de toda la flota, terminadas incluidas", () => {
+    expect(fleetSummary(flota, []).spentUsd).toBeCloseTo(0.4);
+  });
+
+  it("sin flota no hay nada que mostrar", () => {
+    expect(fleetSummary([], [])).toEqual({ running: 0, needsYou: 0, spentUsd: 0 });
   });
 });

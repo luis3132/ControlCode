@@ -6,7 +6,7 @@
  * que pide algo y queda enterrada abajo es un agente parado que nadie ve— y así se puede
  * probar sin montar nada.
  */
-import type { Task, TaskStatus } from "./types";
+import type { PendingApproval, Task, TaskStatus } from "./types";
 
 /** Los tres estados que la consola distingue, y el orden en que se muestran. */
 export type FleetGroup = "needsYou" | "running" | "idle";
@@ -88,4 +88,28 @@ export function filterFleet(
 /** Un estado terminal ya no cambia solo: no hace falta seguir refrescando su reloj. */
 export function isLive(status: TaskStatus): boolean {
   return status === "ready" || status === "running";
+}
+
+export interface FleetSummary {
+  running: number;
+  /** Tarjetas de ESTE workspace con un permiso esperando. */
+  needsYou: number;
+  spentUsd: number;
+}
+
+/**
+ * Lo que la barra de estado dice de la flota, siempre visible.
+ *
+ * Solo cuenta los pedidos de tareas que están en la lista, o sea las de este workspace. La
+ * cola de permisos es de toda la app, pero la barra lleva a `/fleet`, y un número que
+ * promete algo que al abrir la consola no aparece es peor que no mostrarlo.
+ */
+export function fleetSummary(tasks: Task[], approvals: PendingApproval[]): FleetSummary {
+  const ids = new Set(tasks.map((t) => t.id));
+  const blocked = new Set(approvals.filter((a) => ids.has(a.taskId)).map((a) => a.taskId));
+  return {
+    running: tasks.filter((t) => isLive(t.status) && !blocked.has(t.id)).length,
+    needsYou: blocked.size,
+    spentUsd: tasks.reduce((sum, t) => sum + (t.costUsd ?? 0), 0),
+  };
 }

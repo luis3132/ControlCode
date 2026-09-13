@@ -45,6 +45,7 @@ const BADGE: Record<TaskStatus, string> = {
   done: "text-gray-500 dark:text-white/40 bg-gray-200/70 dark:bg-white/8",
   failed: "text-red-600 dark:text-red-400 bg-red-500/12",
   cancelled: "text-gray-500 dark:text-white/35 bg-gray-200/70 dark:bg-white/8",
+  handed_off: "text-blue-700 dark:text-blue-300 bg-blue-500/12",
 };
 
 /**
@@ -170,9 +171,15 @@ export function AgentCard({ task, activity, approval, focused, onCancel, onOpenP
         )}
         {/* Abrir como pane es lo que una CLI no puede ofrecer: la app le impuso el id de
             sesión al lanzar, así que retoma ESA conversación en vez de empezar otra. */}
-        <Tooltip content={t("fleet.card.openPaneHint")} placement="top">
+        {/* Con la tarea viva es "tomar el control": la para y la sigue en una terminal, y
+            el texto lo dice, porque parar un agente no puede ser el efecto secundario de un
+            botón que dice "abrir". Terminada, es solo retomar la conversación. */}
+        <Tooltip
+          content={live ? t("fleet.card.takeOverHint") : t("fleet.card.openPaneHint")}
+          placement="top"
+        >
           <button onClick={onOpenPane} disabled={!task.sessionId} className={ACTION}>
-            {t("fleet.card.openPane")}
+            {live ? t("fleet.card.takeOver") : t("fleet.card.openPane")}
           </button>
         </Tooltip>
       </div>

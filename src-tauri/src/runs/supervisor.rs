@@ -240,18 +240,35 @@ pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
 }
 
 /// Cancela una tarea en curso: marca la fila y mata el proceso con toda su descendencia.
+pub fn cancel(app: &AppHandle, task_id: &str) -> Result<(), String> {
+    stop(app, task_id, status::CANCELLED)
+}
+
+/// Para el proceso headless porque el usuario va a seguir la conversación en una terminal.
+///
+/// Hay que pararlo, no dejarlo correr en paralelo: dos procesos escribiendo la MISMA sesión
+/// a la vez —el headless y el `--resume` de la tab— se pisarían el transcript, y el agente
+/// de la tab arrancaría sin saber lo que el otro hizo después.
+pub fn hand_off(app: &AppHandle, task_id: &str) -> Result<(), String> {
+    stop(app, task_id, status::HANDED_OFF)
+}
+
+/// Marca la fila con `new_status` y mata el proceso con toda su descendencia.
 ///
 /// El orden importa. La fila se marca PRIMERO: al morir el proceso, la tarea que lo espera
-/// va a intentar cerrarlo como fallido, y `finish_task` solo pisa filas que sigan en
-/// `running` — así la cancelación no se convierte en un error que el usuario no cometió.
-pub fn cancel(app: &AppHandle, task_id: &str) -> Result<(), String> {
+/// va a intentar cerrarlo como fallido, y `finish_task` solo pisa filas abiertas — así ni
+/// una cancelación ni un traspaso a terminal se convierten en un error que no hubo.
+fn stop(app: &AppHandle, task_id: &str, new_status: &str) -> Result<(), String> {
     let db = app
         .try_state::<DbConnection>()
         .ok_or_else(|| "la base no está disponible".to_string())?;
     let conn = db.lock().map_err(|e| e.to_string())?;
+    // `ready` también: una tarea que se está lanzando todavía no llegó a `running`, y
+    // pararla en ese instante no puede quedar sin efecto.
     conn.execute(
-        "UPDATE tasks SET status = ?1, ended_at = ?2 WHERE id = ?3 AND status = ?4",
-        rusqlite::params![status::CANCELLED, crate::util::now_ts(), task_id, status::RUNNING],
+        "UPDATE tasks SET status = ?1, ended_at = ?2
+         WHERE id = ?3 AND status IN ('ready', 'running')",
+        rusqlite::params![new_status, crate::util::now_ts(), task_id],
     )
     .map_err(|e| e.to_string())?;
     drop(conn);

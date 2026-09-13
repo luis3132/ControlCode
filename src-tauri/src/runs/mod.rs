@@ -109,6 +109,33 @@ pub fn run_cancel_task(app: AppHandle, task_id: String) -> Result<(), String> {
     supervisor::cancel(&app, &task_id)
 }
 
+/// Deja la tarea lista para seguirla en una terminal y devuelve la fila con lo necesario
+/// para abrirla: la sesión, la cuenta y la carpeta.
+///
+/// Si todavía corre, la para (ver `supervisor::hand_off`). Si ya terminó, no toca nada:
+/// reabrir una conversación cerrada es solo reanudarla.
+#[tauri::command]
+pub fn run_hand_off_task(app: AppHandle, task_id: String) -> Result<Task, String> {
+    let db = db_of(&app)?;
+    let task = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::task_by_id(&conn, &task_id)?.ok_or_else(|| "la tarea ya no existe".to_string())?
+    };
+
+    // Sin sesión no hay nada que reanudar: la tarea falló antes de que la TUI arrancara.
+    // Abrir una tab igual daría una conversación NUEVA presentada como la de la tarea.
+    if task.session_id.is_none() {
+        return Err("esta tarea nunca llegó a arrancar: no hay conversación para seguir".into());
+    }
+
+    if matches!(task.status.as_str(), types::status::READY | types::status::RUNNING) {
+        supervisor::hand_off(&app, &task_id)?;
+    }
+
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    store::task_by_id(&conn, &task_id)?.ok_or_else(|| "la tarea ya no existe".into())
+}
+
 // ── Permisos ────────────────────────────────────────────────────
 
 /// Lo que el puente MCP de una tarea pregunta: ¿puede usar esta herramienta?

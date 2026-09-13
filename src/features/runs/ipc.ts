@@ -31,6 +31,12 @@ export const startTask = (input: StartTaskInput) =>
 
 export const cancelTask = (taskId: string) => invoke<void>("run_cancel_task", { taskId });
 
+/**
+ * Deja la tarea lista para seguirla en una terminal. Si todavía corre, la para: dos
+ * procesos escribiendo la misma sesión se pisarían el transcript.
+ */
+export const handOffTask = (taskId: string) => invoke<Task>("run_hand_off_task", { taskId });
+
 export const listApprovals = () => invoke<PendingApproval[]>("run_pending_approvals");
 
 /**

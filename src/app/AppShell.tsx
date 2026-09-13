@@ -25,6 +25,7 @@ import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
 import { AppExitListener } from "@/app/AppExitListener";
 import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
+import { useFleetEvents } from "@/features/runs/useFleetEvents";
 import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
 
@@ -98,6 +99,9 @@ export function AppShell() {
   const sideWidth = RAIL_W + (workspacesCollapsed ? 0 : PANEL_W);
 
   useGlobalShortcuts();
+  // La flota se escucha desde acá y no desde su pantalla: un agente que pide permiso con
+  // la consola cerrada tiene que verse igual (ver `useFleetEvents`).
+  useFleetEvents();
 
   useEffect(() => {
     detectAgents().then(setDetectedAgents);

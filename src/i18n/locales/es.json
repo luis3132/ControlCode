@@ -506,5 +506,11 @@
   "fleet.rules.delete": "Borrar regla",
   "fleet.rules.pattern": "Patrón de la regla",
   "fleet.rules.add": "Agregar",
-  "fleet.rules.syntax": "Herramienta o Herramienta(patrón), con * como comodín: Read · Bash(git status*) · Edit(src/**). Gana la primera que coincide."
+  "fleet.rules.syntax": "Herramienta o Herramienta(patrón), con * como comodín: Read · Bash(git status*) · Edit(src/**). Gana la primera que coincide.",
+  "fleet.status.handed_off": "en terminal",
+  "fleet.card.takeOver": "tomar el control",
+  "fleet.card.takeOverHint": "Para el agente en segundo plano y sigue la misma conversación en una terminal",
+  "fleet.indicator.needsYou": "{{n}} te espera",
+  "fleet.indicator.running": "{{n}} en segundo plano",
+  "fleet.indicator.hint": "Flota: ${{usd}} gastados en este workspace"
 }

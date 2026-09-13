@@ -881,3 +881,23 @@ fn un_pedido_ya_resuelto_no_se_vuelve_a_resolver() {
     assert!(!segundo);
     assert!(!h.join().unwrap().allow, "vale la primera respuesta");
 }
+
+/// Pasar una tarea a una terminal no es un fallo. Al pararla, el proceso muere y el
+/// supervisor llega igual con un veredicto de error; si ese veredicto pisara la fila, la
+/// tarjeta diría "falló" de algo que el usuario solo movió a una tab.
+#[test]
+fn una_tarea_pasada_a_terminal_no_la_pisa_el_proceso_que_se_paro() {
+    let conn = test_db();
+    let run = run_en(&conn);
+    let id = tarea(&conn, &run);
+    store::mark_running(&conn, &id, "s", "/tmp/e.jsonl").unwrap();
+
+    conn.execute("UPDATE tasks SET status = ?1 WHERE id = ?2", rusqlite::params![status::HANDED_OFF, id])
+        .unwrap();
+    store::finish_task(&conn, &id, &TaskOutcome::failed("killed")).unwrap();
+
+    let t = store::task_by_id(&conn, &id).unwrap().unwrap();
+    assert_eq!(t.status, status::HANDED_OFF);
+    assert_eq!(t.error, None, "no se le inventa un error");
+    assert_eq!(t.session_id.as_deref(), Some("s"), "y conserva la sesión con la que se reabre");
+}

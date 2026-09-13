@@ -62,6 +62,7 @@ pub fn run() {
             crate::runs::run_list_runs,
             crate::runs::run_start_task,
             crate::runs::run_cancel_task,
+            crate::runs::run_hand_off_task,
             crate::runs::run_pending_approvals,
             crate::runs::run_decide_approval,
             crate::runs::run_list_rules,

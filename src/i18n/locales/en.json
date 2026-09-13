@@ -506,5 +506,11 @@
   "fleet.rules.delete": "Delete rule",
   "fleet.rules.pattern": "Rule pattern",
   "fleet.rules.add": "Add",
-  "fleet.rules.syntax": "Tool or Tool(pattern), with * as a wildcard: Read · Bash(git status*) · Edit(src/**). The first match wins."
+  "fleet.rules.syntax": "Tool or Tool(pattern), with * as a wildcard: Read · Bash(git status*) · Edit(src/**). The first match wins.",
+  "fleet.status.handed_off": "in terminal",
+  "fleet.card.takeOver": "take over",
+  "fleet.card.takeOverHint": "Stops the background agent and continues the same conversation in a terminal",
+  "fleet.indicator.needsYou": "{{n}} waiting on you",
+  "fleet.indicator.running": "{{n}} in background",
+  "fleet.indicator.hint": "Fleet: ${{usd}} spent in this workspace"
 }

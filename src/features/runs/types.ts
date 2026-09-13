@@ -24,7 +24,8 @@ export interface Task {
   createdAt: number;
 }
 
-export type TaskStatus = "ready" | "running" | "done" | "failed" | "cancelled";
+/** `handed_off` = el usuario la siguió en una terminal: el trabajo no se paró, se mudó. */
+export type TaskStatus = "ready" | "running" | "done" | "failed" | "cancelled" | "handed_off";
 
 /** Lo que pasó en una tarea, ya traducido del dialecto de su TUI. */
 export type AgentEvent =

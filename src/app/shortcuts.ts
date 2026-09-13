@@ -56,7 +56,10 @@ export interface Shortcut {
 
 /**
  * Las letras siguen la inicial en español —**H**ome, s**E**siones, s**K**ills,
- * **M**arketplace, confi**G**uración— salvo skills, que empieza igual que sesiones.
+ * **M**arketplace, **F**lota, confi**G**uración— salvo skills, que empieza igual que
+ * sesiones. Ctrl+F se le saca a la terminal (en readline es "avanzar un carácter"), el
+ * mismo precio que ya pagan Ctrl+E y Ctrl+K, y bastante menos grave que lo que se evitó
+ * con Ctrl+W y Ctrl+S.
  *
  * Workspaces queda a propósito sin atajo: las teclas que le tocarían (Ctrl+W cierra,
  * Ctrl+S congela la terminal con XOFF) hacen más daño que bien, y se llega desde Home.
@@ -66,6 +69,7 @@ export const SHORTCUTS: Shortcut[] = [
   { key: "e", action: { kind: "goto", path: "/sessions" }, display: "Ctrl+E", labelKey: "sidebar.sessions" },
   { key: "k", action: { kind: "goto", path: "/skills" }, display: "Ctrl+K", labelKey: "sidebar.skills" },
   { key: "m", action: { kind: "goto", path: "/marketplace" }, display: "Ctrl+M", labelKey: "sidebar.marketplace" },
+  { key: "f", action: { kind: "goto", path: "/fleet" }, display: "Ctrl+F", labelKey: "sidebar.fleet" },
   { key: "g", action: { kind: "openSettings" }, path: "/settings", display: "Ctrl+G", labelKey: "sidebar.settings" },
   { key: "tab", action: { kind: "cycleTab", delta: 1 }, display: "Ctrl+Tab", labelKey: "shortcuts.nextTab" },
   {

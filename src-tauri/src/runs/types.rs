@@ -54,6 +54,9 @@ pub mod status {
     pub const DONE: &str = "done";
     pub const FAILED: &str = "failed";
     pub const CANCELLED: &str = "cancelled";
+    /// El usuario la tomó en una terminal. No es lo mismo que cancelarla: el trabajo
+    /// sigue, solo que ahora en una tab, y la tarjeta tiene que decir eso y no "parada".
+    pub const HANDED_OFF: &str = "handed_off";
 }
 
 /// Lo que pasó en una tarea, ya traducido del dialecto de su TUI.

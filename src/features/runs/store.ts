@@ -25,6 +25,8 @@ interface RunsState {
   loadTasks: (workspaceId: string) => Promise<void>;
   startTask: (input: ipc.StartTaskInput) => Promise<Task>;
   cancelTask: (taskId: string) => Promise<void>;
+  /** Para la tarea si hace falta y devuelve la fila con lo necesario para reabrirla. */
+  handOffTask: (taskId: string) => Promise<Task>;
   /** Un evento en vivo del backend. */
   applyEvent: (payload: TaskEventPayload) => void;
   /** Una fila cambió de estado: se relee. */
@@ -67,6 +69,12 @@ export const useRunsStore = create<RunsState>((set) => ({
 
   cancelTask: async (taskId) => {
     await ipc.cancelTask(taskId);
+  },
+
+  handOffTask: async (taskId) => {
+    const task = await ipc.handOffTask(taskId);
+    set((s) => ({ tasks: s.tasks.map((t) => (t.id === task.id ? task : t)) }));
+    return task;
   },
 
   applyEvent: (payload) => {

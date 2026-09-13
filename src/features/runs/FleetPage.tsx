@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AddIcon, EmptyState, NetworkIcon, SearchIcon, ShieldIcon, Tooltip } from "neogestify-ui-components";
+import { AddIcon, EmptyState, Kbd, NetworkIcon, SearchIcon, ShieldIcon, Tooltip } from "neogestify-ui-components";
+
+import { detectAgents } from "@/features/agents/ipc";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { AppDialog } from "@/shared/ui/AppDialog";
@@ -11,12 +13,7 @@ import { countByGroup, filterFleet, FLEET_GROUPS, sortFleet, type FleetGroup } f
 import { NewTaskDialog } from "./NewTaskDialog";
 import { RulesDialog } from "./RulesDialog";
 import { useRunsStore } from "./store";
-import type { PendingApproval, TaskEventPayload } from "./types";
-
-/** Los eventos que emite el supervisor. Deben coincidir con `runs/supervisor.rs`. */
-const TASK_EVENT = "cc-task-event";
-const TASK_CHANGED = "cc-task-changed";
-const APPROVALS_CHANGED = "cc-task-approvals";
+import type { PendingApproval, Task } from "./types";
 
 /**
  * La consola de flota: qué está haciendo cada agente headless, todo junto.
@@ -33,15 +30,11 @@ export function FleetPage() {
 
   const tasks = useRunsStore((s) => s.tasks);
   const activity = useRunsStore((s) => s.activity);
-  const loadTasks = useRunsStore((s) => s.loadTasks);
-  const applyEvent = useRunsStore((s) => s.applyEvent);
-  const refreshTask = useRunsStore((s) => s.refreshTask);
   const startTask = useRunsStore((s) => s.startTask);
   const cancelTask = useRunsStore((s) => s.cancelTask);
   const approvals = useRunsStore((s) => s.approvals);
-  const setApprovals = useRunsStore((s) => s.setApprovals);
-  const loadApprovals = useRunsStore((s) => s.loadApprovals);
   const decideApproval = useRunsStore((s) => s.decideApproval);
+  const handOffTask = useRunsStore((s) => s.handOffTask);
 
   const [group, setGroup] = useState<FleetGroup | null>(null);
   const [query, setQuery] = useState("");
@@ -52,24 +45,51 @@ export function FleetPage() {
   // La carpeta donde se lanza: la de la tab activa, igual que el "+" de la barra de tabs.
   const cwd = tabs.find((tb) => tb.id === activeTabId)?.cwd ?? tabs[0]?.cwd ?? "";
 
-  useEffect(() => {
-    if (workspaceId) loadTasks(workspaceId).catch(console.error);
-    // La cola no es por workspace: un permiso esperando es de la app entera. Se pide al
-    // montar porque puede haber uno de antes de abrir esta pantalla.
-    loadApprovals().catch(console.error);
-  }, [workspaceId, loadTasks, loadApprovals]);
+  // Los eventos los escucha `useFleetEvents` desde el shell, esté abierta o no esta
+  // pantalla. Acá solo se lee.
 
+  const addTab = useTabsStore((s) => s.addTab);
+  const navigate = useNavigate();
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [handOffError, setHandOffError] = useState("");
+
+  // `/` enfoca el buscador. No Ctrl+K, que es lo que muestra el mockup: acá Ctrl+K ya es
+  // Skills, y robarlo rompería un atajo que la gente ya tiene en los dedos.
   useEffect(() => {
-    if (!workspaceId) return;
-    const unlisten = [
-      listen<TaskEventPayload>(TASK_EVENT, (e) => applyEvent(e.payload)),
-      listen<string>(TASK_CHANGED, (e) => refreshTask(workspaceId, e.payload)),
-      listen<PendingApproval[]>(APPROVALS_CHANGED, (e) => setApprovals(e.payload)),
-    ];
-    return () => {
-      unlisten.forEach((p) => p.then((off) => off()).catch(() => {}));
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
+      e.preventDefault();
+      searchRef.current?.focus();
     };
-  }, [workspaceId, applyEvent, refreshTask, setApprovals]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /** Sigue la conversación de una tarea en una terminal de verdad. */
+  const openInTerminal = async (task: Task) => {
+    setHandOffError("");
+    try {
+      const ready = await handOffTask(task.id);
+      if (!ready.sessionId) return;
+      const agent = (await detectAgents()).find((a) => a.id === ready.agentId);
+      addTab({
+        cwd: ready.cwd,
+        agent: agent ?? { id: ready.agentId, label: ready.agentId, command: ready.agentId, available: true },
+        title: ready.title,
+        // La sesión que la app le impuso al lanzar: la tab retoma ESA conversación con
+        // `--resume` en vez de empezar otra.
+        sessionId: ready.sessionId,
+        // Y con la misma cuenta: el transcript vive dentro de la carpeta de la cuenta, y
+        // con otra el resume no lo encontraría.
+        accountId: ready.accountId ?? undefined,
+      });
+      navigate("/workspace");
+    } catch (e) {
+      setHandOffError(String(e));
+    }
+  };
 
   // Por tarea, el primer permiso que esté esperando. Puede haber más de uno encolado si el
   // agente pidió varias cosas seguidas; se muestra de a uno para que la decisión sea sobre
@@ -143,15 +163,27 @@ export function FleetPage() {
           border border-gray-200 dark:border-white/10">
           <SearchIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/30" />
           <input
+            ref={searchRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") { setQuery(""); e.currentTarget.blur(); }
+            }}
             placeholder={t("fleet.search")}
             className="w-40 bg-transparent outline-none text-[11.5px]
               text-gray-800 dark:text-gray-200
               placeholder:text-gray-400 dark:placeholder:text-white/25"
           />
+          <Kbd>/</Kbd>
         </div>
       </div>
+
+      {handOffError && (
+        <div className="shrink-0 px-4 py-2 text-[11px] text-red-600 dark:text-red-400
+          border-b border-red-200/60 dark:border-red-500/20 bg-red-50 dark:bg-red-500/8">
+          {handOffError}
+        </div>
+      )}
 
       {/* ══ la grilla ═══════════════════════════════════════════════ */}
       <div className="flex-1 min-h-0 cc-scroll p-3">
@@ -177,10 +209,7 @@ export function FleetPage() {
                 }}
                 onCancel={() => cancelTask(task.id).catch(console.error)}
                 onShowResult={() => setDetail(task.id)}
-                // El pane todavía no existe: llega en el corte 3, junto con el resto de la
-                // consola. Mostrar el resultado es lo que hay hasta entonces, y decirlo es
-                // mejor que un botón que no hace nada.
-                onOpenPane={() => setDetail(task.id)}
+                onOpenPane={() => openInTerminal(task)}
               />
             ))}
 
