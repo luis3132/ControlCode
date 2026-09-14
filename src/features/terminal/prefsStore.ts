@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { clampZoom, TERMINAL_ZOOM } from "@/features/terminal/theme";
+
 /**
  * Preferencias visuales de la terminal.
  *
@@ -10,6 +12,7 @@ import { create } from "zustand";
  */
 const MARKS_KEY = "cc-terminal-input-marks";
 const GPU_KEY = "cc-terminal-gpu";
+const ZOOM_KEY = "cc-terminal-zoom";
 
 interface TerminalPrefsState {
   /** Dibujar una línea de corte en cada envío del usuario. */
@@ -25,6 +28,10 @@ interface TerminalPrefsState {
    *  el arranque (ver `main.tsx` y `app/rendering.rs`). */
   compositing: boolean;
   setCompositing: (value: boolean) => void;
+  /** Zoom del texto de todas las terminales, en porcentaje (ver `terminalFontSize`). La
+   *  fuente que se ve bien depende de la pantalla y de la distancia, no de la TUI. */
+  zoom: number;
+  setZoom: (value: number) => void;
 }
 
 export const useTerminalPrefsStore = create<TerminalPrefsState>((set) => ({
@@ -46,4 +53,12 @@ export const useTerminalPrefsStore = create<TerminalPrefsState>((set) => ({
 
   compositing: true,
   setCompositing: (compositing) => set({ compositing }),
+
+  zoom: clampZoom(Number(localStorage.getItem(ZOOM_KEY) ?? TERMINAL_ZOOM.default)),
+
+  setZoom: (value) => {
+    const zoom = clampZoom(value);
+    localStorage.setItem(ZOOM_KEY, String(zoom));
+    set({ zoom });
+  },
 }));

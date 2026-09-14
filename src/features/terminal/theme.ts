@@ -10,6 +10,29 @@
 export const TERMINAL_FONT =
   '"JetBrains Mono Variable", "JetBrains Mono", "Cascadia Code", "Fira Code", monospace';
 
+/** Tamaño de la fuente de la terminal con el zoom al 100 %. */
+export const TERMINAL_FONT_SIZE = 13;
+
+/** El zoom del texto de Configuración, en porcentaje. */
+export const TERMINAL_ZOOM = { min: 70, max: 200, step: 10, default: 100 } as const;
+
+/** Un zoom válido: dentro del rango y en uno de sus pasos. Lo que no es un número (basura
+ *  en `localStorage`) vuelve al 100 %. */
+export function clampZoom(zoom: number): number {
+  if (!Number.isFinite(zoom)) return TERMINAL_ZOOM.default;
+  const stepped = Math.round(zoom / TERMINAL_ZOOM.step) * TERMINAL_ZOOM.step;
+  return Math.min(TERMINAL_ZOOM.max, Math.max(TERMINAL_ZOOM.min, stepped));
+}
+
+/**
+ * El tamaño de fuente que corresponde a un zoom, redondeado a píxeles enteros: la celda de
+ * xterm se mide a partir de este tamaño, y uno fraccionario deja los glifos entre dos
+ * píxeles. Con 13 de base, cada paso del 10 % sigue dando un tamaño distinto.
+ */
+export function terminalFontSize(zoom: number): number {
+  return Math.round((TERMINAL_FONT_SIZE * clampZoom(zoom)) / 100);
+}
+
 /**
  * Paletas de la terminal, una por tema. Son GitHub Dark y GitHub Light: el resto de la app
  * ya venía con la oscura, y usar el par oficial mantiene los 16 colores ANSI coherentes

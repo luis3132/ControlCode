@@ -30,7 +30,7 @@ import { ptyAttach, ptyCreate, ptyKill, ptyResize, ptyWrite } from "./ipc";
 import { createFitter } from "./fit";
 import { StatusBadge, type TerminalStatus } from "./StatusBadge";
 import { LOOKBACK_S, startSessionDiscovery } from "./sessionDiscovery";
-import { MARK_LINE, MIN_CONTRAST, TERMINAL_FONT, TERMINAL_THEMES } from "./theme";
+import { MARK_LINE, MIN_CONTRAST, TERMINAL_FONT, TERMINAL_THEMES, terminalFontSize } from "./theme";
 
 interface TerminalProps {
   /** Id de la tab en el store — solo se usa para esperar (si aplica) a que sus symlinks
@@ -112,6 +112,7 @@ export function Terminal({
   // Reactivo (no `getState()`): apagarlo en Configuración tiene que soltar el contexto de
   // la terminal que estés mirando en ese momento, no en la próxima que abras.
   const gpuRenderer = useTerminalPrefsStore((s) => s.gpuRenderer && s.compositing);
+  const zoom = useTerminalPrefsStore((s) => s.zoom);
 
   // ── Renderizador por GPU, SOLO en la terminal activa ─────────────────────
   //
@@ -161,7 +162,7 @@ export function Terminal({
       theme: TERMINAL_THEMES[themeRef.current],
       minimumContrastRatio: MIN_CONTRAST[themeRef.current],
       fontFamily: TERMINAL_FONT,
-      fontSize: 13,
+      fontSize: terminalFontSize(useTerminalPrefsStore.getState().zoom),
       // Un respiro mínimo entre líneas. Con 1 las descendentes de una línea tocaban las
       // mayúsculas de la siguiente, y el texto largo de un agente se leía como un bloque.
       // Los caracteres de caja y bloque no se cortan: xterm los dibuja él mismo, estirados
@@ -520,6 +521,14 @@ export function Terminal({
     term.options.theme = TERMINAL_THEMES[theme];
     term.options.minimumContrastRatio = MIN_CONTRAST[theme];
   }, [theme]);
+
+  // El zoom de Configuración, en vivo y en todas las terminales abiertas. xterm vuelve a
+  // medir la celda, y ese cambio de dimensiones reajusta la grilla y le avisa al PTY (paso
+  // 6): la TUI se redibuja con las columnas nuevas sin reiniciar nada.
+  useEffect(() => {
+    const term = termRef.current;
+    if (term) term.options.fontSize = terminalFontSize(zoom);
+  }, [zoom]);
 
   // Foco automático al pasar a ser la terminal visible: cambiar de tab (o volver a
   // /workspace) debería dejar el cursor listo para escribir, sin un click extra sobre el
