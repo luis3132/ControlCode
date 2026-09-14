@@ -15,6 +15,8 @@ import { SettingsModal } from "@/features/settings/SettingsModal";
 import { AccountsModal } from "@/features/accounts/AccountsModal";
 import { RouteModal } from "@/app/RouteModal";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
+import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
+import { initViewTabsPersistence } from "@/features/tabs/viewStore";
 import { useUiStore } from "@/app/uiStore";
 import { buildWorkspaceTree } from "@/features/workspaces/workspaceTree";
 import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
@@ -133,6 +135,7 @@ export function AppShell() {
   useEffect(() => {
     initTabsPersistence();
     const myLabel = getCurrentWindow().label;
+    initViewTabsPersistence(myLabel);
     loadWindowState(myLabel)
       .then((restored) => {
         if (restored) {
@@ -219,6 +222,8 @@ export function AppShell() {
             }}
           >
             <TerminalPanel />
+            {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. */}
+            <ViewTabsHost />
           </div>
 
           {/* `overflow-hidden` y no `cc-scroll`: cada página arma su propio alto y

@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import { Terminal } from "@/features/terminal/Terminal";
 import { useTabsStore } from "@/features/tabs/store";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { buildResumeCommand, isResumable } from "@/features/sessions/agentResume";
 
 export function TerminalPanel() {
@@ -14,6 +15,9 @@ export function TerminalPanel() {
   // que "ser la tab activa" no alcanza para enfocar: en Skills o Settings el foco tiene que
   // quedarse en esa página, no robárselo una terminal invisible.
   const onWorkspace = useLocation().pathname.startsWith("/workspace");
+  // Con un archivo o un navegador abierto encima, la terminal no se ve: no puede quedarse
+  // con el foco, o lo que se tipee en el editor le llegaría al agente.
+  const viewOnTop = useViewTabsStore((s) => s.activeViewId !== null);
 
   return (
     // h-full en lugar de flex-1: el padre es position:absolute;inset:0 (no flex),
@@ -45,7 +49,7 @@ export function TerminalPanel() {
               prelaunch={tab.prelaunch}
               attachPtyId={tab.ptyId ?? undefined}
               initialScrollback={isResuming ? undefined : tab.scrollback}
-              isActive={tab.id === activeTabId && onWorkspace}
+              isActive={tab.id === activeTabId && onWorkspace && !viewOnTop}
               openedAt={tab.openedAt}
               knownSessionId={tab.sessionId}
               onReady={(ptyId) => setPtyId(tab.id, ptyId)}

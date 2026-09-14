@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AddIcon } from "neogestify-ui-components";
+import { AddIcon, Button } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { TabItem } from "@/features/tabs/TabItem";
@@ -14,6 +14,10 @@ import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
 import { WindowLights } from "@/app/WindowLights";
+import { AppDialog } from "@/shared/ui/AppDialog";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { viewLabels, viewsOfWorkspace } from "@/features/tabs/viewTabs";
+import { ViewTabItem } from "@/features/tabs/ViewTabItem";
 
 /**
  * Las tabs del workspace activo, dentro de la barra de título.
@@ -49,6 +53,23 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
 
   const visible = tabsOfWorkspace(tabs, activeTabId);
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
+
+  const views = useViewTabsStore((s) => s.views);
+  const activeViewId = useViewTabsStore((s) => s.activeViewId);
+  const activateView = useViewTabsStore((s) => s.activateView);
+  const closeView = useViewTabsStore((s) => s.closeView);
+  const showTerminal = useViewTabsStore((s) => s.showTerminal);
+  const workspaceViews = useMemo(() => viewsOfWorkspace(views, activeTab?.cwd ?? null), [views, activeTab?.cwd]);
+  const labels = useMemo(() => viewLabels(workspaceViews), [workspaceViews]);
+  const activeView = workspaceViews.find((v) => v.id === activeViewId) ?? null;
+  /** Una tab con cambios sin guardar que se pidió cerrar: se confirma antes. */
+  const [closingDirty, setClosingDirty] = useState<string | null>(null);
+
+  const requestCloseView = (id: string) => {
+    const view = views.find((v) => v.id === id);
+    if (view?.kind === "file" && view.dirty) setClosingDirty(id);
+    else closeView(id);
+  };
 
   const clearDrag = () => {
     setDraggedId(null);
@@ -100,10 +121,13 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
           <TabItem
             key={tab.id}
             tab={tab}
-            isActive={tab.id === activeTabId}
+            isActive={tab.id === activeTabId && !activeView}
             isDragOver={dragOverId === tab.id && draggedId !== tab.id}
             onActivate={() => {
               activateTab(tab.id);
+              // Si la tab ya era la activa no cambia nada en el store, y la vista abierta
+              // encima seguiría tapando la terminal que se acaba de pedir.
+              showTerminal();
               navigate("/workspace");
             }}
             onClose={(e) => {
@@ -120,6 +144,23 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
             onDrop={() => moveTo(tab.id)}
             onDragEnd={clearDrag}
             onContextMenu={(e) => setContextTab({ tabId: tab.id, x: e.clientX, y: e.clientY })}
+          />
+        ))}
+
+        {workspaceViews.length > 0 && (
+          <span className="shrink-0 self-center w-px h-4 mx-1 bg-gray-300 dark:bg-white/10" />
+        )}
+        {workspaceViews.map((view) => (
+          <ViewTabItem
+            key={view.id}
+            view={view}
+            hint={labels.get(view.id)?.hint ?? null}
+            isActive={view.id === activeView?.id}
+            onActivate={() => {
+              activateView(view.id);
+              navigate("/workspace");
+            }}
+            onClose={() => requestCloseView(view.id)}
           />
         ))}
 
@@ -174,6 +215,27 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
           />
         );
       })()}
+
+      {closingDirty && (
+        <AppDialog
+          title={t("editor.closeDirty.title")}
+          size="sm"
+          closeOnEsc
+          onClose={() => setClosingDirty(null)}
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setClosingDirty(null)}>{t("btn.cancel")}</Button>
+              <Button variant="danger" onClick={() => { closeView(closingDirty); setClosingDirty(null); }}>
+                {t("editor.closeDirty.confirm")}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            {t("editor.closeDirty.body", { name: views.find((v) => v.id === closingDirty)?.title ?? "" })}
+          </p>
+        </AppDialog>
+      )}
 
       {skillTarget && (
         <SkillPalette target={skillTarget} onClose={() => setSkillTarget(null)} />
