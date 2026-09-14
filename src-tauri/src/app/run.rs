@@ -61,6 +61,20 @@ pub fn run() {
             crate::explorer::explorer_read_file,
             crate::explorer::explorer_write_file,
             crate::explorer::explorer_file_stat,
+            // Control de versiones (panel derecho)
+            crate::scm::scm_status,
+            crate::scm::scm_init,
+            crate::scm::scm_stage,
+            crate::scm::scm_unstage,
+            crate::scm::scm_discard,
+            crate::scm::scm_commit,
+            crate::scm::scm_branches,
+            crate::scm::scm_checkout,
+            crate::scm::scm_fetch,
+            crate::scm::scm_pull,
+            crate::scm::scm_push,
+            crate::scm::scm_log,
+            crate::scm::scm_file_at,
             // Renderizado del WebView (texto nítido en Linux)
             crate::app::rendering_info,
             // Detección de agentes

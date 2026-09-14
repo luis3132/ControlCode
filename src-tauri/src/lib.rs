@@ -12,6 +12,7 @@ mod marketplace;
 mod orchestrator;
 mod prelaunch;
 mod runs;
+mod scm;
 mod session;
 mod skills;
 mod terminal;
