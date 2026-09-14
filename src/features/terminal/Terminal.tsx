@@ -25,7 +25,7 @@ import { ptyAttach, ptyCreate, ptyKill, ptyResize, ptyWrite } from "./ipc";
 import { createFitter } from "./fit";
 import { StatusBadge, type TerminalStatus } from "./StatusBadge";
 import { LOOKBACK_S, startSessionDiscovery } from "./sessionDiscovery";
-import { MARK_LINE, MIN_CONTRAST, TERMINAL_THEMES } from "./theme";
+import { MARK_LINE, MIN_CONTRAST, TERMINAL_FONT, TERMINAL_THEMES } from "./theme";
 
 interface TerminalProps {
   /** Id de la tab en el store — solo se usa para esperar (si aplica) a que sus symlinks
@@ -155,7 +155,7 @@ export function Terminal({
     const term = new XTerm({
       theme: TERMINAL_THEMES[themeRef.current],
       minimumContrastRatio: MIN_CONTRAST[themeRef.current],
-      fontFamily: '"Cascadia Code", "JetBrains Mono", "Fira Code", monospace',
+      fontFamily: TERMINAL_FONT,
       fontSize: 13,
       lineHeight: 1,
       cursorBlink: true,

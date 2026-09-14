@@ -1,4 +1,16 @@
 /**
+ * La fuente de la terminal. JetBrains Mono viene incluida con la app
+ * (`@fontsource-variable/jetbrains-mono`, cargada en `main.tsx`): antes el stack pedía
+ * Cascadia Code, JetBrains Mono y Fira Code, que no vienen instaladas en casi ningún Linux,
+ * y la terminal terminaba en el `monospace` que tocara — distinto en cada máquina y, en
+ * Fedora, una variable pensada para documentos y no para una grilla a 13px.
+ *
+ * Las demás quedan detrás por si alguien prefiere la suya instalada.
+ */
+export const TERMINAL_FONT =
+  '"JetBrains Mono Variable", "JetBrains Mono", "Cascadia Code", "Fira Code", monospace';
+
+/**
  * Paletas de la terminal, una por tema. Son GitHub Dark y GitHub Light: el resto de la app
  * ya venía con la oscura, y usar el par oficial mantiene los 16 colores ANSI coherentes
  * entre sí en vez de aclarar la oscura a ojo (que deja los colores brillantes ilegibles
