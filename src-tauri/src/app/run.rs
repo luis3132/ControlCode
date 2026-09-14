@@ -7,10 +7,11 @@ use crate::database::DbConnection;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    super::signals::cleanup_on_signals();
     let db_conn = crate::database::init_db().expect("Failed to initialize SQLite database");
-    // Antes de construir Tauri: WebKitGTK decide cómo componer al inicializarse.
+    // Antes de construir Tauri, porque WebKitGTK decide cómo componer al inicializarse; y
+    // antes del hilo de señales, porque toca el entorno del proceso (ver `configure`).
     super::rendering::configure(&db_conn);
+    super::signals::cleanup_on_signals();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

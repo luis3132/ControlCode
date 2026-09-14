@@ -34,13 +34,21 @@ pub(super) fn gpu_compositing_enabled(db: &DbConnection) -> bool {
     get_setting(db, GPU_COMPOSITING_KEY).ok().flatten().as_deref() == Some("1")
 }
 
-/// Aplica la preferencia. Tiene que correr antes de construir Tauri.
+/// Aplica la preferencia.
+///
+/// Tiene que correr con el proceso todavía en un solo hilo: antes de construir Tauri y
+/// antes de `cleanup_on_signals`, que es el primero en crear uno (ver `run`). Escribir el
+/// entorno mientras otro hilo lo lee —cualquier `getenv`, o lanzar un proceso— es
+/// comportamiento indefinido, y por eso `set_var` es `unsafe` desde la edición 2024.
 pub(super) fn configure(db: &DbConnection) {
     let user_defined = std::env::var_os(WEBKIT_ENV).is_some();
     let _ = USER_ENV.set(user_defined);
     // Quien la definió a mano sabe lo que quiere: su valor manda sobre el de la app.
     if cfg!(target_os = "linux") && !user_defined && !gpu_compositing_enabled(db) {
-        std::env::set_var(WEBKIT_ENV, "1");
+        // SAFETY: todavía no hay otro hilo que pueda leer el entorno — `run` llama a esto
+        // antes de instalar el hilo de señales y de levantar Tauri, y abrir la base de
+        // SQLite no crea hilos.
+        unsafe { std::env::set_var(WEBKIT_ENV, "1") };
     }
 }
 
