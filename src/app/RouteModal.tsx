@@ -1,6 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { CloseIcon } from "neogestify-ui-components";
+
+import { hasOpenDialog } from "@/shared/ui/openDialog";
+import { useFocusInside } from "@/shared/ui/useFocusInside";
 
 /**
  * El marco que convierte una ruta en un modal.
@@ -14,10 +17,15 @@ import { CloseIcon } from "neogestify-ui-components";
  */
 export function RouteModal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   const { t } = useTranslation();
+  const frameRef = useRef<HTMLDivElement>(null);
+  // Ver `useFocusInside`: sin esto el teclado seguía en la terminal de atrás.
+  useFocusInside(frameRef);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // Un diálogo abierto encima es el dueño de este Escape (ver `hasOpenDialog`).
+      if (hasOpenDialog()) return;
       // Se corta acá: si no, el Escape sigue viaje hasta la terminal de atrás y el agente
       // lo recibe como si lo hubieras tecleado vos.
       e.preventDefault();
@@ -36,7 +44,7 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
         className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/65"
       />
 
-      <div className="cc-rise relative flex flex-col w-full max-w-5xl h-full
+      <div ref={frameRef} tabIndex={-1} className="outline-none cc-rise relative flex flex-col w-full max-w-5xl h-full
         rounded-2xl overflow-hidden
         bg-gray-50 dark:bg-[#0d1117]
         border border-gray-200 dark:border-white/12

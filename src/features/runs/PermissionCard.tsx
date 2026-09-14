@@ -128,7 +128,11 @@ export function PermissionCard({ approval, onDecide, focused }: {
           {preview.diff.map((line, i) => (
             <span
               key={i}
-              className={`truncate px-1.5 font-mono text-[10px] leading-[1.45]
+              // `whitespace-pre` y no `truncate`: `truncate` trae `nowrap`, que colapsa los
+              // espacios del principio, y un diff sin indentación esconde justo cambios como
+              // mover una línea de nivel.
+              className={`overflow-hidden text-ellipsis whitespace-pre [tab-size:2]
+                px-1.5 font-mono text-[10px] leading-[1.45]
                 ${line.sign === "-"
                   ? "bg-red-500/10 text-red-700 dark:text-red-300"
                   : line.sign === "+"

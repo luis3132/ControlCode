@@ -1,6 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { CloseIcon } from "neogestify-ui-components";
+
+import { hasOpenDialog } from "@/shared/ui/openDialog";
+import { useFocusInside } from "@/shared/ui/useFocusInside";
 
 /**
  * El marco de un modal de la app (Configuración, Cuentas).
@@ -21,10 +24,16 @@ export function ShellModal({ title, icon, width = "max-w-4xl", onClose, children
   children: React.ReactNode;
 }) {
   const { t } = useTranslation();
+  const frameRef = useRef<HTMLDivElement>(null);
+  // Ver `useFocusInside`: sin esto el teclado seguía en la terminal de atrás.
+  useFocusInside(frameRef);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // Un diálogo abierto encima (agregar cuenta, por ejemplo) es el dueño de este Escape:
+      // cerrar la pantalla entera se lo llevaría puesto. Ver `hasOpenDialog`.
+      if (hasOpenDialog()) return;
       // Se corta acá: si no, el Escape sigue viaje hasta la terminal que está detrás y el
       // agente lo recibe como si lo hubieras tecleado vos.
       e.preventDefault();
@@ -43,7 +52,7 @@ export function ShellModal({ title, icon, width = "max-w-4xl", onClose, children
         className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/65"
       />
 
-      <div className={`cc-rise relative flex flex-col w-full ${width} h-full max-h-[42rem]
+      <div ref={frameRef} tabIndex={-1} className={`outline-none cc-rise relative flex flex-col w-full ${width} h-full max-h-[42rem]
         rounded-2xl overflow-hidden
         bg-gray-50 dark:bg-[#0d1117]
         border border-gray-200 dark:border-white/12
