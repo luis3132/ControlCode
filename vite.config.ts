@@ -86,7 +86,16 @@ export default defineConfig(async () => ({
     // El bundle solo corre dentro del webview que empaqueta Tauri, no en navegadores
     // arbitrarios: se compila contra ese motor concreto (WebView2 en Windows, WebKit en
     // el resto) en vez de degradar sintaxis para browsers que nunca van a abrir esto.
-    target: platform === "windows" ? "chrome105" : "safari13",
+    //
+    // WebKit NO puede bajar de Safari 15. Estaba en `safari13` y rompió la terminal del
+    // release: xterm trae `let r; f(r ||= {})`, Safari 13 no tiene asignación lógica, y
+    // esbuild al bajarla Y minificar se come la declaración y deja `void 0 || (i = {})`,
+    // una asignación a una variable que no existe. En un módulo eso es un ReferenceError,
+    // que saltaba con la primera consulta de modo (DECRQM) de Claude Code y dejaba muerto
+    // el parser de xterm. `tauri dev` no minifica, así que en desarrollo nunca se vio; lo
+    // cuida `src/app/tests/buildTarget.test.ts`. Safari 15 es el último que llega a macOS
+    // Catalina, así que no deja afuera a nadie que Tauri 2 soporte.
+    target: platform === "windows" ? "chrome105" : "safari15",
     // Sin minificar y con sourcemaps en `tauri dev`/`tauri build --debug`, para que un
     // error apunte al .tsx real en vez de a una línea de bundle ilegible.
     minify: isDebugBuild ? false : "esbuild",
