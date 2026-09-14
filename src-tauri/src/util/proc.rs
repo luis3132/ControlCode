@@ -19,6 +19,17 @@ const POLL: Duration = Duration::from_millis(25);
 /// y "no encontró nada" son cosas distintas, y confundirlas haría que un binario colgado
 /// se vea como una sesión inexistente.
 pub fn output_with_timeout(cmd: &mut Command, limit: Duration) -> std::io::Result<Output> {
+    // En Windows, un programa de consola (git, node, opencode) lanzado desde una app de
+    // ventana abre SU PROPIA consola, que aparece y desaparece en un parpadeo. Con el panel
+    // de control de versiones consultando git cada pocos segundos, la pantalla parpadearía
+    // sin parar. Todo lo que pasa por acá corre sin ventana.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
     let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::null()).spawn()?;
 
     // Los pipes se drenan en threads propios: si el proceso llena el buffer del pipe y
