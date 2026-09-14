@@ -57,6 +57,11 @@ describe("matchShortcut", () => {
     });
   });
 
+  it("Ctrl+Shift+Tab en WebKitGTK, donde Shift+Tab llega como tecla desconocida", () => {
+    expect(matchShortcut(chord({ key: "Unidentified", code: "Tab", ctrlKey: true, shiftKey: true }))?.action)
+      .toEqual({ kind: "cycleTab", delta: -1 });
+  });
+
   it("una tecla que no está en la tabla no matchea", () => {
     expect(matchShortcut(chord({ key: "z", ctrlKey: true }))).toBeNull();
   });

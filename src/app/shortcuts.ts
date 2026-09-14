@@ -28,6 +28,8 @@
  * click para volver, que es al revés de lo que hace falta.
  */
 
+import { keyName } from "@/shared/keyboard";
+
 /** La ruta del área de terminales. Volver acá es volver a trabajar. */
 export const WORKSPACE_PATH = "/workspace";
 
@@ -84,6 +86,8 @@ export const SHORTCUTS: Shortcut[] = [
 /** Lo que hace falta de un `KeyboardEvent` — estructural para poder testear sin DOM. */
 export interface KeyChord {
   key: string;
+  /** La tecla física. Hace falta para reconocer Shift+Tab en WebKitGTK (ver `keyName`). */
+  code?: string;
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
@@ -95,7 +99,7 @@ export function matchShortcut(e: KeyChord): Shortcut | null {
   // Ctrl+Alt, así que sin esta condición escribir un carácter con AltGr dispararía atajos.
   // Meta queda afuera por lo mismo (Cmd+M minimiza en macOS).
   if (!e.ctrlKey || e.altKey || e.metaKey) return null;
-  const key = e.key.toLowerCase();
+  const key = keyName(e).toLowerCase();
   return SHORTCUTS.find((s) => s.key === key && Boolean(s.shift) === e.shiftKey) ?? null;
 }
 

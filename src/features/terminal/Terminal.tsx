@@ -14,7 +14,7 @@ import { registerCapabilityResponders } from "@/features/terminal/terminalCapabi
 import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
 import { registerTerminal } from "@/features/terminal/terminalRegistry";
-import { installDeadKeyFilter } from "@/features/terminal/kittyTextKeys";
+import { installTerminalKeyHandler } from "@/features/terminal/terminalKeys";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { isLocalUrl } from "@/features/tabs/viewTabs";
@@ -188,7 +188,7 @@ export function Terminal({
       vtExtensions: {
         // Protocolo de teclado de Kitty: la TUI lo pide si lo quiere, y con él distingue
         // lo que la codificación vieja confunde — Shift+Enter de Enter, Ctrl+I de Tab,
-        // Escape de Alt. Encendido sin más rompía los acentos; ver `kittyTextKeys.ts`.
+        // Escape de Alt. Encendido sin más rompía los acentos; ver `terminalKeys.ts`.
         kittyKeyboard: true,
       },
     });
@@ -220,8 +220,8 @@ export function Terminal({
 
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
-    // Los acentos con tecla muerta, que el protocolo de Kitty perdía (ver kittyTextKeys.ts).
-    installDeadKeyFilter(term);
+    // Tab que no se escapa de la terminal, AltGr y los acentos (ver terminalKeys.ts).
+    installTerminalKeyHandler(term);
     term.open(containerRef.current);
     termRef.current = term;
     const unregister = tabId ? registerTerminal(tabId, term) : undefined;
