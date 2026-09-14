@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 
+import { BrowserTab } from "@/features/browser/BrowserTab";
 import { DiffTab } from "@/features/editor/DiffTab";
 import { FileTab } from "@/features/editor/FileTab";
 import { useTabsStore } from "@/features/tabs/store";
@@ -48,6 +49,7 @@ export function ViewTabsHost() {
           <div key={view.id} style={{ position: "absolute", inset: 0, visibility: isActive ? undefined : "hidden" }}>
             {view.kind === "file" && <FileTab view={view} active={isActive && onWorkspace} />}
             {view.kind === "diff" && <DiffTab view={view} active={isActive && onWorkspace} />}
+            {view.kind === "browser" && <BrowserTab view={view} active={isActive && onWorkspace} />}
           </div>
         );
       })}

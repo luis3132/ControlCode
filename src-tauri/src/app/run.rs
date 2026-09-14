@@ -75,6 +75,9 @@ pub fn run() {
             crate::scm::scm_push,
             crate::scm::scm_log,
             crate::scm::scm_file_at,
+            // Tabs de navegador (proxy con selector de elementos)
+            crate::preview::preview_resolve,
+            crate::preview::preview_detect_servers,
             // Renderizado del WebView (texto nítido en Linux)
             crate::app::rendering_info,
             // Detección de agentes

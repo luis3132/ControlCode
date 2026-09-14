@@ -11,6 +11,7 @@ pub mod ipc;
 mod marketplace;
 mod orchestrator;
 mod prelaunch;
+mod preview;
 mod runs;
 mod scm;
 mod session;

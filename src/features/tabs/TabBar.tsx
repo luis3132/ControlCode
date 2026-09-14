@@ -14,6 +14,7 @@ import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
 import { WindowLights } from "@/app/WindowLights";
+import { GlobeIcon } from "@/app/icons";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { viewLabels, viewsOfWorkspace } from "@/features/tabs/viewTabs";
@@ -59,6 +60,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
   const activateView = useViewTabsStore((s) => s.activateView);
   const closeView = useViewTabsStore((s) => s.closeView);
   const showTerminal = useViewTabsStore((s) => s.showTerminal);
+  const openBrowser = useViewTabsStore((s) => s.openBrowser);
   const workspaceViews = useMemo(() => viewsOfWorkspace(views, activeTab?.cwd ?? null), [views, activeTab?.cwd]);
   const labels = useMemo(() => viewLabels(workspaceViews), [workspaceViews]);
   const activeView = workspaceViews.find((v) => v.id === activeViewId) ?? null;
@@ -178,6 +180,25 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
         >
           <AddIcon className="w-5 h-5" />
         </button>
+        {activeTab && (
+          <button
+            // Un navegador es del workspace: se abre al lado de sus agentes, para probar lo
+            // que están construyendo.
+            onClick={() => {
+              openBrowser(activeTab.cwd);
+              navigate("/workspace");
+            }}
+            title={t("tabs.newBrowser")}
+            data-tauri-drag-region="false"
+            className="flex items-center justify-center w-8 h-10 shrink-0
+              text-gray-400 dark:text-white/30
+              hover:text-gray-600 dark:hover:text-white/70
+              hover:bg-gray-200/60 dark:hover:bg-white/6
+              transition-colors duration-150"
+          >
+            <GlobeIcon className="w-4 h-4" />
+          </button>
+        )}
 
         {/* El resto de la franja es para arrastrar la ventana. */}
         <div className="flex-1 h-full" data-tauri-drag-region />

@@ -1,6 +1,7 @@
+import { readFile } from "node:fs/promises";
 import { fileURLToPath, URL } from "node:url";
 
-import { defineConfig } from "vite";
+import { defineConfig, transformWithEsbuild, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -11,9 +12,38 @@ const platform = process.env.TAURI_ENV_PLATFORM;
 // @ts-expect-error process is a nodejs global
 const isDebugBuild = !!process.env.TAURI_ENV_DEBUG;
 
+/**
+ * `import fuente from "./archivo.ts?script"` — ese archivo compilado a JS, como string.
+ *
+ * Para el código que la app no corre sino que INYECTA en otra página: el selector de
+ * elementos del navegador de las tabs vive adentro del iframe del proyecto. Se escribe en
+ * TS y lo chequea tsc como a todo lo demás; lo único distinto es el resultado, un script
+ * autocontenido (IIFE) en vez de un módulo del bundle.
+ */
+function scriptAsString(): Plugin {
+  const SUFFIX = "?script";
+  return {
+    name: "controlcode:script-as-string",
+    async load(id) {
+      if (!id.endsWith(SUFFIX)) return null;
+      const file = id.slice(0, -SUFFIX.length);
+      this.addWatchFile(file);
+      const source = await readFile(file, "utf8");
+      const { code } = await transformWithEsbuild(source, file, {
+        loader: "ts",
+        format: "iife",
+        // Corre dentro de la página del usuario, no del webview de la app: se apunta bajo.
+        target: "es2019",
+        minify: true,
+      });
+      return `export default ${JSON.stringify(code)};`;
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), scriptAsString()],
 
   // `@/` apunta a `src/`. Con carpetas por feature, los imports relativos entre features
   // (`../../../features/skills/store`) son ilegibles y se rompen al mover un archivo; el

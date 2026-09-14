@@ -13,6 +13,10 @@ import { isResumable } from "@/features/sessions/agentResume";
 import { registerCapabilityResponders } from "@/features/terminal/terminalCapabilities";
 import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
+import { registerTerminal } from "@/features/terminal/terminalRegistry";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { isLocalUrl } from "@/features/tabs/viewTabs";
 import { awaitSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { useAgentsStore } from "@/features/agents/store";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
@@ -192,12 +196,20 @@ export function Terminal({
     }
 
     const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
+    // Un link a un servidor de esta máquina ("Local: http://localhost:5173") se abre en una
+    // tab de navegador, al lado del agente que lo levantó: es para probar lo que está
+    // haciendo. Cualquier otro va al navegador del sistema.
+    const webLinksAddon = new WebLinksAddon((event, uri) => {
+      event.preventDefault();
+      if (cwd && isLocalUrl(uri)) useViewTabsStore.getState().openBrowser(cwd, uri);
+      else openUrl(uri).catch(console.error);
+    });
 
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
     term.open(containerRef.current);
     termRef.current = term;
+    const unregister = tabId ? registerTerminal(tabId, term) : undefined;
 
     // Las TUIs modernas preguntan qué sabe hacer la terminal y ESPERAN respuesta antes de
     // dibujar. xterm.js no contesta varias de esas consultas, y sin respuesta OpenCode se
@@ -456,6 +468,7 @@ export function Terminal({
         ptyIdRef.current = null;
       }
       termRef.current = null;
+      unregister?.();
       term.dispose();
     };
   }, []); // Solo montar/desmontar una vez
