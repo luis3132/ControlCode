@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, AnimateSpin, Button } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
+import { repoInfo } from "@/features/explorer/ipc";
 import { AccountPickerStep } from "@/features/tabs/wizard/AccountPickerStep";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
@@ -19,8 +20,10 @@ import type { StartTaskInput } from "./ipc";
 const HEADLESS_AGENTS = ["claude-code"];
 
 /** Lanzar un agente headless: qué tiene que hacer, con qué cuenta y hasta cuánto gastar. */
-export function NewTaskDialog({ cwd, onClose, onStart }: {
+export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
   cwd: string;
+  /** Agentes trabajando YA sobre esta carpeta (no en un worktree propio). */
+  busyInFolder: number;
   onClose: () => void;
   onStart: (input: Omit<StartTaskInput, "workspaceId" | "cwd">) => Promise<void>;
 }) {
@@ -32,6 +35,22 @@ export function NewTaskDialog({ cwd, onClose, onStart }: {
   const [budget, setBudget] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** `null` = todavía no se sabe si la carpeta es un repo. */
+  const [isRepo, setIsRepo] = useState<boolean | null>(null);
+  const [isolate, setIsolate] = useState(false);
+
+  useEffect(() => {
+    repoInfo(cwd)
+      .then((info) => {
+        const repo = info.root !== null;
+        setIsRepo(repo);
+        // Encendido solo si hace falta: con otro agente ya trabajando en la carpeta, el
+        // segundo editaría los mismos archivos. Con la carpeta libre no hay choque, y un
+        // worktree sería una copia del repo y una rama que nadie pidió.
+        setIsolate(repo && busyInFolder > 0);
+      })
+      .catch(() => setIsRepo(false));
+  }, [cwd, busyInFolder]);
 
   const canStart = prompt.trim().length > 0 && !busy;
 
@@ -47,6 +66,7 @@ export function NewTaskDialog({ cwd, onClose, onStart }: {
         prompt: prompt.trim(),
         accountId: accountId ?? null,
         budgetUsd: parseBudget(budget),
+        isolate: Boolean(isRepo) && isolate,
       });
       onClose();
     } catch (e) {
@@ -139,6 +159,32 @@ export function NewTaskDialog({ cwd, onClose, onStart }: {
               className={INPUT}
             />
           </Field>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className={`flex items-start gap-2 select-none
+            ${isRepo ? "cursor-pointer" : "opacity-50 cursor-not-allowed"}`}>
+            <input
+              type="checkbox"
+              checked={Boolean(isRepo) && isolate}
+              disabled={!isRepo}
+              onChange={(e) => setIsolate(e.target.checked)}
+              className="mt-0.5 shrink-0"
+            />
+            <span className="flex flex-col gap-0.5">
+              <span className="text-[11.5px] font-semibold text-gray-700 dark:text-gray-300">
+                {t("fleet.new.isolate")}
+              </span>
+              <span className="text-[10.5px] leading-relaxed text-gray-400 dark:text-white/35">
+                {isRepo === false ? t("fleet.new.isolateNoRepo") : t("fleet.new.isolateHint")}
+              </span>
+            </span>
+          </label>
+          {/* Se avisa ANTES de lanzar, no después: enterarse de que dos agentes se pisaron
+              los archivos recién al ver el resultado es enterarse tarde. */}
+          {busyInFolder > 0 && !(isRepo && isolate) && (
+            <Alert variant="warning">{t("fleet.new.collision", { n: busyInFolder })}</Alert>
+          )}
         </div>
 
         {error && <Alert variant="danger">{error}</Alert>}

@@ -55,7 +55,7 @@ const BADGE: Record<TaskStatus, string> = {
  * que "qué archivo tocó" viene como dato: las líneas son ya la forma corta (`Bash(cargo
  * test)`), no un recorte de su salida. Quien quiera el detalle abre la tarea como pane.
  */
-export function AgentCard({ task, activity, approval, focused, onCancel, onOpenPane, onShowResult, onDecide }: {
+export function AgentCard({ task, activity, approval, focused, onCancel, onOpenPane, onShowResult, onDecide, onDiscardWorktree }: {
   task: Task;
   activity: string[];
   /** El permiso que esta tarea está esperando, si hay uno. */
@@ -65,6 +65,7 @@ export function AgentCard({ task, activity, approval, focused, onCancel, onOpenP
   onCancel: () => void;
   onOpenPane: () => void;
   onShowResult: () => void;
+  onDiscardWorktree: () => void;
   onDecide: (allow: boolean, remember: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -95,7 +96,16 @@ export function AgentCard({ task, activity, approval, focused, onCancel, onOpenP
             </span>
           </span>
           <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30">
-            {task.cwd}
+            {task.branch ? (
+              <span title={task.cwd}>
+                <span className="text-violet-500 dark:text-violet-400">
+                  {task.worktreeRemoved ? t("fleet.card.branchOnly") : t("fleet.card.worktree")}
+                </span>{" "}
+                {task.branch}
+              </span>
+            ) : (
+              task.cwd
+            )}
           </span>
         </div>
         {/* Estar esperando una decisión gana sobre el estado: para quien mira, esta
@@ -169,16 +179,24 @@ export function AgentCard({ task, activity, approval, focused, onCancel, onOpenP
             <button onClick={onShowResult} className={ACTION}>{t("fleet.card.result")}</button>
           )
         )}
-        {/* Abrir como pane es lo que una CLI no puede ofrecer: la app le impuso el id de
-            sesión al lanzar, así que retoma ESA conversación en vez de empezar otra. */}
-        {/* Con la tarea viva es "tomar el control": la para y la sigue en una terminal, y
-            el texto lo dice, porque parar un agente no puede ser el efecto secundario de un
-            botón que dice "abrir". Terminada, es solo retomar la conversación. */}
+        {/* Solo con la tarea terminada, nunca sola: al terminar, el resultado ESTÁ en el
+            worktree, y descartarlo ahí sería borrar lo que el usuario todavía no revisó. */}
+        {!live && task.worktreePath && !task.worktreeRemoved && (
+          <Tooltip content={t("fleet.card.discardHint")} placement="top">
+            <button onClick={onDiscardWorktree} className={ACTION}>
+              {t("fleet.card.discard")}
+            </button>
+          </Tooltip>
+        )}
+        {/* Abrir en una terminal es lo que una CLI no puede ofrecer: la app le impuso el id
+            de sesión al lanzar, así que retoma ESA conversación en vez de empezar otra. Con
+            la tarea viva es "tomar el control": la para, y el texto lo dice, porque parar un
+            agente no puede ser el efecto secundario de un botón que dice "abrir". */}
         <Tooltip
           content={live ? t("fleet.card.takeOverHint") : t("fleet.card.openPaneHint")}
           placement="top"
         >
-          <button onClick={onOpenPane} disabled={!task.sessionId} className={ACTION}>
+          <button onClick={onOpenPane} disabled={!task.sessionId || task.worktreeRemoved} className={ACTION}>
             {live ? t("fleet.card.takeOver") : t("fleet.card.openPane")}
           </button>
         </Tooltip>

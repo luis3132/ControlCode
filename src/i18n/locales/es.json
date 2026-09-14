@@ -512,5 +512,15 @@
   "fleet.card.takeOverHint": "Para el agente en segundo plano y sigue la misma conversación en una terminal",
   "fleet.indicator.needsYou": "{{n}} te espera",
   "fleet.indicator.running": "{{n}} en segundo plano",
-  "fleet.indicator.hint": "Flota: ${{usd}} gastados en este workspace"
+  "fleet.indicator.hint": "Flota: ${{usd}} gastados en este workspace",
+  "fleet.new.isolate": "En su propio worktree",
+  "fleet.new.isolateHint": "Una copia del repo en una rama nueva, para que no choque con otros agentes. Parte del último commit: lo que no commiteaste no está.",
+  "fleet.new.isolateNoRepo": "Solo en carpetas que son un repositorio de git con al menos un commit.",
+  "fleet.new.collision": "Ya hay {{n}} agente(s) trabajando en esta carpeta. Sin worktree, van a editar los mismos archivos a la vez.",
+  "fleet.card.worktree": "worktree ·",
+  "fleet.card.branchOnly": "rama ·",
+  "fleet.card.discard": "descartar worktree",
+  "fleet.card.discardHint": "Borra la copia de trabajo. Se niega si hay cambios sin commitear, y la rama queda si tiene commits propios.",
+  "fleet.worktree.discarded": "Worktree descartado. La rama {{branch}} no tenía nada nuevo y se borró también.",
+  "fleet.worktree.discardedKept": "Worktree descartado. La rama {{branch}} se conservó: tiene commits que no están en ningún otro lado."
 }

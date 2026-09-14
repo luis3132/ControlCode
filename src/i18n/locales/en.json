@@ -512,5 +512,15 @@
   "fleet.card.takeOverHint": "Stops the background agent and continues the same conversation in a terminal",
   "fleet.indicator.needsYou": "{{n}} waiting on you",
   "fleet.indicator.running": "{{n}} in background",
-  "fleet.indicator.hint": "Fleet: ${{usd}} spent in this workspace"
+  "fleet.indicator.hint": "Fleet: ${{usd}} spent in this workspace",
+  "fleet.new.isolate": "In its own worktree",
+  "fleet.new.isolateHint": "A copy of the repo on a new branch, so it doesn't collide with other agents. Starts from the last commit: uncommitted work isn't there.",
+  "fleet.new.isolateNoRepo": "Only for folders that are a git repository with at least one commit.",
+  "fleet.new.collision": "{{n}} agent(s) are already working in this folder. Without a worktree they will edit the same files at once.",
+  "fleet.card.worktree": "worktree ·",
+  "fleet.card.branchOnly": "branch ·",
+  "fleet.card.discard": "discard worktree",
+  "fleet.card.discardHint": "Deletes the working copy. Refuses if there are uncommitted changes, and keeps the branch if it has its own commits.",
+  "fleet.worktree.discarded": "Worktree discarded. Branch {{branch}} had nothing new and was deleted too.",
+  "fleet.worktree.discardedKept": "Worktree discarded. Branch {{branch}} was kept: it has commits that exist nowhere else."
 }

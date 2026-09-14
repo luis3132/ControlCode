@@ -19,6 +19,11 @@ export interface Task {
   tokensIn: number | null;
   tokensOut: number | null;
   eventsPath: string | null;
+  /** La raíz del worktree en el que corre. `null` = corre en la carpeta del proyecto. */
+  worktreePath: string | null;
+  branch: string | null;
+  /** Se descartó la carpeta del worktree. La rama puede seguir existiendo. */
+  worktreeRemoved: boolean;
   startedAt: number | null;
   endedAt: number | null;
   createdAt: number;

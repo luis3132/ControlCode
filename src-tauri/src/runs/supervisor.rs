@@ -77,6 +77,12 @@ fn emit_changed(app: &AppHandle, task_id: &str) {
     let _ = app.emit(TASK_CHANGED, task_id.to_string());
 }
 
+/// Avisa a la consola que una fila cambió por algo que no pasó en el proceso (descartar su
+/// worktree, por ejemplo).
+pub fn notify_changed(app: &AppHandle, task_id: &str) {
+    emit_changed(app, task_id);
+}
+
 /// El `--mcp-config` que le dice al agente cómo alcanzar su puente de permisos.
 ///
 /// Se escribe uno por tarea porque el `--task` de adentro es lo que después le dice a la

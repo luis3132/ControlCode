@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { countByGroup, filterFleet, fleetSummary, groupOf, isLive, sortFleet } from "../fleetOrder";
+import { countByGroup, filterFleet, fleetSummary, groupOf, isLive, liveInFolder, sortFleet } from "../fleetOrder";
 import { lineOf } from "../store";
 import type { PendingApproval, Task, TaskStatus } from "../types";
 
@@ -23,6 +23,9 @@ function task(patch: Partial<Task> & { id: string }): Task {
     tokensIn: null,
     tokensOut: null,
     eventsPath: null,
+    worktreePath: null,
+    branch: null,
+    worktreeRemoved: false,
     startedAt: null,
     endedAt: null,
     createdAt: 0,
@@ -237,5 +240,24 @@ describe("fleetSummary", () => {
 
   it("sin flota no hay nada que mostrar", () => {
     expect(fleetSummary([], [])).toEqual({ running: 0, needsYou: 0, spentUsd: 0 });
+  });
+});
+
+describe("liveInFolder", () => {
+  /// Es lo que decide si el siguiente agente arranca aislado: uno solo en la carpeta no
+  /// choca con nadie, un segundo editaría los mismos archivos.
+  it("cuenta solo los que trabajan sobre la carpeta misma", () => {
+    const flota = [
+      task({ id: "a", status: "running", cwd: "/p" }),
+      task({ id: "b", status: "ready", cwd: "/p" }),
+      // En su worktree: no toca la carpeta, no choca.
+      task({ id: "c", status: "running", cwd: "/w/ab12", worktreePath: "/w/ab12" }),
+      // Terminado: ya no edita nada.
+      task({ id: "d", status: "done", cwd: "/p" }),
+      // Otra carpeta.
+      task({ id: "e", status: "running", cwd: "/otra" }),
+    ];
+    expect(liveInFolder(flota, "/p")).toBe(2);
+    expect(liveInFolder(flota, "/nadie")).toBe(0);
   });
 });

@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 13;
+const SCHEMA_VERSION: i32 = 14;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -468,6 +468,21 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
          );
          CREATE INDEX IF NOT EXISTS idx_permission_rules_cwd ON permission_rules(cwd);",
     )?;
+
+    // v14 — El worktree de una tarea headless.
+    //
+    // Con ALTER porque `tasks` ya existe desde la v11. `cwd` de la tarea pasa a ser la del
+    // worktree cuando lo hay; la del proyecto sigue en `runs.cwd`, que es de donde salen
+    // las reglas. `worktree_removed` no borra las otras dos: la rama sigue existiendo (y
+    // puede tener el trabajo del agente) aunque la carpeta ya no.
+    if !has_column(conn, "tasks", "worktree_path") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN worktree_path TEXT", [])?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN branch TEXT", [])?;
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN worktree_removed INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
 
     // Columna agregada después de que `tabs` ya existía en instalaciones reales, así que
     // se suma con ALTER en vez de recrear la tabla (que perdería las tabs guardadas).

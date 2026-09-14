@@ -41,6 +41,11 @@ pub struct Task {
     pub tokens_in: Option<i64>,
     pub tokens_out: Option<i64>,
     pub events_path: Option<String>,
+    /// La raíz del worktree en el que corre. `None` = corre en la carpeta del proyecto.
+    pub worktree_path: Option<String>,
+    pub branch: Option<String>,
+    /// Se descartó la carpeta. La rama puede seguir existiendo.
+    pub worktree_removed: bool,
     pub started_at: Option<i64>,
     pub ended_at: Option<i64>,
     pub created_at: i64,

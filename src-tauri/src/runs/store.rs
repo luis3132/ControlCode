@@ -18,7 +18,8 @@ const RUN_COLUMNS: &str = "id, workspace_id, objective, cwd, status, max_paralle
 
 const TASK_COLUMNS: &str = "id, run_id, title, prompt, agent_id, account_id, model, cwd, \
                             budget_usd, status, session_id, attempt, result, error, cost_usd, \
-                            tokens_in, tokens_out, events_path, started_at, ended_at, created_at";
+                            tokens_in, tokens_out, events_path, started_at, ended_at, created_at, \
+                            worktree_path, branch, worktree_removed";
 
 fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
     Ok(Run {
@@ -58,6 +59,9 @@ fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         started_at: row.get(18)?,
         ended_at: row.get(19)?,
         created_at: row.get(20)?,
+        worktree_path: row.get(21)?,
+        branch: row.get(22)?,
+        worktree_removed: row.get::<_, i64>(23)? != 0,
     })
 }
 
@@ -171,6 +175,35 @@ pub fn list_tasks(conn: &Connection, workspace_id: &str) -> Result<Vec<Task>, St
 }
 
 // ── Cerrar ──────────────────────────────────────────────────────
+
+/// La tarea corre en un worktree: su `cwd` pasa a ser el de adentro.
+pub fn set_worktree(conn: &Connection, task_id: &str, cwd: &str, root: &str, branch: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE tasks SET cwd = ?1, worktree_path = ?2, branch = ?3 WHERE id = ?4",
+        rusqlite::params![cwd, root, branch, task_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// `(carpeta del proyecto, cwd de la tarea, raíz del worktree)`, si corre en uno.
+pub fn worktree_of_task(conn: &Connection, task_id: &str) -> Option<(String, String, String)> {
+    conn.query_row(
+        "SELECT r.cwd, t.cwd, t.worktree_path FROM tasks t JOIN runs r ON r.id = t.run_id
+         WHERE t.id = ?1 AND t.worktree_path IS NOT NULL",
+        [task_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )
+    .optional()
+    .ok()
+    .flatten()
+}
+
+pub fn mark_worktree_removed(conn: &Connection, task_id: &str) -> Result<(), String> {
+    conn.execute("UPDATE tasks SET worktree_removed = 1 WHERE id = ?1", [task_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
 
 /// La tarea arrancó: queda el id de sesión que se le impuso y dónde va su crudo.
 pub fn mark_running(

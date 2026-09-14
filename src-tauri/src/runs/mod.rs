@@ -16,6 +16,7 @@ mod rules;
 mod store;
 mod supervisor;
 mod types;
+mod worktrees;
 #[cfg(test)]
 mod test;
 
@@ -71,9 +72,12 @@ pub fn run_start_task(
     account_id: Option<String>,
     model: Option<String>,
     budget_usd: Option<f64>,
+    // En su propio worktree. Es lo que hace seguro lanzar un segundo agente sobre una
+    // carpeta en la que ya trabaja otro.
+    isolate: bool,
 ) -> Result<Task, String> {
     let db = db_of(&app)?;
-    let task = {
+    let mut task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let run = store::create_run(&conn, &workspace_id, &title, &cwd)?;
         store::create_task(
@@ -93,15 +97,113 @@ pub fn run_start_task(
 
     // Si el lanzamiento falla, la fila queda igual pero como fallida: una tarea que
     // desaparece sin dejar rastro no se puede diagnosticar, y el motivo (un binario que
-    // no está, una cuenta borrada) es justo lo que hay que mostrar.
-    if let Err(e) = supervisor::start(&app, task.clone()) {
+    // no está, una cuenta borrada, una carpeta que no es un repo) es justo lo que hay que
+    // mostrar.
+    let fail = |task_id: &str, e: String| -> Result<Task, String> {
         let conn = db.lock().map_err(|err| err.to_string())?;
-        store::finish_task(&conn, &task.id, &types::TaskOutcome::failed(e.clone()))?;
-        return Err(e);
+        store::finish_task(&conn, task_id, &types::TaskOutcome::failed(e.clone()))?;
+        Err(e)
+    };
+
+    if isolate {
+        match worktrees_base().and_then(|base| isolate_task(&base, &db, &task)) {
+            Ok(isolated) => task = isolated,
+            Err(e) => return fail(&task.id, e),
+        }
+    }
+
+    if let Err(e) = supervisor::start(&app, task.clone()) {
+        return fail(&task.id, e);
     }
 
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::task_by_id(&conn, &task.id)?.ok_or_else(|| "la tarea se perdió al lanzarla".into())
+}
+
+/// Dónde viven los worktrees de las tareas. Fuera del repo a propósito: adentro habría que
+/// ignorarlos en `.gitignore`, y cualquier herramienta que recorra el proyecto (un linter,
+/// el mismo agente) los encontraría como si fueran parte del código.
+fn worktrees_base() -> Result<std::path::PathBuf, String> {
+    Ok(dirs::home_dir()
+        .ok_or_else(|| "no se pudo resolver el home".to_string())?
+        .join(".controlcode")
+        .join("worktrees"))
+}
+
+/// Crea el worktree de una tarea, le monta las skills del proyecto y deja la fila
+/// apuntando adentro. `base` se recibe para que los tests no escriban en el home.
+pub(crate) fn isolate_task(base: &std::path::Path, db: &DbConnection, task: &Task) -> Result<Task, String> {
+    let project = std::path::Path::new(&task.cwd);
+    let wt = worktrees::create(base, project, &task.title)?;
+
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    // Las skills que el usuario ve en el proyecto, también adentro. Best-effort: sin la
+    // carpeta global configurada, o sin skills, el agente arranca igual.
+    if let (Ok(skills_dir), Some(project_links), Some(task_links)) = (
+        crate::skills::skills_dir_from_conn(&conn),
+        crate::skills::links_dir_for(&task.cwd, &task.agent_id),
+        crate::skills::links_dir_for(&wt.task_cwd.to_string_lossy(), &task.agent_id),
+    ) {
+        worktrees::link_skills(&project_links, &task_links, &skills_dir);
+    }
+
+    store::set_worktree(
+        &conn,
+        &task.id,
+        &wt.task_cwd.to_string_lossy(),
+        &wt.root.to_string_lossy(),
+        &wt.branch,
+    )?;
+    store::task_by_id(&conn, &task.id)?.ok_or_else(|| "la tarea se perdió al aislarla".into())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscardedWorktree {
+    pub branch: String,
+    /// La rama quedó porque tiene commits que no están en ningún otro lado.
+    pub branch_kept: bool,
+}
+
+/// Descarta el worktree de una tarea terminada.
+///
+/// Nunca con la tarea viva: sería sacarle la carpeta a un agente que está trabajando.
+/// Se niega también si hay cambios sin commitear (ver `worktrees::remove`).
+#[tauri::command]
+pub fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<DiscardedWorktree, String> {
+    let db = db_of(&app)?;
+    let (task, project_cwd, skills_dir) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let task = store::task_by_id(&conn, &task_id)?.ok_or_else(|| "la tarea ya no existe".to_string())?;
+        let project = store::project_cwd_of_task(&conn, &task_id).ok_or("la tarea no tiene run")?;
+        (task, project, crate::skills::skills_dir_from_conn(&conn)?)
+    };
+
+    if matches!(task.status.as_str(), types::status::READY | types::status::RUNNING) {
+        return Err("la tarea todavía está corriendo: parala o esperá a que termine".into());
+    }
+    let (Some(root), Some(branch)) = (task.worktree_path.clone(), task.branch.clone()) else {
+        return Err("esta tarea no corre en un worktree".into());
+    };
+    if task.worktree_removed {
+        return Err("el worktree de esta tarea ya se descartó".into());
+    }
+
+    let wt = worktrees::Worktree {
+        root: root.into(),
+        task_cwd: task.cwd.clone().into(),
+        branch: branch.clone(),
+    };
+    let links = crate::skills::links_dir_for(&task.cwd, &task.agent_id).unwrap_or_default();
+    // Cualquier carpeta del repo sirve para `git -C`; la del proyecto sigue existiendo.
+    let removed = worktrees::remove(std::path::Path::new(&project_cwd), &wt, &links, &skills_dir)?;
+
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::mark_worktree_removed(&conn, &task_id)?;
+    }
+    supervisor::notify_changed(&app, &task_id);
+    Ok(DiscardedWorktree { branch, branch_kept: removed.branch_kept })
 }
 
 #[tauri::command]
@@ -126,6 +228,11 @@ pub fn run_hand_off_task(app: AppHandle, task_id: String) -> Result<Task, String
     // Abrir una tab igual daría una conversación NUEVA presentada como la de la tarea.
     if task.session_id.is_none() {
         return Err("esta tarea nunca llegó a arrancar: no hay conversación para seguir".into());
+    }
+    // La sesión quedó atada a la ruta del worktree: sin la carpeta, `--resume` en otro
+    // lado no la encuentra y abriría una conversación nueva haciéndose pasar por esta.
+    if task.worktree_removed {
+        return Err("el worktree de esta tarea se descartó: su conversación ya no tiene dónde retomarse".into());
     }
 
     if matches!(task.status.as_str(), types::status::READY | types::status::RUNNING) {

@@ -113,3 +113,14 @@ export function fleetSummary(tasks: Task[], approvals: PendingApproval[]): Fleet
     spentUsd: tasks.reduce((sum, t) => sum + (t.costUsd ?? 0), 0),
   };
 }
+
+/**
+ * Cuántos agentes están trabajando YA sobre la carpeta misma (no en un worktree suyo).
+ *
+ * Es el dato que decide si aislar el siguiente: uno solo en la carpeta no choca con nadie,
+ * pero un segundo editaría los mismos archivos que el primero. Los que corren en su
+ * worktree no cuentan, justamente porque no tocan la carpeta.
+ */
+export function liveInFolder(tasks: Task[], cwd: string): number {
+  return tasks.filter((t) => isLive(t.status) && !t.worktreePath && t.cwd === cwd).length;
+}

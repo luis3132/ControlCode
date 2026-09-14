@@ -230,8 +230,12 @@ pub fn resolve(
     timeout: Duration,
 ) -> Verdict {
     let rules = rules_for_task(db, task_id);
+    // Las reglas y el "recordar" miran las rutas como si la tarea corriera en el proyecto,
+    // no en su worktree; el registro guarda la ruta REAL que tocó el agente, que es lo que
+    // uno quiere encontrar al revisar qué se autorizó.
+    let as_project = in_project_terms(db, task_id, &input);
 
-    match rules::decide(&rules, tool_name, &input) {
+    match rules::decide(&rules, tool_name, &as_project) {
         Decision::Allow => {
             record(db, &Uuid::new_v4().to_string(), task_id, tool_name, &input, Some(true), DecidedBy::Rule);
             Verdict { allow: true, reason: None, by: DecidedBy::Rule }
@@ -243,7 +247,7 @@ pub fn resolve(
         Decision::Ask => {
             let id = Uuid::new_v4().to_string();
             record(db, &id, task_id, tool_name, &input, None, DecidedBy::User);
-            let verdict = ask(&id, task_id, tool_name, input, timeout);
+            let verdict = ask(&id, task_id, tool_name, as_project, timeout);
             close_row(db, &id, &verdict);
             verdict
         }
@@ -287,6 +291,23 @@ pub fn release_matching(db: &DbConnection, cwd: &str) -> usize {
             Decision::Ask => false,
         })
         .count()
+}
+
+/// El input con las rutas del worktree traducidas a las del proyecto. Sin worktree, igual.
+///
+/// Cada worktree vive en otra ruta: sin esto, "recordar" una edición en uno escribiría una
+/// regla que no le sirve al agente siguiente, que corre en otro.
+fn in_project_terms(db: &DbConnection, task_id: &str, input: &serde_json::Value) -> serde_json::Value {
+    let Ok(conn) = db.lock() else { return input.clone() };
+    let Some((project, task_cwd, root)) = store::worktree_of_task(&conn, task_id) else {
+        return input.clone();
+    };
+    let (project, task_cwd, root) =
+        (std::path::Path::new(&project), std::path::Path::new(&task_cwd), std::path::Path::new(&root));
+    match super::worktrees::repo_root_from(project, task_cwd, root) {
+        Some(repo) => super::worktrees::to_project_paths(input, root, &repo),
+        None => input.clone(),
+    }
 }
 
 fn rules_for_task(db: &DbConnection, task_id: &str) -> Vec<PermissionRule> {

@@ -901,3 +901,372 @@ fn una_tarea_pasada_a_terminal_no_la_pisa_el_proceso_que_se_paro() {
     assert_eq!(t.error, None, "no se le inventa un error");
     assert_eq!(t.session_id.as_deref(), Some("s"), "y conserva la sesión con la que se reabre");
 }
+
+// ── Worktrees, contra git de verdad ─────────────────────────────
+
+use super::worktrees::{self, Worktree};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// Carpeta temporal que se borra sola. Mismo patrón que `accounts/test.rs`: sin crate
+/// externo para algo de diez líneas.
+struct Tmp(PathBuf);
+
+impl Tmp {
+    fn new(nombre: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("cc-wt-{nombre}-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Tmp(dir.canonicalize().unwrap())
+    }
+}
+
+impl Drop for Tmp {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn sh_git(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        // Identidad propia: el runner de CI no tiene `user.name` configurado, y sin esto el
+        // primer commit falla antes de que el test llegue a probar nada.
+        .args(["-c", "user.name=cc-test", "-c", "user.email=cc@test"])
+        .args(args)
+        .output()
+        .expect("git instalado");
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// Un repo con un commit y una subcarpeta, como un monorepo mínimo.
+fn repo() -> Tmp {
+    let t = Tmp::new("repo");
+    sh_git(&t.0, &["init", "-q", "-b", "main"]);
+    std::fs::create_dir_all(t.0.join("packages/app")).unwrap();
+    std::fs::write(t.0.join("README.md"), "hola\n").unwrap();
+    std::fs::write(t.0.join("packages/app/index.ts"), "export {}\n").unwrap();
+    sh_git(&t.0, &["add", "."]);
+    sh_git(&t.0, &["commit", "-q", "-m", "inicio"]);
+    t
+}
+
+#[test]
+fn el_nombre_de_rama_sale_legible_del_titulo() {
+    assert_eq!(worktrees::branch_slug("Arreglar el test de containment"), "arreglar-el-test-de-containment");
+    assert_eq!(worktrees::branch_slug("¡Migración de la BD!"), "migracion-de-la-bd");
+    // Un título sin nada usable no puede dar una rama vacía (`cc/-abc` es ilegible).
+    assert_eq!(worktrees::branch_slug("¿¿??"), "tarea");
+    assert!(worktrees::branch_slug(&"a".repeat(200)).len() <= 32);
+}
+
+#[test]
+fn crear_un_worktree_da_una_copia_en_su_propia_rama() {
+    let repo = repo();
+    let base = Tmp::new("base");
+
+    let wt = worktrees::create(&base.0, &repo.0, "arreglar algo").unwrap();
+
+    assert!(wt.branch.starts_with("cc/arreglar-algo-"));
+    assert_eq!(wt.task_cwd, wt.root, "lanzada desde la raíz, corre en la raíz");
+    assert!(wt.root.join("README.md").exists(), "tiene el checkout");
+    assert_eq!(sh_git(&wt.root, &["rev-parse", "--abbrev-ref", "HEAD"]), wt.branch);
+    // Y el repo original sigue en su rama, sin enterarse.
+    assert_eq!(sh_git(&repo.0, &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+}
+
+/// En un monorepo el worktree es del repo entero, pero la tarea tiene que correr en la
+/// MISMA subcarpeta desde la que se lanzó: lanzarla en la raíz la haría trabajar sobre
+/// otro paquete que el que el usuario tenía abierto.
+#[test]
+fn lanzada_desde_una_subcarpeta_corre_en_esa_subcarpeta_del_worktree() {
+    let repo = repo();
+    let base = Tmp::new("base");
+
+    let wt = worktrees::create(&base.0, &repo.0.join("packages/app"), "x").unwrap();
+
+    assert_eq!(wt.task_cwd, wt.root.join("packages/app"));
+    assert!(wt.task_cwd.join("index.ts").exists());
+}
+
+#[test]
+fn sin_repo_o_sin_commits_se_dice_por_que_no_hay_worktree() {
+    let suelta = Tmp::new("suelta");
+    let err = worktrees::repo_root(&suelta.0).unwrap_err();
+    assert!(err.contains("no es un repositorio"), "{err}");
+
+    let vacio = Tmp::new("vacio");
+    sh_git(&vacio.0, &["init", "-q"]);
+    let err = worktrees::repo_root(&vacio.0).unwrap_err();
+    assert!(err.contains("ningún commit"), "{err}");
+}
+
+/// Un directorio global de skills con una skill, y la carpeta de symlinks de un proyecto
+/// apuntando a ella — lo mismo que deja la app al adjuntar una skill.
+fn skills_montadas(proyecto: &Path, global: &Path) -> PathBuf {
+    std::fs::create_dir_all(global.join("git-helper")).unwrap();
+    std::fs::write(global.join("git-helper/SKILL.md"), "---\nname: git-helper\n---\n").unwrap();
+    let links = proyecto.join(".claude/skills");
+    std::fs::create_dir_all(&links).unwrap();
+    symlink::symlink_auto(global.join("git-helper"), links.join("git-helper")).unwrap();
+    links
+}
+
+/// Sin esto el agente del worktree trabaja sin las skills que el usuario ve en el proyecto:
+/// los symlinks son por carpeta y la del worktree es otra.
+#[test]
+fn el_worktree_recibe_las_skills_que_tiene_el_proyecto_y_ninguna_otra() {
+    let repo = repo();
+    let base = Tmp::new("base");
+    let global = Tmp::new("global");
+    let links = skills_montadas(&repo.0, &global.0);
+    // Un symlink del usuario, a otro lado: no es de la app y no se copia.
+    symlink::symlink_auto(repo.0.join("README.md"), links.join("mio")).unwrap();
+
+    let wt = worktrees::create(&base.0, &repo.0, "x").unwrap();
+    let task_links = wt.task_cwd.join(".claude/skills");
+    assert_eq!(worktrees::link_skills(&links, &task_links, &global.0), 1);
+
+    assert!(task_links.join("git-helper/SKILL.md").exists());
+    assert!(!task_links.join("mio").exists());
+}
+
+/// Para git, los symlinks de skills recién puestos son archivos sin trackear. Si contaran,
+/// todo worktree nacería "sucio" y no se podría descartar nunca.
+#[test]
+fn los_symlinks_de_la_app_no_cuentan_como_cambios_pero_un_archivo_del_agente_si() {
+    let repo = repo();
+    let base = Tmp::new("base");
+    let global = Tmp::new("global");
+    let links = skills_montadas(&repo.0, &global.0);
+    let wt = worktrees::create(&base.0, &repo.0, "x").unwrap();
+    let task_links = wt.task_cwd.join(".claude/skills");
+    worktrees::link_skills(&links, &task_links, &global.0);
+
+    let managed = worktrees::managed_links(&task_links, &global.0);
+    assert!(worktrees::dirty_files(&wt.root, &managed).unwrap().is_empty());
+
+    std::fs::write(wt.root.join("README.md"), "cambiado por el agente\n").unwrap();
+    std::fs::write(wt.root.join("nuevo con espacios.txt"), "x").unwrap();
+    let mut sucios = worktrees::dirty_files(&wt.root, &managed).unwrap();
+    sucios.sort();
+    assert_eq!(sucios, ["README.md", "nuevo con espacios.txt"]);
+}
+
+/// Es trabajo del agente que no está en ningún commit: borrarlo no tiene vuelta atrás.
+#[test]
+fn no_se_descarta_un_worktree_con_cambios_sin_commitear() {
+    let repo = repo();
+    let base = Tmp::new("base");
+    let global = Tmp::new("global");
+    let wt = worktrees::create(&base.0, &repo.0, "x").unwrap();
+    std::fs::write(wt.root.join("a.txt"), "trabajo sin commitear").unwrap();
+
+    let links = wt.task_cwd.join(".claude/skills");
+    let err = worktrees::remove(&repo.0, &wt, &links, &global.0).unwrap_err();
+    assert!(err.contains("a.txt"), "dice cuál: {err}");
+    assert!(wt.root.join("a.txt").exists(), "y no tocó nada");
+}
+
+/// Limpio (con los symlinks de skills adentro, que es lo normal) se descarta, y la rama se
+/// va con él porque no tiene nada que no esté ya en `main`.
+#[test]
+fn un_worktree_limpio_se_descarta_con_sus_skills_y_su_rama() {
+    let repo = repo();
+    let base = Tmp::new("base");
+    let global = Tmp::new("global");
+    let links = skills_montadas(&repo.0, &global.0);
+    let wt = worktrees::create(&base.0, &repo.0, "x").unwrap();
+    let task_links = wt.task_cwd.join(".claude/skills");
+    worktrees::link_skills(&links, &task_links, &global.0);
+
+    let removed = worktrees::remove(&repo.0, &wt, &task_links, &global.0).unwrap();
+
+    assert!(!wt.root.exists());
+    assert!(!removed.branch_kept);
+    assert!(sh_git(&repo.0, &["branch", "--list", &wt.branch]).is_empty());
+    // Las skills del PROYECTO siguen donde estaban.
+    assert!(links.join("git-helper").exists());
+}
+
+/// Si el agente commiteó, la rama tiene trabajo que no está en ningún otro lado. El
+/// worktree se puede descartar (la carpeta es solo una copia), pero la rama NO.
+#[test]
+fn la_rama_con_commits_propios_se_conserva_al_descartar() {
+    let repo = repo();
+    let base = Tmp::new("base");
+    let global = Tmp::new("global");
+    let wt = worktrees::create(&base.0, &repo.0, "x").unwrap();
+    std::fs::write(wt.root.join("hecho.txt"), "listo").unwrap();
+    sh_git(&wt.root, &["add", "."]);
+    sh_git(&wt.root, &["commit", "-q", "-m", "trabajo del agente"]);
+
+    let removed = worktrees::remove(&repo.0, &wt, &wt.task_cwd.join(".claude/skills"), &global.0).unwrap();
+
+    assert!(!wt.root.exists());
+    assert!(removed.branch_kept);
+    assert!(!sh_git(&repo.0, &["branch", "--list", &wt.branch]).is_empty(), "la rama sigue");
+}
+
+/// Borrado a mano por fuera de la app: descartar igual tiene que funcionar y dejar a git
+/// sin el registro colgado.
+#[test]
+fn descartar_un_worktree_que_ya_no_existe_limpia_el_registro_de_git() {
+    let repo = repo();
+    let base = Tmp::new("base");
+    let global = Tmp::new("global");
+    let wt = worktrees::create(&base.0, &repo.0, "x").unwrap();
+    std::fs::remove_dir_all(&wt.root).unwrap();
+
+    worktrees::remove(&repo.0, &wt, &wt.task_cwd.join(".claude/skills"), &global.0).unwrap();
+    assert!(!sh_git(&repo.0, &["worktree", "list"]).contains(&*wt.root.to_string_lossy()));
+}
+
+/// Cada worktree vive en otra ruta: sin traducir, "recordar" una edición en uno no serviría
+/// para el agente siguiente, que corre en otro.
+#[test]
+fn las_rutas_del_worktree_se_traducen_a_las_del_proyecto_para_las_reglas() {
+    let wt = Path::new("/home/u/.controlcode/worktrees/ab12");
+    let repo = Path::new("/home/u/proyecto");
+
+    let input = serde_json::json!({"file_path": "/home/u/.controlcode/worktrees/ab12/src/a.rs", "old_string": "x"});
+    let out = worktrees::to_project_paths(&input, wt, repo);
+    assert_eq!(out["file_path"], "/home/u/proyecto/src/a.rs");
+    assert_eq!(out["old_string"], "x", "el resto del input no se toca");
+
+    // Un comando se compara tal cual: reescribir adentro es cambiar lo que se aprobó.
+    let bash = serde_json::json!({"command": "cat /home/u/.controlcode/worktrees/ab12/x"});
+    assert_eq!(worktrees::to_project_paths(&bash, wt, repo), bash);
+
+    // Una ruta de afuera del worktree queda igual.
+    let fuera = serde_json::json!({"file_path": "/etc/hosts"});
+    assert_eq!(worktrees::to_project_paths(&fuera, wt, repo), fuera);
+}
+
+#[test]
+fn la_raiz_del_repo_se_deduce_sin_llamar_a_git() {
+    let root = Path::new("/w/ab12");
+    assert_eq!(
+        worktrees::repo_root_from(Path::new("/p/mono/packages/app"), &root.join("packages/app"), root),
+        Some(PathBuf::from("/p/mono"))
+    );
+    assert_eq!(worktrees::repo_root_from(Path::new("/p/solo"), root, root), Some(PathBuf::from("/p/solo")));
+}
+
+#[allow(dead_code)]
+fn _usa_worktree(_: Worktree) {}
+
+/// Una regla escrita sobre el proyecto vale para la tarea que corre en su worktree. Sin la
+/// traducción, "recordar" en un agente aislado dejaría una regla con la ruta de SU
+/// worktree, inútil para el siguiente, que corre en otro.
+#[test]
+fn una_regla_del_proyecto_aplica_a_la_tarea_de_su_worktree_y_el_registro_guarda_la_ruta_real() {
+    let _serial = con_broker_limpio();
+    let db = db_compartida();
+    let id = {
+        let conn = db.lock().unwrap();
+        let run = run_en(&conn); // proyecto en /tmp/proy
+        let id = tarea_en(&conn, &run);
+        store::set_worktree(&conn, &id, "/wt/ab12", "/wt/ab12", "cc/x-ab12").unwrap();
+        store::upsert_rule(&conn, "/tmp/proy", "Edit(/tmp/proy/src/a.rs)", true).unwrap();
+        id
+    };
+
+    let verdict = broker::resolve(
+        &db,
+        &id,
+        "Edit",
+        serde_json::json!({"file_path": "/wt/ab12/src/a.rs", "old_string": "a", "new_string": "b"}),
+        Duration::from_secs(5),
+    );
+    assert!(verdict.allow, "la regla del proyecto cubrió la edición en el worktree");
+    assert_eq!(verdict.by, broker::DecidedBy::Rule);
+
+    let conn = db.lock().unwrap();
+    let guardado: String = conn
+        .query_row("SELECT input_json FROM task_approvals WHERE task_id = ?1", [&id], |r| r.get(0))
+        .unwrap();
+    assert!(guardado.contains("/wt/ab12/src/a.rs"), "el registro guarda lo que tocó de verdad: {guardado}");
+}
+
+/// Y lo que se ofrece recordar sale ya en términos del proyecto.
+#[test]
+fn lo_que_ofrece_recordar_una_tarea_aislada_es_la_ruta_del_proyecto() {
+    let _serial = con_broker_limpio();
+    let db = db_compartida();
+    let id = {
+        let conn = db.lock().unwrap();
+        let run = run_en(&conn);
+        let id = tarea_en(&conn, &run);
+        store::set_worktree(&conn, &id, "/wt/ab12", "/wt/ab12", "cc/x-ab12").unwrap();
+        id
+    };
+
+    let db2 = db.clone();
+    let id2 = id.clone();
+    let h = std::thread::spawn(move || {
+        broker::resolve(
+            &db2,
+            &id2,
+            "Edit",
+            serde_json::json!({"file_path": "/wt/ab12/src/a.rs"}),
+            Duration::from_secs(5),
+        )
+    });
+    let pedido = loop {
+        if let Some(p) = broker::pending().into_iter().next() {
+            break p;
+        }
+        std::thread::yield_now();
+    };
+    assert_eq!(pedido.suggested_rule.as_deref(), Some("Edit(/tmp/proy/src/a.rs)"));
+    broker::decide(&pedido.id, false, None);
+    h.join().unwrap();
+}
+
+/// El cableado completo del aislamiento: la tarea termina corriendo ADENTRO del worktree,
+/// con su rama anotada, y la carpeta del proyecto (la del run, de donde salen las reglas)
+/// no cambia.
+#[test]
+fn aislar_una_tarea_la_muda_al_worktree_sin_mover_el_proyecto() {
+    let repo = repo();
+    let base = Tmp::new("base");
+    let db = db_compartida();
+    let task = {
+        let conn = db.lock().unwrap();
+        conn.execute("INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('w1','W',0,0)", [])
+            .unwrap();
+        let cwd = repo.0.to_string_lossy().to_string();
+        let run = store::create_run(&conn, "w1", "o", &cwd).unwrap();
+        store::create_task(
+            &conn,
+            &NewTask {
+                run_id: &run.id,
+                title: "arreglar el login",
+                prompt: "x",
+                agent_id: "claude-code",
+                account_id: None,
+                model: None,
+                cwd: &cwd,
+                budget_usd: None,
+            },
+        )
+        .unwrap()
+    };
+
+    let aislada = super::isolate_task(&base.0, &db, &task).unwrap();
+
+    let root = aislada.worktree_path.clone().expect("anota el worktree");
+    assert!(root.starts_with(&*base.0.to_string_lossy()));
+    assert_eq!(aislada.cwd, root, "corre adentro");
+    assert!(aislada.branch.as_deref().unwrap().starts_with("cc/arreglar-el-login-"));
+    assert!(!aislada.worktree_removed);
+
+    let conn = db.lock().unwrap();
+    assert_eq!(
+        store::project_cwd_of_task(&conn, &task.id).as_deref(),
+        Some(&*repo.0.to_string_lossy()),
+        "las reglas se siguen buscando en el proyecto"
+    );
+}

@@ -9,7 +9,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { AgentCard } from "./AgentCard";
-import { countByGroup, filterFleet, FLEET_GROUPS, sortFleet, type FleetGroup } from "./fleetOrder";
+import { countByGroup, filterFleet, FLEET_GROUPS, liveInFolder, sortFleet, type FleetGroup } from "./fleetOrder";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { RulesDialog } from "./RulesDialog";
 import { useRunsStore } from "./store";
@@ -35,6 +35,7 @@ export function FleetPage() {
   const approvals = useRunsStore((s) => s.approvals);
   const decideApproval = useRunsStore((s) => s.decideApproval);
   const handOffTask = useRunsStore((s) => s.handOffTask);
+  const discardWorktree = useRunsStore((s) => s.discardWorktree);
 
   const [group, setGroup] = useState<FleetGroup | null>(null);
   const [query, setQuery] = useState("");
@@ -51,7 +52,8 @@ export function FleetPage() {
   const addTab = useTabsStore((s) => s.addTab);
   const navigate = useNavigate();
   const searchRef = useRef<HTMLInputElement>(null);
-  const [handOffError, setHandOffError] = useState("");
+  /** Un aviso sobre la última acción de una tarjeta: tomar el control, descartar. */
+  const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null);
 
   // `/` enfoca el buscador. No Ctrl+K, que es lo que muestra el mockup: acá Ctrl+K ya es
   // Skills, y robarlo rompería un atajo que la gente ya tiene en los dedos.
@@ -69,7 +71,7 @@ export function FleetPage() {
 
   /** Sigue la conversación de una tarea en una terminal de verdad. */
   const openInTerminal = async (task: Task) => {
-    setHandOffError("");
+    setNotice(null);
     try {
       const ready = await handOffTask(task.id);
       if (!ready.sessionId) return;
@@ -87,7 +89,25 @@ export function FleetPage() {
       });
       navigate("/workspace");
     } catch (e) {
-      setHandOffError(String(e));
+      setNotice({ error: true, text: String(e) });
+    }
+  };
+
+  /** Descarta el worktree de una tarea terminada, y dice qué pasó con su rama. */
+  const discard = async (task: Task) => {
+    setNotice(null);
+    try {
+      const done = await discardWorktree(task.id);
+      // Que la rama quede es la parte que importa contar: ahí está el trabajo del agente, y
+      // sin decirlo el usuario creería que se fue con la carpeta.
+      setNotice({
+        error: false,
+        text: done.branchKept
+          ? t("fleet.worktree.discardedKept", { branch: done.branch })
+          : t("fleet.worktree.discarded", { branch: done.branch }),
+      });
+    } catch (e) {
+      setNotice({ error: true, text: String(e) });
     }
   };
 
@@ -178,10 +198,12 @@ export function FleetPage() {
         </div>
       </div>
 
-      {handOffError && (
-        <div className="shrink-0 px-4 py-2 text-[11px] text-red-600 dark:text-red-400
-          border-b border-red-200/60 dark:border-red-500/20 bg-red-50 dark:bg-red-500/8">
-          {handOffError}
+      {notice && (
+        <div className={`shrink-0 px-4 py-2 text-[11px] border-b
+          ${notice.error
+            ? "text-red-600 dark:text-red-400 border-red-200/60 dark:border-red-500/20 bg-red-50 dark:bg-red-500/8"
+            : "text-violet-700 dark:text-violet-300 border-violet-200/60 dark:border-violet-500/20 bg-violet-50 dark:bg-violet-500/8"}`}>
+          {notice.text}
         </div>
       )}
 
@@ -210,6 +232,7 @@ export function FleetPage() {
                 onCancel={() => cancelTask(task.id).catch(console.error)}
                 onShowResult={() => setDetail(task.id)}
                 onOpenPane={() => openInTerminal(task)}
+                onDiscardWorktree={() => discard(task)}
               />
             ))}
 
@@ -246,6 +269,7 @@ export function FleetPage() {
       {newOpen && cwd && (
         <NewTaskDialog
           cwd={cwd}
+          busyInFolder={liveInFolder(tasks, cwd)}
           onClose={() => setNewOpen(false)}
           onStart={async (input) => {
             if (!workspaceId) throw new Error(t("fleet.error.noWorkspace"));

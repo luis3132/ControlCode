@@ -15,6 +15,8 @@ export interface StartTaskInput {
   accountId?: string | null;
   model?: string | null;
   budgetUsd?: number | null;
+  /** En su propio worktree de git, en vez de sobre la carpeta del proyecto. */
+  isolate?: boolean;
 }
 
 export const startTask = (input: StartTaskInput) =>
@@ -27,6 +29,7 @@ export const startTask = (input: StartTaskInput) =>
     accountId: input.accountId ?? null,
     model: input.model ?? null,
     budgetUsd: input.budgetUsd ?? null,
+    isolate: input.isolate ?? false,
   });
 
 export const cancelTask = (taskId: string) => invoke<void>("run_cancel_task", { taskId });
@@ -36,6 +39,16 @@ export const cancelTask = (taskId: string) => invoke<void>("run_cancel_task", { 
  * procesos escribiendo la misma sesión se pisarían el transcript.
  */
 export const handOffTask = (taskId: string) => invoke<Task>("run_hand_off_task", { taskId });
+
+export interface DiscardedWorktree {
+  branch: string;
+  /** La rama quedó porque tiene commits que no están en ningún otro lado. */
+  branchKept: boolean;
+}
+
+/** Descarta el worktree de una tarea terminada. Se niega si hay cambios sin commitear. */
+export const discardWorktree = (taskId: string) =>
+  invoke<DiscardedWorktree>("run_discard_worktree", { taskId });
 
 export const listApprovals = () => invoke<PendingApproval[]>("run_pending_approvals");
 
