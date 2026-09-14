@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { viewsOfWorkspace } from "@/features/tabs/viewTabs";
 import { useUiStore } from "@/app/uiStore";
 
 import { WORKSPACE_PATH, matchShortcut, nextTabId, resolveGoto } from "./shortcuts";
@@ -47,13 +49,20 @@ export function useGlobalShortcuts() {
 
       // Cicla dentro del workspace, no por todas las tabs de la ventana: saltar a una
       // que la barra ni siquiera muestra es cambiar de carpeta a ciegas.
-      const next = nextTabId(
-        tabsOfWorkspace(tabs, activeTabId).map((t) => t.id),
-        activeTabId,
-        shortcut.action.delta
-      );
+      // Las tabs de archivo y navegador cuentan: están en la misma barra.
+      const agentIds = tabsOfWorkspace(tabs, activeTabId).map((t) => t.id);
+      const activeCwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null;
+      const views = useViewTabsStore.getState();
+      const viewIds = viewsOfWorkspace(views.views, activeCwd).map((v) => v.id);
+      const current = viewIds.includes(views.activeViewId ?? "") ? views.activeViewId : activeTabId;
+      const next = nextTabId([...agentIds, ...viewIds], current, shortcut.action.delta);
       if (!next) return;
-      activateTab(next);
+      if (viewIds.includes(next)) {
+        views.activateView(next);
+      } else {
+        activateTab(next);
+        views.showTerminal();
+      }
       // Cambiar de tab sin mostrarla sería cambiar a ciegas: si estabas en una sección, el
       // atajo te lleva a la terminal de la tab a la que acabás de moverte.
       navigate(WORKSPACE_PATH);

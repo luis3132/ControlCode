@@ -15,6 +15,7 @@ use tauri::AppHandle;
 use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
 use super::shared::bridge_call;
+use super::runs::run_approve;
 use super::skills::{skill_edit, skill_install, skill_list, skill_new, skill_search, skill_show};
 use super::tabs::{tab_create, tab_list, tab_output, tab_send};
 use super::watch::{watch_add, watch_list, watch_remove, watch_wait};
@@ -47,6 +48,9 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "skill.show" => skill_show(app, args),
         "skill.new" => skill_new(app, args),
         "skill.edit" => skill_edit(app, args),
+        // El único que manda un agente, no una persona: llega desde el `ccode mcp` que
+        // la propia tarea lanzó, y bloquea hasta que alguien decide.
+        "run.approve" => run_approve(app, args),
         "app.status" => app_status(app),
         other => Err(format!("Comando desconocido: {other}")),
     };

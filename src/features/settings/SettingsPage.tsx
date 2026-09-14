@@ -12,10 +12,12 @@ import { useSkillsStore } from "@/features/skills/store";
 import { CustomAgentForm } from "@/features/agents/CustomAgentForm";
 import { CliInstallSection } from "@/features/settings/CliInstallSection";
 import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection";
+import { RoutingSection } from "@/features/runs/RoutingSection";
 import { PrelaunchSection } from "@/features/prelaunch/PrelaunchSection";
 import { TerminalSection } from "@/features/terminal/TerminalSection";
 import { ShortcutsSection } from "@/features/settings/ShortcutsSection";
 import { SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
+import { RenderingSetting } from "@/features/settings/RenderingSetting";
 
 /** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
  *  formulario solo para saber si reanuda sesiones o si le gestionamos skills. */
@@ -43,7 +45,7 @@ function AgentCapabilities({ agent }: { agent: CustomAgent }) {
 
 type SectionId =
   | "appearance" | "shortcuts" | "terminal" | "skillsDir"
-  | "tuis" | "prelaunch" | "cli" | "orchestrator";
+  | "tuis" | "prelaunch" | "cli" | "orchestrator" | "routing";
 
 /**
  * El contenido de Configuración.
@@ -85,6 +87,7 @@ export function SettingsPage() {
       { id: "prelaunch", label: t("settings.prelaunch") },
       { id: "cli", label: t("settings.cli") },
       { id: "orchestrator", label: t("settings.orchestrator") },
+      { id: "routing", label: t("settings.routing") },
     ],
     [t]
   );
@@ -142,6 +145,7 @@ export function SettingsPage() {
                   ]}
                 />
               </SettingsRow>
+              <RenderingSetting />
             </div>
           </SettingsSection>
         )}
@@ -247,6 +251,7 @@ export function SettingsPage() {
         {section === "prelaunch" && <PrelaunchSection />}
         {section === "cli" && <CliInstallSection />}
         {section === "orchestrator" && <OrchestratorSection />}
+        {section === "routing" && <RoutingSection />}
       </div>
     </>
   );

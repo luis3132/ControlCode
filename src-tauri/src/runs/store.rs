@@ -4,7 +4,8 @@
 //! frontend— acá la base **es** la fuente de verdad: el proceso lo lanza y lo espera Rust,
 //! así que no hay un store de Zustand que sepa nada que la base no sepa.
 
-use rusqlite::{Connection, Row};
+use rusqlite::{Connection, OptionalExtension, Row};
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::database::DbConnection;
@@ -17,7 +18,9 @@ const RUN_COLUMNS: &str = "id, workspace_id, objective, cwd, status, max_paralle
 
 const TASK_COLUMNS: &str = "id, run_id, title, prompt, agent_id, account_id, model, cwd, \
                             budget_usd, status, session_id, attempt, result, error, cost_usd, \
-                            tokens_in, tokens_out, events_path, started_at, ended_at, created_at";
+                            tokens_in, tokens_out, events_path, started_at, ended_at, created_at, \
+                            worktree_path, branch, worktree_removed, complexity, routed_by, \
+                            route_note";
 
 fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
     Ok(Run {
@@ -57,6 +60,12 @@ fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         started_at: row.get(18)?,
         ended_at: row.get(19)?,
         created_at: row.get(20)?,
+        worktree_path: row.get(21)?,
+        branch: row.get(22)?,
+        worktree_removed: row.get::<_, i64>(23)? != 0,
+        complexity: row.get(24)?,
+        routed_by: row.get(25)?,
+        route_note: row.get(26)?,
     })
 }
 
@@ -88,14 +97,17 @@ pub struct NewTask<'a> {
     pub model: Option<&'a str>,
     pub cwd: &'a str,
     pub budget_usd: Option<f64>,
+    pub complexity: Option<&'a str>,
+    pub routed_by: Option<&'a str>,
+    pub route_note: Option<&'a str>,
 }
 
 pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO tasks (id, run_id, title, prompt, agent_id, account_id, model, cwd,
-                            budget_usd, status, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                            budget_usd, status, created_at, complexity, routed_by, route_note)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         rusqlite::params![
             id,
             new.run_id,
@@ -108,6 +120,9 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
             new.budget_usd,
             status::READY,
             now_ts(),
+            new.complexity,
+            new.routed_by,
+            new.route_note,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -170,6 +185,35 @@ pub fn list_tasks(conn: &Connection, workspace_id: &str) -> Result<Vec<Task>, St
 }
 
 // ── Cerrar ──────────────────────────────────────────────────────
+
+/// La tarea corre en un worktree: su `cwd` pasa a ser el de adentro.
+pub fn set_worktree(conn: &Connection, task_id: &str, cwd: &str, root: &str, branch: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE tasks SET cwd = ?1, worktree_path = ?2, branch = ?3 WHERE id = ?4",
+        rusqlite::params![cwd, root, branch, task_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// `(carpeta del proyecto, cwd de la tarea, raíz del worktree)`, si corre en uno.
+pub fn worktree_of_task(conn: &Connection, task_id: &str) -> Option<(String, String, String)> {
+    conn.query_row(
+        "SELECT r.cwd, t.cwd, t.worktree_path FROM tasks t JOIN runs r ON r.id = t.run_id
+         WHERE t.id = ?1 AND t.worktree_path IS NOT NULL",
+        [task_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )
+    .optional()
+    .ok()
+    .flatten()
+}
+
+pub fn mark_worktree_removed(conn: &Connection, task_id: &str) -> Result<(), String> {
+    conn.execute("UPDATE tasks SET worktree_removed = 1 WHERE id = ?1", [task_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
 
 /// La tarea arrancó: queda el id de sesión que se le impuso y dónde va su crudo.
 pub fn mark_running(
@@ -245,4 +289,89 @@ pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
         )
         .map_err(|e| e.to_string())?;
     Ok(n)
+}
+
+// ── Reglas de permisos ──────────────────────────────────────────
+
+/// Una regla tal como se guarda y como la ve la consola.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleRow {
+    pub id: String,
+    pub cwd: String,
+    pub pattern: String,
+    pub allow: bool,
+    pub created_at: i64,
+}
+
+/// La carpeta de proyecto de una tarea: la de su run, no la suya.
+///
+/// Hoy coinciden. Cuando las tareas corran en worktrees, cada una va a tener su propio
+/// cwd, y las reglas tienen que seguir siendo las del proyecto desde el que se lanzaron.
+pub fn project_cwd_of_task(conn: &Connection, task_id: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT r.cwd FROM runs r JOIN tasks t ON t.run_id = r.id WHERE t.id = ?1",
+        [task_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+}
+
+/// Las reglas de una carpeta, en el orden en que se evalúan.
+///
+/// Por creación, con el `rowid` de desempate: dos reglas creadas en el mismo segundo
+/// tienen que salir siempre en el mismo orden, porque con "gana la primera que coincide"
+/// un orden inestable es un resultado inestable.
+pub fn list_rules(conn: &Connection, cwd: &str) -> Result<Vec<RuleRow>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, cwd, pattern, allow, created_at FROM permission_rules
+             WHERE cwd = ?1 ORDER BY created_at, rowid",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([cwd], |row| {
+            Ok(RuleRow {
+                id: row.get(0)?,
+                cwd: row.get(1)?,
+                pattern: row.get(2)?,
+                allow: row.get::<_, i64>(3)? != 0,
+                created_at: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
+/// Guarda una regla. Si ya había una con el mismo patrón en esa carpeta, le cambia el
+/// veredicto **sin moverla de lugar**.
+///
+/// No moverla importa: el orden decide con "gana la primera", y darle vuelta a una regla
+/// que ya existía no debería cambiar su precedencia respecto de las demás a espaldas del
+/// usuario.
+pub fn upsert_rule(conn: &Connection, cwd: &str, pattern: &str, allow: bool) -> Result<RuleRow, String> {
+    let pattern = pattern.trim();
+    conn.execute(
+        "INSERT INTO permission_rules (id, cwd, pattern, allow, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(cwd, pattern) DO UPDATE SET allow = excluded.allow",
+        rusqlite::params![Uuid::new_v4().to_string(), cwd, pattern, allow as i64, now_ts()],
+    )
+    .map_err(|e| e.to_string())?;
+
+    list_rules(conn, cwd)?
+        .into_iter()
+        .find(|r| r.pattern == pattern)
+        .ok_or_else(|| "la regla no quedó guardada".to_string())
+}
+
+pub fn delete_rule(conn: &Connection, id: &str) -> Result<bool, String> {
+    let n = conn
+        .execute("DELETE FROM permission_rules WHERE id = ?1", [id])
+        .map_err(|e| e.to_string())?;
+    Ok(n > 0)
 }

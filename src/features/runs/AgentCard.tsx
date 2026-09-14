@@ -5,7 +5,8 @@ import { Tooltip } from "neogestify-ui-components";
 import { agentIcon } from "@/features/agents/agentIcons";
 
 import { isLive } from "./fleetOrder";
-import type { Task, TaskStatus } from "./types";
+import { PermissionCard } from "./PermissionCard";
+import type { PendingApproval, Task, TaskStatus } from "./types";
 
 /** Segundos transcurridos, refrescados solo mientras la tarea sigue viva. */
 function useElapsed(task: Task): number {
@@ -44,6 +45,7 @@ const BADGE: Record<TaskStatus, string> = {
   done: "text-gray-500 dark:text-white/40 bg-gray-200/70 dark:bg-white/8",
   failed: "text-red-600 dark:text-red-400 bg-red-500/12",
   cancelled: "text-gray-500 dark:text-white/35 bg-gray-200/70 dark:bg-white/8",
+  handed_off: "text-blue-700 dark:text-blue-300 bg-blue-500/12",
 };
 
 /**
@@ -53,12 +55,18 @@ const BADGE: Record<TaskStatus, string> = {
  * que "qué archivo tocó" viene como dato: las líneas son ya la forma corta (`Bash(cargo
  * test)`), no un recorte de su salida. Quien quiera el detalle abre la tarea como pane.
  */
-export function AgentCard({ task, activity, onCancel, onOpenPane, onShowResult }: {
+export function AgentCard({ task, activity, approval, focused, onCancel, onOpenPane, onShowResult, onDecide, onDiscardWorktree }: {
   task: Task;
   activity: string[];
+  /** El permiso que esta tarea está esperando, si hay uno. */
+  approval?: PendingApproval;
+  /** Si es la tarjeta que responde a `y`/`n`. */
+  focused: boolean;
   onCancel: () => void;
   onOpenPane: () => void;
   onShowResult: () => void;
+  onDiscardWorktree: () => void;
+  onDecide: (allow: boolean, remember: boolean) => void;
 }) {
   const { t } = useTranslation();
   const Icon = agentIcon(task.agentId);
@@ -69,9 +77,11 @@ export function AgentCard({ task, activity, onCancel, onOpenPane, onShowResult }
   return (
     <div className={`flex flex-col rounded-xl overflow-hidden
       bg-gray-50 dark:bg-white/4
-      border ${task.status === "failed"
-        ? "border-red-300/60 dark:border-red-500/25"
-        : "border-gray-200 dark:border-white/10"}`}>
+      border ${approval
+        ? "border-amber-400/70 dark:border-amber-500/40"
+        : task.status === "failed"
+          ? "border-red-300/60 dark:border-red-500/25"
+          : "border-gray-200 dark:border-white/10"}`}>
 
       {/* ── quién y en qué estado ── */}
       <div className="flex items-start gap-2.5 px-3 pt-2.5">
@@ -80,18 +90,32 @@ export function AgentCard({ task, activity, onCancel, onOpenPane, onShowResult }
           <span className="flex items-baseline gap-1.5 min-w-0">
             <span className="shrink-0 font-mono text-[10px] text-gray-400 dark:text-white/30">
               {task.agentId}
+              {task.model && <RoutedModel task={task} />}
             </span>
             <span className="truncate text-[12.5px] font-semibold text-gray-900 dark:text-white">
               {task.title}
             </span>
           </span>
           <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30">
-            {task.cwd}
+            {task.branch ? (
+              <span title={task.cwd}>
+                <span className="text-violet-500 dark:text-violet-400">
+                  {task.worktreeRemoved ? t("fleet.card.branchOnly") : t("fleet.card.worktree")}
+                </span>{" "}
+                {task.branch}
+              </span>
+            ) : (
+              task.cwd
+            )}
           </span>
         </div>
+        {/* Estar esperando una decisión gana sobre el estado: para quien mira, esta
+            tarjeta no está trabajando, está parada por su culpa. */}
         <span className={`shrink-0 px-1.5 py-px rounded-full text-[9.5px] font-bold
-          uppercase tracking-wider ${BADGE[task.status]}`}>
-          {t(`fleet.status.${task.status}`)}
+          uppercase tracking-wider ${approval
+            ? "text-amber-800 dark:text-amber-300 bg-amber-500/20"
+            : BADGE[task.status]}`}>
+          {approval ? t("fleet.status.needsYou") : t(`fleet.status.${task.status}`)}
         </span>
       </div>
 
@@ -118,6 +142,10 @@ export function AgentCard({ task, activity, onCancel, onOpenPane, onShowResult }
           </span>
         )}
       </div>
+
+      {approval && (
+        <PermissionCard approval={approval} focused={focused} onDecide={onDecide} />
+      )}
 
       {/* ── qué costó y qué se puede hacer ── */}
       <div className="flex items-center gap-2.5 px-3 h-8 shrink-0
@@ -152,15 +180,53 @@ export function AgentCard({ task, activity, onCancel, onOpenPane, onShowResult }
             <button onClick={onShowResult} className={ACTION}>{t("fleet.card.result")}</button>
           )
         )}
-        {/* Abrir como pane es lo que una CLI no puede ofrecer: la app le impuso el id de
-            sesión al lanzar, así que retoma ESA conversación en vez de empezar otra. */}
-        <Tooltip content={t("fleet.card.openPaneHint")} placement="top">
-          <button onClick={onOpenPane} disabled={!task.sessionId} className={ACTION}>
-            {t("fleet.card.openPane")}
+        {/* Solo con la tarea terminada, nunca sola: al terminar, el resultado ESTÁ en el
+            worktree, y descartarlo ahí sería borrar lo que el usuario todavía no revisó. */}
+        {!live && task.worktreePath && !task.worktreeRemoved && (
+          <Tooltip content={t("fleet.card.discardHint")} placement="top">
+            <button onClick={onDiscardWorktree} className={ACTION}>
+              {t("fleet.card.discard")}
+            </button>
+          </Tooltip>
+        )}
+        {/* Abrir en una terminal es lo que una CLI no puede ofrecer: la app le impuso el id
+            de sesión al lanzar, así que retoma ESA conversación en vez de empezar otra. Con
+            la tarea viva es "tomar el control": la para, y el texto lo dice, porque parar un
+            agente no puede ser el efecto secundario de un botón que dice "abrir". */}
+        <Tooltip
+          content={live ? t("fleet.card.takeOverHint") : t("fleet.card.openPaneHint")}
+          placement="top"
+        >
+          <button onClick={onOpenPane} disabled={!task.sessionId || task.worktreeRemoved} className={ACTION}>
+            {live ? t("fleet.card.takeOver") : t("fleet.card.openPane")}
           </button>
         </Tooltip>
       </div>
     </div>
+  );
+}
+
+/**
+ * El modelo con el que corre. Si hubo que descartar algo para asignarlo, va en ámbar y el
+ * motivo en el tooltip: una tarea "difícil" corriendo en Sonnet se ve como un error si no
+ * se sabe que Opus no tenía cuenta con cupo.
+ */
+function RoutedModel({ task }: { task: Task }) {
+  const { t } = useTranslation();
+  const label = ` · ${task.model}`;
+  if (task.routedBy !== "fallback" || !task.routeNote) return <>{label}</>;
+  return (
+    <Tooltip
+      content={
+        <span className="flex flex-col gap-0.5 max-w-72">
+          <span className="font-semibold">{t("fleet.card.fallback")}</span>
+          {task.routeNote.split("\n").map((line) => <span key={line}>{line}</span>)}
+        </span>
+      }
+      placement="top"
+    >
+      <span className="text-amber-600 dark:text-amber-400/90 cursor-help">{label}</span>
+    </Tooltip>
   );
 }
 

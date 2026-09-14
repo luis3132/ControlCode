@@ -15,6 +15,8 @@ import { SettingsModal } from "@/features/settings/SettingsModal";
 import { AccountsModal } from "@/features/accounts/AccountsModal";
 import { RouteModal } from "@/app/RouteModal";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
+import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
+import { initViewTabsPersistence } from "@/features/tabs/viewStore";
 import { useUiStore } from "@/app/uiStore";
 import { buildWorkspaceTree } from "@/features/workspaces/workspaceTree";
 import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
@@ -25,6 +27,7 @@ import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
 import { AppExitListener } from "@/app/AppExitListener";
 import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
+import { useFleetEvents } from "@/features/runs/useFleetEvents";
 import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
 
@@ -98,6 +101,9 @@ export function AppShell() {
   const sideWidth = RAIL_W + (workspacesCollapsed ? 0 : PANEL_W);
 
   useGlobalShortcuts();
+  // La flota se escucha desde acá y no desde su pantalla: un agente que pide permiso con
+  // la consola cerrada tiene que verse igual (ver `useFleetEvents`).
+  useFleetEvents();
 
   useEffect(() => {
     detectAgents().then(setDetectedAgents);
@@ -129,6 +135,7 @@ export function AppShell() {
   useEffect(() => {
     initTabsPersistence();
     const myLabel = getCurrentWindow().label;
+    initViewTabsPersistence(myLabel);
     loadWindowState(myLabel)
       .then((restored) => {
         if (restored) {
@@ -215,6 +222,8 @@ export function AppShell() {
             }}
           >
             <TerminalPanel />
+            {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. */}
+            <ViewTabsHost />
           </div>
 
           {/* `overflow-hidden` y no `cc-scroll`: cada página arma su propio alto y

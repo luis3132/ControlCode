@@ -28,6 +28,8 @@
  * click para volver, que es al revés de lo que hace falta.
  */
 
+import { keyName } from "@/shared/keyboard";
+
 /** La ruta del área de terminales. Volver acá es volver a trabajar. */
 export const WORKSPACE_PATH = "/workspace";
 
@@ -56,7 +58,10 @@ export interface Shortcut {
 
 /**
  * Las letras siguen la inicial en español —**H**ome, s**E**siones, s**K**ills,
- * **M**arketplace, confi**G**uración— salvo skills, que empieza igual que sesiones.
+ * **M**arketplace, **F**lota, confi**G**uración— salvo skills, que empieza igual que
+ * sesiones. Ctrl+F se le saca a la terminal (en readline es "avanzar un carácter"), el
+ * mismo precio que ya pagan Ctrl+E y Ctrl+K, y bastante menos grave que lo que se evitó
+ * con Ctrl+W y Ctrl+S.
  *
  * Workspaces queda a propósito sin atajo: las teclas que le tocarían (Ctrl+W cierra,
  * Ctrl+S congela la terminal con XOFF) hacen más daño que bien, y se llega desde Home.
@@ -66,6 +71,7 @@ export const SHORTCUTS: Shortcut[] = [
   { key: "e", action: { kind: "goto", path: "/sessions" }, display: "Ctrl+E", labelKey: "sidebar.sessions" },
   { key: "k", action: { kind: "goto", path: "/skills" }, display: "Ctrl+K", labelKey: "sidebar.skills" },
   { key: "m", action: { kind: "goto", path: "/marketplace" }, display: "Ctrl+M", labelKey: "sidebar.marketplace" },
+  { key: "f", action: { kind: "goto", path: "/fleet" }, display: "Ctrl+F", labelKey: "sidebar.fleet" },
   { key: "g", action: { kind: "openSettings" }, path: "/settings", display: "Ctrl+G", labelKey: "sidebar.settings" },
   { key: "tab", action: { kind: "cycleTab", delta: 1 }, display: "Ctrl+Tab", labelKey: "shortcuts.nextTab" },
   {
@@ -80,6 +86,8 @@ export const SHORTCUTS: Shortcut[] = [
 /** Lo que hace falta de un `KeyboardEvent` — estructural para poder testear sin DOM. */
 export interface KeyChord {
   key: string;
+  /** La tecla física. Hace falta para reconocer Shift+Tab en WebKitGTK (ver `keyName`). */
+  code?: string;
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
@@ -91,7 +99,7 @@ export function matchShortcut(e: KeyChord): Shortcut | null {
   // Ctrl+Alt, así que sin esta condición escribir un carácter con AltGr dispararía atajos.
   // Meta queda afuera por lo mismo (Cmd+M minimiza en macOS).
   if (!e.ctrlKey || e.altKey || e.metaKey) return null;
-  const key = e.key.toLowerCase();
+  const key = keyName(e).toLowerCase();
   return SHORTCUTS.find((s) => s.key === key && Boolean(s.shift) === e.shiftKey) ?? null;
 }
 

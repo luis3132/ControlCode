@@ -41,6 +41,17 @@ pub struct Task {
     pub tokens_in: Option<i64>,
     pub tokens_out: Option<i64>,
     pub events_path: Option<String>,
+    /// La raíz del worktree en el que corre. `None` = corre en la carpeta del proyecto.
+    pub worktree_path: Option<String>,
+    pub branch: Option<String>,
+    /// Se descartó la carpeta. La rama puede seguir existiendo.
+    pub worktree_removed: bool,
+    /// `trivial` | `standard` | `hard`, si se lanzó por complejidad.
+    pub complexity: Option<String>,
+    /// `manual` | `policy` | `fallback` (ver `routing::RoutedBy`).
+    pub routed_by: Option<String>,
+    /// Qué se descartó al asignarla y por qué.
+    pub route_note: Option<String>,
     pub started_at: Option<i64>,
     pub ended_at: Option<i64>,
     pub created_at: i64,
@@ -54,6 +65,9 @@ pub mod status {
     pub const DONE: &str = "done";
     pub const FAILED: &str = "failed";
     pub const CANCELLED: &str = "cancelled";
+    /// El usuario la tomó en una terminal. No es lo mismo que cancelarla: el trabajo
+    /// sigue, solo que ahora en una tab, y la tarjeta tiene que decir eso y no "parada".
+    pub const HANDED_OFF: &str = "handed_off";
 }
 
 /// Lo que pasó en una tarea, ya traducido del dialecto de su TUI.
@@ -74,6 +88,9 @@ pub enum AgentEvent {
     Tool { name: String, label: String },
     /// Cerró. Trae el veredicto y lo que costó.
     Finished { outcome: TaskOutcome },
+    /// Cuánto cupo le queda a la cuenta con la que corre. No es actividad de la tarjeta:
+    /// el supervisor lo guarda para el ruteo y no lo reenvía a la consola.
+    Quota { quota: super::quota::Quota },
 }
 
 /// El veredicto de una tarea.

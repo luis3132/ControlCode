@@ -1,9 +1,9 @@
 [package]
 name = "controlcode"
-version = "1.5.1"
+version = "1.6.0"
 description = "Control Code — AI coding agent command center"
-authors = ["you"]
-edition = "2021"
+authors = ["luis3132"]
+edition = "2024"
 # El crate emite dos binarios (`controlcode` de la app y `ccode` de la CLI), así que
 # cargo/tauri necesitan saber cuál es el principal para empaquetar.
 default-run = "controlcode"
@@ -57,7 +57,26 @@ symlink = "0.1"
 # Fase 6 — Marketplace de skills (registries remotos)
 # rustls en vez de la TLS nativa del sistema: evita depender de libssl/openssl-dev
 # instalado en la máquina del usuario para poder compilar/correr.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+
+# Buscador de texto del panel derecho. `ignore` es el recorrido de ripgrep: respeta
+# `.gitignore` sin tener que invocar a git por cada carpeta, y trae los globs de
+# incluir/excluir. `regex` ya estaba en el árbol por otras dependencias.
+ignore = "0.4"
+regex = "1"
+
+# Navegador de las tabs: un proxy local delante del dev server, para poder inyectarle el
+# selector de elementos. hyper ya estaba en el árbol (lo trae reqwest como cliente); acá
+# se le prende el lado servidor. `bytes` y `http-body-util` también venían con reqwest.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+futures-util = "0.3"
+
+# Las imágenes de las tabs de archivo viajan como data URL: sin esto habría que abrirle al
+# webview el protocolo de assets sobre todo el disco. Ya venía en el árbol.
+base64 = "0.22"
 
 # Señales POSIX: matar el GRUPO de procesos de una tab y no solo a su líder, para que no
 # queden huérfanos los procesos que el agente haya lanzado (ver terminal::pty_manager).

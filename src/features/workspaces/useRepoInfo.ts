@@ -7,6 +7,19 @@ const UNRESOLVED: RepoInfo = {
   root: null, branch: null, isWorktree: false, changes: {}, changedCount: 0,
 };
 
+const invalidators = new Set<(root: string) => void>();
+
+/**
+ * Descarta lo que se sabía del repo `root` para que se vuelva a leer.
+ *
+ * La caché es por carpeta y para siempre, lo cual está bien mientras nada cambie — pero el
+ * panel de control de versiones cambia el repo (commitea, cambia de rama), y sin avisar
+ * acá las marcas del árbol y la rama del lateral seguirían mostrando lo de antes.
+ */
+export function invalidateRepoInfo(root: string) {
+  invalidators.forEach((invalidate) => invalidate(root));
+}
+
 /**
  * Resuelve cada `cwd` contra git, una sola vez por carpeta.
  *
@@ -16,6 +29,22 @@ const UNRESOLVED: RepoInfo = {
  */
 export function useRepoInfo(cwds: string[]): Map<string, RepoInfo> {
   const [cache, setCache] = useState<Map<string, RepoInfo>>(new Map());
+  const [version, setVersion] = useState(0);
+
+  useEffect(() => {
+    const invalidate = (root: string) => {
+      setCache((prev) => {
+        const next = new Map(prev);
+        for (const [cwd, info] of prev) {
+          if (info.root === root || cwd === root || cwd.startsWith(`${root}/`)) next.delete(cwd);
+        }
+        return next.size === prev.size ? prev : next;
+      });
+      setVersion((v) => v + 1);
+    };
+    invalidators.add(invalidate);
+    return () => { invalidators.delete(invalidate); };
+  }, []);
 
   // La clave es el CONTENIDO, no el array: `cwds` se rearma en cada render y comparar la
   // referencia relanzaría el efecto para siempre.
@@ -46,8 +75,9 @@ export function useRepoInfo(cwds: string[]): Map<string, RepoInfo> {
 
     return () => { stale = true; };
     // `cache` queda fuera a propósito: agregarlo relanzaría el efecto con cada respuesta.
+    // `version` sí entra: es la señal de que algo se invalidó y hay que volver a leer.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, version]);
 
   return cache;
 }

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { countByGroup, filterFleet, groupOf, isLive, sortFleet } from "../fleetOrder";
+import { countByGroup, filterFleet, fleetSummary, groupOf, isLive, liveInFolder, sortFleet } from "../fleetOrder";
 import { lineOf } from "../store";
-import type { Task, TaskStatus } from "../types";
+import type { PendingApproval, Task, TaskStatus } from "../types";
 
 function task(patch: Partial<Task> & { id: string }): Task {
   return {
@@ -23,6 +23,12 @@ function task(patch: Partial<Task> & { id: string }): Task {
     tokensIn: null,
     tokensOut: null,
     eventsPath: null,
+    worktreePath: null,
+    branch: null,
+    worktreeRemoved: false,
+    complexity: null,
+    routedBy: null,
+    routeNote: null,
     startedAt: null,
     endedAt: null,
     createdAt: 0,
@@ -155,5 +161,106 @@ describe("lineOf", () => {
         outcome: { ok: true, result: null, error: null, costUsd: null, tokensIn: null, tokensOut: null },
       })
     ).toBeNull();
+  });
+});
+
+describe("needsYou", () => {
+  const flota = [
+    task({ id: "trabajando", status: "running", startedAt: 10 }),
+    task({ id: "trabada", status: "running", startedAt: 900 }),
+    task({ id: "lista", status: "done", endedAt: 999 }),
+  ];
+  const bloqueadas = new Set(["trabada"]);
+
+  /// Una tarea con un permiso esperando sigue en `running` para el backend, pero desde
+  /// afuera no está trabajando: está parada por culpa del usuario.
+  it("una tarea con un permiso esperando deja de contar como trabajando", () => {
+    expect(groupOf(task({ id: "trabada", status: "running" }), bloqueadas)).toBe("needsYou");
+    expect(groupOf(task({ id: "otra", status: "running" }), bloqueadas)).toBe("running");
+  });
+
+  /// Es el orden del que depende que la consola sirva: la que pide algo va arriba de todo,
+  /// aunque haya arrancado después que las demás.
+  it("la trabada va primera aunque sea la más nueva", () => {
+    expect(sortFleet(flota, bloqueadas).map((t) => t.id))
+      .toEqual(["trabada", "trabajando", "lista"]);
+  });
+
+  it("el contador la mueve de grupo", () => {
+    expect(countByGroup(flota, bloqueadas)).toEqual({ needsYou: 1, running: 1, idle: 1 });
+  });
+
+  it("el filtro de 'te necesita' deja solo a las trabadas", () => {
+    expect(filterFleet(flota, "needsYou", "", bloqueadas).map((t) => t.id)).toEqual(["trabada"]);
+  });
+
+  /// Sin el conjunto, todo se comporta como antes: es lo que permite que la consola pinte
+  /// aunque la cola de permisos todavía no haya llegado.
+  it("sin datos de bloqueo nada cambia", () => {
+    expect(countByGroup(flota)).toEqual({ needsYou: 0, running: 2, idle: 1 });
+  });
+});
+
+describe("handed_off", () => {
+  /// Pasada a una terminal, la tarea deja de ser trabajo en segundo plano: no está parada
+  /// esperando ni avanzando sola, así que va con las terminadas y no suma a "trabajando".
+  it("una tarea pasada a terminal cuenta como terminada y ya no está viva", () => {
+    expect(groupOf(task({ id: "t", status: "handed_off" }))).toBe("idle");
+    expect(isLive("handed_off")).toBe(false);
+  });
+});
+
+function pedido(taskId: string): PendingApproval {
+  return { id: `ap-${taskId}`, taskId, toolName: "Edit", input: {}, askedAt: 0, suggestedRule: null };
+}
+
+describe("fleetSummary", () => {
+  const flota = [
+    task({ id: "a", status: "running", costUsd: 0.1 }),
+    task({ id: "b", status: "running", costUsd: 0.25 }),
+    task({ id: "c", status: "done", costUsd: 0.05 }),
+  ];
+
+  /// Una tarea trabada no puede contar dos veces: está en "te espera", no en "trabajando".
+  /// Sumarla a los dos lados haría que la barra prometa más agentes de los que hay.
+  it("la trabada cuenta como que te espera, no como trabajando", () => {
+    expect(fleetSummary(flota, [pedido("a")])).toMatchObject({ running: 1, needsYou: 1 });
+  });
+
+  /// La cola de permisos es de toda la app, pero la barra lleva a la consola de ESTE
+  /// workspace: contar un pedido que al abrirla no aparece sería mentirle al que hace click.
+  it("no cuenta pedidos de tareas que no están en la lista", () => {
+    expect(fleetSummary(flota, [pedido("de-otro-workspace")]).needsYou).toBe(0);
+  });
+
+  it("varios pedidos de la misma tarea son una sola tarea esperando", () => {
+    expect(fleetSummary(flota, [pedido("a"), { ...pedido("a"), id: "otro" }]).needsYou).toBe(1);
+  });
+
+  it("suma lo gastado de toda la flota, terminadas incluidas", () => {
+    expect(fleetSummary(flota, []).spentUsd).toBeCloseTo(0.4);
+  });
+
+  it("sin flota no hay nada que mostrar", () => {
+    expect(fleetSummary([], [])).toEqual({ running: 0, needsYou: 0, spentUsd: 0 });
+  });
+});
+
+describe("liveInFolder", () => {
+  /// Es lo que decide si el siguiente agente arranca aislado: uno solo en la carpeta no
+  /// choca con nadie, un segundo editaría los mismos archivos.
+  it("cuenta solo los que trabajan sobre la carpeta misma", () => {
+    const flota = [
+      task({ id: "a", status: "running", cwd: "/p" }),
+      task({ id: "b", status: "ready", cwd: "/p" }),
+      // En su worktree: no toca la carpeta, no choca.
+      task({ id: "c", status: "running", cwd: "/w/ab12", worktreePath: "/w/ab12" }),
+      // Terminado: ya no edita nada.
+      task({ id: "d", status: "done", cwd: "/p" }),
+      // Otra carpeta.
+      task({ id: "e", status: "running", cwd: "/otra" }),
+    ];
+    expect(liveInFolder(flota, "/p")).toBe(2);
+    expect(liveInFolder(flota, "/nadie")).toBe(0);
   });
 });

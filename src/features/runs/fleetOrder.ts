@@ -6,7 +6,7 @@
  * que pide algo y queda enterrada abajo es un agente parado que nadie ve— y así se puede
  * probar sin montar nada.
  */
-import type { Task, TaskStatus } from "./types";
+import type { PendingApproval, Task, TaskStatus } from "./types";
 
 /** Los tres estados que la consola distingue, y el orden en que se muestran. */
 export type FleetGroup = "needsYou" | "running" | "idle";
@@ -16,12 +16,13 @@ export const FLEET_GROUPS: FleetGroup[] = ["needsYou", "running", "idle"];
 /**
  * En qué grupo cae una tarjeta.
  *
- * `needsYou` todavía no lo produce nadie: lo va a llenar el broker de permisos, cuando una
- * tarea quede esperando una decisión. Se declara desde ahora porque es la categoría que
- * manda en el orden, y tenerla ya definida evita que el día que exista haya que rehacer
- * todo lo que la consulta.
+ * Una tarea con un permiso esperando es `needsYou` aunque su estado siga siendo `running`:
+ * desde afuera no está trabajando, está parada. Esa distinción es la que hace que la
+ * consola sirva — un agente bloqueado que se ve igual que uno que avanza es un agente que
+ * nadie destraba.
  */
-export function groupOf(task: Task): FleetGroup {
+export function groupOf(task: Task, blocked?: ReadonlySet<string>): FleetGroup {
+  if (blocked?.has(task.id)) return "needsYou";
   switch (task.status) {
     case "running":
       return "running";
@@ -33,9 +34,12 @@ export function groupOf(task: Task): FleetGroup {
   }
 }
 
-export function countByGroup(tasks: Task[]): Record<FleetGroup, number> {
+export function countByGroup(
+  tasks: Task[],
+  blocked?: ReadonlySet<string>
+): Record<FleetGroup, number> {
   const counts: Record<FleetGroup, number> = { needsYou: 0, running: 0, idle: 0 };
-  for (const t of tasks) counts[groupOf(t)] += 1;
+  for (const t of tasks) counts[groupOf(t, blocked)] += 1;
   return counts;
 }
 
@@ -50,12 +54,12 @@ const GROUP_RANK: Record<FleetGroup, number> = { needsYou: 0, running: 1, idle: 
  * conviene mirar. Dentro de "terminado" va primero el que cerró recién, que es lo último
  * que pasó y de lo que uno se quiere enterar.
  */
-export function sortFleet(tasks: Task[]): Task[] {
+export function sortFleet(tasks: Task[], blocked?: ReadonlySet<string>): Task[] {
   return [...tasks].sort((a, b) => {
-    const byGroup = GROUP_RANK[groupOf(a)] - GROUP_RANK[groupOf(b)];
+    const byGroup = GROUP_RANK[groupOf(a, blocked)] - GROUP_RANK[groupOf(b, blocked)];
     if (byGroup !== 0) return byGroup;
 
-    if (groupOf(a) === "idle") {
+    if (groupOf(a, blocked) === "idle") {
       return (b.endedAt ?? b.createdAt) - (a.endedAt ?? a.createdAt);
     }
     return (a.startedAt ?? a.createdAt) - (b.startedAt ?? b.createdAt);
@@ -63,10 +67,15 @@ export function sortFleet(tasks: Task[]): Task[] {
 }
 
 /** Las tarjetas que coinciden con el filtro de estado y con el texto del buscador. */
-export function filterFleet(tasks: Task[], group: FleetGroup | null, query: string): Task[] {
+export function filterFleet(
+  tasks: Task[],
+  group: FleetGroup | null,
+  query: string,
+  blocked?: ReadonlySet<string>
+): Task[] {
   const q = query.trim().toLowerCase();
   return tasks.filter((t) => {
-    if (group && groupOf(t) !== group) return false;
+    if (group && groupOf(t, blocked) !== group) return false;
     if (!q) return true;
     return (
       t.title.toLowerCase().includes(q) ||
@@ -79,4 +88,39 @@ export function filterFleet(tasks: Task[], group: FleetGroup | null, query: stri
 /** Un estado terminal ya no cambia solo: no hace falta seguir refrescando su reloj. */
 export function isLive(status: TaskStatus): boolean {
   return status === "ready" || status === "running";
+}
+
+export interface FleetSummary {
+  running: number;
+  /** Tarjetas de ESTE workspace con un permiso esperando. */
+  needsYou: number;
+  spentUsd: number;
+}
+
+/**
+ * Lo que la barra de estado dice de la flota, siempre visible.
+ *
+ * Solo cuenta los pedidos de tareas que están en la lista, o sea las de este workspace. La
+ * cola de permisos es de toda la app, pero la barra lleva a `/fleet`, y un número que
+ * promete algo que al abrir la consola no aparece es peor que no mostrarlo.
+ */
+export function fleetSummary(tasks: Task[], approvals: PendingApproval[]): FleetSummary {
+  const ids = new Set(tasks.map((t) => t.id));
+  const blocked = new Set(approvals.filter((a) => ids.has(a.taskId)).map((a) => a.taskId));
+  return {
+    running: tasks.filter((t) => isLive(t.status) && !blocked.has(t.id)).length,
+    needsYou: blocked.size,
+    spentUsd: tasks.reduce((sum, t) => sum + (t.costUsd ?? 0), 0),
+  };
+}
+
+/**
+ * Cuántos agentes están trabajando YA sobre la carpeta misma (no en un worktree suyo).
+ *
+ * Es el dato que decide si aislar el siguiente: uno solo en la carpeta no choca con nadie,
+ * pero un segundo editaría los mismos archivos que el primero. Los que corren en su
+ * worktree no cuentan, justamente porque no tocan la carpeta.
+ */
+export function liveInFolder(tasks: Task[], cwd: string): number {
+  return tasks.filter((t) => isLive(t.status) && !t.worktreePath && t.cwd === cwd).length;
 }

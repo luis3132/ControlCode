@@ -907,3 +907,57 @@ fn borrar_un_workspace_se_lleva_sus_runs_y_tareas() {
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM runs"), 0);
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM tasks"), 0);
 }
+
+/// La v14 le agrega a `tasks` las columnas del worktree. Sobre una base que ya tenía tareas
+/// (desde la v11), las filas existentes tienen que quedar intactas y sin worktree.
+#[test]
+fn migrar_a_v14_agrega_el_worktree_sin_tocar_las_tareas() {
+    let conn = schema::in_memory();
+    conn.execute_batch(
+        "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+         INSERT INTO runs (id, workspace_id, objective, cwd, created_at) VALUES ('r', 'ws', 'o', '/p', 0);
+         INSERT INTO tasks (id, run_id, title, prompt, agent_id, cwd, created_at)
+             VALUES ('t', 'r', 'tit', 'pr', 'claude-code', '/p', 0);
+         PRAGMA user_version = 13;",
+    )
+    .unwrap();
+
+    schema::migrate(&conn).expect("migrar de v13 a v14");
+
+    let (wt, removed): (Option<String>, i64) = conn
+        .query_row("SELECT worktree_path, worktree_removed FROM tasks WHERE id = 't'", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
+    assert_eq!((wt, removed), (None, 0));
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM tasks"), 1);
+}
+
+/// La v15 le agrega a `tasks` con qué criterio se asignó. Las columnas se BORRAN antes de
+/// migrar (SQLite lo permite desde la 3.35) para que el `ALTER` corra de verdad: con la
+/// base recién creada ya estarían, y el test pasaría sin probar nada.
+#[test]
+fn migrar_a_v15_agrega_el_ruteo_sin_tocar_las_tareas() {
+    let conn = schema::in_memory();
+    conn.execute_batch(
+        "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+         INSERT INTO runs (id, workspace_id, objective, cwd, created_at) VALUES ('r', 'ws', 'o', '/p', 0);
+         INSERT INTO tasks (id, run_id, title, prompt, agent_id, model, cwd, created_at)
+             VALUES ('t', 'r', 'tit', 'pr', 'claude-code', 'opus', '/p', 0);
+         ALTER TABLE tasks DROP COLUMN complexity;
+         ALTER TABLE tasks DROP COLUMN routed_by;
+         ALTER TABLE tasks DROP COLUMN route_note;
+         PRAGMA user_version = 14;",
+    )
+    .unwrap();
+
+    schema::migrate(&conn).expect("migrar de v14 a v15");
+
+    let (model, complexity, routed_by, note): (String, Option<String>, Option<String>, Option<String>) = conn
+        .query_row("SELECT model, complexity, routed_by, route_note FROM tasks WHERE id = 't'", [], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .unwrap();
+    assert_eq!(model, "opus", "la tarea que ya estaba sigue igual");
+    assert_eq!((complexity, routed_by, note), (None, None, None));
+}

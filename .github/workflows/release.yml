@@ -136,6 +136,22 @@ jobs:
         if: matrix.native && !startsWith(matrix.name, 'windows')
         run: cd src-tauri && cargo test
 
+      # El cache de cargo trae `target/` entero de la corrida anterior, y el bundler de Tauri
+      # nunca vacía `bundle/`: deja el instalador nuevo AL LADO de los que ya había. Con eso
+      # el glob del upload de abajo se llevaba todo junto, y cada release salía con los
+      # instaladores de las versiones anteriores colgados al lado de los suyos.
+      #
+      # Se borra solo `bundle/`, no `target/`: lo compilado es justamente lo que el cache
+      # viene a ahorrar. Y va ANTES del build aunque abajo también se limpie, porque los
+      # caches que ya están guardados en GitHub traen los instaladores viejos adentro — sin
+      # este paso, la próxima versión los volvería a publicar.
+      #
+      # `bash` explícito: en Windows el shell por defecto es PowerShell, donde `rm -rf` no
+      # existe.
+      - name: Limpiar instaladores de versiones anteriores
+        shell: bash
+        run: rm -rf "src-tauri/target/${{ matrix.target }}/release/bundle"
+
       # El mismo comando que se corre a mano, con el target de esta celda fijado.
       - name: Build
         run: bun run app:build --release --target ${{ matrix.target }}
@@ -153,6 +169,15 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+
+      # Los instaladores ya viajaron como artifact al job que publica, así que en este
+      # runner no hacen más falta. Borrarlos acá, antes de que termine el job, es lo que los
+      # deja FUERA del cache de cargo, que se guarda recién al final: cientos de megas por
+      # celda que no sirven para compilar nada y que son los que después se colaban en la
+      # versión siguiente.
+      - name: Sacar los instaladores del cache
+        shell: bash
+        run: rm -rf "src-tauri/target/${{ matrix.target }}/release/bundle"
 
   # Los artifacts de arriba caducan y solo los ve quien entra al run. Este trabajo es el
   # que convierte ese build en algo que la gente puede descargar: crea el release del tag
@@ -195,6 +220,22 @@ jobs:
             find artifacts -type f
             exit 1
           fi
+
+          # Última red, por si algún día vuelve a colarse algo. Los instaladores de Tauri
+          # llevan siempre la versión en el nombre (controlcode_1.6.0_amd64.deb,
+          # controlcode-1.6.0-1.x86_64.rpm…), así que uno que no la lleve es un resto de otra
+          # versión — y es preferible un release en rojo a uno que ofrece la versión vieja
+          # como si fuera la nueva. Se compara la parte numérica: el sufijo de una
+          # prerelease (-beta.1) no todos los empaquetadores lo escriben igual.
+          version="${GITHUB_REF_NAME#v}"
+          nucleo="${version%%-*}"
+          ajenos=$(find dist -type f ! -name "*${nucleo}*")
+          if [ -n "$ajenos" ]; then
+            echo "::error::Hay instaladores que no son de la versión $version"
+            echo "$ajenos"
+            exit 1
+          fi
+
           echo "Se van a publicar $despues archivos:"
           ls -lh dist/
 

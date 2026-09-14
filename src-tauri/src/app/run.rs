@@ -7,8 +7,11 @@ use crate::database::DbConnection;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    super::signals::cleanup_on_signals();
     let db_conn = crate::database::init_db().expect("Failed to initialize SQLite database");
+    // Antes de construir Tauri, porque WebKitGTK decide cómo componer al inicializarse; y
+    // antes del hilo de señales, porque toca el entorno del proceso (ver `configure`).
+    super::rendering::configure(&db_conn);
+    super::signals::cleanup_on_signals();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -54,6 +57,30 @@ pub fn run() {
             // Explorador de archivos del workspace (panel derecho)
             crate::explorer::explorer_read_dir,
             crate::explorer::explorer_repo_info,
+            crate::explorer::explorer_search,
+            // Tabs de archivo
+            crate::explorer::explorer_read_file,
+            crate::explorer::explorer_write_file,
+            crate::explorer::explorer_file_stat,
+            // Control de versiones (panel derecho)
+            crate::scm::scm_status,
+            crate::scm::scm_init,
+            crate::scm::scm_stage,
+            crate::scm::scm_unstage,
+            crate::scm::scm_discard,
+            crate::scm::scm_commit,
+            crate::scm::scm_branches,
+            crate::scm::scm_checkout,
+            crate::scm::scm_fetch,
+            crate::scm::scm_pull,
+            crate::scm::scm_push,
+            crate::scm::scm_log,
+            crate::scm::scm_file_at,
+            // Tabs de navegador (proxy con selector de elementos)
+            crate::preview::preview_resolve,
+            crate::preview::preview_detect_servers,
+            // Renderizado del WebView (texto nítido en Linux)
+            crate::app::rendering_info,
             // Detección de agentes
             crate::agents::agent_registry,
             crate::agents::detect_agents,
@@ -62,6 +89,17 @@ pub fn run() {
             crate::runs::run_list_runs,
             crate::runs::run_start_task,
             crate::runs::run_cancel_task,
+            crate::runs::run_hand_off_task,
+            crate::runs::run_discard_worktree,
+            crate::runs::run_pending_approvals,
+            crate::runs::run_decide_approval,
+            crate::runs::run_list_rules,
+            crate::runs::run_add_rule,
+            crate::runs::run_delete_rule,
+            crate::runs::run_roster,
+            crate::runs::run_preview_route,
+            crate::runs::run_get_tiers,
+            crate::runs::run_set_tiers,
             // Cuentas múltiples por TUI
             crate::accounts::account_capable_agents,
             crate::accounts::list_agent_accounts,
@@ -171,6 +209,9 @@ pub fn run() {
                     eprintln!("[runs] {n} tarea(s) headless quedaron colgadas del cierre anterior");
                 }
             }
+            // Y sus pedidos de permiso: el agente que esperaba murió con la app, así que
+            // no los va a contestar nadie.
+            let _ = crate::runs::sweep_orphan_approvals(&db);
 
             let active_id = crate::database::db_get_last_active_workspace_id(&db)?;
             let windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;

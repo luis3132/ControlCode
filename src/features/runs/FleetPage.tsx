@@ -1,20 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AddIcon, EmptyState, NetworkIcon, SearchIcon } from "neogestify-ui-components";
+import { AddIcon, EmptyState, Kbd, NetworkIcon, SearchIcon, ShieldIcon, Tooltip } from "neogestify-ui-components";
+
+import { detectAgents } from "@/features/agents/ipc";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { AgentCard } from "./AgentCard";
-import { countByGroup, filterFleet, FLEET_GROUPS, sortFleet, type FleetGroup } from "./fleetOrder";
+import { countByGroup, filterFleet, FLEET_GROUPS, liveInFolder, sortFleet, type FleetGroup } from "./fleetOrder";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { RulesDialog } from "./RulesDialog";
 import { useRunsStore } from "./store";
-import type { TaskEventPayload } from "./types";
-
-/** Los eventos que emite el supervisor. Deben coincidir con `runs/supervisor.rs`. */
-const TASK_EVENT = "cc-task-event";
-const TASK_CHANGED = "cc-task-changed";
+import type { PendingApproval, Task } from "./types";
 
 /**
  * La consola de flota: qué está haciendo cada agente headless, todo junto.
@@ -31,38 +30,106 @@ export function FleetPage() {
 
   const tasks = useRunsStore((s) => s.tasks);
   const activity = useRunsStore((s) => s.activity);
-  const loadTasks = useRunsStore((s) => s.loadTasks);
-  const applyEvent = useRunsStore((s) => s.applyEvent);
-  const refreshTask = useRunsStore((s) => s.refreshTask);
   const startTask = useRunsStore((s) => s.startTask);
   const cancelTask = useRunsStore((s) => s.cancelTask);
+  const approvals = useRunsStore((s) => s.approvals);
+  const decideApproval = useRunsStore((s) => s.decideApproval);
+  const handOffTask = useRunsStore((s) => s.handOffTask);
+  const discardWorktree = useRunsStore((s) => s.discardWorktree);
 
   const [group, setGroup] = useState<FleetGroup | null>(null);
   const [query, setQuery] = useState("");
   const [newOpen, setNewOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [detail, setDetail] = useState<string | null>(null);
 
   // La carpeta donde se lanza: la de la tab activa, igual que el "+" de la barra de tabs.
   const cwd = tabs.find((tb) => tb.id === activeTabId)?.cwd ?? tabs[0]?.cwd ?? "";
 
-  useEffect(() => {
-    if (workspaceId) loadTasks(workspaceId).catch(console.error);
-  }, [workspaceId, loadTasks]);
+  // Los eventos los escucha `useFleetEvents` desde el shell, esté abierta o no esta
+  // pantalla. Acá solo se lee.
 
+  const addTab = useTabsStore((s) => s.addTab);
+  const navigate = useNavigate();
+  const searchRef = useRef<HTMLInputElement>(null);
+  /** Un aviso sobre la última acción de una tarjeta: tomar el control, descartar. */
+  const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null);
+
+  // `/` enfoca el buscador. No Ctrl+K, que es lo que muestra el mockup: acá Ctrl+K ya es
+  // Skills, y robarlo rompería un atajo que la gente ya tiene en los dedos.
   useEffect(() => {
-    if (!workspaceId) return;
-    const unlisten = [
-      listen<TaskEventPayload>(TASK_EVENT, (e) => applyEvent(e.payload)),
-      listen<string>(TASK_CHANGED, (e) => refreshTask(workspaceId, e.payload)),
-    ];
-    return () => {
-      unlisten.forEach((p) => p.then((off) => off()).catch(() => {}));
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
+      e.preventDefault();
+      searchRef.current?.focus();
     };
-  }, [workspaceId, applyEvent, refreshTask]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
-  const counts = useMemo(() => countByGroup(tasks), [tasks]);
-  const shown = useMemo(() => sortFleet(filterFleet(tasks, group, query)), [tasks, group, query]);
+  /** Sigue la conversación de una tarea en una terminal de verdad. */
+  const openInTerminal = async (task: Task) => {
+    setNotice(null);
+    try {
+      const ready = await handOffTask(task.id);
+      if (!ready.sessionId) return;
+      const agent = (await detectAgents()).find((a) => a.id === ready.agentId);
+      addTab({
+        cwd: ready.cwd,
+        agent: agent ?? { id: ready.agentId, label: ready.agentId, command: ready.agentId, available: true },
+        title: ready.title,
+        // La sesión que la app le impuso al lanzar: la tab retoma ESA conversación con
+        // `--resume` en vez de empezar otra.
+        sessionId: ready.sessionId,
+        // Y con la misma cuenta: el transcript vive dentro de la carpeta de la cuenta, y
+        // con otra el resume no lo encontraría.
+        accountId: ready.accountId ?? undefined,
+      });
+      navigate("/workspace");
+    } catch (e) {
+      setNotice({ error: true, text: String(e) });
+    }
+  };
+
+  /** Descarta el worktree de una tarea terminada, y dice qué pasó con su rama. */
+  const discard = async (task: Task) => {
+    setNotice(null);
+    try {
+      const done = await discardWorktree(task.id);
+      // Que la rama quede es la parte que importa contar: ahí está el trabajo del agente, y
+      // sin decirlo el usuario creería que se fue con la carpeta.
+      setNotice({
+        error: false,
+        text: done.branchKept
+          ? t("fleet.worktree.discardedKept", { branch: done.branch })
+          : t("fleet.worktree.discarded", { branch: done.branch }),
+      });
+    } catch (e) {
+      setNotice({ error: true, text: String(e) });
+    }
+  };
+
+  // Por tarea, el primer permiso que esté esperando. Puede haber más de uno encolado si el
+  // agente pidió varias cosas seguidas; se muestra de a uno para que la decisión sea sobre
+  // algo concreto y no sobre una lista.
+  const byTask = useMemo(() => {
+    const map = new Map<string, PendingApproval>();
+    for (const a of approvals) if (!map.has(a.taskId)) map.set(a.taskId, a);
+    return map;
+  }, [approvals]);
+  const blocked = useMemo(() => new Set(byTask.keys()), [byTask]);
+
+  const counts = useMemo(() => countByGroup(tasks, blocked), [tasks, blocked]);
+  const shown = useMemo(
+    () => sortFleet(filterFleet(tasks, group, query, blocked), blocked),
+    [tasks, group, query, blocked]
+  );
   const detailTask = tasks.find((tk) => tk.id === detail);
+  // El teclado contesta la PRIMERA tarjeta trabada del orden vigente, que es la que el
+  // usuario tiene arriba de todo. Con varias, `y` a secas sería ambiguo.
+  const focusedId = shown.find((tk) => blocked.has(tk.id))?.id;
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -95,20 +162,50 @@ export function FleetPage() {
 
         <div className="flex-1" />
 
+        {/* Las reglas son de la carpeta en la que se lanza, la misma que usa "Nuevo agente". */}
+        <Tooltip content={t("fleet.rules.title")} placement="bottom">
+          <button
+            onClick={() => setRulesOpen(true)}
+            disabled={!cwd}
+            aria-label={t("fleet.rules.title")}
+            className="cc-t flex items-center justify-center w-7 h-7 rounded-lg shrink-0
+              text-gray-400 dark:text-white/35
+              hover:text-gray-700 dark:hover:text-white
+              hover:bg-gray-200 dark:hover:bg-white/10
+              disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            <ShieldIcon className="w-3.5 h-3.5" />
+          </button>
+        </Tooltip>
+
         <div className="flex items-center gap-1.5 px-2 h-7 rounded-lg shrink-0
           bg-gray-100 dark:bg-white/5
           border border-gray-200 dark:border-white/10">
           <SearchIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/30" />
           <input
+            ref={searchRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") { setQuery(""); e.currentTarget.blur(); }
+            }}
             placeholder={t("fleet.search")}
             className="w-40 bg-transparent outline-none text-[11.5px]
               text-gray-800 dark:text-gray-200
               placeholder:text-gray-400 dark:placeholder:text-white/25"
           />
+          <Kbd>/</Kbd>
         </div>
       </div>
+
+      {notice && (
+        <div className={`shrink-0 px-4 py-2 text-[11px] border-b
+          ${notice.error
+            ? "text-red-600 dark:text-red-400 border-red-200/60 dark:border-red-500/20 bg-red-50 dark:bg-red-500/8"
+            : "text-violet-700 dark:text-violet-300 border-violet-200/60 dark:border-violet-500/20 bg-violet-50 dark:bg-violet-500/8"}`}>
+          {notice.text}
+        </div>
+      )}
 
       {/* ══ la grilla ═══════════════════════════════════════════════ */}
       <div className="flex-1 min-h-0 cc-scroll p-3">
@@ -126,12 +223,16 @@ export function FleetPage() {
                 key={task.id}
                 task={task}
                 activity={activity[task.id] ?? []}
+                approval={byTask.get(task.id)}
+                focused={task.id === focusedId}
+                onDecide={(allow, remember) => {
+                  const a = byTask.get(task.id);
+                  if (a) decideApproval(a.id, allow, remember).catch(console.error);
+                }}
                 onCancel={() => cancelTask(task.id).catch(console.error)}
                 onShowResult={() => setDetail(task.id)}
-                // El pane todavía no existe: llega en el corte 3, junto con el resto de la
-                // consola. Mostrar el resultado es lo que hay hasta entonces, y decirlo es
-                // mejor que un botón que no hace nada.
-                onOpenPane={() => setDetail(task.id)}
+                onOpenPane={() => openInTerminal(task)}
+                onDiscardWorktree={() => discard(task)}
               />
             ))}
 
@@ -168,6 +269,7 @@ export function FleetPage() {
       {newOpen && cwd && (
         <NewTaskDialog
           cwd={cwd}
+          busyInFolder={liveInFolder(tasks, cwd)}
           onClose={() => setNewOpen(false)}
           onStart={async (input) => {
             if (!workspaceId) throw new Error(t("fleet.error.noWorkspace"));
@@ -177,6 +279,7 @@ export function FleetPage() {
       )}
 
       {detailTask && <TaskDetail task={detailTask} onClose={() => setDetail(null)} />}
+      {rulesOpen && cwd && <RulesDialog cwd={cwd} onClose={() => setRulesOpen(false)} />}
     </div>
   );
 }

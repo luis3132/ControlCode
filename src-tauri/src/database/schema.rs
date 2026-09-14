@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 11;
+const SCHEMA_VERSION: i32 = 15;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -423,8 +423,79 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              created_at INTEGER NOT NULL
          );
          CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
-         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);",
+         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+
+         -- v12 — Cada permiso que un agente headless pidió, y qué se le contestó.
+         --
+         -- Se persiste y no vive solo en memoria por dos motivos. Es el registro de qué le
+         -- autorizaste a quién, que es lo que uno quiere poder mirar después de dejar
+         -- agentes corriendo solos. Y es de donde salen las reglas: una decisión que se
+         -- repite es una que conviene dejar de preguntar.
+         CREATE TABLE IF NOT EXISTS task_approvals (
+             id         TEXT PRIMARY KEY,
+             task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+             tool_name  TEXT NOT NULL,
+             -- El `input` crudo de la herramienta. De acá sale el diff que se muestra.
+             input_json TEXT NOT NULL,
+             -- pending | allowed | denied
+             status     TEXT NOT NULL DEFAULT 'pending',
+             -- user | rule: si lo decidió una persona o una regla del run.
+             decided_by TEXT,
+             reason     TEXT,
+             asked_at   INTEGER NOT NULL,
+             decided_at INTEGER
+         );
+         CREATE INDEX IF NOT EXISTS idx_task_approvals_task ON task_approvals(task_id);
+
+         -- v13 — Lo que se decide sin preguntar, por carpeta de proyecto.
+         --
+         -- Van por carpeta y no por run porque hoy cada lanzamiento abre su propio run: una
+         -- regla del run duraba lo que dura UNA tarea, y un 'permitir siempre' que se olvida
+         -- al lanzar el agente siguiente no es 'siempre'. La carpeta es la del run (el
+         -- proyecto desde el que se lanzó), no la de la tarea: cuando las tareas corran en
+         -- worktrees, cada una va a tener su propio cwd, y la política tiene que seguir
+         -- siendo la del proyecto.
+         CREATE TABLE IF NOT EXISTS permission_rules (
+             id         TEXT PRIMARY KEY,
+             cwd        TEXT NOT NULL,
+             -- `Bash(git status*)`, `Read`, `Edit(src/**)`. La sintaxis de `--allowedTools`.
+             pattern    TEXT NOT NULL,
+             allow      INTEGER NOT NULL,
+             created_at INTEGER NOT NULL,
+             -- Una decisión nueva sobre el mismo patrón REEMPLAZA a la anterior: dos reglas
+             -- idénticas con veredictos opuestos harían depender el resultado del orden.
+             UNIQUE (cwd, pattern)
+         );
+         CREATE INDEX IF NOT EXISTS idx_permission_rules_cwd ON permission_rules(cwd);",
     )?;
+
+    // v14 — El worktree de una tarea headless.
+    //
+    // Con ALTER porque `tasks` ya existe desde la v11. `cwd` de la tarea pasa a ser la del
+    // worktree cuando lo hay; la del proyecto sigue en `runs.cwd`, que es de donde salen
+    // las reglas. `worktree_removed` no borra las otras dos: la rama sigue existiendo (y
+    // puede tener el trabajo del agente) aunque la carpeta ya no.
+    if !has_column(conn, "tasks", "worktree_path") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN worktree_path TEXT", [])?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN branch TEXT", [])?;
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN worktree_removed INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+
+    // v15 — Con qué criterio se asignó cada tarea.
+    //
+    // `complexity` es lo que se declaró al lanzarla; `routed_by` si el modelo lo nombró
+    // alguien (`manual`), salió a la primera del tramo (`policy`) o hubo que descartar algo
+    // (`fallback`); y `route_note` qué se descartó y por qué. Es el dato para ajustar los
+    // tramos a mano después: sin él no hay forma de saber si "trivial" está cayendo en un
+    // modelo que después falla. Las tareas de antes quedan en NULL: se lanzaron a mano.
+    if !has_column(conn, "tasks", "complexity") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN complexity TEXT", [])?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN routed_by TEXT", [])?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN route_note TEXT", [])?;
+    }
 
     // Columna agregada después de que `tabs` ya existía en instalaciones reales, así que
     // se suma con ALTER en vez de recrear la tabla (que perdería las tabs guardadas).

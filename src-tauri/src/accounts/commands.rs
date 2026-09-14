@@ -41,6 +41,12 @@ pub async fn account_capable_agents() -> Result<Vec<AccountCapableAgent>, String
 #[tauri::command]
 pub fn list_agent_accounts(db: tauri::State<DbConnection>) -> Result<Vec<AgentAccount>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
+    list_accounts(&conn)
+}
+
+/// Las cuentas creadas en la app, sobre una conexión ya tomada. Es lo que usa también el
+/// roster de la flota, que necesita la lista sin pasar por un comando.
+pub fn list_accounts(conn: &rusqlite::Connection) -> Result<Vec<AgentAccount>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, agent_id, name, dir, created_at FROM agent_accounts
@@ -173,27 +179,32 @@ pub async fn system_accounts() -> Result<Vec<AgentAccount>, String> {
                     .map(crate::agents::command_exists)
                     .unwrap_or(false)
             })
-            .filter_map(|spec| {
-                let dir = super::profiles::default_dir(spec)?;
-                let (logged_in, label) = super::profiles::read_identity(&dir, spec);
-                Some(AgentAccount {
-                    // Id sintético y estable: no hay fila, pero el frontend necesita una
-                    // clave y el backend tiene que poder distinguirla de un perfil real.
-                    id: format!("system:{}", spec.agent_id),
-                    agent_id: spec.agent_id.to_string(),
-                    name: crate::agents::agent_label(spec.agent_id)
-                        .unwrap_or(spec.agent_id)
-                        .to_string(),
-                    dir: dir.to_string_lossy().to_string(),
-                    env_var: spec.env_var.to_string(),
-                    login_command: spec.login_command.to_string(),
-                    logged_in,
-                    label,
-                    created_at: 0,
-                })
-            })
+            .filter_map(|spec| system_account(spec.agent_id))
             .collect()
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// La cuenta principal de UNA TUI, esté instalada o no. `None` si no soporta cuentas.
+pub fn system_account(agent_id: &str) -> Option<AgentAccount> {
+    let spec = spec_for(agent_id)?;
+    let dir = super::profiles::default_dir(spec)?;
+    let marker_root = super::profiles::system_marker_root(spec, &dirs::home_dir()?, &dir);
+    let (logged_in, label) = super::profiles::read_identity(&marker_root, spec);
+    Some(AgentAccount {
+        // Id sintético y estable: no hay fila, pero el frontend necesita una clave y el
+        // backend tiene que poder distinguirla de un perfil real.
+        id: format!("system:{}", spec.agent_id),
+        agent_id: spec.agent_id.to_string(),
+        name: crate::agents::agent_label(spec.agent_id)
+            .unwrap_or(spec.agent_id)
+            .to_string(),
+        dir: dir.to_string_lossy().to_string(),
+        env_var: spec.env_var.to_string(),
+        login_command: spec.login_command.to_string(),
+        logged_in,
+        label,
+        created_at: 0,
+    })
 }

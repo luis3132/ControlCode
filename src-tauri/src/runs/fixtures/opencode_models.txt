@@ -1,0 +1,289 @@
+opencode/big-pickle
+{
+  "id": "big-pickle",
+  "providerID": "opencode",
+  "name": "Big Pickle",
+  "family": "big-pickle",
+  "api": {
+    "id": "big-pickle",
+    "url": "https://opencode.ai/zen/v1",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "limit": {
+    "context": 200000,
+    "input": 160000,
+    "output": 32000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2025-10-17",
+  "variants": {}
+}
+opencode/claude-sonnet-5
+{
+  "id": "claude-sonnet-5",
+  "providerID": "opencode",
+  "name": "Claude Sonnet 5",
+  "family": "claude-sonnet",
+  "api": {
+    "id": "claude-sonnet-5",
+    "url": "https://opencode.ai/zen/v1",
+    "npm": "@ai-sdk/anthropic"
+  },
+  "status": "active",
+  "headers": {},
+  "options": {},
+  "cost": {
+    "input": 2,
+    "output": 10,
+    "cache": {
+      "read": 0.2,
+      "write": 2.5
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 128000
+  },
+  "capabilities": {
+    "temperature": false,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-06-30",
+  "variants": {
+    "low": {
+      "thinking": {
+        "type": "adaptive",
+        "display": "summarized"
+      },
+      "effort": "low"
+    },
+    "medium": {
+      "thinking": {
+        "type": "adaptive",
+        "display": "summarized"
+      },
+      "effort": "medium"
+    },
+    "high": {
+      "thinking": {
+        "type": "adaptive",
+        "display": "summarized"
+      },
+      "effort": "high"
+    },
+    "xhigh": {
+      "thinking": {
+        "type": "adaptive",
+        "display": "summarized"
+      },
+      "effort": "xhigh"
+    },
+    "max": {
+      "thinking": {
+        "type": "adaptive",
+        "display": "summarized"
+      },
+      "effort": "max"
+    }
+  }
+}
+ollama/qwen2.5-coder:14b
+{
+  "id": "qwen2.5-coder:14b",
+  "api": {
+    "id": "qwen2.5-coder:14b",
+    "npm": "@ai-sdk/openai-compatible",
+    "url": ""
+  },
+  "status": "active",
+  "name": "qwen2.5-coder:14b",
+  "providerID": "ollama",
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "options": {},
+  "limit": {
+    "context": 0,
+    "output": 0
+  },
+  "headers": {},
+  "family": "",
+  "release_date": "",
+  "variants": {}
+}
+ollama/kimi-k2.6:cloud
+{
+  "id": "kimi-k2.6:cloud",
+  "api": {
+    "id": "kimi-k2.6:cloud",
+    "npm": "@ai-sdk/openai-compatible",
+    "url": ""
+  },
+  "status": "active",
+  "name": "kimi-k2.6:cloud",
+  "providerID": "ollama",
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "options": {},
+  "limit": {
+    "context": 0,
+    "output": 0
+  },
+  "headers": {},
+  "family": "",
+  "release_date": "",
+  "variants": {}
+}
+ollama/glm-5.1:cloud
+{
+  "id": "glm-5.1:cloud",
+  "api": {
+    "id": "glm-5.1:cloud",
+    "npm": "@ai-sdk/openai-compatible",
+    "url": ""
+  },
+  "status": "active",
+  "name": "glm-5.1:cloud",
+  "providerID": "ollama",
+  "capabilities": {
+    "temperature": false,
+    "reasoning": false,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "cost": {
+    "input": 0,
+    "output": 0,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "options": {},
+  "limit": {
+    "context": 0,
+    "output": 0
+  },
+  "headers": {},
+  "family": "",
+  "release_date": "",
+  "variants": {}
+}

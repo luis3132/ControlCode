@@ -33,6 +33,14 @@ use super::types::{status, AgentEvent, Task, TaskOutcome};
 pub const TASK_EVENT: &str = "cc-task-event";
 /// Evento de "esta tarjeta cambió de estado"; la consola recarga esa fila.
 pub const TASK_CHANGED: &str = "cc-task-changed";
+/// Evento de "cambió la cola de permisos"; la consola vuelve a pedirla.
+pub const APPROVALS_CHANGED: &str = "cc-task-approvals";
+
+/// Avisa que la cola de permisos cambió. Se manda el estado entero y no el delta porque
+/// son unos pocos pedidos y así una ventana que se perdió un evento se recupera sola.
+pub fn notify_approvals(app: &AppHandle) {
+    let _ = app.emit(APPROVALS_CHANGED, super::broker::pending());
+}
 
 /// Nombre del grupo de contención. No se cruza con los ids de PTY porque va por otro
 /// contador y el nombre del cgroup los distingue igual; solo sirve para leerlo.
@@ -67,6 +75,39 @@ fn emit_event(app: &AppHandle, task_id: &str, event: AgentEvent) {
 
 fn emit_changed(app: &AppHandle, task_id: &str) {
     let _ = app.emit(TASK_CHANGED, task_id.to_string());
+}
+
+/// Avisa a la consola que una fila cambió por algo que no pasó en el proceso (descartar su
+/// worktree, por ejemplo).
+pub fn notify_changed(app: &AppHandle, task_id: &str) {
+    emit_changed(app, task_id);
+}
+
+/// El `--mcp-config` que le dice al agente cómo alcanzar su puente de permisos.
+///
+/// Se escribe uno por tarea porque el `--task` de adentro es lo que después le dice a la
+/// app a qué tarjeta pertenece cada pedido. El archivo se borra al terminar; los que
+/// queden de un cierre sucio los barre el arranque.
+fn write_mcp_config(task_id: &str) -> Option<PathBuf> {
+    // El mismo binario que la app instala en el PATH. Si no está —una build de desarrollo
+    // sin `ccode` al lado— se corre sin broker en vez de fallar: el agente igual sirve,
+    // solo que sin poder pedir permiso.
+    let ccode = crate::ipc::install::source_binary()?;
+
+    let dir = dirs::home_dir()?.join(".controlcode").join("mcp");
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join(format!("{task_id}.json"));
+
+    let config = serde_json::json!({
+        "mcpServers": {
+            crate::ipc::mcp::SERVER_NAME: {
+                "command": ccode.to_string_lossy(),
+                "args": ["mcp", "--task", task_id],
+            }
+        }
+    });
+    std::fs::write(&path, config.to_string()).ok()?;
+    Some(path)
 }
 
 /// Dónde va el NDJSON crudo de una tarea.
@@ -108,7 +149,8 @@ pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
         None => Default::default(),
     };
 
-    let ctx = LaunchCtx { session_id: &session_id, account_env };
+    let mcp_config = write_mcp_config(&task.id);
+    let ctx = LaunchCtx { session_id: &session_id, account_env, mcp_config: mcp_config.clone() };
     let launch = adapter.launch(&task.prompt, task.model.as_deref(), task.budget_usd, &ctx);
 
     let mut command = tokio::process::Command::new(&launch.program);
@@ -144,6 +186,7 @@ pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
     let stderr = child.stderr.take();
     let app = app.clone();
     let task_id = task.id.clone();
+    let quota_key = super::quota::account_key(&task.agent_id, task.account_id.as_deref());
 
     tokio::spawn(async move {
         let mut file = tokio::fs::File::create(&events_path).await.ok();
@@ -157,10 +200,18 @@ pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
                     let _ = f.write_all(b"\n").await;
                 }
                 for event in adapter.parse_line(&line) {
-                    if let AgentEvent::Finished { outcome } = &event {
-                        emitted = Some(outcome.clone());
+                    match event {
+                        // Es de la cuenta, no de la tarjeta: se guarda para que el ruteo
+                        // sepa cuánto le queda, y la consola no se entera.
+                        AgentEvent::Quota { quota } => {
+                            super::quota::record(&db, &quota_key, quota, crate::util::now_ts());
+                        }
+                        AgentEvent::Finished { ref outcome } => {
+                            emitted = Some(outcome.clone());
+                            emit_event(&app, &task_id, event);
+                        }
+                        event => emit_event(&app, &task_id, event),
                     }
-                    emit_event(&app, &task_id, event);
                 }
             }
         }
@@ -186,6 +237,12 @@ pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
         // Sacarlo del registro corre el `Drop` del grupo, que barre lo que el agente
         // hubiera dejado atrás (un `cargo test` a medias, un server levantado).
         live().remove(&task_id);
+        // Un pedido de permiso sin proceso que lo espere no lo va a contestar nadie:
+        // dejarlo en la cola lo mostraría en la consola para siempre.
+        super::broker::drop_task(&task_id);
+        if let Some(path) = &mcp_config {
+            let _ = std::fs::remove_file(path);
+        }
 
         if let Ok(conn) = db.lock() {
             let _ = store::finish_task(&conn, &task_id, &outcome);
@@ -198,22 +255,40 @@ pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
 }
 
 /// Cancela una tarea en curso: marca la fila y mata el proceso con toda su descendencia.
+pub fn cancel(app: &AppHandle, task_id: &str) -> Result<(), String> {
+    stop(app, task_id, status::CANCELLED)
+}
+
+/// Para el proceso headless porque el usuario va a seguir la conversación en una terminal.
+///
+/// Hay que pararlo, no dejarlo correr en paralelo: dos procesos escribiendo la MISMA sesión
+/// a la vez —el headless y el `--resume` de la tab— se pisarían el transcript, y el agente
+/// de la tab arrancaría sin saber lo que el otro hizo después.
+pub fn hand_off(app: &AppHandle, task_id: &str) -> Result<(), String> {
+    stop(app, task_id, status::HANDED_OFF)
+}
+
+/// Marca la fila con `new_status` y mata el proceso con toda su descendencia.
 ///
 /// El orden importa. La fila se marca PRIMERO: al morir el proceso, la tarea que lo espera
-/// va a intentar cerrarlo como fallido, y `finish_task` solo pisa filas que sigan en
-/// `running` — así la cancelación no se convierte en un error que el usuario no cometió.
-pub fn cancel(app: &AppHandle, task_id: &str) -> Result<(), String> {
+/// va a intentar cerrarlo como fallido, y `finish_task` solo pisa filas abiertas — así ni
+/// una cancelación ni un traspaso a terminal se convierten en un error que no hubo.
+fn stop(app: &AppHandle, task_id: &str, new_status: &str) -> Result<(), String> {
     let db = app
         .try_state::<DbConnection>()
         .ok_or_else(|| "la base no está disponible".to_string())?;
     let conn = db.lock().map_err(|e| e.to_string())?;
+    // `ready` también: una tarea que se está lanzando todavía no llegó a `running`, y
+    // pararla en ese instante no puede quedar sin efecto.
     conn.execute(
-        "UPDATE tasks SET status = ?1, ended_at = ?2 WHERE id = ?3 AND status = ?4",
-        rusqlite::params![status::CANCELLED, crate::util::now_ts(), task_id, status::RUNNING],
+        "UPDATE tasks SET status = ?1, ended_at = ?2
+         WHERE id = ?3 AND status IN ('ready', 'running')",
+        rusqlite::params![new_status, crate::util::now_ts(), task_id],
     )
     .map_err(|e| e.to_string())?;
     drop(conn);
 
+    super::broker::drop_task(task_id);
     if let Some(mut group) = live().remove(task_id) {
         group.kill_all();
     }

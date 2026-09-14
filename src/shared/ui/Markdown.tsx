@@ -102,11 +102,22 @@ export function Markdown({ content }: { content: string }) {
 
 /** Saca el bloque `---` inicial de un SKILL.md. Si no hay, devuelve el texto igual. */
 export function stripFrontmatter(content: string): string {
-  const text = content.replace(/^﻿/, "");
-  if (!/^---\r?\n/.test(text)) return content;
+  return splitFrontmatter(content).body;
+}
+
+/**
+ * Separa el bloque `---` inicial del resto. `frontmatter` es su contenido, sin las rayas;
+ * `null` si el archivo no tiene (y entonces `body` es el texto tal cual).
+ */
+export function splitFrontmatter(content: string): { frontmatter: string | null; body: string } {
+  const text = content.replace(/^\uFEFF/, "");
+  if (!/^---\r?\n/.test(text)) return { frontmatter: null, body: content };
   // El cierre tiene que estar al principio de una línea: un `---` en medio de la prosa
   // (una línea horizontal, por ejemplo) no cierra nada.
   const end = text.search(/\r?\n---[ \t]*(\r?\n|$)/);
-  if (end === -1) return content;
-  return text.slice(text.indexOf("\n", end + 1) + 1).replace(/^\s*\n/, "");
+  if (end === -1) return { frontmatter: null, body: content };
+  return {
+    frontmatter: text.slice(text.indexOf("\n") + 1, end),
+    body: text.slice(text.indexOf("\n", end + 1) + 1).replace(/^\s*\n/, ""),
+  };
 }

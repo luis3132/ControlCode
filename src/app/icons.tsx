@@ -100,3 +100,87 @@ export function FolderOpenIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Globo: una tab de navegador. */
+export function GlobeIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z" />
+    </svg>
+  );
+}
+
+/** Cursor sobre un recuadro punteado: marcar un elemento de la página. */
+export function PickIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M9 3H5a2 2 0 00-2 2v4M21 9V5a2 2 0 00-2-2h-4M3 15v4a2 2 0 002 2h4" strokeDasharray="0" />
+      <path d="M12 12l8.5 3.2-3.6 1.6-1.6 3.6L12 12z" />
+    </svg>
+  );
+}
+
+/** Flecha saliendo de una caja: abrir afuera de la app. */
+export function ExternalIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5" />
+    </svg>
+  );
+}
+
+/** Avión de papel: mandar algo a un agente. */
+export function SendIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M21 3L10 14M21 3l-7 18-4-7-7-4 18-7z" />
+    </svg>
+  );
+}
+
+/** Flecha hacia arriba sobre una línea: subir (push). */
+export function PushIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M12 17V5M6 11l6-6 6 6M5 20h14" />
+    </svg>
+  );
+}
+
+/** Flecha hacia abajo sobre una línea: traer (pull). */
+export function PullIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M12 4v12M6 10l6 6 6-6M5 20h14" />
+    </svg>
+  );
+}
+
+/** Flecha curva hacia atrás: descartar cambios. */
+export function UndoIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M9 14L4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 010 11H11" />
+    </svg>
+  );
+}
+
+/** El logo de GitHub, de trazo como el resto. */
+export function GithubIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 00-1.3-3.2 4.2 4.2 0 00-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 00-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 00-.1 3.2A4.6 4.6 0 004 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21" />
+    </svg>
+  );
+}
+
+/** El logo de GitLab (el zorro), simplificado a trazo. */
+export function GitlabIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M12 21l-9-7 2.5-10 3 7h7l3-7L21 14l-9 7z" />
+    </svg>
+  );
+}

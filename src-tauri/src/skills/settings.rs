@@ -17,7 +17,7 @@ pub(super) fn resolve_skills_dir(db: &DbConnection) -> Result<PathBuf, String> {
 /// DB tomado (attach/detach, cierre de tabs/ventanas), y volver a lockear ahí sería un
 /// deadlock. No crea el directorio: acá solo se usa para decidir si un symlink existente
 /// apunta a la copia global (o sea, si lo gestiona Control Code) o es del usuario.
-pub(super) fn skills_dir_from_conn(conn: &rusqlite::Connection) -> Result<PathBuf, String> {
+pub(crate) fn skills_dir_from_conn(conn: &rusqlite::Connection) -> Result<PathBuf, String> {
     let value: Option<String> = conn
         .query_row("SELECT value FROM settings WHERE key = 'skills_dir'", [], |r| r.get(0))
         .optional()

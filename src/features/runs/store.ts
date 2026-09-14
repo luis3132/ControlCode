@@ -10,23 +10,31 @@
 import { create } from "zustand";
 
 import * as ipc from "./ipc";
-import type { AgentEvent, Task, TaskEventPayload } from "./types";
+import type { AgentEvent, PendingApproval, Task, TaskEventPayload } from "./types";
 
 /** Cuántas líneas de actividad conserva una tarjeta. Lo de más atrás está en el `.jsonl`. */
 export const CARD_LINES = 5;
 
 interface RunsState {
   tasks: Task[];
+  /** Los permisos que hay esperando, por tarea. */
+  approvals: PendingApproval[];
   /** Por tarea, las últimas líneas de actividad. */
   activity: Record<string, string[]>;
   loaded: boolean;
   loadTasks: (workspaceId: string) => Promise<void>;
   startTask: (input: ipc.StartTaskInput) => Promise<Task>;
   cancelTask: (taskId: string) => Promise<void>;
+  /** Para la tarea si hace falta y devuelve la fila con lo necesario para reabrirla. */
+  handOffTask: (taskId: string) => Promise<Task>;
+  discardWorktree: (taskId: string) => Promise<ipc.DiscardedWorktree>;
   /** Un evento en vivo del backend. */
   applyEvent: (payload: TaskEventPayload) => void;
   /** Una fila cambió de estado: se relee. */
   refreshTask: (workspaceId: string, taskId: string) => Promise<void>;
+  setApprovals: (approvals: PendingApproval[]) => void;
+  loadApprovals: () => Promise<void>;
+  decideApproval: (approvalId: string, allow: boolean, remember: boolean) => Promise<void>;
 }
 
 /** La línea que se muestra para un evento. `null` = no aporta nada a la tarjeta. */
@@ -45,6 +53,7 @@ export function lineOf(event: AgentEvent): string | null {
 
 export const useRunsStore = create<RunsState>((set) => ({
   tasks: [],
+  approvals: [],
   activity: {},
   loaded: false,
 
@@ -63,6 +72,20 @@ export const useRunsStore = create<RunsState>((set) => ({
     await ipc.cancelTask(taskId);
   },
 
+  discardWorktree: async (taskId) => {
+    const done = await ipc.discardWorktree(taskId);
+    set((s) => ({
+      tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, worktreeRemoved: true } : t)),
+    }));
+    return done;
+  },
+
+  handOffTask: async (taskId) => {
+    const task = await ipc.handOffTask(taskId);
+    set((s) => ({ tasks: s.tasks.map((t) => (t.id === task.id ? task : t)) }));
+    return task;
+  },
+
   applyEvent: (payload) => {
     const line = lineOf(payload);
     if (line === null) return;
@@ -71,6 +94,19 @@ export const useRunsStore = create<RunsState>((set) => ({
       const next = [...prev, line].slice(-CARD_LINES);
       return { activity: { ...s.activity, [payload.taskId]: next } };
     });
+  },
+
+  setApprovals: (approvals) => set({ approvals }),
+
+  loadApprovals: async () => {
+    set({ approvals: await ipc.listApprovals() });
+  },
+
+  decideApproval: async (approvalId, allow, remember) => {
+    // Se saca de la lista en el acto: el backend avisa igual por evento, pero esperar ese
+    // viaje deja el botón apretado mostrando algo que ya se decidió.
+    set((s) => ({ approvals: s.approvals.filter((a) => a.id !== approvalId) }));
+    await ipc.decideApproval(approvalId, allow, remember);
   },
 
   refreshTask: async (workspaceId, taskId) => {
