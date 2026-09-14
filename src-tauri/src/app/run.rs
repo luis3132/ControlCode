@@ -56,6 +56,11 @@ pub fn run() {
             // Explorador de archivos del workspace (panel derecho)
             crate::explorer::explorer_read_dir,
             crate::explorer::explorer_repo_info,
+            crate::explorer::explorer_search,
+            // Tabs de archivo
+            crate::explorer::explorer_read_file,
+            crate::explorer::explorer_write_file,
+            crate::explorer::explorer_file_stat,
             // Renderizado del WebView (texto nítido en Linux)
             crate::app::rendering_info,
             // Detección de agentes
