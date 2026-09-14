@@ -36,6 +36,9 @@ fn tarea(conn: &Connection, run_id: &str) -> String {
             model: None,
             cwd: "/tmp/proy",
             budget_usd: None,
+            complexity: None,
+            routed_by: None,
+            route_note: None,
         },
     )
     .unwrap()
@@ -1250,6 +1253,9 @@ fn aislar_una_tarea_la_muda_al_worktree_sin_mover_el_proyecto() {
                 model: None,
                 cwd: &cwd,
                 budget_usd: None,
+                complexity: None,
+                routed_by: None,
+                route_note: None,
             },
         )
         .unwrap()
@@ -1269,4 +1275,337 @@ fn aislar_una_tarea_la_muda_al_worktree_sin_mover_el_proyecto() {
         Some(&*repo.0.to_string_lossy()),
         "las reglas se siguen buscando en el proyecto"
     );
+}
+
+// ── El cupo ─────────────────────────────────────────────────────
+
+use super::quota::{self, Quota, QuotaWindow};
+
+/// Tal cual la emitió una corrida real de la 2.1.269 (`claude -p --model haiku`).
+const EVENTO_DE_CUPO: &str = r#"{"type": "rate_limit_event", "rate_limit_info": {"status": "allowed", "resetsAt": 1789429800, "rateLimitType": "five_hour", "overageStatus": "rejected", "overageDisabledReason": "org_level_disabled", "isUsingOverage": false, "unifiedWindows": {"five_hour": {"utilization": 0.09, "resetsAt": 1789429800}, "seven_day": {"utilization": 0.07, "resetsAt": 1789920000}}}, "uuid": "b8a7965b-d84f-4b26-bc55-7c7a05b05ca6", "session_id": "1b4bad67-d1ea-4dcb-b772-c7f3eac7f672"}"#;
+
+fn ventana(utilization: f64, resets_at: i64) -> Option<QuotaWindow> {
+    Some(QuotaWindow { utilization, resets_at: Some(resets_at) })
+}
+
+#[test]
+fn el_evento_de_cupo_trae_las_dos_ventanas_con_su_reinicio() {
+    let eventos = claude().parse_line(EVENTO_DE_CUPO);
+    let [AgentEvent::Quota { quota }] = eventos.as_slice() else { panic!("{eventos:?}") };
+    assert_eq!(quota.five_hour, ventana(0.09, 1789429800));
+    assert_eq!(quota.seven_day, ventana(0.07, 1789920000));
+    assert!(!quota.rejected);
+    assert!(!quota.overage, "overageStatus rejected = plan sin excedente");
+}
+
+#[test]
+fn una_ventana_llena_agota_la_cuenta_solo_hasta_que_se_reinicia() {
+    let q = Quota { five_hour: ventana(1.0, 1_000), ..Default::default() };
+    assert!(q.exhausted_at(999));
+    assert!(!q.exhausted_at(1_000), "ya se reinició: el dato viejo no dice nada");
+    assert_eq!(q.five_hour_at(1_000), Some(0.0));
+}
+
+#[test]
+fn un_rechazo_sin_fecha_vence_a_las_cinco_horas_de_observado() {
+    let q = Quota { rejected: true, observed_at: 10_000, ..Default::default() };
+    assert!(q.exhausted_at(10_000 + 5 * 3600 - 1));
+    assert!(!q.exhausted_at(10_000 + 5 * 3600), "sin techo quedaría fuera de juego para siempre");
+}
+
+#[test]
+fn con_excedente_pasar_el_cien_no_agota() {
+    let q = Quota { five_hour: ventana(1.2, 2_000), overage: true, ..Default::default() };
+    assert!(!q.exhausted_at(1_000));
+}
+
+#[test]
+fn el_cupo_se_guarda_por_cuenta() {
+    let db = db_compartida();
+    let q = Quota { five_hour: ventana(0.5, 9_000), ..Default::default() };
+    quota::record(&db, "system:claude-code", q.clone(), 1_234);
+
+    let conn = db.lock().unwrap();
+    let guardado = quota::load(&conn, "system:claude-code").expect("quedó guardado");
+    assert_eq!(guardado.observed_at, 1_234, "la hora la pone quien lo guarda");
+    assert_eq!(guardado.five_hour, q.five_hour);
+    assert!(quota::load(&conn, "otra-cuenta").is_none());
+    assert_eq!(quota::account_key("claude-code", None), "system:claude-code");
+    assert_eq!(quota::account_key("claude-code", Some("abc")), "abc");
+}
+
+// ── El roster ───────────────────────────────────────────────────
+
+use super::roster::{self, Roster, RosterAccount, RosterAgent, RosterModel};
+
+const OPENCODE_MODELS: &str = include_str!("fixtures/opencode_models.txt");
+const OLLAMA_LIST: &str = include_str!("fixtures/ollama_list.txt");
+
+#[test]
+fn opencode_lista_sus_modelos_con_precio_contexto_y_herramientas() {
+    let modelos = roster::parse_opencode_models(OPENCODE_MODELS);
+    let ids: Vec<&str> = modelos.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        ["opencode/big-pickle", "opencode/claude-sonnet-5", "ollama/qwen2.5-coder:14b", "ollama/kimi-k2.6:cloud", "ollama/glm-5.1:cloud"]
+    );
+
+    let sonnet = &modelos[1];
+    assert_eq!(sonnet.provider, "opencode");
+    assert_eq!((sonnet.cost_in, sonnet.cost_out), (Some(2.0), Some(10.0)));
+    assert_eq!(sonnet.context, Some(1_000_000));
+    assert_eq!(sonnet.toolcall, Some(true));
+
+    // opencode pone 0 cuando no sabe el contexto: no es un modelo sin contexto.
+    assert_eq!(modelos[2].context, None);
+}
+
+#[test]
+fn sin_verbose_igual_salen_los_modelos() {
+    let modelos = roster::parse_opencode_models("opencode/big-pickle\nzai/glm-5\n");
+    assert_eq!(modelos.len(), 2);
+    assert_eq!(modelos[1].provider, "zai");
+    assert_eq!(modelos[1].toolcall, None, "sin metadatos no se inventa la capacidad");
+}
+
+#[test]
+fn ollama_list_da_los_nombres_sin_la_cabecera() {
+    assert_eq!(roster::parse_ollama_list(OLLAMA_LIST), ["qwen2.5-coder:14b", "gemma4:e4b", "glm-5.1:cloud"]);
+}
+
+#[test]
+fn un_modelo_de_ollama_que_no_esta_descargado_dice_por_que() {
+    let modelos = roster::parse_opencode_models(OPENCODE_MODELS);
+    let descargados = roster::parse_ollama_list(OLLAMA_LIST);
+    let cruzados = roster::opencode_roster_models(&modelos, Some(&descargados));
+    let por_id = |id: &str| cruzados.iter().find(|m| m.id == id).unwrap();
+
+    assert_eq!(por_id("opencode/big-pickle").unavailable, None, "no es de Ollama");
+    let qwen = por_id("ollama/qwen2.5-coder:14b");
+    assert_eq!(qwen.unavailable, None);
+    assert!(qwen.local);
+    let kimi = por_id("ollama/kimi-k2.6:cloud");
+    assert!(kimi.unavailable.as_deref().unwrap().contains("ollama pull kimi-k2.6:cloud"));
+    let glm = por_id("ollama/glm-5.1:cloud");
+    assert_eq!(glm.unavailable, None);
+    assert!(!glm.local, "un :cloud pasa por Ollama pero corre afuera");
+
+    let sin_ollama = roster::opencode_roster_models(&modelos, None);
+    assert!(sin_ollama.iter().filter(|m| m.id.starts_with("ollama/")).all(|m| m.unavailable.is_some()));
+}
+
+// ── El ruteo ────────────────────────────────────────────────────
+
+use super::routing::{self, AccountChoice, Complexity, ModelRef, RouteRequest, RoutedBy, Tiers};
+
+const AHORA: i64 = 1_000_000;
+
+fn modelo(id: &str, toolcall: bool) -> RosterModel {
+    RosterModel {
+        id: id.into(),
+        label: id.into(),
+        toolcall: Some(toolcall),
+        local: false,
+        cost_in: None,
+        cost_out: None,
+        context: None,
+        unavailable: None,
+    }
+}
+
+fn cuenta(id: Option<&str>, name: &str, usada: Option<f64>) -> RosterAccount {
+    RosterAccount {
+        account_id: id.map(str::to_string),
+        key: quota::account_key("claude-code", id),
+        name: name.into(),
+        label: None,
+        logged_in: true,
+        quota: usada.map(|u| Quota { five_hour: ventana(u, AHORA + 1800), ..Default::default() }),
+        running: 0,
+    }
+}
+
+/// Claude Code con dos cuentas, y opencode lanzable con un modelo local que no sabe usar
+/// herramientas: la forma que va a tener el roster cuando entre su adaptador.
+fn roster_de_prueba() -> Roster {
+    Roster {
+        agents: vec![
+            RosterAgent {
+                agent_id: "claude-code".into(),
+                label: "Claude Code".into(),
+                installed: true,
+                launchable: true,
+                unavailable: None,
+                models: vec![modelo("haiku", true), modelo("sonnet", true), modelo("opus", true)],
+                accounts: vec![cuenta(None, "Claude Code", None), cuenta(Some("trabajo"), "trabajo", None)],
+            },
+            RosterAgent {
+                agent_id: "opencode".into(),
+                label: "OpenCode".into(),
+                installed: true,
+                launchable: true,
+                unavailable: None,
+                models: vec![modelo("ollama/chiquito", false)],
+                accounts: vec![],
+            },
+            RosterAgent {
+                agent_id: "codex".into(),
+                label: "Codex".into(),
+                installed: false,
+                launchable: false,
+                unavailable: Some("Codex no está instalado".into()),
+                models: vec![],
+                accounts: vec![],
+            },
+        ],
+    }
+}
+
+fn por_complejidad(c: Complexity) -> RouteRequest {
+    RouteRequest { agent_id: None, model: None, complexity: Some(c), account: AccountChoice::Auto }
+}
+
+fn agente<'a>(roster: &'a mut Roster, id: &str) -> &'a mut RosterAgent {
+    roster.agents.iter_mut().find(|a| a.agent_id == id).unwrap()
+}
+
+#[test]
+fn una_tarea_trivial_cae_al_modelo_barato() {
+    let a = routing::route(&roster_de_prueba(), &Tiers::default(), &por_complejidad(Complexity::Trivial), AHORA).unwrap();
+    assert_eq!((a.agent_id.as_str(), a.model.as_deref()), ("claude-code", Some("haiku")));
+    assert_eq!(a.routed_by, RoutedBy::Policy);
+    assert!(a.notes.is_empty());
+
+    let dificil = routing::route(&roster_de_prueba(), &Tiers::default(), &por_complejidad(Complexity::Hard), AHORA).unwrap();
+    assert_eq!(dificil.model.as_deref(), Some("opus"));
+}
+
+#[test]
+fn un_modelo_que_no_usa_herramientas_nunca_se_elige_aunque_sea_el_mas_barato() {
+    let tiers = Tiers {
+        trivial: vec![
+            ModelRef { agent_id: "opencode".into(), model: "ollama/chiquito".into() },
+            ModelRef { agent_id: "claude-code".into(), model: "haiku".into() },
+        ],
+        ..Tiers::default()
+    };
+    let a = routing::route(&roster_de_prueba(), &tiers, &por_complejidad(Complexity::Trivial), AHORA).unwrap();
+    assert_eq!(a.model.as_deref(), Some("haiku"));
+    assert_eq!(a.routed_by, RoutedBy::Fallback, "se descartó algo del tramo");
+    assert!(a.notes[0].contains("ollama/chiquito") && a.notes[0].contains("herramientas"), "{:?}", a.notes);
+}
+
+#[test]
+fn con_la_ventana_quemada_cambia_de_cuenta_antes_que_de_modelo() {
+    let mut roster = roster_de_prueba();
+    agente(&mut roster, "claude-code").accounts[0].quota =
+        Some(Quota { five_hour: ventana(1.0, AHORA + 2400), ..Default::default() });
+    let tiers = Tiers {
+        standard: vec![
+            ModelRef { agent_id: "claude-code".into(), model: "sonnet".into() },
+            ModelRef { agent_id: "claude-code".into(), model: "haiku".into() },
+        ],
+        ..Tiers::default()
+    };
+
+    let a = routing::route(&roster, &tiers, &por_complejidad(Complexity::Standard), AHORA).unwrap();
+    assert_eq!(a.model.as_deref(), Some("sonnet"), "el mismo modelo");
+    assert_eq!(a.account_id.as_deref(), Some("trabajo"), "otra cuenta");
+    assert_eq!(a.routed_by, RoutedBy::Fallback);
+    assert_eq!(a.notes, ["la cuenta principal agotó su cupo (se reinicia en 40 min)"]);
+}
+
+#[test]
+fn con_todas_las_cuentas_quemadas_no_se_lanza_y_dice_por_que() {
+    let mut roster = roster_de_prueba();
+    for c in &mut agente(&mut roster, "claude-code").accounts {
+        c.quota = Some(Quota { five_hour: ventana(1.0, AHORA + 600), ..Default::default() });
+    }
+    let err = routing::route(&roster, &Tiers::default(), &por_complejidad(Complexity::Standard), AHORA).unwrap_err();
+    assert!(err.contains("tramo standard") && err.contains("se reinicia en 10 min"), "{err}");
+}
+
+#[test]
+fn un_agente_pedido_a_mano_que_no_esta_disponible_falla_diciendo_por_que() {
+    let pedido = RouteRequest {
+        agent_id: Some("codex".into()),
+        model: Some("gpt-5".into()),
+        complexity: None,
+        account: AccountChoice::Auto,
+    };
+    assert_eq!(
+        routing::route(&roster_de_prueba(), &Tiers::default(), &pedido, AHORA).unwrap_err(),
+        "Codex no está instalado"
+    );
+}
+
+#[test]
+fn un_modelo_nombrado_se_respeta_aunque_la_lista_no_lo_tenga() {
+    let pedido = RouteRequest {
+        agent_id: Some("claude-code".into()),
+        model: Some("claude-sonnet-5".into()),
+        // La complejidad no pisa un modelo nombrado.
+        complexity: Some(Complexity::Trivial),
+        account: AccountChoice::Fixed(None),
+    };
+    let a = routing::route(&roster_de_prueba(), &Tiers::default(), &pedido, AHORA).unwrap();
+    assert_eq!(a.model.as_deref(), Some("claude-sonnet-5"));
+    assert_eq!((a.account_id, a.routed_by), (None, RoutedBy::Manual));
+}
+
+#[test]
+fn una_cuenta_elegida_sin_sesion_no_se_cambia_por_otra() {
+    let mut roster = roster_de_prueba();
+    agente(&mut roster, "claude-code").accounts[1].logged_in = false;
+    let pedido = RouteRequest {
+        agent_id: Some("claude-code".into()),
+        model: None,
+        complexity: None,
+        account: AccountChoice::Fixed(Some("trabajo".into())),
+    };
+    let err = routing::route(&roster, &Tiers::default(), &pedido, AHORA).unwrap_err();
+    assert!(err.contains("trabajo no tiene sesión"), "{err}");
+}
+
+#[test]
+fn en_automatico_va_a_la_cuenta_con_mas_ventana_y_desempata_por_carga() {
+    let mut roster = roster_de_prueba();
+    {
+        let cc = agente(&mut roster, "claude-code");
+        cc.accounts[0] = cuenta(None, "Claude Code", Some(0.62));
+        cc.accounts[1] = cuenta(Some("trabajo"), "trabajo", Some(0.10));
+    }
+    let a = routing::route(&roster, &Tiers::default(), &por_complejidad(Complexity::Standard), AHORA).unwrap();
+    assert_eq!(a.account_id.as_deref(), Some("trabajo"));
+    assert!(a.notes.is_empty(), "elegir la más libre no es descartar nada");
+
+    // Mismo escalón de 10 %: decide cuántas tareas ya tiene cada una.
+    {
+        let cc = agente(&mut roster, "claude-code");
+        cc.accounts[0] = cuenta(None, "Claude Code", Some(0.11));
+        cc.accounts[0].running = 2;
+        cc.accounts[1] = cuenta(Some("trabajo"), "trabajo", Some(0.18));
+    }
+    let b = routing::route(&roster, &Tiers::default(), &por_complejidad(Complexity::Standard), AHORA).unwrap();
+    assert_eq!(b.account_id.as_deref(), Some("trabajo"));
+}
+
+#[test]
+fn un_tramo_restringido_a_un_agente_sin_modelos_ahi_lo_dice() {
+    let pedido = RouteRequest { agent_id: Some("opencode".into()), ..por_complejidad(Complexity::Hard) };
+    let err = routing::route(&roster_de_prueba(), &Tiers::default(), &pedido, AHORA).unwrap_err();
+    assert_eq!(err, "el tramo hard no tiene modelos de 'opencode'");
+}
+
+#[test]
+fn tramos_guardados_ilegibles_vuelven_a_los_de_fabrica() {
+    let db = db_compartida();
+    assert_eq!(routing::load_tiers(&db), Tiers::default());
+
+    crate::database::set_setting(&db, "runs.routing.tiers", "{no es json").unwrap();
+    assert_eq!(routing::load_tiers(&db), Tiers::default());
+
+    let propios = Tiers { hard: vec![ModelRef { agent_id: "claude-code".into(), model: "fable".into() }], ..Tiers::default() };
+    routing::save_tiers(&db, &propios).unwrap();
+    assert_eq!(routing::load_tiers(&db), propios);
 }

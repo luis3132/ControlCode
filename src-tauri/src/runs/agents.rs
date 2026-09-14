@@ -138,6 +138,9 @@ impl HeadlessAgent for ClaudeCode {
         // y una línea que no se entiende es una línea que no se muestra — nunca una tarea
         // que se cae. El crudo ya quedó guardado en el `.jsonl` igual.
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { return Vec::new() };
+        if let Some(quota) = super::quota::parse_rate_limit(&v) {
+            return vec![AgentEvent::Quota { quota }];
+        }
 
         match v.get("type").and_then(|t| t.as_str()) {
             // Solo el `init`. Verificado contra una corrida real: hay varios `system` por

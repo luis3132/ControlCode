@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::profiles::{read_identity, spec_for, ProfileSpec};
+use super::profiles::{read_identity, spec_for, system_marker_root, ProfileSpec};
 use super::store::validate_name;
 
 /// Un directorio propio por test, que se borra solo.
@@ -86,4 +86,19 @@ fn el_perfil_de_opencode_distingue_un_auth_vacio_de_uno_con_credenciales() {
 
     dir.write("opencode/auth.json", r#"{"anthropic":{"type":"oauth"}}"#);
     assert_eq!(read_identity(dir.path(), spec("opencode")), (true, None));
+}
+
+/// La cuenta principal de Claude Code tiene su `.claude.json` en el home, no en `~/.claude/`.
+/// Con el marcador buscado adentro figuraba sin sesión aunque estuviera logueada.
+#[test]
+fn la_cuenta_principal_de_claude_se_lee_desde_el_home() {
+    let home = TempDir::new();
+    home.write(".claude.json", r#"{"oauthAccount":{"emailAddress":"yo@casa.com"}}"#);
+    let claude = spec("claude-code");
+    let root = system_marker_root(claude, home.path(), &home.path().join(".claude"));
+    assert_eq!(read_identity(&root, claude), (true, Some("yo@casa.com".into())));
+
+    // Las demás siguen buscando en su propio directorio.
+    let codex_dir = home.path().join(".codex");
+    assert_eq!(system_marker_root(spec("codex"), home.path(), &codex_dir), codex_dir);
 }

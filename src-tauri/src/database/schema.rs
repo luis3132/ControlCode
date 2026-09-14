@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 14;
+const SCHEMA_VERSION: i32 = 15;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -482,6 +482,19 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
             "ALTER TABLE tasks ADD COLUMN worktree_removed INTEGER NOT NULL DEFAULT 0",
             [],
         )?;
+    }
+
+    // v15 — Con qué criterio se asignó cada tarea.
+    //
+    // `complexity` es lo que se declaró al lanzarla; `routed_by` si el modelo lo nombró
+    // alguien (`manual`), salió a la primera del tramo (`policy`) o hubo que descartar algo
+    // (`fallback`); y `route_note` qué se descartó y por qué. Es el dato para ajustar los
+    // tramos a mano después: sin él no hay forma de saber si "trivial" está cayendo en un
+    // modelo que después falla. Las tareas de antes quedan en NULL: se lanzaron a mano.
+    if !has_column(conn, "tasks", "complexity") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN complexity TEXT", [])?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN routed_by TEXT", [])?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN route_note TEXT", [])?;
     }
 
     // Columna agregada después de que `tabs` ya existía en instalaciones reales, así que

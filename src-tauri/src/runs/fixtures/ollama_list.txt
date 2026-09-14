@@ -1,0 +1,4 @@
+NAME                 ID              SIZE      MODIFIED     
+qwen2.5-coder:14b    9ec8897f747e    9.0 GB    4 months ago    
+gemma4:e4b           c6eb396dbd59    9.6 GB    5 months ago    
+glm-5.1:cloud        59472abf9d0a    -         5 months ago    

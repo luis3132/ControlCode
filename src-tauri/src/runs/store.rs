@@ -19,7 +19,8 @@ const RUN_COLUMNS: &str = "id, workspace_id, objective, cwd, status, max_paralle
 const TASK_COLUMNS: &str = "id, run_id, title, prompt, agent_id, account_id, model, cwd, \
                             budget_usd, status, session_id, attempt, result, error, cost_usd, \
                             tokens_in, tokens_out, events_path, started_at, ended_at, created_at, \
-                            worktree_path, branch, worktree_removed";
+                            worktree_path, branch, worktree_removed, complexity, routed_by, \
+                            route_note";
 
 fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
     Ok(Run {
@@ -62,6 +63,9 @@ fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         worktree_path: row.get(21)?,
         branch: row.get(22)?,
         worktree_removed: row.get::<_, i64>(23)? != 0,
+        complexity: row.get(24)?,
+        routed_by: row.get(25)?,
+        route_note: row.get(26)?,
     })
 }
 
@@ -93,14 +97,17 @@ pub struct NewTask<'a> {
     pub model: Option<&'a str>,
     pub cwd: &'a str,
     pub budget_usd: Option<f64>,
+    pub complexity: Option<&'a str>,
+    pub routed_by: Option<&'a str>,
+    pub route_note: Option<&'a str>,
 }
 
 pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO tasks (id, run_id, title, prompt, agent_id, account_id, model, cwd,
-                            budget_usd, status, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                            budget_usd, status, created_at, complexity, routed_by, route_note)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         rusqlite::params![
             id,
             new.run_id,
@@ -113,6 +120,9 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
             new.budget_usd,
             status::READY,
             now_ts(),
+            new.complexity,
+            new.routed_by,
+            new.route_note,
         ],
     )
     .map_err(|e| e.to_string())?;

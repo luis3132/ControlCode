@@ -25,6 +25,9 @@ export interface FileView extends ViewBase {
   /** Dónde poner el cursor (desde el buscador). `nonce` hace que dos saltos a la misma
    *  línea se vean como dos pedidos distintos. */
   reveal?: { line: number; column: number; nonce: number };
+  /** Un Markdown que se está viendo renderizado en vez de como código. Se persiste: volver
+   *  a la tab es encontrarla como se dejó. */
+  preview?: boolean;
 }
 
 export interface DiffView extends ViewBase {

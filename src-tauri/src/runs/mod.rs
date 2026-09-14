@@ -12,6 +12,9 @@
 mod activity;
 mod agents;
 mod broker;
+mod quota;
+mod roster;
+mod routing;
 mod rules;
 mod store;
 mod supervisor;
@@ -56,27 +59,40 @@ pub fn run_list_runs(
     store::list_runs(&conn, &workspace_id)
 }
 
-/// Crea la tarea y la lanza.
+/// Asigna la tarea, la crea y la lanza.
 ///
 /// Por ahora cada lanzamiento abre su propio run. Cuando entre el DAG, un run pasará a
 /// agrupar varias tareas con sus dependencias; la forma ya está para eso.
+///
+/// El modelo y la cuenta salen del ruteo (`routing::route`): o se nombran, o se declara la
+/// complejidad y elige la app. Si no hay a quién asignarla, vuelve el motivo y NO se crea
+/// la fila: no se lanzó nada, y lo que hay que hacer es cambiar el pedido, no diagnosticar
+/// una tarjeta fallida.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-pub fn run_start_task(
+pub async fn run_start_task(
     app: AppHandle,
     workspace_id: String,
     cwd: String,
     title: String,
     prompt: String,
-    agent_id: String,
-    account_id: Option<String>,
+    agent_id: Option<String>,
     model: Option<String>,
+    complexity: Option<routing::Complexity>,
+    account_id: Option<String>,
+    // Que la cuenta la elija el ruteo. Con `false`, `account_id` manda (y `None` es la del
+    // sistema).
+    auto_account: bool,
     budget_usd: Option<f64>,
     // En su propio worktree. Es lo que hace seguro lanzar un segundo agente sobre una
     // carpeta en la que ya trabaja otro.
     isolate: bool,
 ) -> Result<Task, String> {
     let db = db_of(&app)?;
+    let request = route_request(agent_id, model, complexity, account_id, auto_account);
+    let assignment = assign(&db, request).await?;
+    let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
+
     let mut task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let run = store::create_run(&conn, &workspace_id, &title, &cwd)?;
@@ -86,11 +102,14 @@ pub fn run_start_task(
                 run_id: &run.id,
                 title: &title,
                 prompt: &prompt,
-                agent_id: &agent_id,
-                account_id: account_id.as_deref(),
-                model: model.as_deref(),
+                agent_id: &assignment.agent_id,
+                account_id: assignment.account_id.as_deref(),
+                model: assignment.model.as_deref(),
                 cwd: &cwd,
                 budget_usd,
+                complexity: complexity.map(routing::Complexity::as_str),
+                routed_by: Some(assignment.routed_by.as_str()),
+                route_note: note.as_deref(),
             },
         )?
     };
@@ -118,6 +137,89 @@ pub fn run_start_task(
 
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::task_by_id(&conn, &task.id)?.ok_or_else(|| "la tarea se perdió al lanzarla".into())
+}
+
+fn route_request(
+    agent_id: Option<String>,
+    model: Option<String>,
+    complexity: Option<routing::Complexity>,
+    account_id: Option<String>,
+    auto_account: bool,
+) -> routing::RouteRequest {
+    routing::RouteRequest {
+        agent_id,
+        // Un modelo en blanco es "el de siempre", no un modelo llamado "".
+        model: model.filter(|m| !m.trim().is_empty()),
+        complexity,
+        account: if auto_account {
+            routing::AccountChoice::Auto
+        } else {
+            routing::AccountChoice::Fixed(account_id)
+        },
+    }
+}
+
+/// Corre el ruteo fuera del hilo async: la primera vez sondea el roster, que lanza procesos.
+async fn assign(db: &DbConnection, request: routing::RouteRequest) -> Result<routing::Assignment, String> {
+    let db = db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let roster = roster::snapshot(&db, false)?;
+        let tiers = routing::load_tiers(&db);
+        routing::route(&roster, &tiers, &request, crate::util::now_ts())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Qué agentes, modelos y cuentas hay para lanzar ahora. `refresh` vuelve a sondear las
+/// TUIs aunque lo último sea reciente.
+#[tauri::command]
+pub async fn run_roster(app: AppHandle, refresh: bool) -> Result<roster::Roster, String> {
+    let db = db_of(&app)?;
+    tauri::async_runtime::spawn_blocking(move || roster::snapshot(&db, refresh))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// A quién le tocaría una tarea con estos datos, sin lanzarla. Es lo que muestra el
+/// diálogo antes de apretar "Lanzar": enterarse de que fue a otra cuenta DESPUÉS sería
+/// enterarse tarde.
+#[tauri::command]
+pub async fn run_preview_route(
+    app: AppHandle,
+    agent_id: Option<String>,
+    model: Option<String>,
+    complexity: Option<routing::Complexity>,
+    account_id: Option<String>,
+    auto_account: bool,
+) -> Result<routing::Assignment, String> {
+    let db = db_of(&app)?;
+    assign(&db, route_request(agent_id, model, complexity, account_id, auto_account)).await
+}
+
+#[tauri::command]
+pub fn run_get_tiers(db: tauri::State<DbConnection>) -> routing::Tiers {
+    routing::load_tiers(&db)
+}
+
+#[tauri::command]
+pub fn run_set_tiers(tiers: routing::Tiers, db: tauri::State<DbConnection>) -> Result<routing::Tiers, String> {
+    for c in [routing::Complexity::Trivial, routing::Complexity::Standard, routing::Complexity::Hard] {
+        let entries = tiers.get(c);
+        // Un tramo vacío no tiene a quién asignar: lanzar con esa complejidad fallaría
+        // siempre, y se enteraría quien lanza en vez de quien lo dejó vacío.
+        if entries.is_empty() {
+            return Err(format!("el tramo {} necesita al menos un modelo", c.as_str()));
+        }
+        if let Some(bad) = entries.iter().find(|e| crate::agents::agent_def(&e.agent_id).is_none()) {
+            return Err(format!("'{}' no es un agente conocido", bad.agent_id));
+        }
+        if entries.iter().any(|e| e.model.trim().is_empty()) {
+            return Err(format!("el tramo {} tiene un modelo sin nombre", c.as_str()));
+        }
+    }
+    routing::save_tiers(&db, &tiers)?;
+    Ok(tiers)
 }
 
 /// Dónde viven los worktrees de las tareas. Fuera del repo a propósito: adentro habría que

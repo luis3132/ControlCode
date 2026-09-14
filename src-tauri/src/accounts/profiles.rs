@@ -58,6 +58,19 @@ pub(super) fn default_dir(spec: &ProfileSpec) -> Option<std::path::PathBuf> {
     })
 }
 
+/// Desde dónde se busca el marcador de login de la cuenta principal.
+///
+/// Casi siempre es su mismo directorio, salvo Claude Code: sin `CLAUDE_CONFIG_DIR` guarda
+/// su `.claude.json` en el home, AL LADO de `~/.claude/` y no adentro (ver
+/// `usage/trust.rs`, que ya lo resolvía así). Buscarlo en `~/.claude/.claude.json` era leer
+/// un archivo que no existe, y la cuenta que el usuario usa siempre figuraba sin sesión.
+pub(super) fn system_marker_root(spec: &ProfileSpec, home: &Path, default_dir: &Path) -> std::path::PathBuf {
+    match spec.env_var {
+        "CLAUDE_CONFIG_DIR" => home.to_path_buf(),
+        _ => default_dir.to_path_buf(),
+    }
+}
+
 // ── Identidad leída del disco ───────────────────────────────────
 
 /// Lee del perfil quién está logueado. Devuelve `(logueado, etiqueta)`.

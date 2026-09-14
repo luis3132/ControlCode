@@ -5,6 +5,7 @@ import {
   baseName, findExisting, nextActiveAfterClose, toPersisted,
   type BrowserView, type DiffView, type FileView, type ViewTab,
 } from "@/features/tabs/viewTabs";
+import { isMarkdownPath, prefersMarkdownPreview } from "@/features/editor/markdown";
 
 interface ViewTabsState {
   views: ViewTab[];
@@ -34,12 +35,14 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
       set((s) => ({
         activeViewId: existing.id,
         views: nextReveal
-          ? s.views.map((v) => (v.id === existing.id && v.kind === "file" ? { ...v, reveal: nextReveal } : v))
+          ? s.views.map((v) => (v.id === existing.id && v.kind === "file" ? { ...v, reveal: nextReveal, preview: false } : v))
           : s.views,
       }));
       return;
     }
-    const view: FileView = { ...wanted, id: crypto.randomUUID(), title: baseName(path), reveal: nextReveal };
+    // Un salto a una línea (desde el buscador) es para ver el código, no el documento.
+    const preview = isMarkdownPath(path) && !nextReveal ? prefersMarkdownPreview() : undefined;
+    const view: FileView = { ...wanted, id: crypto.randomUUID(), title: baseName(path), reveal: nextReveal, preview };
     set((s) => ({ views: [...s.views, view], activeViewId: view.id }));
   },
 

@@ -15,7 +15,15 @@ interface AccountPickerStepProps {
    * seguidas.
    */
   showLabel?: boolean;
+  /**
+   * Ofrecer "Automática" (valor [`AUTO_ACCOUNT`]): que la elija el ruteo de la flota. Solo
+   * tiene sentido donde hay un ruteo que decida — una tab se abre con la cuenta que se ve.
+   */
+  allowAuto?: boolean;
 }
+
+/** El valor de "que la elija el ruteo". Los ids de cuenta son UUIDs, así que no chocan. */
+export const AUTO_ACCOUNT = "auto";
 
 /**
  * Las cuentas creadas para una TUI, cargando el store si todavía nadie lo hizo.
@@ -56,7 +64,7 @@ export function useAgentAccounts(agentId: string | null, preload = false): Agent
  * configuración al arrancar, así que cambiarla en caliente no haría nada. Para otra cuenta,
  * otra tab.
  */
-export function AccountPickerStep({ agentId, value, onChange, showLabel = true }: AccountPickerStepProps) {
+export function AccountPickerStep({ agentId, value, onChange, showLabel = true, allowAuto = false }: AccountPickerStepProps) {
   const { t } = useTranslation();
   const forAgent = useAgentAccounts(agentId);
 
@@ -64,12 +72,16 @@ export function AccountPickerStep({ agentId, value, onChange, showLabel = true }
   // diálogo estaba abierto, o se cambió de agente) — se vuelve a la del sistema en vez de
   // dejar seleccionada una que ya no existe.
   useEffect(() => {
+    if (value === AUTO_ACCOUNT && allowAuto) return;
     if (value && !forAgent.some((a) => a.id === value)) onChange(undefined);
-  }, [value, forAgent, onChange]);
+  }, [value, forAgent, onChange, allowAuto]);
 
   if (forAgent.length === 0) return null;
 
   const options = [
+    ...(allowAuto
+      ? [{ id: AUTO_ACCOUNT as string | undefined, name: t("accounts.auto"), hint: t("accounts.auto.hint"), warn: false }]
+      : []),
     { id: undefined, name: t("accounts.system"), hint: t("accounts.system.hint"), warn: false },
     ...forAgent.map((a) => ({
       id: a.id as string | undefined,

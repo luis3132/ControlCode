@@ -90,6 +90,7 @@ export function AgentCard({ task, activity, approval, focused, onCancel, onOpenP
           <span className="flex items-baseline gap-1.5 min-w-0">
             <span className="shrink-0 font-mono text-[10px] text-gray-400 dark:text-white/30">
               {task.agentId}
+              {task.model && <RoutedModel task={task} />}
             </span>
             <span className="truncate text-[12.5px] font-semibold text-gray-900 dark:text-white">
               {task.title}
@@ -202,6 +203,30 @@ export function AgentCard({ task, activity, approval, focused, onCancel, onOpenP
         </Tooltip>
       </div>
     </div>
+  );
+}
+
+/**
+ * El modelo con el que corre. Si hubo que descartar algo para asignarlo, va en ámbar y el
+ * motivo en el tooltip: una tarea "difícil" corriendo en Sonnet se ve como un error si no
+ * se sabe que Opus no tenía cuenta con cupo.
+ */
+function RoutedModel({ task }: { task: Task }) {
+  const { t } = useTranslation();
+  const label = ` · ${task.model}`;
+  if (task.routedBy !== "fallback" || !task.routeNote) return <>{label}</>;
+  return (
+    <Tooltip
+      content={
+        <span className="flex flex-col gap-0.5 max-w-72">
+          <span className="font-semibold">{t("fleet.card.fallback")}</span>
+          {task.routeNote.split("\n").map((line) => <span key={line}>{line}</span>)}
+        </span>
+      }
+      placement="top"
+    >
+      <span className="text-amber-600 dark:text-amber-400/90 cursor-help">{label}</span>
+    </Tooltip>
   );
 }
 

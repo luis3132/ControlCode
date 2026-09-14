@@ -1,36 +1,64 @@
 /** Comandos de los agentes headless. */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { PendingApproval, PermissionRule, Task } from "./types";
+import type { Assignment, Complexity, PendingApproval, PermissionRule, Roster, Task, Tiers } from "./types";
 
 export const listTasks = (workspaceId: string) =>
   invoke<Task[]>("run_list_tasks", { workspaceId });
 
-export interface StartTaskInput {
+/** A quién le toca: o se nombra el modelo, o se declara la complejidad y elige la app. */
+export interface RouteInput {
+  /** Obligatorio con `model`. Con solo `complexity`, lo elige el ruteo. */
+  agentId?: string | null;
+  model?: string | null;
+  complexity?: Complexity | null;
+  /** Con `autoAccount`, se ignora. `null` = la del sistema. */
+  accountId?: string | null;
+  /** Que la cuenta la elija el ruteo: con sesión, con cupo y la menos cargada. */
+  autoAccount?: boolean;
+}
+
+export interface StartTaskInput extends RouteInput {
   workspaceId: string;
   cwd: string;
   title: string;
   prompt: string;
-  agentId: string;
-  accountId?: string | null;
-  model?: string | null;
   budgetUsd?: number | null;
   /** En su propio worktree de git, en vez de sobre la carpeta del proyecto. */
   isolate?: boolean;
 }
 
+const routeArgs = (input: RouteInput) => ({
+  agentId: input.agentId ?? null,
+  model: input.model ?? null,
+  complexity: input.complexity ?? null,
+  accountId: input.accountId ?? null,
+  autoAccount: input.autoAccount ?? false,
+});
+
+/** Asigna, crea y lanza. Si no hay a quién asignarla, falla con el motivo y no crea nada. */
 export const startTask = (input: StartTaskInput) =>
   invoke<Task>("run_start_task", {
     workspaceId: input.workspaceId,
     cwd: input.cwd,
     title: input.title,
     prompt: input.prompt,
-    agentId: input.agentId,
-    accountId: input.accountId ?? null,
-    model: input.model ?? null,
+    ...routeArgs(input),
     budgetUsd: input.budgetUsd ?? null,
     isolate: input.isolate ?? false,
   });
+
+/** A quién le tocaría, sin lanzar nada. */
+export const previewRoute = (input: RouteInput) =>
+  invoke<Assignment>("run_preview_route", routeArgs(input));
+
+/** Qué se puede lanzar ahora. `refresh` vuelve a sondear las TUIs. */
+export const getRoster = (refresh = false) => invoke<Roster>("run_roster", { refresh });
+
+export const getTiers = () => invoke<Tiers>("run_get_tiers");
+
+/** Guarda los tramos. Se niega si alguno queda vacío. */
+export const setTiers = (tiers: Tiers) => invoke<Tiers>("run_set_tiers", { tiers });
 
 export const cancelTask = (taskId: string) => invoke<void>("run_cancel_task", { taskId });
 

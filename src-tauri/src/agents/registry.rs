@@ -58,6 +58,41 @@ pub struct ProfileDef {
     pub label_path: &'static [&'static str],
 }
 
+/// Un modelo que la TUI resuelve sola a partir de un alias.
+#[derive(Clone, Copy, Debug)]
+pub struct ModelAlias {
+    /// Lo que recibe el flag de modelo.
+    pub id: &'static str,
+    pub label: &'static str,
+    /// Precio de lista en USD por millón de tokens, entrada y salida. Orientativo: el alias
+    /// sigue al último modelo de su clase y el precio puede moverse con él.
+    pub cost_in: f64,
+    pub cost_out: f64,
+    pub context: u64,
+}
+
+/// De dónde salen los modelos que se le pueden pedir a una TUI.
+#[derive(Clone, Copy, Debug)]
+pub enum ModelSource {
+    /// Una lista fija de alias.
+    Aliases(&'static [ModelAlias]),
+    /// Se le pregunta al binario con `opencode models --verbose`, que trae proveedor,
+    /// precio, contexto y si el modelo puede usar herramientas.
+    OpencodeModels,
+    /// No se sabe listarlos.
+    Unknown,
+}
+
+/// Los alias de `claude --model`. Verificados contra `claude --help` de la 2.1.269 ("an
+/// alias for the latest model (e.g. 'fable', 'opus', or 'sonnet')") y `haiku` con una
+/// corrida real, que resolvió a `claude-haiku-4-5-20251001`. Precios de lista a junio 2026.
+const CLAUDE_MODELS: &[ModelAlias] = &[
+    ModelAlias { id: "haiku", label: "Haiku", cost_in: 1.0, cost_out: 5.0, context: 200_000 },
+    ModelAlias { id: "sonnet", label: "Sonnet", cost_in: 2.0, cost_out: 10.0, context: 1_000_000 },
+    ModelAlias { id: "opus", label: "Opus", cost_in: 5.0, cost_out: 25.0, context: 1_000_000 },
+    ModelAlias { id: "fable", label: "Fable", cost_in: 10.0, cost_out: 50.0, context: 1_000_000 },
+];
+
 /// Todo lo que la app sabe de una TUI de fábrica, en una fila.
 #[derive(Clone, Copy, Debug)]
 pub struct AgentDef {
@@ -83,6 +118,7 @@ pub struct AgentDef {
     ///   `--session <id>` (alias `-S`, mayúscula: distinta de `-s`/`--continue`).
     pub resume: Option<&'static str>,
     pub sessions: SessionSource,
+    pub models: ModelSource,
 }
 
 pub const AGENTS: &[AgentDef] = &[
@@ -105,6 +141,7 @@ pub const AGENTS: &[AgentDef] = &[
         }),
         resume: Some("--resume {session}"),
         sessions: SessionSource::ClaudeProjects,
+        models: ModelSource::Aliases(CLAUDE_MODELS),
     },
     AgentDef {
         id: "gemini-cli",
@@ -115,6 +152,7 @@ pub const AGENTS: &[AgentDef] = &[
         profile: None,
         resume: Some("--resume {session}"),
         sessions: SessionSource::GeminiTmp,
+        models: ModelSource::Unknown,
     },
     AgentDef {
         id: "codex",
@@ -131,6 +169,7 @@ pub const AGENTS: &[AgentDef] = &[
         }),
         resume: Some("resume {session}"),
         sessions: SessionSource::CodexRollouts,
+        models: ModelSource::Unknown,
     },
     AgentDef {
         id: "opencode",
@@ -151,6 +190,7 @@ pub const AGENTS: &[AgentDef] = &[
         }),
         resume: Some("--session {session}"),
         sessions: SessionSource::ProcessQuery,
+        models: ModelSource::OpencodeModels,
     },
     AgentDef {
         // Moonshot AI — repo en transición de nombre kimi-cli → kimi-code, el binario real
@@ -163,6 +203,7 @@ pub const AGENTS: &[AgentDef] = &[
         profile: None,
         resume: Some("--session {session}"),
         sessions: SessionSource::KimiSessions,
+        models: ModelSource::Unknown,
     },
     AgentDef {
         // No es una TUI de agente: es la salida de emergencia a una terminal pelada. Está
@@ -176,6 +217,7 @@ pub const AGENTS: &[AgentDef] = &[
         profile: None,
         resume: None,
         sessions: SessionSource::None,
+        models: ModelSource::Unknown,
     },
 ];
 

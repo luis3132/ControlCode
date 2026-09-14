@@ -186,6 +186,7 @@ pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
     let stderr = child.stderr.take();
     let app = app.clone();
     let task_id = task.id.clone();
+    let quota_key = super::quota::account_key(&task.agent_id, task.account_id.as_deref());
 
     tokio::spawn(async move {
         let mut file = tokio::fs::File::create(&events_path).await.ok();
@@ -199,10 +200,18 @@ pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
                     let _ = f.write_all(b"\n").await;
                 }
                 for event in adapter.parse_line(&line) {
-                    if let AgentEvent::Finished { outcome } = &event {
-                        emitted = Some(outcome.clone());
+                    match event {
+                        // Es de la cuenta, no de la tarjeta: se guarda para que el ruteo
+                        // sepa cuánto le queda, y la consola no se entera.
+                        AgentEvent::Quota { quota } => {
+                            super::quota::record(&db, &quota_key, quota, crate::util::now_ts());
+                        }
+                        AgentEvent::Finished { ref outcome } => {
+                            emitted = Some(outcome.clone());
+                            emit_event(&app, &task_id, event);
+                        }
+                        event => emit_event(&app, &task_id, event),
                     }
-                    emit_event(&app, &task_id, event);
                 }
             }
         }

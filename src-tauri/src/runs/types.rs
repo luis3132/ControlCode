@@ -46,6 +46,12 @@ pub struct Task {
     pub branch: Option<String>,
     /// Se descartó la carpeta. La rama puede seguir existiendo.
     pub worktree_removed: bool,
+    /// `trivial` | `standard` | `hard`, si se lanzó por complejidad.
+    pub complexity: Option<String>,
+    /// `manual` | `policy` | `fallback` (ver `routing::RoutedBy`).
+    pub routed_by: Option<String>,
+    /// Qué se descartó al asignarla y por qué.
+    pub route_note: Option<String>,
     pub started_at: Option<i64>,
     pub ended_at: Option<i64>,
     pub created_at: i64,
@@ -82,6 +88,9 @@ pub enum AgentEvent {
     Tool { name: String, label: String },
     /// Cerró. Trae el veredicto y lo que costó.
     Finished { outcome: TaskOutcome },
+    /// Cuánto cupo le queda a la cuenta con la que corre. No es actividad de la tarjeta:
+    /// el supervisor lo guarda para el ruteo y no lo reenvía a la consola.
+    Quota { quota: super::quota::Quota },
 }
 
 /// El veredicto de una tarea.

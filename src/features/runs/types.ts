@@ -24,6 +24,11 @@ export interface Task {
   branch: string | null;
   /** Se descartó la carpeta del worktree. La rama puede seguir existiendo. */
   worktreeRemoved: boolean;
+  /** Con qué complejidad se lanzó. `null` = se nombró el modelo (o se usó el de siempre). */
+  complexity: Complexity | null;
+  routedBy: RoutedBy | null;
+  /** Qué se descartó al asignarla y por qué, una cosa por línea. */
+  routeNote: string | null;
   startedAt: number | null;
   endedAt: number | null;
   createdAt: number;
@@ -71,4 +76,90 @@ export interface PermissionRule {
   pattern: string;
   allow: boolean;
   createdAt: number;
+}
+
+// ── Ruteo ──────────────────────────────────────────────────────────
+
+export type Complexity = "trivial" | "standard" | "hard";
+
+/**
+ * Con qué criterio se asignó: lo nombró quien la lanzó (`manual`), salió a la primera del
+ * tramo (`policy`), o hubo que descartar algo por el camino (`fallback`).
+ */
+export type RoutedBy = "manual" | "policy" | "fallback";
+
+export interface QuotaWindow {
+  /** De 0 a 1. */
+  utilization: number;
+  /** Epoch en segundos. Pasado ese momento, la ventana ya se reinició. */
+  resetsAt: number | null;
+}
+
+/** Lo último que informó una tarea sobre el cupo de su cuenta. */
+export interface Quota {
+  fiveHour: QuotaWindow | null;
+  sevenDay: QuotaWindow | null;
+  rejected: boolean;
+  rejectedUntil: number | null;
+  overage: boolean;
+  observedAt: number;
+}
+
+export interface RosterModel {
+  /** Lo que recibe el flag de modelo de la TUI. */
+  id: string;
+  label: string;
+  /** `false` = no puede trabajar como agente. `null` = no se sabe. */
+  toolcall: boolean | null;
+  local: boolean;
+  /** USD por millón de tokens. */
+  costIn: number | null;
+  costOut: number | null;
+  context: number | null;
+  unavailable: string | null;
+}
+
+export interface RosterAccount {
+  /** `null` = la del sistema. */
+  accountId: string | null;
+  key: string;
+  name: string;
+  label: string | null;
+  loggedIn: boolean;
+  quota: Quota | null;
+  running: number;
+}
+
+export interface RosterAgent {
+  agentId: string;
+  label: string;
+  installed: boolean;
+  /** Se puede correr sin terminal. */
+  launchable: boolean;
+  unavailable: string | null;
+  models: RosterModel[];
+  accounts: RosterAccount[];
+}
+
+/** Qué se puede lanzar ahora. */
+export interface Roster {
+  agents: RosterAgent[];
+}
+
+export interface ModelRef {
+  agentId: string;
+  model: string;
+}
+
+/** Qué modelos probar para cada complejidad, en orden. */
+export type Tiers = Record<Complexity, ModelRef[]>;
+
+export interface Assignment {
+  agentId: string;
+  /** `null` = el de siempre de la TUI. */
+  model: string | null;
+  /** `null` = la del sistema. */
+  accountId: string | null;
+  routedBy: RoutedBy;
+  notes: string[];
 }
