@@ -522,5 +522,10 @@
   "fleet.card.discard": "descartar worktree",
   "fleet.card.discardHint": "Borra la copia de trabajo. Se niega si hay cambios sin commitear, y la rama queda si tiene commits propios.",
   "fleet.worktree.discarded": "Worktree descartado. La rama {{branch}} no tenía nada nuevo y se borró también.",
-  "fleet.worktree.discardedKept": "Worktree descartado. La rama {{branch}} se conservó: tiene commits que no están en ningún otro lado."
+  "fleet.worktree.discardedKept": "Worktree descartado. La rama {{branch}} se conservó: tiene commits que no están en ningún otro lado.",
+  "settings.rendering.gpu": "Composición por GPU",
+  "settings.rendering.gpu.desc": "Apagada, el texto se ve nítido: WebKitGTK, al componer la ventana por GPU, deja las letras borrosas. Encendela solo si la app se siente lenta en esta máquina.",
+  "settings.rendering.restart": "Se aplica al reiniciar la app.",
+  "settings.rendering.env": "La variable WEBKIT_DISABLE_COMPOSITING_MODE de tu entorno manda sobre esta opción.",
+  "settings.terminal.gpu.noCompositing": "No disponible: sin composición por GPU (Apariencia) no hay WebGL, así que la terminal se dibuja con el DOM."
 }

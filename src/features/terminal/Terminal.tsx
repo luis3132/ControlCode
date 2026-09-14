@@ -106,7 +106,7 @@ export function Terminal({
   const gpuBrokenRef = useRef(false);
   // Reactivo (no `getState()`): apagarlo en Configuración tiene que soltar el contexto de
   // la terminal que estés mirando en ese momento, no en la próxima que abras.
-  const gpuRenderer = useTerminalPrefsStore((s) => s.gpuRenderer);
+  const gpuRenderer = useTerminalPrefsStore((s) => s.gpuRenderer && s.compositing);
 
   // ── Renderizador por GPU, SOLO en la terminal activa ─────────────────────
   //

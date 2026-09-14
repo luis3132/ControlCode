@@ -20,6 +20,11 @@ interface TerminalPrefsState {
    *  renderizador por DOM, que es más feo pero nunca falla. */
   gpuRenderer: boolean;
   setGpuRenderer: (value: boolean) => void;
+  /** La ventana se compone por GPU en esta ejecución. Sin eso WebKitGTK no ofrece WebGL,
+   *  y pedirlo igual deja la terminal esperando un contexto que nunca llega bien. Lo fija
+   *  el arranque (ver `main.tsx` y `app/rendering.rs`). */
+  compositing: boolean;
+  setCompositing: (value: boolean) => void;
 }
 
 export const useTerminalPrefsStore = create<TerminalPrefsState>((set) => ({
@@ -38,4 +43,7 @@ export const useTerminalPrefsStore = create<TerminalPrefsState>((set) => ({
     localStorage.setItem(GPU_KEY, value ? "1" : "0");
     set({ gpuRenderer: value });
   },
+
+  compositing: true,
+  setCompositing: (compositing) => set({ compositing }),
 }));

@@ -16,6 +16,7 @@ import { PrelaunchSection } from "@/features/prelaunch/PrelaunchSection";
 import { TerminalSection } from "@/features/terminal/TerminalSection";
 import { ShortcutsSection } from "@/features/settings/ShortcutsSection";
 import { SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
+import { RenderingSetting } from "@/features/settings/RenderingSetting";
 
 /** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
  *  formulario solo para saber si reanuda sesiones o si le gestionamos skills. */
@@ -142,6 +143,7 @@ export function SettingsPage() {
                   ]}
                 />
               </SettingsRow>
+              <RenderingSetting />
             </div>
           </SettingsSection>
         )}

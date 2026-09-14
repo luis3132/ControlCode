@@ -9,6 +9,8 @@ use crate::database::DbConnection;
 pub fn run() {
     super::signals::cleanup_on_signals();
     let db_conn = crate::database::init_db().expect("Failed to initialize SQLite database");
+    // Antes de construir Tauri: WebKitGTK decide cómo componer al inicializarse.
+    super::rendering::configure(&db_conn);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -54,6 +56,8 @@ pub fn run() {
             // Explorador de archivos del workspace (panel derecho)
             crate::explorer::explorer_read_dir,
             crate::explorer::explorer_repo_info,
+            // Renderizado del WebView (texto nítido en Linux)
+            crate::app::rendering_info,
             // Detección de agentes
             crate::agents::agent_registry,
             crate::agents::detect_agents,

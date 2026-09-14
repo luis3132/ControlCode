@@ -522,5 +522,10 @@
   "fleet.card.discard": "discard worktree",
   "fleet.card.discardHint": "Deletes the working copy. Refuses if there are uncommitted changes, and keeps the branch if it has its own commits.",
   "fleet.worktree.discarded": "Worktree discarded. Branch {{branch}} had nothing new and was deleted too.",
-  "fleet.worktree.discardedKept": "Worktree discarded. Branch {{branch}} was kept: it has commits that exist nowhere else."
+  "fleet.worktree.discardedKept": "Worktree discarded. Branch {{branch}} was kept: it has commits that exist nowhere else.",
+  "settings.rendering.gpu": "GPU compositing",
+  "settings.rendering.gpu.desc": "Off keeps text sharp: when WebKitGTK composites the window on the GPU, glyphs come out blurry. Turn it on only if the app feels slow on this machine.",
+  "settings.rendering.restart": "Takes effect after restarting the app.",
+  "settings.rendering.env": "The WEBKIT_DISABLE_COMPOSITING_MODE variable in your environment overrides this option.",
+  "settings.terminal.gpu.noCompositing": "Unavailable: without GPU compositing (Appearance) there is no WebGL, so the terminal is drawn with the DOM."
 }

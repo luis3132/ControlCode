@@ -9,6 +9,7 @@ export function TerminalSection() {
   const setInputMarks = useTerminalPrefsStore((s) => s.setInputMarks);
   const gpuRenderer = useTerminalPrefsStore((s) => s.gpuRenderer);
   const setGpuRenderer = useTerminalPrefsStore((s) => s.setGpuRenderer);
+  const compositing = useTerminalPrefsStore((s) => s.compositing);
   return (
     <SettingsSection title={t("settings.terminal")} description={t("settings.terminal.desc")}>
 
@@ -23,12 +24,20 @@ export function TerminalSection() {
       <div className="h-4" />
 
       <Switch
-        checked={gpuRenderer}
+        checked={gpuRenderer && compositing}
         onChange={setGpuRenderer}
+        disabled={!compositing}
         label={t("settings.terminal.gpu")}
         description={t("settings.terminal.gpu.desc")}
         labelPosition="left"
       />
+      {/* Sin composición por GPU (la opción de texto nítido de Apariencia) no hay WebGL: el
+          switch no puede hacer nada, y decir por qué evita buscar el problema acá. */}
+      {!compositing && (
+        <p className="text-[11px] text-gray-400 dark:text-white/40 mt-1.5">
+          {t("settings.terminal.gpu.noCompositing")}
+        </p>
+      )}
 
       {/* Va fuera del `description` del Switch a propósito: no es lo que hace la opción
           sino dónde NO aplica, y decirlo acá evita el "no anda" cuando en realidad la TUI
