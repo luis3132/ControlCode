@@ -14,6 +14,7 @@ import { registerCapabilityResponders } from "@/features/terminal/terminalCapabi
 import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
 import { registerTerminal } from "@/features/terminal/terminalRegistry";
+import { installDeadKeyFilter } from "@/features/terminal/kittyTextKeys";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { isLocalUrl } from "@/features/tabs/viewTabs";
@@ -161,9 +162,15 @@ export function Terminal({
       minimumContrastRatio: MIN_CONTRAST[themeRef.current],
       fontFamily: TERMINAL_FONT,
       fontSize: 13,
-      lineHeight: 1,
+      // Un respiro mínimo entre líneas. Con 1 las descendentes de una línea tocaban las
+      // mayúsculas de la siguiente, y el texto largo de un agente se leía como un bloque.
+      // Los caracteres de caja y bloque no se cortan: xterm los dibuja él mismo, estirados
+      // al alto de la celda.
+      lineHeight: 1.1,
       cursorBlink: true,
       cursorStyle: "bar",
+      // La barra de 1px desaparecía entre el antialiasing de las letras vecinas.
+      cursorWidth: 2,
       scrollback: 5000,
       // `allowTransparency` estaba en true y era la causa del texto borroso: apaga el
       // camino rápido de fondo opaco y obliga a compositar cada celda, lo que se lleva
@@ -178,6 +185,12 @@ export function Terminal({
       // escala en vez de invadir la celda siguiente. Sin esto, una barra de progreso o un
       // prompt con iconos corre todo lo que tiene a la derecha.
       rescaleOverlappingGlyphs: true,
+      vtExtensions: {
+        // Protocolo de teclado de Kitty: la TUI lo pide si lo quiere, y con él distingue
+        // lo que la codificación vieja confunde — Shift+Enter de Enter, Ctrl+I de Tab,
+        // Escape de Alt. Encendido sin más rompía los acentos; ver `kittyTextKeys.ts`.
+        kittyKeyboard: true,
+      },
     });
 
     // Unicode 11 ANTES de escribir nada: xterm trae las tablas de ancho de Unicode 6, que
@@ -207,6 +220,8 @@ export function Terminal({
 
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
+    // Los acentos con tecla muerta, que el protocolo de Kitty perdía (ver kittyTextKeys.ts).
+    installDeadKeyFilter(term);
     term.open(containerRef.current);
     termRef.current = term;
     const unregister = tabId ? registerTerminal(tabId, term) : undefined;
@@ -215,15 +230,11 @@ export function Terminal({
     // dibujar. xterm.js no contesta varias de esas consultas, y sin respuesta OpenCode se
     // queda mudo tras pasar a la pantalla alternativa — una terminal negra. Se registra
     // antes de lanzar el proceso para no perder la primera tanda, que llega enseguida.
-    const disposeCapabilities = registerCapabilityResponders(
-      term,
-      (data) => {
-        if (ptyIdRef.current !== null) {
-          ptyWrite(ptyIdRef.current, data).catch(console.error);
-        }
-      },
-      TERMINAL_THEMES[themeRef.current]
-    );
+    const disposeCapabilities = registerCapabilityResponders(term, (data) => {
+      if (ptyIdRef.current !== null) {
+        ptyWrite(ptyIdRef.current, data).catch(console.error);
+      }
+    });
 
     // La barra de scroll de xterm se esconde sola; se la deja fija cuando hay historial
     // que recorrer (ver terminalScrollbar.ts).
@@ -238,21 +249,15 @@ export function Terminal({
     // Ajuste de la grilla al contenedor real (ver `fit.ts`: el PTY nace con este tamaño).
     const { fit: fitAndTrim, fitOnce } = createFitter(term, fitAddon, () => containerRef.current);
 
-    // Mover la ventana a un monitor con otro factor de escala cambia el tamaño real de un
-    // píxel, y el atlas de glifos ya rasterizado queda a la resolución vieja — que es
-    // exactamente cómo se ve "borroso de repente". Se tira el atlas y se vuelve a medir.
-    const dpr = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
-    const onDprChange = () => {
-      term.clearTextureAtlas();
-      fitAndTrim();
-    };
-    dpr.addEventListener("change", onDprChange);
 
     // ── 2. Crear la sesión PTY en Rust ───────────────────────
     let unlistenData: UnlistenFn | null = null;
     let unlistenExit: UnlistenFn | null = null;
     let stopDiscovery: (() => void) | null = null;
     let cancelled = false;
+    /** El último tamaño que se le dijo al PTY. Con esto no se repite un resize que no
+     *  cambia nada: cada uno es un SIGWINCH y un redibujo completo de la TUI. */
+    let sentSize = "";
 
     const pollSessionId = (resolvedCwd: string, startedAfter: number) => {
       if (!agentId || !isResumable(agentId) || !onSessionDiscovered) return;
@@ -318,6 +323,7 @@ export function Terminal({
           // El área de terminal puede medir distinto que cuando el PTY nació (paneles
           // plegados, ventana redimensionada mientras la tab estaba en segundo plano).
           if (!cancelled) {
+            sentSize = `${term.cols}x${term.rows}`;
             ptyResize(attachPtyId, term.cols, term.rows).catch(console.error);
           }
           return;
@@ -403,6 +409,7 @@ export function Terminal({
           prelaunch: resolvedPrelaunch,
         });
         ptyIdRef.current = ptyId;
+        sentSize = `${term.cols}x${term.rows}`;
         setStatus("running");
         onReady?.(ptyId);
         pollSessionId(resolvedCwd, startedAfter);
@@ -423,43 +430,74 @@ export function Terminal({
     });
 
     // ── 6. Resize automático ─────────────────────────────────
-    // Con debounce: arrastrar el borde de la ventana dispara el observer decenas de veces
-    // por segundo, y cada una hacía un `fit()` (que remide la celda y repinta todo) más un
-    // `pty_resize` por IPC. Ese torrente es lo que se ve como parpadeo/basura mientras se
-    // redimensiona; el tamaño que importa es el final, no los intermedios.
-    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-    const applyFit = () => {
+    // Dos ritmos distintos, a propósito.
+    //
+    // La GRILLA se ajusta en cada cuadro mientras cambia el tamaño: es local y barata, y es
+    // lo que hace que la terminal acompañe el borde de la ventana en vez de quedar recortada
+    // o con un hueco hasta que se suelta el mouse.
+    //
+    // El PTY, en cambio, se entera recién cuando el tamaño se estabiliza. Cada `pty_resize`
+    // es un SIGWINCH, y cada SIGWINCH hace que la TUI redibuje la pantalla entera: mandarlos
+    // por cuadro era el torrente que se veía como parpadeo y basura al redimensionar.
+    let fitPending = false;
+    let fitFrame = 0;
+    let fitFallback: ReturnType<typeof setTimeout> | null = null;
+    let ptyTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const runFit = () => {
+      if (!fitPending) return;
+      fitPending = false;
+      cancelAnimationFrame(fitFrame);
+      if (fitFallback) clearTimeout(fitFallback);
       const el = containerRef.current;
-      // Un contenedor en 0×0 (la tab todavía no se pintó) haría que fit() calcule filas y
-      // columnas contra una celda sin medir, dejando el PTY con un tamaño absurdo que
-      // recién se corrige al siguiente resize — con el proceso ya dibujando encima.
+      // Un contenedor en 0×0 (tab recién creada) haría que fit() calcule contra una celda
+      // sin medir y deje una grilla absurda.
       if (!el || el.clientWidth === 0 || el.clientHeight === 0) return;
       fitAndTrim();
-      if (ptyIdRef.current !== null) {
-        const { cols, rows } = term;
-        ptyResize(ptyIdRef.current, cols, rows).catch(console.error);
-      }
     };
 
-    const resizeObserver = new ResizeObserver(() => {
-      if (resizeTimer) clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => requestAnimationFrame(applyFit), 80);
+    const scheduleFit = () => {
+      if (fitPending) return;
+      fitPending = true;
+      fitFrame = requestAnimationFrame(runFit);
+      // Con la ventana minimizada u oculta no hay cuadros y el rAF no corre nunca. Sin este
+      // respaldo, maximizar o redimensionar la ventana desde afuera dejaba a la TUI con el
+      // tamaño viejo hasta el próximo resize visible.
+      fitFallback = setTimeout(runFit, 150);
+    };
+
+    const sizeToPty = term.onResize(({ cols, rows }) => {
+      if (ptyTimer) clearTimeout(ptyTimer);
+      ptyTimer = setTimeout(() => {
+        const size = `${cols}x${rows}`;
+        if (ptyIdRef.current === null || size === sentSize) return;
+        sentSize = size;
+        ptyResize(ptyIdRef.current, cols, rows).catch(console.error);
+      }, 120);
     });
 
+    // Cambió el tamaño de la CELDA, no del contenedor: terminó de cargar la fuente, la
+    // ventana pasó a un monitor con otra escala. Las mismas filas ya no entran igual.
+    const refitOnCell = term.onDimensionsChange(scheduleFit);
+
+    const resizeObserver = new ResizeObserver(scheduleFit);
     resizeObserver.observe(containerRef.current);
 
     // ── 7. Cleanup ───────────────────────────────────────────
     return () => {
       cancelled = true;
       stopDiscovery?.();
-      if (resizeTimer) clearTimeout(resizeTimer);
+      cancelAnimationFrame(fitFrame);
+      if (fitFallback) clearTimeout(fitFallback);
+      if (ptyTimer) clearTimeout(ptyTimer);
       resizeObserver.disconnect();
+      sizeToPty.dispose();
+      refitOnCell.dispose();
       disposeCapabilities();
       disposeMarks();
       disposeScrollbar();
       unlistenData?.();
       unlistenExit?.();
-      dpr.removeEventListener("change", onDprChange);
       if (ptyIdRef.current !== null) {
         // Antes había un guardia acá para no matar un PTY que estaba viajando a otra
         // ventana. Ese camino ya no existe: se cambia de workspace en el lugar, así que
@@ -497,33 +535,24 @@ export function Terminal({
   }, [isActive]);
 
   return (
-    <div className="relative flex flex-col h-full w-full">
+    // El fondo va en el envoltorio de afuera: fit() calcula filas y columnas enteras, así
+    // que casi siempre sobran unos píxeles abajo y a la derecha que no llegan a una celda.
+    // Con el mismo color que la terminal, esa franja no se ve.
+    <div
+      className="relative flex flex-col h-full w-full"
+      style={{ background: TERMINAL_THEMES[theme].background }}
+    >
       <StatusBadge status={status} isDark={isDark} />
 
-      {/* Contenedor de xterm.
-          Sin `height: 100%`: con `flex: 1` dentro de un padre `flex-col` ya recibe el alto
-          disponible, y declarar las dos cosas hacía que el alto se resolviera por dos
-          caminos distintos (el algoritmo flex y el porcentaje contra el padre). En el
-          borde inferior eso se veía como filas cortadas o tapadas.
-
-          `background` igual al del tema de xterm: fit() calcula filas enteras, así que casi
-          siempre sobran unos píxeles abajo que no llegan a una fila completa. Antes esa
-          franja mostraba el fondo del panel y se leía como un glitch; ahora es del mismo
-          color que la terminal y desaparece. */}
-      <div
-        ref={containerRef}
-        style={{
-          flex: 1,
-          width: "100%",
-          minHeight: 0,
-          overflow: "hidden",
-          padding: "8px",
-          boxSizing: "border-box",
-          // Mismo fondo que la paleta activa: la franja sobrante de menos de una fila que
-          // queda abajo tiene que ser invisible en los dos temas, no solo en el oscuro.
-          background: TERMINAL_THEMES[theme].background,
-        }}
-      />
+      {/* El margen alrededor del texto, en un envoltorio propio y NO en el contenedor de
+          xterm: fit() mide ese contenedor incluyendo su padding, y con el padding ahí
+          calculaba columnas de más que quedaban cortadas contra el borde (ver fit.ts). */}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", padding: "8px 4px 6px 12px" }}>
+        {/* Sin `height: 100%`: con `flex: 1` ya recibe el alto disponible, y declarar las
+            dos cosas resolvía el alto por dos caminos (flex y porcentaje), que en el borde
+            inferior se veía como filas cortadas o tapadas. */}
+        <div ref={containerRef} style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }} />
+      </div>
     </div>
   );
 }

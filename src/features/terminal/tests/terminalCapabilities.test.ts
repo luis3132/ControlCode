@@ -1,25 +1,10 @@
 import type { Terminal } from "@xterm/xterm";
 import { describe, expect, it } from "vitest";
 
-import { registerCapabilityResponders, toXParseColor } from "../terminalCapabilities";
-
-describe("toXParseColor", () => {
-  it("traduce #rrggbb al formato que espera OSC 10/11", () => {
-    expect(toXParseColor("#0d1117")).toBe("rgb:0d0d/1111/1717");
-    expect(toXParseColor("0d1117")).toBe("rgb:0d0d/1111/1717");
-    expect(toXParseColor("#FFFFFF")).toBe("rgb:ffff/ffff/ffff");
-  });
-
-  /// Un color mal formado no puede tumbar la respuesta: la TUI está ESPERANDO una, y no
-  /// contestar la deja colgada (que es el bug que motivó todo este módulo).
-  it("un color inválido degrada a negro en vez de romper", () => {
-    expect(toXParseColor("#fff")).toBe("rgb:0000/0000/0000");
-    expect(toXParseColor("")).toBe("rgb:0000/0000/0000");
-  });
-});
+import { registerCapabilityResponders } from "../terminalCapabilities";
 
 /** Parser de mentira: guarda los handlers registrados para poder dispararlos a mano. */
-function fakeTerminal() {
+function fakeTerminal(kittyKeyboard = false) {
   const csi: Array<{ id: Record<string, unknown>; fn: (p: number[]) => boolean }> = [];
   const osc: Array<{ code: number; fn: (data: string) => boolean }> = [];
   const dcs: Array<{ id: Record<string, unknown>; fn: () => boolean }> = [];
@@ -27,6 +12,7 @@ function fakeTerminal() {
   const dispose = () => ({ dispose: () => { disposed += 1; } });
 
   const term = {
+    options: { vtExtensions: { kittyKeyboard } },
     parser: {
       registerCsiHandler: (id: Record<string, unknown>, fn: (p: number[]) => boolean) => {
         csi.push({ id, fn });
@@ -45,70 +31,44 @@ function fakeTerminal() {
 
   return {
     term,
+    csi,
+    osc,
     csiWith: (match: Record<string, unknown>) =>
-      csi.find((h) => Object.entries(match).every(([k, v]) => h.id[k] === v))!.fn,
-    oscWith: (code: number) => osc.find((h) => h.code === code)!.fn,
+      csi.find((h) => Object.entries(match).every(([k, v]) => h.id[k] === v))?.fn,
     dcsHandler: () => dcs[0].fn,
     disposedCount: () => disposed,
     registered: () => csi.length + osc.length + dcs.length,
   };
 }
 
-function setup() {
-  const fake = fakeTerminal();
+function setup(kittyKeyboard = false) {
+  const fake = fakeTerminal(kittyKeyboard);
   const sent: string[] = [];
-  const unregister = registerCapabilityResponders(fake.term, (d) => sent.push(d), {
-    foreground: "#e6edf3",
-    background: "#0d1117",
-  });
+  const unregister = registerCapabilityResponders(fake.term, (d) => sent.push(d));
   return { ...fake, sent, unregister };
 }
 
 describe("registerCapabilityResponders", () => {
-  /// Lo que importa es CONTESTAR: sin respuesta, OpenCode dibuja su logo, pasa a la
-  /// pantalla alternativa y se queda mudo para siempre — una terminal negra.
-  it("responde DECRQM con 'no conozco ese modo', sea cual sea", () => {
-    const { csiWith, sent } = setup();
-    const decrqm = csiWith({ intermediates: "$", final: "p" });
-
-    expect(decrqm([2026])).toBe(true);
-    expect(decrqm([2031])).toBe(true);
-    expect(sent).toEqual(["\x1b[?2026;0$y", "\x1b[?2031;0$y"]);
+  /// Desde xterm 6.1 estas las contesta xterm con el estado real. Interceptarlas pisaba esa
+  /// respuesta: un "no conozco el modo 2026" deja a la TUI sin salida sincronizada, y
+  /// redibuja parpadeando.
+  it("no intercepta lo que xterm ya contesta bien: DECRQM, XTVERSION ni los colores", () => {
+    const { csiWith, osc } = setup();
+    expect(csiWith({ intermediates: "$", final: "p" })).toBeUndefined();
+    expect(csiWith({ prefix: ">", final: "q" })).toBeUndefined();
+    expect(osc).toHaveLength(0);
   });
 
-  it("responde XTVERSION solo a la forma `CSI > 0 q`", () => {
-    const { csiWith, sent } = setup();
-    const xtversion = csiWith({ prefix: ">", final: "q" });
-
-    expect(xtversion([0])).toBe(true);
-    expect(sent).toEqual(["\x1bP>|xterm.js\x1b\\"]);
-
-    // Otros valores son DECSCUSR (forma del cursor): los maneja xterm.js, no nosotros.
-    expect(xtversion([2])).toBe(false);
-    expect(sent).toHaveLength(1);
-  });
-
-  it("declara que no soporta el protocolo de teclado de Kitty", () => {
-    const { csiWith, sent } = setup();
-    expect(csiWith({ prefix: "?", final: "u" })([])).toBe(true);
+  /// Con el protocolo apagado xterm no contesta nada, y sin respuesta la TUI se cuelga.
+  it("con el teclado de Kitty apagado, contesta que no lo soporta", () => {
+    const { csiWith, sent } = setup(false);
+    expect(csiWith({ prefix: "?", final: "u" })!([])).toBe(true);
     expect(sent).toEqual(["\x1b[?0u"]);
   });
 
-  it("contesta los colores reales del tema en OSC 10/11", () => {
-    const { oscWith, sent } = setup();
-    expect(oscWith(10)("?")).toBe(true);
-    expect(oscWith(11)("?")).toBe(true);
-    expect(sent).toEqual([
-      "\x1b]10;rgb:e6e6/eded/f3f3\x1b\\",
-      "\x1b]11;rgb:0d0d/1111/1717\x1b\\",
-    ]);
-  });
-
-  /// Solo se intercepta la CONSULTA (`?`). La forma de asignación sigue siendo de
-  /// xterm.js: si la tomáramos, cambiar el color de fondo desde la TUI dejaría de andar.
-  it("no intercepta la asignación de color, solo la consulta", () => {
-    const { oscWith, sent } = setup();
-    expect(oscWith(11)("#ff0000")).toBe(false);
+  it("con el teclado de Kitty encendido, deja que conteste xterm", () => {
+    const { csiWith, sent } = setup(true);
+    expect(csiWith({ prefix: "?", final: "u" })!([])).toBe(false);
     expect(sent).toHaveLength(0);
   });
 

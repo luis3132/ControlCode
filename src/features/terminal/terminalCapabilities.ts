@@ -1,7 +1,8 @@
 import type { Terminal } from "@xterm/xterm";
 
 /**
- * Respuestas a las consultas de capacidades que hacen las TUIs modernas al arrancar.
+ * Respuestas a las consultas de capacidades que hacen las TUIs modernas al arrancar, en
+ * los casos en que xterm.js todavía no contesta solo.
  *
  * ## El problema
  *
@@ -10,101 +11,54 @@ import type { Terminal } from "@xterm/xterm";
  *
  *   ESC[?2031h  ESC]10;?  ESC]11;?  ESC[>0q  ESC[6n  ESC P+q…  ESC[?2026$p  ESC[?u  …
  *
- * xterm.js 6 contesta `ESC[6n` (posición del cursor) y las DA, pero **no implementa
- * DECRQM (`$p`) ni XTVERSION (`>q`) ni el protocolo de teclado de Kitty (`?u`)** —
- * verificado sobre el bundle instalado. Sin esas respuestas, OpenCode se queda esperando
- * para siempre: dibuja su logo, cambia a la pantalla alternativa (fondo #0a0a0a) y no
- * escribe nada más. Desde afuera es una **terminal negra**.
+ * Si alguna queda sin contestar, se queda esperando para siempre: dibuja su logo, cambia a
+ * la pantalla alternativa y no escribe nada más. Desde afuera es una **terminal negra**.
+ * Medido con un PTY real (`cargo run --example pty_probe`): sin responder, OpenCode se
+ * detiene a los 3s en 7011 bytes; respondiendo, llega a ~10100 y termina de pintar.
  *
- * Medido con un PTY real (`cargo run --example pty_probe`): sin responder, OpenCode escribe
- * 7011 bytes y se detiene a los 3s, vivo pero mudo, incluso pasados 30s. Respondiendo,
- * llega a ~10100 bytes y termina de pintar su interfaz.
+ * ## Qué contesta xterm y qué no
  *
- * ## La respuesta
+ * Con xterm 6.0 había que contestar casi todo a mano. Desde 6.1 xterm implementa por su
+ * cuenta DECRQM (`$p`), XTVERSION (`>q`) y la consulta de colores (OSC 10/11) — verificado
+ * en `src/common/InputHandler.ts` de la versión instalada — y los contesta MEJOR que esto:
+ * con el estado real de cada modo y los colores del tema vigente.
  *
- * Se contesta lo que xterm.js no cubre, y se contesta **"no soportado"** en todos los
- * casos en que la respuesta implicaría una promesa. Decirle a una TUI que soportamos un
- * modo que xterm.js no implementa es peor que decirle que no: usaría secuencias que la
- * terminal no entiende y el resultado sería basura en pantalla en vez de una degradación
- * limpia. Lo que importa es **contestar**, no contestar que sí.
+ * Por eso ya no se interceptan. No era inocuo dejarlos: un handler registrado después se
+ * prueba primero, así que el nuestro, que contestaba "no conozco ese modo" a todo, le
+ * decía a las TUIs que no había salida sincronizada (modo 2026) ni bracketed paste. Con
+ * eso redibujaban sin sincronizar — el parpadeo — y pegaban texto como si se tipeara.
+ *
+ * Quedan los dos que xterm no cubre:
+ *
+ * - **Teclado de Kitty (`CSI ? u`)** mientras esté apagado: xterm lo acepta pero no
+ *   contesta nada, que es justo lo que cuelga a quien espera respuesta.
+ * - **XTGETTCAP (`DCS + q`)**: xterm no lo implementa.
+ *
+ * En ambos se contesta "no soportado". Decirle a una TUI que soportamos algo que la
+ * terminal no hace es peor que decirle que no: usaría secuencias que nadie entiende. Lo
+ * que importa es **contestar**, no contestar que sí.
  */
 
-/** Terminadores de secuencia: BEL para OSC, ST (ESC \) para DCS/APC. */
+/** Terminador de DCS (ESC \). */
 const ST = "\x1b\\";
-
-export interface CapabilityColors {
-  /** Color de texto en formato CSS (`#rrggbb`), para responder OSC 10. */
-  foreground: string;
-  /** Color de fondo, para responder OSC 11. */
-  background: string;
-}
-
-/** `#rrggbb` → `rgb:rrrr/gggg/bbbb`, que es el formato que espera OSC 10/11. */
-export function toXParseColor(hex: string): string {
-  const clean = hex.replace("#", "");
-  if (clean.length !== 6) return "rgb:0000/0000/0000";
-  const part = (i: number) => {
-    const byte = clean.slice(i, i + 2);
-    return `${byte}${byte}`.toLowerCase();
-  };
-  return `rgb:${part(0)}/${part(2)}/${part(4)}`;
-}
 
 /**
  * Registra las respuestas en `term`. `send` tiene que escribir al PTY (no al terminal).
  * Devuelve la función para desregistrarlas.
  */
-export function registerCapabilityResponders(
-  term: Terminal,
-  send: (data: string) => void,
-  colors: CapabilityColors
-): () => void {
+export function registerCapabilityResponders(term: Terminal, send: (data: string) => void): () => void {
   const disposables: Array<{ dispose: () => void }> = [];
 
-  // ── DECRQM: "¿tenés el modo N?" ─────────────────────────────
-  // Se responde 0 = "no lo conozco" para todos, incluso los que xterm.js sí implementa.
-  // Es la respuesta conservadora: la TUI evita usarlos y degrada bien. Afirmar soporte
-  // que después no está es lo que produce pantallas corruptas.
-  disposables.push(
-    term.parser.registerCsiHandler({ prefix: "?", intermediates: "$", final: "p" }, (params) => {
-      const mode = Number(params[0]) || 0;
-      send(`\x1b[?${mode};0$y`);
-      return true;
-    })
-  );
-
-  // ── XTVERSION: "¿qué terminal sos?" ─────────────────────────
-  // Solo la forma `CSI > 0 q`. Otros valores de `Ps` son DECSCUSR (forma del cursor),
-  // que le corresponde manejar a xterm.js — por eso se devuelve false ahí.
-  disposables.push(
-    term.parser.registerCsiHandler({ prefix: ">", final: "q" }, (params) => {
-      if (Number(params[0] ?? 0) !== 0) return false;
-      send(`\x1bP>|xterm.js${ST}`);
-      return true;
-    })
-  );
-
   // ── Protocolo de teclado de Kitty ───────────────────────────
-  // `CSI ? u` pregunta qué flags están activas. `0` = ninguna, o sea "no lo soporto".
+  // `CSI ? u` pregunta qué flags están activas. Con el protocolo encendido la respuesta es
+  // de xterm (sabe qué flags pidió la TUI); apagado, `0` = "no lo soporto".
   disposables.push(
     term.parser.registerCsiHandler({ prefix: "?", final: "u" }, () => {
+      if (term.options.vtExtensions?.kittyKeyboard) return false;
       send("\x1b[?0u");
       return true;
     })
   );
-
-  // ── OSC 10/11: colores de texto y de fondo ──────────────────
-  // Con esto la TUI elige su paleta clara u oscura según el tema real de la app, en vez
-  // de adivinar. Solo se intercepta la forma de consulta (`?`); la de asignación sigue
-  // siendo de xterm.js.
-  const colorQuery = (code: number, value: string) =>
-    term.parser.registerOscHandler(code, (data) => {
-      if (data !== "?") return false;
-      send(`\x1b]${code};${toXParseColor(value)}${ST}`);
-      return true;
-    });
-  disposables.push(colorQuery(10, colors.foreground));
-  disposables.push(colorQuery(11, colors.background));
 
   // ── XTGETTCAP: consulta de terminfo ─────────────────────────
   // `DCS + q <hex> ST`. Se responde `0` = "no tengo esa capacidad", que es la respuesta

@@ -4,34 +4,43 @@ import type { Terminal as XTerm } from "@xterm/xterm";
 /**
  * Ajustar la grilla de la terminal al tamaño real del contenedor.
  *
- * `fit()` divide el alto disponible por el alto de celda *teórico* y redondea hacia abajo.
- * Pero lo que el motor rasteriza no siempre mide eso: con escalado fraccionario (Wayland
- * al 125%/150%) cada fila se redondea a píxeles de dispositivo y el error se acumula, así
- * que las N filas calculadas terminan ocupando unos píxeles MÁS que el contenedor — y la
- * última queda cortada contra el borde inferior.
+ * ## El contenedor no puede tener padding
  *
- * En vez de intentar predecir ese redondeo, se mide lo que realmente quedó pintado y, si
- * desborda, se saca una fila.
+ * `fit()` mide el PADRE del elemento de xterm con `getComputedStyle(...).height/width`, y
+ * con `box-sizing: border-box` eso incluye el padding. La terminal tenía 8px de padding
+ * en ese mismo padre, así que fit calculaba filas y columnas para 16px más de los que había:
+ * sobraba casi una fila (se recortaba a mano) y un par de columnas que nadie recortaba —
+ * el borde derecho de la TUI quedaba cortado. Por eso el padding vive ahora en un
+ * envoltorio de afuera (ver `Terminal.tsx`) y el padre de xterm mide exactamente lo
+ * disponible.
+ *
+ * ## El redondeo del motor
+ *
+ * Aun con la cuenta bien hecha, lo que se rasteriza no siempre mide lo teórico: con
+ * escalado fraccionario cada celda se redondea a píxeles de dispositivo y el error se
+ * acumula. En vez de predecirlo, se compara lo que xterm dice que ocupa (`dimensions`, API
+ * pública desde 6.1) con el espacio real y, si se pasa, se saca una fila o una columna.
  */
 export function createFitter(term: XTerm, addon: FitAddon, container: () => HTMLElement | null) {
-  /** El medio píxel de tolerancia evita que el ruido de subpíxel dispare una corrección
-   *  donde entra justo. */
-  const trimOverflowingRow = () => {
+  const trimOverflow = () => {
     const el = container();
-    const screen = el?.querySelector<HTMLElement>(".xterm-screen");
-    if (!el || !screen) return;
-    const style = getComputedStyle(el);
-    const available =
-      el.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-    if (screen.getBoundingClientRect().height > available + 0.5 && term.rows > 1) {
-      term.resize(term.cols, term.rows - 1);
-    }
+    const canvas = term.dimensions?.css.canvas;
+    if (!el || !canvas) return;
+    const box = el.getBoundingClientRect();
+    // El carril de la barra de scroll está dentro del contenedor, a la derecha de la grilla.
+    const scrollbar = term.options.scrollbar?.width ?? 14;
+    let { cols, rows } = term;
+    // El medio píxel de tolerancia evita que el ruido de subpíxel dispare una corrección
+    // donde entra justo.
+    if (canvas.height > box.height + 0.5 && rows > 1) rows -= 1;
+    if (canvas.width + scrollbar > box.width + 0.5 && cols > 2) cols -= 1;
+    if (cols !== term.cols || rows !== term.rows) term.resize(cols, rows);
   };
 
   const fit = () => {
     try {
       addon.fit();
-      trimOverflowingRow();
+      trimOverflow();
     } catch {
       // ignorar si el terminal fue dispose()d
     }
@@ -41,10 +50,9 @@ export function createFitter(term: XTerm, addon: FitAddon, container: () => HTML
    * Primer ajuste, antes de spawnear el proceso (el PTY nace con este tamaño, no con uno
    * fijo que se corrige después).
    *
-   * - `document.fonts.ready`: si se mide con la fuente de fallback (porque "Cascadia
-   *   Code"/"JetBrains Mono"/"Fira Code" todavía no cargó), se calculan cols/rows para
-   *   celdas de un tamaño que no es el real — al terminar de cargar la fuente, el
-   *   contenido desborda o queda recortado por el `overflow: hidden` del contenedor.
+   * - `document.fonts.ready`: si se mide con la fuente de fallback, se calculan cols/rows
+   *   para celdas de un tamaño que no es el real. (La fuente de la terminal además se
+   *   precarga al arrancar la app, ver `main.tsx`.)
    * - Doble rAF: el primero solo garantiza que el layout se pintó una vez; medir antes de
    *   eso puede dar un contenedor todavía en 0×0 (tab recién creada).
    */
