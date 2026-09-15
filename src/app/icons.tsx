@@ -226,6 +226,63 @@ export function SplitDownIcon({ className }: IconProps) {
   );
 }
 
+/** Un lápiz: anotar encima de la página. */
+export function PenIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4 11.5-11.5z" />
+      <path d="M14.5 5.5l3 3" />
+    </svg>
+  );
+}
+
+/** Un resaltador: la punta ancha y la línea que deja. */
+export function HighlighterIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M15 4l5 5-8 8H7v-5l8-8z" />
+      <path d="M7 17l-3 3M4 21h16" />
+    </svg>
+  );
+}
+
+/** Una flecha en diagonal: señalar algo. */
+export function ArrowToolIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M5 19L19 5M10 5h9v9" />
+    </svg>
+  );
+}
+
+/** Un rectángulo: encerrar una zona. */
+export function RectToolIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="4" y="6" width="16" height="12" rx="1.5" />
+    </svg>
+  );
+}
+
+/** Una T: escribir. */
+export function TextToolIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M5 6V5h14v1M12 5v14M9 19h6" />
+    </svg>
+  );
+}
+
+/** Flecha curva hacia adelante: rehacer. */
+export function RedoIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M15 14l5-5-5-5" />
+      <path d="M20 9H9.5a5.5 5.5 0 000 11H13" />
+    </svg>
+  );
+}
+
 /** Flecha que gira sobre un rectángulo: cambiar la orientación. */
 export function RotateIcon({ className }: IconProps) {
   return (

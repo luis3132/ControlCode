@@ -16,6 +16,16 @@ export const previewResolve = (url: string, picker: string) =>
 /** Servidores escuchando en los puertos típicos de desarrollo de esta máquina. */
 export const previewDetectServers = () => invoke<string[]>("preview_detect_servers");
 
+/** La foto del webview de la app entero, en PNG, a la resolución del motor. */
+export async function previewCapture(): Promise<ArrayBuffer> {
+  const png = await invoke<ArrayBuffer | number[]>("preview_capture");
+  // Por el protocolo del IPC llega crudo; si Tauri tuvo que caer a `postMessage`, como lista.
+  return png instanceof ArrayBuffer ? png : new Uint8Array(png).buffer;
+}
+
+/** Guarda una captura en la carpeta temporal y devuelve su ruta. Va cruda, no como JSON. */
+export const previewSaveCapture = (png: Uint8Array) => invoke<string>("preview_save_capture", png);
+
 /** Un pedido que pasó por el proxy (ver `src-tauri/src/preview/log.rs`). */
 export interface ProxyRequest {
   seq: number;

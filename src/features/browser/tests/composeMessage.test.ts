@@ -6,6 +6,7 @@ import type { PickedElement } from "../protocol";
 const labels: ComposeLabels = {
   header: (url) => `Elementos marcados en ${url}:`,
   page: "Página", selector: "Selector", component: "Componente", attributes: "Atributos", html: "HTML", note: "Nota",
+  captures: "Capturas anotadas:",
 };
 
 const proxy = "http://127.0.0.1:40111";
@@ -47,6 +48,30 @@ describe("el mensaje para el agente", () => {
 
   it("sin elementos queda solo la nota", () => {
     expect(composePickMessage([], " hola ", display, labels)).toBe("hola");
+  });
+
+  it("cada captura lleva su página y la ruta sola en su línea, después de los elementos", () => {
+    const text = composePickMessage(
+      [el({ component: null, attributes: {}, text: "" })],
+      "el botón no se ve",
+      display,
+      labels,
+      [{ url: `${proxy}/login`, path: "/tmp/controlcode/capturas/captura-1-abcd.png" }]
+    );
+    expect(text.split("\n").slice(-6)).toEqual([
+      "Capturas anotadas:",
+      "",
+      "1. http://localhost:5173/login",
+      "/tmp/controlcode/capturas/captura-1-abcd.png",
+      "",
+      "Nota: el botón no se ve",
+    ]);
+    expect(text.indexOf("Elementos marcados")).toBe(0);
+  });
+
+  it("una captura sola, sin elementos ni nota, también es un mensaje", () => {
+    const text = composePickMessage([], "", display, labels, [{ url: "http://localhost:5173/", path: "C:\\Temp\\captura.png" }]);
+    expect(text).toBe("Capturas anotadas:\n\n1. http://localhost:5173/\nC:\\Temp\\captura.png");
   });
 
   it("una URL que no es del proxy no se toca", () => {

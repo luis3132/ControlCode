@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import {
-  Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, Select, TrashIcon, Tooltip,
-} from "neogestify-ui-components";
+import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, Select, TrashIcon } from "neogestify-ui-components";
 
-import { BugIcon, DevicesIcon, ExternalIcon, GlobeIcon, PickIcon, RefreshIcon, SendIcon } from "@/app/icons";
+import {
+  BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
+} from "@/app/icons";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { normalizeUrl, type BrowserView } from "@/features/tabs/viewTabs";
@@ -14,15 +14,18 @@ import { pasteIntoTab } from "@/features/terminal/terminalRegistry";
 import pickerScript from "./picker.ts?script";
 import runtimeScript from "./page/runtime.ts?script";
 import { registerBrowserHost } from "./agentBridge";
-import { composePickMessage, toTargetUrl } from "./composeMessage";
+import { AnnotationBar, AnnotationCanvas, renderAnnotated, useAnnotationSession } from "./annotate/Annotator";
+import { canvasToPng, freezePage, thumbnail, type FrozenPage } from "./annotate/capture";
+import { composePickMessage, toTargetUrl, type AnnotatedCapture } from "./composeMessage";
 import { DebugPanel, MIN_PANEL, type DebugTab } from "./debug/DebugPanel";
 import { appendBatch, currentCounts, EMPTY_LOG, startDocument } from "./debugLog";
 import { useDebugStore } from "./debugStore";
 import { DeviceBar } from "./DeviceBar";
-import { previewDetectServers, previewResolve, type PreviewTarget } from "./ipc";
+import { previewDetectServers, previewResolve, previewSaveCapture, type PreviewTarget } from "./ipc";
 import { PageChannel } from "./pageChannel";
 import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
+import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
 
 /** Lo que el proxy inyecta en cada página: el selector y el runtime (control del agente y
@@ -30,6 +33,13 @@ import { presetById, type Viewport } from "./viewport";
 const INJECTED = `${pickerScript}\n;${runtimeScript}`;
 
 const PANEL_HEIGHT_KEY = "cc-browser-debug-height";
+
+/**
+ * Por debajo de este ancho la barra no entra en una fila: la dirección se queda con todo el
+ * ancho y las acciones pasan a una fila que se despliega. Pasa enseguida con la pantalla
+ * dividida — un navegador al lado de una terminal ya no tiene 700 px.
+ */
+const COMPACT_BELOW = 760;
 
 function savedPanelHeight(): number {
   try {
@@ -40,61 +50,10 @@ function savedPanelHeight(): number {
   }
 }
 
-function ToolButton({ label, onClick, disabled, active, children }: {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  active?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Tooltip content={label} placement="bottom">
-      <button
-        onClick={onClick}
-        disabled={disabled}
-        aria-label={label}
-        aria-pressed={active}
-        // Contraste de texto, no de adorno: estos son los controles con los que se usa la
-        // tab. Con el gris al 45% sobre el fondo oscuro, y encima atenuados al 35% mientras
-        // la página no cargó, prácticamente no se veían.
-        className={`cc-t relative flex items-center justify-center w-8 h-8 rounded-lg shrink-0
-          disabled:text-gray-400 dark:disabled:text-white/30 disabled:hover:bg-transparent
-          ${active
-            ? "bg-blue-500/15 text-blue-600 dark:bg-blue-400/20 dark:text-blue-300"
-            : "text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10"}`}
-      >
-        {children}
-      </button>
-    </Tooltip>
-  );
-}
-
-/** Una acción propia de esta tab, con rótulo. Marcar y enviar no son iconos que alguien
- *  reconozca de un navegador: sin la palabra al lado había que pasar el mouse para saber
- *  qué hacían. */
-function ActionButton({ hint, onClick, disabled, active, children }: {
-  hint: string;
-  onClick: () => void;
-  disabled?: boolean;
-  active?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Tooltip content={hint} placement="bottom">
-      <button
-        onClick={onClick}
-        disabled={disabled}
-        aria-pressed={active}
-        className={`cc-t flex items-center gap-1.5 h-8 px-2.5 rounded-lg shrink-0 border text-[12px] font-semibold
-          disabled:opacity-45 disabled:hover:bg-transparent
-          ${active
-            ? "bg-blue-600 border-blue-600 text-white hover:bg-blue-500"
-            : "border-gray-300 dark:border-white/15 text-gray-800 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-white/10"}`}
-      >
-        {children}
-      </button>
-    </Tooltip>
-  );
+/** Una captura anotada que espera en el mensaje. */
+interface PendingCapture extends AnnotatedCapture {
+  id: string;
+  thumb: string;
 }
 
 /**
@@ -103,7 +62,10 @@ function ActionButton({ hint, onClick, disabled, active, children }: {
  * La página se carga a través de un proxy local (ver `src-tauri/src/preview`) que le
  * agrega el selector de elementos. Con él se marcan partes de la página —un botón, una
  * tarjeta— y se le mandan a un agente con una nota: lo que llega es lo que el agente
- * necesita para encontrarlo en el código (componente, selector, HTML), no una captura.
+ * necesita para encontrarlo en el código (componente, selector, HTML).
+ *
+ * Y cuando lo que hay que mostrar es cómo se VE, se anota encima: la página se congela en
+ * una foto, se dibuja sobre ella, y la foto con los dibujos va en el mismo mensaje.
  */
 export function BrowserTab({ view, active }: { view: BrowserView; active: boolean }) {
   const { t } = useTranslation();
@@ -118,6 +80,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [picks, setPicks] = useState<PickedElement[]>([]);
+  const [captures, setCaptures] = useState<PendingCapture[]>([]);
   const [composerOpen, setComposerOpen] = useState(false);
   const [note, setNote] = useState("");
   const [agentId, setAgentId] = useState<string | null>(activeTabId);
@@ -128,7 +91,15 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const [debugTab, setDebugTab] = useState<DebugTab>("console");
   const [debugHeight, setDebugHeight] = useState(savedPanelHeight);
   const [docId, setDocId] = useState<string | null>(null);
+  const [compact, setCompact] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [frozen, setFrozen] = useState<(FrozenPage & { url: string }) | null>(null);
+  const [freezing, setFreezing] = useState(false);
+  const [savingCapture, setSavingCapture] = useState(false);
+  const annotation = useAnnotationSession();
   const errors = useDebugStore((s) => currentCounts(s.logs[view.id] ?? EMPTY_LOG).errors);
+  const root = useRef<HTMLDivElement>(null);
+  const column = useRef<HTMLDivElement>(null);
   const iframe = useRef<HTMLIFrameElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
   /** Dónde está parada la página, en la URL del proxy: es lo que se recarga. */
@@ -149,6 +120,19 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     channel.dispose();
     useDebugStore.getState().drop(view.id);
   }, [channel, view.id]);
+
+  useLayoutEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const measure = () => {
+      // Oculta (otra tab encima) mide 0: ahí no hay nada que decidir.
+      if (el.clientWidth > 0) setCompact(el.clientWidth < COMPACT_BELOW);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const postToPage = useCallback((type: SimpleAppMessage["type"]) => {
     if (!target) return;
@@ -315,9 +299,66 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     postToPage(next ? "pick:on" : "pick:off");
   };
 
+  /** Las acciones estaban desplegadas al empezar a anotar: se vuelven a desplegar al terminar. */
+  const reopenActions = useRef(false);
+
+  const startAnnotating = async () => {
+    if (!target || freezing || frozen || !iframe.current || !column.current) return;
+    if (picking) {
+      setPicking(false);
+      postToPage("pick:off");
+    }
+    // La barra de anotación es de una fila. Si la foto se sacara con las acciones abiertas
+    // (dos filas), al congelar la página subiría esa diferencia y abajo asomaría la viva.
+    // `freezePage` espera a que se dibuje esto antes de medir.
+    reopenActions.current = compact && actionsOpen;
+    if (reopenActions.current) setActionsOpen(false);
+    setFreezing(true);
+    setError(null);
+    try {
+      const page = await freezePage(iframe.current, column.current);
+      annotation.reset();
+      setFrozen({ ...page, url: shownUrl.current });
+    } catch (e) {
+      setError(t("browser.annotate.failed", { error: String(e) }));
+      stopAnnotating();
+    } finally {
+      setFreezing(false);
+    }
+  };
+
+  const stopAnnotating = useCallback(() => {
+    setFrozen(null);
+    if (reopenActions.current) setActionsOpen(true);
+    reopenActions.current = false;
+  }, []);
+
+  const cancelAnnotating = stopAnnotating;
+
+  const historyRef = useRef(annotation.history);
+  historyRef.current = annotation.history;
+  const finishAnnotating = async () => {
+    if (!frozen || savingCapture) return;
+    setSavingCapture(true);
+    try {
+      const annotated = renderAnnotated(frozen.canvas, historyRef.current.present);
+      const path = await previewSaveCapture(await canvasToPng(annotated));
+      setCaptures((prev) => [...prev, { id: crypto.randomUUID(), path, url: frozen.url, thumb: thumbnail(annotated) }]);
+      stopAnnotating();
+      setComposerOpen(true);
+      setSent(null);
+    } catch (e) {
+      setError(t("browser.annotate.saveFailed", { error: String(e) }));
+    } finally {
+      setSavingCapture(false);
+    }
+  };
+
+  const attachments = picks.length + captures.length;
+
   const send = () => {
     const agent = agents.find((a) => a.id === agentId);
-    if (!agent || !target || (picks.length === 0 && !note.trim())) return;
+    if (!agent || !target || (attachments === 0 && !note.trim())) return;
     const text = composePickMessage(
       picks,
       note,
@@ -330,7 +371,9 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         attributes: t("browser.message.attributes"),
         html: "HTML",
         note: t("browser.message.note"),
-      }
+        captures: t("browser.message.captures"),
+      },
+      captures
     );
     if (!pasteIntoTab(agent.id, text, true)) {
       setError(t("browser.agentNotReady"));
@@ -338,85 +381,159 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     }
     setSent({ tabId: agent.id, title: agent.title });
     setPicks([]);
+    setCaptures([]);
     setNote("");
   };
 
   const shownError = error && (
-    <div className="absolute inset-x-0 top-0 z-10 p-3"><Alert variant="danger">{error}</Alert></div>
+    <div className="absolute inset-x-0 top-0 z-40 p-3"><Alert variant="danger">{error}</Alert></div>
   );
 
-  return (
-    <div className="flex flex-col h-full min-h-0 bg-gray-50 dark:bg-[#0d1117]">
+  const navButtons = (
+    <>
+      <ToolButton label={t("browser.back")} disabled={!target} onClick={() => postToPage("history:back")}>
+        <ArrowLeftIcon className="w-4 h-4 stroke-2" />
+      </ToolButton>
+      <ToolButton label={t("browser.forward")} disabled={!target} onClick={() => postToPage("history:forward")}>
+        <ArrowRightIcon className="w-4 h-4 stroke-2" />
+      </ToolButton>
+      <ToolButton label={t("browser.reload")} disabled={!target} onClick={reload}>
+        <RefreshIcon className="w-4 h-4 stroke-2" />
+      </ToolButton>
+    </>
+  );
+
+  const addressBar = (
+    <form className="flex-1 min-w-0 mx-1.5" onSubmit={(e) => { e.preventDefault(); go(address); }}>
+      <input
+        ref={addressRef}
+        value={address}
+        onChange={(e) => setAddress(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        placeholder={t("browser.address")}
+        spellCheck={false}
+        className="w-full h-8 px-3.5 rounded-full outline-none font-mono text-[12px]
+          bg-white dark:bg-white/6 border border-gray-300 dark:border-white/12
+          focus:border-blue-500 dark:focus:border-blue-400
+          text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/35"
+      />
+    </form>
+  );
+
+  const pageActions = (
+    <>
+      <ActionButton
+        hint={picking ? t("browser.pick.stop") : t("browser.pick.start")}
+        disabled={!target}
+        active={picking}
+        onClick={togglePicking}
+      >
+        <PickIcon className="w-4 h-4 stroke-2" />
+        {t("browser.pick.label")}
+      </ActionButton>
+      {/* Sin el tooltip de la app: se dibujaría encima de la página y saldría en la foto. */}
+      <ActionButton plain hint={t("browser.annotate.start")} disabled={!target || freezing} active={freezing} onClick={startAnnotating}>
+        <PenIcon className="w-4 h-4" />
+        {freezing ? t("browser.annotate.capturing") : t("browser.annotate.label")}
+      </ActionButton>
+      <ActionButton
+        hint={t("browser.composer")}
+        active={composerOpen}
+        onClick={() => setComposerOpen((v) => !v)}
+      >
+        <SendIcon className="w-4 h-4 stroke-2" />
+        {t("browser.composer.label")}
+        {attachments > 0 && (
+          <span className={`min-w-4.5 h-4.5 px-1 rounded-full text-[10px] font-bold leading-[18px] text-center tabular-nums
+            ${composerOpen ? "bg-white text-blue-600" : "bg-blue-600 text-white"}`}>
+            {attachments}
+          </span>
+        )}
+      </ActionButton>
+    </>
+  );
+
+  const tabTools = (
+    <>
+      <ToolButton label={viewport ? t("browser.viewport.exit") : t("browser.viewport.enter")} active={!!viewport}
+        onClick={() => setViewport(viewport ? null : (presetById("phone") ?? null))}>
+        <DevicesIcon className="w-4 h-4" />
+      </ToolButton>
+      <ToolButton label={t("browser.debug.toggle")} active={debugOpen} onClick={() => setDebugOpen((v) => !v)}>
+        <BugIcon className="w-4 h-4" />
+        {errors > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-red-600 text-white
+            text-[9.5px] font-bold leading-4 text-center tabular-nums">
+            {errors > 99 ? "99+" : errors}
+          </span>
+        )}
+      </ToolButton>
+      <ToolButton label={t("browser.openExternal")} disabled={!target}
+        onClick={() => openUrl(address).catch(console.error)}>
+        <ExternalIcon className="w-4 h-4 stroke-2" />
+      </ToolButton>
+    </>
+  );
+
+  // Con las acciones plegadas, lo que pide atención (algo esperando en el mensaje, errores
+  // en la consola) se avisa en el botón que las despliega.
+  const pendingAttention = !actionsOpen && (attachments > 0 || errors > 0);
+
+  const toolbar = frozen ? (
+    <AnnotationBar
+      session={annotation}
+      compact={compact}
+      busy={savingCapture}
+      onCancel={cancelAnnotating}
+      onDone={finishAnnotating}
+    />
+  ) : compact ? (
+    <>
       <div className="flex items-center gap-1 h-11 shrink-0 px-2 border-b border-gray-200 dark:border-white/7">
-        <ToolButton label={t("browser.back")} disabled={!target} onClick={() => postToPage("history:back")}>
-          <ArrowLeftIcon className="w-4 h-4 stroke-2" />
-        </ToolButton>
-        <ToolButton label={t("browser.forward")} disabled={!target} onClick={() => postToPage("history:forward")}>
-          <ArrowRightIcon className="w-4 h-4 stroke-2" />
-        </ToolButton>
-        <ToolButton label={t("browser.reload")} disabled={!target} onClick={reload}>
-          <RefreshIcon className="w-4 h-4 stroke-2" />
-        </ToolButton>
-
-        <form className="flex-1 min-w-0 mx-1.5" onSubmit={(e) => { e.preventDefault(); go(address); }}>
-          <input
-            ref={addressRef}
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            onFocus={(e) => e.target.select()}
-            placeholder={t("browser.address")}
-            spellCheck={false}
-            className="w-full h-8 px-3.5 rounded-full outline-none font-mono text-[12px]
-              bg-white dark:bg-white/6 border border-gray-300 dark:border-white/12
-              focus:border-blue-500 dark:focus:border-blue-400
-              text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/35"
-          />
-        </form>
-
-        <ActionButton
-          hint={picking ? t("browser.pick.stop") : t("browser.pick.start")}
-          disabled={!target}
-          active={picking}
-          onClick={togglePicking}
-        >
-          <PickIcon className="w-4 h-4 stroke-2" />
-          {t("browser.pick.label")}
-        </ActionButton>
-        <ActionButton
-          hint={t("browser.composer")}
-          active={composerOpen}
-          onClick={() => setComposerOpen((v) => !v)}
-        >
-          <SendIcon className="w-4 h-4 stroke-2" />
-          {t("browser.composer.label")}
-          {picks.length > 0 && (
-            <span className={`min-w-4.5 h-4.5 px-1 rounded-full text-[10px] font-bold leading-[18px] text-center tabular-nums
-              ${composerOpen ? "bg-white text-blue-600" : "bg-blue-600 text-white"}`}>
-              {picks.length}
-            </span>
+        {addressBar}
+        <ToolButton label={actionsOpen ? t("browser.actions.less") : t("browser.actions.more")} active={actionsOpen}
+          onClick={() => setActionsOpen((v) => !v)}>
+          <DotsIcon className="w-4 h-4" />
+          {pendingAttention && (
+            <span className={`absolute top-1 right-1 w-2 h-2 rounded-full ${errors > 0 ? "bg-red-600" : "bg-blue-600"}`} />
           )}
-        </ActionButton>
-        <div className="w-px h-5 mx-0.5 shrink-0 bg-gray-200 dark:bg-white/10" />
-        <ToolButton label={viewport ? t("browser.viewport.exit") : t("browser.viewport.enter")} active={!!viewport}
-          onClick={() => setViewport(viewport ? null : (presetById("phone") ?? null))}>
-          <DevicesIcon className="w-4 h-4" />
-        </ToolButton>
-        <ToolButton label={t("browser.debug.toggle")} active={debugOpen} onClick={() => setDebugOpen((v) => !v)}>
-          <BugIcon className="w-4 h-4" />
-          {errors > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-red-600 text-white
-              text-[9.5px] font-bold leading-4 text-center tabular-nums">
-              {errors > 99 ? "99+" : errors}
-            </span>
-          )}
-        </ToolButton>
-        <ToolButton label={t("browser.openExternal")} disabled={!target}
-          onClick={() => openUrl(address).catch(console.error)}>
-          <ExternalIcon className="w-4 h-4 stroke-2" />
         </ToolButton>
       </div>
+      {actionsOpen && (
+        <div className="flex flex-wrap items-center gap-1 shrink-0 px-2 py-1.5 border-b border-gray-200 dark:border-white/7">
+          {navButtons}
+          <ToolbarSeparator />
+          {pageActions}
+          <ToolbarSeparator />
+          {tabTools}
+        </div>
+      )}
+    </>
+  ) : (
+    <div className="flex items-center gap-1 h-11 shrink-0 px-2 border-b border-gray-200 dark:border-white/7">
+      {navButtons}
+      {addressBar}
+      {pageActions}
+      <ToolbarSeparator />
+      {tabTools}
+    </div>
+  );
 
-      {viewport && <DeviceBar viewport={viewport} onChange={setViewport} onClose={() => setViewport(null)} />}
+  const capturesLabel = captures.length > 0 ? t("browser.captures", { count: captures.length }) : null;
+  const composerTitle = [picks.length > 0 || !capturesLabel ? t("browser.picks", { count: picks.length }) : null, capturesLabel]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div ref={root} className="flex flex-col h-full min-h-0 bg-gray-50 dark:bg-[#0d1117]">
+      {toolbar}
+
+      {viewport && (
+        // Congelada, la página no cambia de tamaño: la barra queda a la vista pero quieta.
+        <div inert={frozen ? true : undefined} className={`shrink-0 ${frozen ? "opacity-50" : ""}`}>
+          <DeviceBar viewport={viewport} onChange={setViewport} onClose={() => setViewport(null)} />
+        </div>
+      )}
 
       {picking && (
         <div className="shrink-0 px-3 py-1 text-[11px] text-center
@@ -425,8 +542,8 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         </div>
       )}
 
-      <div className="flex flex-1 min-h-0">
-        <div data-browser-column className="relative flex flex-col flex-1 min-w-0">
+      <div className={`flex flex-1 min-h-0 ${compact ? "flex-col" : ""}`}>
+        <div ref={column} data-browser-column className="relative flex flex-col flex-1 min-w-0 min-h-0">
           {shownError}
           {target ? (
             <ResponsiveStage viewport={viewport} onResize={setViewport}>
@@ -493,13 +610,19 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
               onClose={() => setDebugOpen(false)}
             />
           )}
+          {frozen && (
+            <AnnotationCanvas frozen={frozen} session={annotation} active={active} onCancel={cancelAnnotating} />
+          )}
         </div>
 
         {composerOpen && (
-          <aside className="flex flex-col w-80 shrink-0 min-h-0 border-l border-gray-200 dark:border-white/7">
+          // Angosta, el mensaje va abajo: al costado le quitaría a la página casi todo el ancho.
+          <aside className={compact
+            ? "flex flex-col shrink-0 max-h-[55%] min-h-0 border-t border-gray-200 dark:border-white/7"
+            : "flex flex-col w-80 shrink-0 min-h-0 border-l border-gray-200 dark:border-white/7"}>
             <div className="flex items-center gap-2 h-9 shrink-0 pl-3.5 pr-2 border-b border-gray-200 dark:border-white/7">
-              <span className="flex-1 text-[11.5px] font-semibold text-gray-700 dark:text-gray-300">
-                {t("browser.picks", { count: picks.length })}
+              <span className="flex-1 min-w-0 truncate text-[11.5px] font-semibold text-gray-700 dark:text-gray-300">
+                {composerTitle}
               </span>
               <button onClick={() => setComposerOpen(false)} aria-label={t("btn.close")}
                 className="cc-t flex items-center justify-center w-6 h-6 rounded-md
@@ -508,34 +631,57 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
               </button>
             </div>
 
-            <div className="flex-1 min-h-0 cc-scroll p-2.5 flex flex-col gap-1.5">
-              {picks.length === 0 ? (
+            <div className={`flex-1 min-h-0 cc-scroll p-2.5 gap-1.5 ${compact && attachments > 0 ? "flex flex-row flex-wrap content-start" : "flex flex-col"}`}>
+              {attachments === 0 ? (
                 <p className="px-1 py-4 text-center text-[11.5px] leading-relaxed text-gray-400 dark:text-white/30">
                   {t("browser.picks.empty")}
                 </p>
-              ) : picks.map((p, i) => (
-                <div key={`${p.url}:${p.selector}`}
-                  className="group flex flex-col gap-0.5 px-2.5 py-2 rounded-lg bg-white dark:bg-white/4
-                    border border-gray-200 dark:border-white/8">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="shrink-0 text-[10px] tabular-nums text-gray-400">{i + 1}</span>
-                    <span className="min-w-0 truncate font-mono text-[11.5px] font-semibold text-gray-800 dark:text-gray-100">
-                      {`<${p.tag}>`}{p.component && <span className="text-blue-600 dark:text-blue-400"> {p.component.name}</span>}
-                    </span>
-                    <div className="flex-1" />
-                    <button onClick={() => setPicks((prev) => prev.filter((_, j) => j !== i))}
-                      aria-label={t("btn.delete")}
-                      className="cc-t hidden group-hover:flex items-center justify-center w-5 h-5 rounded
-                        text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-white/10">
-                      <TrashIcon className="w-3 h-3" />
-                    </button>
-                  </div>
-                  {p.text && <span className="truncate text-[11px] text-gray-500 dark:text-white/45">«{p.text}»</span>}
-                  <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30" title={p.selector}>
-                    {p.selector}
-                  </span>
-                </div>
-              ))}
+              ) : (
+                <>
+                  {captures.map((c) => (
+                    <div key={c.id}
+                      className={`group relative flex flex-col shrink-0 rounded-lg overflow-hidden bg-white dark:bg-white/4
+                        border border-gray-200 dark:border-white/8 ${compact ? "w-44" : ""}`}>
+                      <img src={c.thumb} alt="" className="block w-full max-h-36 object-contain bg-gray-100 dark:bg-black/30" />
+                      <div className="flex items-center gap-1.5 min-w-0 px-2 py-1.5">
+                        <PenIcon className="w-3 h-3 shrink-0 text-blue-600 dark:text-blue-400" />
+                        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-gray-500 dark:text-white/45" title={c.path}>
+                          {c.url}
+                        </span>
+                        <button onClick={() => setCaptures((prev) => prev.filter((x) => x.id !== c.id))}
+                          aria-label={t("btn.delete")}
+                          className="cc-t flex items-center justify-center w-5 h-5 shrink-0 rounded
+                            text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-white/10">
+                          <TrashIcon className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {picks.map((p, i) => (
+                    <div key={`${p.url}:${p.selector}`}
+                      className={`group flex flex-col gap-0.5 px-2.5 py-2 rounded-lg bg-white dark:bg-white/4
+                        border border-gray-200 dark:border-white/8 ${compact ? "w-44 shrink-0" : ""}`}>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="shrink-0 text-[10px] tabular-nums text-gray-400">{i + 1}</span>
+                        <span className="min-w-0 truncate font-mono text-[11.5px] font-semibold text-gray-800 dark:text-gray-100">
+                          {`<${p.tag}>`}{p.component && <span className="text-blue-600 dark:text-blue-400"> {p.component.name}</span>}
+                        </span>
+                        <div className="flex-1" />
+                        <button onClick={() => setPicks((prev) => prev.filter((_, j) => j !== i))}
+                          aria-label={t("btn.delete")}
+                          className="cc-t hidden group-hover:flex items-center justify-center w-5 h-5 rounded
+                            text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-white/10">
+                          <TrashIcon className="w-3 h-3" />
+                        </button>
+                      </div>
+                      {p.text && <span className="truncate text-[11px] text-gray-500 dark:text-white/45">«{p.text}»</span>}
+                      <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30" title={p.selector}>
+                        {p.selector}
+                      </span>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
 
             <div className="flex flex-col gap-2 shrink-0 p-2.5 border-t border-gray-200 dark:border-white/7">
@@ -553,30 +699,34 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
                 }}
-                rows={3}
+                rows={compact ? 2 : 3}
                 placeholder={t("browser.note")}
                 className="w-full resize-none px-2.5 py-1.5 rounded-lg outline-none text-[12px] leading-relaxed
                   bg-white dark:bg-white/4 border border-gray-200 dark:border-white/10
                   focus:border-blue-500 dark:focus:border-blue-400
                   text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/25"
               />
-              {agents.length === 0 ? (
-                <p className="text-[11px] text-gray-400 dark:text-white/30">{t("browser.noAgents")}</p>
-              ) : (
-                <Select
-                  value={agentId ?? ""}
-                  onChange={(e) => setAgentId(e.target.value)}
-                  options={agents.map((a) => ({ value: a.id, label: a.title }))}
-                  size="sm"
-                  variant="outline"
-                />
-              )}
-              <Button size="sm" variant="primary" fullWidth
-                disabled={!agentId || (picks.length === 0 && !note.trim())}
-                onClick={send}>
-                <SendIcon className="w-3.5 h-3.5" />
-                {t("browser.send")}
-              </Button>
+              <div className={compact ? "flex items-center gap-2" : "flex flex-col gap-2"}>
+                {agents.length === 0 ? (
+                  <p className="flex-1 text-[11px] text-gray-400 dark:text-white/30">{t("browser.noAgents")}</p>
+                ) : (
+                  <div className={compact ? "flex-1 min-w-0" : undefined}>
+                    <Select
+                      value={agentId ?? ""}
+                      onChange={(e) => setAgentId(e.target.value)}
+                      options={agents.map((a) => ({ value: a.id, label: a.title }))}
+                      size="sm"
+                      variant="outline"
+                    />
+                  </div>
+                )}
+                <Button size="sm" variant="primary" fullWidth={!compact}
+                  disabled={!agentId || (attachments === 0 && !note.trim())}
+                  onClick={send}>
+                  <SendIcon className="w-3.5 h-3.5" />
+                  {t("browser.send")}
+                </Button>
+              </div>
             </div>
           </aside>
         )}

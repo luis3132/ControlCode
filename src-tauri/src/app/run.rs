@@ -83,6 +83,8 @@ pub fn run() {
             crate::preview::preview_clear_network,
             crate::preview::preview_cookies,
             crate::preview::preview_detect_servers,
+            crate::preview::preview_capture,
+            crate::preview::preview_save_capture,
             // Renderizado del WebView (texto nítido en Linux)
             crate::app::rendering_info,
             // Detección de agentes

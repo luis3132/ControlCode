@@ -83,6 +83,20 @@ base64 = "0.22"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Capturas del navegador de las tabs (ver preview::snapshot): la API de cada webview. Todas
+# con la MISMA versión que ya trae wry: el handle que entrega Tauri es de ese crate, y con
+# otra versión serían tipos distintos que no se pueden pasar de uno al otro.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2.0"
+# `png`: la captura llega como superficie de cairo y se escribe como PNG sin otro crate.
+cairo-rs = { version = "0.18", features = ["png"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSBitmapImageRep"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration"] }
+
 # Job Objects: el equivalente en Windows del cgroup que se usa en Linux para que la
 # descendencia de una tab muera con ella (ver terminal::containment).
 [target.'cfg(windows)'.dependencies]
@@ -99,6 +113,10 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }
+# Capturas del navegador (ver preview::snapshot): WebView2 entrega el PNG en un IStream.
+# Misma regla que arriba: las versiones que ya trae wry.
+webview2-com = "0.38"
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
