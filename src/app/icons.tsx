@@ -184,3 +184,34 @@ export function GitlabIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Un teléfono delante de un monitor: probar la página en otros tamaños. */
+export function DevicesIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M17 17H4.5A1.5 1.5 0 013 15.5v-9A1.5 1.5 0 014.5 5h13A1.5 1.5 0 0119 6.5V9M8 21h7M11 17v4" />
+      <rect x="15" y="11" width="6" height="10" rx="1.2" />
+    </svg>
+  );
+}
+
+/** Un bicho: el panel de debug de la página. */
+export function BugIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M9 7.5V6a3 3 0 016 0v1.5" />
+      <rect x="7" y="7.5" width="10" height="12" rx="5" />
+      <path d="M12 11v8.5M3.5 13H7M17 13h3.5M4.5 8.5L7.2 10M19.5 8.5L16.8 10M4.5 18.5l2.8-1.6M19.5 18.5l-2.8-1.6" />
+    </svg>
+  );
+}
+
+/** Flecha que gira sobre un rectángulo: cambiar la orientación. */
+export function RotateIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="4" y="9" width="11" height="11" rx="1.5" />
+      <path d="M13 3.5a7 7 0 017 7M17.5 8.5l2.5 2 2-2.5" />
+    </svg>
+  );
+}

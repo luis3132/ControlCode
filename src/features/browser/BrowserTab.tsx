@@ -5,16 +5,40 @@ import {
   Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, Select, TrashIcon, Tooltip,
 } from "neogestify-ui-components";
 
-import { ExternalIcon, GlobeIcon, PickIcon, RefreshIcon, SendIcon } from "@/app/icons";
+import { BugIcon, DevicesIcon, ExternalIcon, GlobeIcon, PickIcon, RefreshIcon, SendIcon } from "@/app/icons";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { normalizeUrl, type BrowserView } from "@/features/tabs/viewTabs";
 import { pasteIntoTab } from "@/features/terminal/terminalRegistry";
 
 import pickerScript from "./picker.ts?script";
+import runtimeScript from "./page/runtime.ts?script";
+import { registerBrowserHost } from "./agentBridge";
 import { composePickMessage, toTargetUrl } from "./composeMessage";
+import { DebugPanel, MIN_PANEL, type DebugTab } from "./debug/DebugPanel";
+import { appendBatch, currentCounts, EMPTY_LOG, startDocument } from "./debugLog";
+import { useDebugStore } from "./debugStore";
+import { DeviceBar } from "./DeviceBar";
 import { previewDetectServers, previewResolve, type PreviewTarget } from "./ipc";
-import { isPageMessage, type AppMessage, type PickedElement } from "./protocol";
+import { PageChannel } from "./pageChannel";
+import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
+import { ResponsiveStage } from "./ResponsiveStage";
+import { presetById, type Viewport } from "./viewport";
+
+/** Lo que el proxy inyecta en cada página: el selector y el runtime (control del agente y
+ *  captura de debug). Dos scripts sueltos en un solo archivo, así es un único pedido. */
+const INJECTED = `${pickerScript}\n;${runtimeScript}`;
+
+const PANEL_HEIGHT_KEY = "cc-browser-debug-height";
+
+function savedPanelHeight(): number {
+  try {
+    const n = Number(localStorage.getItem(PANEL_HEIGHT_KEY));
+    return Number.isFinite(n) && n >= MIN_PANEL ? n : 280;
+  } catch {
+    return 280;
+  }
+}
 
 function ToolButton({ label, onClick, disabled, active, children }: {
   label: string;
@@ -99,37 +123,115 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const [agentId, setAgentId] = useState<string | null>(activeTabId);
   const [sent, setSent] = useState<{ tabId: string; title: string } | null>(null);
   const [servers, setServers] = useState<string[] | null>(null);
+  const [viewport, setViewportState] = useState<Viewport | null>(view.viewport ?? null);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugTab, setDebugTab] = useState<DebugTab>("console");
+  const [debugHeight, setDebugHeight] = useState(savedPanelHeight);
+  const [docId, setDocId] = useState<string | null>(null);
+  const errors = useDebugStore((s) => currentCounts(s.logs[view.id] ?? EMPTY_LOG).errors);
   const iframe = useRef<HTMLIFrameElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
   /** Dónde está parada la página, en la URL del proxy: es lo que se recarga. */
   const pageUrl = useRef<string | null>(null);
+  /** Lo que el agente lee sin esperar a un render: la última versión de cada cosa. */
+  const targetRef = useRef<PreviewTarget | null>(null);
+  const shownUrl = useRef(view.url);
+  const viewportRef = useRef(viewport);
+  /** Cada documento que cargó con el runtime, y si ya llegó a DOMContentLoaded. */
+  const doc = useRef<{ id: string | null; count: number; ready: boolean }>({ id: null, count: 0, ready: false });
+  const loadWaiters = useRef(new Set<() => void>());
 
-  const postToPage = useCallback((type: AppMessage["type"]) => {
+  const channel = useMemo(() => new PageChannel(() => (
+    targetRef.current ? { window: iframe.current?.contentWindow ?? null, origin: targetRef.current.proxyOrigin } : null
+  )), []);
+
+  useEffect(() => () => {
+    channel.dispose();
+    useDebugStore.getState().drop(view.id);
+  }, [channel, view.id]);
+
+  const postToPage = useCallback((type: SimpleAppMessage["type"]) => {
     if (!target) return;
     iframe.current?.contentWindow?.postMessage({ source: "controlcode", type } satisfies AppMessage, target.proxyOrigin);
   }, [target]);
 
-  const go = useCallback(async (input: string) => {
+  const setViewport = useCallback((next: Viewport | null) => {
+    viewportRef.current = next;
+    setViewportState(next);
+    updateView(view.id, { viewport: next });
+  }, [updateView, view.id]);
+
+  /** `null` si cargó; el motivo si no. */
+  const go = useCallback(async (input: string): Promise<string | null> => {
     const url = normalizeUrl(input);
     if (!url) {
       setError(t("browser.invalidUrl"));
-      return;
+      return t("browser.invalidUrl");
     }
     try {
-      const resolved = await previewResolve(url, pickerScript);
+      const resolved = await previewResolve(url, INJECTED);
       // La misma dirección otra vez es "recargá": el `src` no cambia y el iframe no se
       // enteraría.
       if (iframe.current && iframe.current.src === resolved.proxiedUrl) iframe.current.src = resolved.proxiedUrl;
+      targetRef.current = resolved;
+      shownUrl.current = url;
       setTarget(resolved);
       pageUrl.current = resolved.proxiedUrl;
       setAddress(url);
       setError(null);
       setPicking(false);
       updateView(view.id, { url, title: new URL(url).host });
+      return null;
     } catch (e) {
       setError(String(e));
+      return String(e);
     }
   }, [t, updateView, view.id]);
+
+  const reload = useCallback(() => {
+    if (iframe.current && pageUrl.current) iframe.current.src = pageUrl.current;
+  }, []);
+
+  // Lo que maneja un agente. Todo por refs: el pedido llega por fuera de React, y tiene
+  // que ver la página como está AHORA, no como estaba en el último render.
+  const goRef = useRef(go);
+  const postRef = useRef(postToPage);
+  goRef.current = go;
+  postRef.current = postToPage;
+  useEffect(() => registerBrowserHost({
+    viewId: view.id,
+    cwd: view.cwd,
+    channel,
+    navigate: async (url) => {
+      const failure = await goRef.current(url);
+      if (failure) throw new Error(failure);
+    },
+    history: (action) => (action === "reload" ? reload() : postRef.current(action === "back" ? "history:back" : "history:forward")),
+    setViewport,
+    viewport: () => viewportRef.current,
+    proxyOrigin: () => targetRef.current?.proxyOrigin ?? null,
+    targetOrigin: () => targetRef.current?.targetOrigin ?? null,
+    currentUrl: () => shownUrl.current,
+    loadCount: () => doc.current.count,
+    waitForLoad: (after, timeoutMs) => new Promise((resolve) => {
+      const check = () => doc.current.count > after && doc.current.ready;
+      if (check()) {
+        resolve(true);
+        return;
+      }
+      const wake = () => {
+        if (!check()) return;
+        finish(true);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      const finish = (ok: boolean) => {
+        clearTimeout(timer);
+        loadWaiters.current.delete(wake);
+        resolve(ok);
+      };
+      loadWaiters.current.add(wake);
+    }),
+  }), [channel, reload, setViewport, view.cwd, view.id]);
 
   useEffect(() => {
     if (view.url) go(view.url);
@@ -143,17 +245,37 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
 
   useEffect(() => {
     if (!target) return;
+    const display = (url: string) => toTargetUrl(url, target.proxyOrigin, target.targetOrigin);
+    const wakeLoadWaiters = () => {
+      for (const wake of [...loadWaiters.current]) wake();
+    };
     const onMessage = (e: MessageEvent) => {
       // Solo lo que manda ESTE iframe: con dos navegadores abiertos, cada uno escucha lo suyo.
       if (e.source !== iframe.current?.contentWindow || !isPageMessage(e.data)) return;
       const msg = e.data;
       if (msg.type === "nav") {
         pageUrl.current = msg.payload.url;
-        const shown = toTargetUrl(msg.payload.url, target.proxyOrigin, target.targetOrigin);
+        const shown = display(msg.payload.url);
+        shownUrl.current = shown;
         setAddress(shown);
         let host = shown;
         try { host = new URL(shown).host; } catch { /* se queda con la URL entera */ }
         updateView(view.id, { url: shown, title: msg.payload.title || host });
+        doc.current.ready = true;
+        wakeLoadWaiters();
+      } else if (msg.type === "page:ready") {
+        const url = display(msg.payload.url);
+        channel.documentChanged(url);
+        doc.current = { id: msg.payload.doc, count: doc.current.count + 1, ready: false };
+        setDocId(msg.payload.doc);
+        useDebugStore.getState().apply(view.id, (log) => startDocument(log, msg.payload.doc, url, Date.now()));
+        // Con esto la página aprende a quién mandarle lo que capturó durante la carga.
+        (e.source as Window).postMessage({ source: "controlcode", type: "connect" } satisfies AppMessage, target.proxyOrigin);
+      } else if (msg.type === "page:reply") {
+        channel.reply(msg.payload);
+      } else if (msg.type === "debug:batch") {
+        const batch = { ...msg.payload, url: display(msg.payload.url) };
+        useDebugStore.getState().apply(view.id, (log) => appendBatch(log, batch));
       } else if (msg.type === "pick:selected") {
         const el = msg.payload.element;
         setPicks((prev) => [...prev.filter((p) => !(p.selector === el.selector && p.url === el.url)), el]);
@@ -166,7 +288,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [target, updateView, view.id]);
+  }, [channel, target, updateView, view.id]);
 
   // Esc también cancela con el foco afuera de la página (en la barra, por ejemplo).
   useEffect(() => {
@@ -232,8 +354,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         <ToolButton label={t("browser.forward")} disabled={!target} onClick={() => postToPage("history:forward")}>
           <ArrowRightIcon className="w-4 h-4 stroke-2" />
         </ToolButton>
-        <ToolButton label={t("browser.reload")} disabled={!target}
-          onClick={() => { if (iframe.current && pageUrl.current) iframe.current.src = pageUrl.current; }}>
+        <ToolButton label={t("browser.reload")} disabled={!target} onClick={reload}>
           <RefreshIcon className="w-4 h-4 stroke-2" />
         </ToolButton>
 
@@ -275,11 +396,27 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
             </span>
           )}
         </ActionButton>
+        <div className="w-px h-5 mx-0.5 shrink-0 bg-gray-200 dark:bg-white/10" />
+        <ToolButton label={viewport ? t("browser.viewport.exit") : t("browser.viewport.enter")} active={!!viewport}
+          onClick={() => setViewport(viewport ? null : (presetById("phone") ?? null))}>
+          <DevicesIcon className="w-4 h-4" />
+        </ToolButton>
+        <ToolButton label={t("browser.debug.toggle")} active={debugOpen} onClick={() => setDebugOpen((v) => !v)}>
+          <BugIcon className="w-4 h-4" />
+          {errors > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-red-600 text-white
+              text-[9.5px] font-bold leading-4 text-center tabular-nums">
+              {errors > 99 ? "99+" : errors}
+            </span>
+          )}
+        </ToolButton>
         <ToolButton label={t("browser.openExternal")} disabled={!target}
           onClick={() => openUrl(address).catch(console.error)}>
           <ExternalIcon className="w-4 h-4 stroke-2" />
         </ToolButton>
       </div>
+
+      {viewport && <DeviceBar viewport={viewport} onChange={setViewport} onClose={() => setViewport(null)} />}
 
       {picking && (
         <div className="shrink-0 px-3 py-1 text-[11px] text-center
@@ -289,9 +426,10 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       )}
 
       <div className="flex flex-1 min-h-0">
-        <div className="relative flex-1 min-w-0 bg-white">
+        <div data-browser-column className="relative flex flex-col flex-1 min-w-0">
           {shownError}
           {target ? (
+            <ResponsiveStage viewport={viewport} onResize={setViewport}>
             <iframe
               ref={iframe}
               src={target.proxiedUrl}
@@ -305,10 +443,11 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
               // entera (los clásicos anti-iframe) no puede sacar a la app de sí misma.
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock"
               allow="clipboard-read; clipboard-write; fullscreen"
-              className="w-full h-full border-0"
+              className="block w-full h-full border-0"
             />
+            </ResponsiveStage>
           ) : (
-            <div className="flex items-center justify-center h-full p-8 bg-gray-50 dark:bg-[#0d1117]">
+            <div className="flex flex-1 items-center justify-center p-8 bg-gray-50 dark:bg-[#0d1117]">
               <div className="flex flex-col items-center gap-4 max-w-sm text-center">
                 <span className="flex items-center justify-center w-12 h-12 rounded-2xl
                   bg-blue-500/10 text-blue-600 dark:text-blue-400">
@@ -336,6 +475,23 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
                 )}
               </div>
             </div>
+          )}
+          {debugOpen && target && (
+            <DebugPanel
+              viewId={view.id}
+              channel={channel}
+              proxyOrigin={target.proxyOrigin}
+              targetOrigin={target.targetOrigin}
+              docId={docId}
+              tab={debugTab}
+              onTab={setDebugTab}
+              height={debugHeight}
+              onHeight={(h) => {
+                setDebugHeight(h);
+                try { localStorage.setItem(PANEL_HEIGHT_KEY, String(h)); } catch { /* recordarlo es cortesía */ }
+              }}
+              onClose={() => setDebugOpen(false)}
+            />
           )}
         </div>
 

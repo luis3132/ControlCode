@@ -11,6 +11,7 @@
 //! cualquier diálogo o menú de la app que pasara por esa zona quedaría tapado, y habría que
 //! reposicionarlo a mano con cada cambio de layout.
 
+mod log;
 mod proxy;
 mod rewrite;
 #[cfg(test)]

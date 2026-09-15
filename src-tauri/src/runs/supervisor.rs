@@ -83,31 +83,17 @@ pub fn notify_changed(app: &AppHandle, task_id: &str) {
     emit_changed(app, task_id);
 }
 
-/// El `--mcp-config` que le dice al agente cómo alcanzar su puente de permisos.
+/// El `--mcp-config` que le dice al agente cómo alcanzar su puente de permisos y el
+/// navegador.
 ///
 /// Se escribe uno por tarea porque el `--task` de adentro es lo que después le dice a la
 /// app a qué tarjeta pertenece cada pedido. El archivo se borra al terminar; los que
 /// queden de un cierre sucio los barre el arranque.
+///
+/// Si no hay `ccode` —una build de desarrollo sin el binario al lado— se corre sin broker
+/// en vez de fallar: el agente igual sirve, solo que sin poder pedir permiso.
 fn write_mcp_config(task_id: &str) -> Option<PathBuf> {
-    // El mismo binario que la app instala en el PATH. Si no está —una build de desarrollo
-    // sin `ccode` al lado— se corre sin broker en vez de fallar: el agente igual sirve,
-    // solo que sin poder pedir permiso.
-    let ccode = crate::ipc::install::source_binary()?;
-
-    let dir = dirs::home_dir()?.join(".controlcode").join("mcp");
-    std::fs::create_dir_all(&dir).ok()?;
-    let path = dir.join(format!("{task_id}.json"));
-
-    let config = serde_json::json!({
-        "mcpServers": {
-            crate::ipc::mcp::SERVER_NAME: {
-                "command": ccode.to_string_lossy(),
-                "args": ["mcp", "--task", task_id],
-            }
-        }
-    });
-    std::fs::write(&path, config.to_string()).ok()?;
-    Some(path)
+    crate::ipc::mcp::write_config(task_id, &["mcp", "--task", task_id])
 }
 
 /// Dónde va el NDJSON crudo de una tarea.

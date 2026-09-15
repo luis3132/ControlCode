@@ -25,6 +25,7 @@ import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { accountEnv as accountEnvFor } from "@/features/accounts/ipc";
 import { resolvePrelaunch } from "@/features/prelaunch/ipc";
 import { reconcileTabSkills } from "@/features/skills/ipc";
+import { withBrowserMcp } from "@/features/browser/tabMcp";
 import { homeDir } from "@/shared/ipc/window";
 import { ptyAttach, ptyCreate, ptyKill, ptyResize, ptyWrite } from "./ipc";
 import { createFitter } from "./fit";
@@ -391,8 +392,13 @@ export function Terminal({
           }
         }
 
+        // Claude Code arranca con el navegador de la app como MCP: así puede abrir, leer y
+        // probar la página del proyecto en la tab de navegador que el usuario ve.
+        const launch = agentId === "claude-code" ? await withBrowserMcp(command, resolvedCwd) : command;
+        if (cancelled) return;
+
         const ptyId = await ptyCreate({
-          command,
+          command: launch,
           cwd: resolvedCwd,
           cols: term.cols,
           rows: term.rows,

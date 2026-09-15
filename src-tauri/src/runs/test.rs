@@ -92,6 +92,18 @@ fn con_broker_los_permisos_se_rutean_a_la_consola() {
     assert!(args.contains("--permission-prompts host"));
 }
 
+/// El navegador de las tabs no pasa por la consola: una tarea que prueba una página haría
+/// una pregunta por cada click. Y no se permite nada más que eso — ni el propio broker, ni
+/// un comodín que abarcaría cualquier tool futura del servidor.
+#[test]
+fn con_broker_el_navegador_ya_esta_permitido_y_nada_mas() {
+    let launch = claude().launch("x", None, None, &ctx_con_broker());
+    let at = launch.args.iter().position(|a| a == "--allowedTools").expect("falta --allowedTools");
+    let allowed: Vec<&str> = launch.args[at + 1].split(',').collect();
+    assert!(allowed.contains(&"mcp__controlcode__browser_click"));
+    assert!(allowed.iter().all(|t| t.starts_with("mcp__controlcode__browser_")), "{allowed:?}");
+}
+
 /// Sin broker no hay a quién preguntarle: lo que preguntaría se deniega en vez de colgar el
 /// proceso esperando a nadie.
 #[test]

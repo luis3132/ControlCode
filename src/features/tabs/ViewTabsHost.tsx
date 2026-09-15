@@ -19,6 +19,7 @@ import { comparablePath } from "@/features/tabs/viewTabs";
 export function ViewTabsHost() {
   const views = useViewTabsStore((s) => s.views);
   const activeViewId = useViewTabsStore((s) => s.activeViewId);
+  const keepMountedIds = useViewTabsStore((s) => s.keepMountedIds);
   const activeCwd = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId)?.cwd ?? null);
   const onWorkspace = useLocation().pathname.startsWith("/workspace");
 
@@ -44,7 +45,7 @@ export function ViewTabsHost() {
     >
       {views.map((view) => {
         const isActive = view.id === active?.id;
-        if (!isActive && !seen.has(view.id)) return null;
+        if (!isActive && !seen.has(view.id) && !keepMountedIds.includes(view.id)) return null;
         return (
           <div key={view.id} style={{ position: "absolute", inset: 0, visibility: isActive ? undefined : "hidden" }}>
             {view.kind === "file" && <FileTab view={view} active={isActive && onWorkspace} />}

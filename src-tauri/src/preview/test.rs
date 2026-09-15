@@ -142,6 +142,7 @@ async fn fake_dev_server() -> u16 {
                     "/" => ("200 OK", "Content-Type: text/html; charset=utf-8\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: frame-ancestors 'none'\r\n",
                             "<html><head><title>Hola</title></head><body>hola</body></html>".to_string()),
                     "/app.js" => ("200 OK", "Content-Type: application/javascript\r\n", "console.log(1)".to_string()),
+                    "/sesion" => ("200 OK", "Set-Cookie: sid=abc; Path=/app; HttpOnly; SameSite=Lax\r\nSet-Cookie: tema=oscuro; Domain=localhost\r\n", String::new()),
                     "/login" => ("302 Found", &*Box::leak(format!("Location: http://127.0.0.1:{port}/panel\r\n").into_boxed_str()), String::new()),
                     _ => ("404 Not Found", "", String::new()),
                 };
@@ -231,4 +232,138 @@ async fn el_websocket_del_recargado_en_caliente_atraviesa_el_proxy() {
     let mut echo = [0u8; 4];
     sock.read_exact(&mut echo).await.unwrap();
     assert_eq!(&echo, b"ping");
+}
+
+// ── El log del proxy: red y cookies ──────────────────────────────
+
+use super::log::{parse_cookie_header, parse_http_date, parse_set_cookie, Exchange, ProxyLog};
+use super::proxy::{preview_cookies, preview_network};
+
+#[test]
+fn las_fechas_http_se_leen_en_sus_dos_grafias() {
+    assert_eq!(parse_http_date("Thu, 01 Jan 1970 00:00:00 GMT"), Some(0));
+    assert_eq!(parse_http_date("Wed, 21 Oct 2015 07:28:00 GMT"), Some(1_445_412_480));
+    assert_eq!(parse_http_date("Wed, 21-Oct-2015 07:28:00 GMT"), Some(1_445_412_480));
+    assert_eq!(parse_http_date("mañana"), None);
+}
+
+#[test]
+fn un_set_cookie_trae_los_atributos_que_explican_por_que_no_llega() {
+    let c = parse_set_cookie("sid=abc=def; Path=/app; HttpOnly; Secure; SameSite=Strict; Max-Age=60", 1000).unwrap();
+    assert_eq!((c.name.as_str(), c.value.as_str()), ("sid", "abc=def"));
+    assert_eq!(c.path.as_deref(), Some("/app"));
+    assert!(c.http_only && c.secure);
+    assert_eq!(c.same_site.as_deref(), Some("Strict"));
+    assert_eq!(c.expires_at, Some(1060));
+
+    // Max-Age gana sobre Expires, y Max-Age=0 es "borrala ya".
+    let borrar = parse_set_cookie("sid=; Expires=Wed, 21 Oct 2099 07:28:00 GMT; Max-Age=0", 1000).unwrap();
+    assert_eq!(borrar.expires_at, Some(0));
+    assert!(parse_set_cookie("sin-igual", 0).is_none());
+}
+
+#[test]
+fn la_cabecera_cookie_se_parte_en_pares() {
+    let cookies = parse_cookie_header("a=1; b=x=y;  ; c");
+    let names: Vec<_> = cookies.iter().map(|c| (c.name.as_str(), c.value.as_str())).collect();
+    assert_eq!(names, vec![("a", "1"), ("b", "x=y")]);
+}
+
+fn exchange(url: &str, set_cookies: &[&str]) -> Exchange<'static> {
+    Exchange {
+        method: "GET",
+        url: url.to_string(),
+        cookie_header: None,
+        status: Some(200),
+        content_type: None,
+        size: None,
+        duration_ms: 1,
+        error: None,
+        websocket: false,
+        set_cookies: set_cookies.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+#[test]
+fn el_log_se_lee_por_partes_y_avisa_si_se_perdio_algo() {
+    let log = ProxyLog::default();
+    for i in 0..3 {
+        log.record(exchange(&format!("http://x/{i}"), &[]), 0);
+    }
+    let first = log.since(0);
+    assert_eq!(first.entries.len(), 3);
+    assert_eq!(first.next, 3);
+    assert!(!first.dropped);
+
+    log.record(exchange("http://x/3", &[]), 0);
+    let second = log.since(first.next);
+    assert_eq!(second.entries.iter().map(|e| e.url.as_str()).collect::<Vec<_>>(), vec!["http://x/3"]);
+
+    // Más de lo que entra: quien leyó hasta el 4 se perdió entradas y tiene que saberlo.
+    for i in 0..2000 {
+        log.record(exchange(&format!("http://x/n{i}"), &[]), 0);
+    }
+    assert!(log.since(second.next).dropped);
+}
+
+/// Un servidor borra una cookie mandándola vencida: si el log la siguiera mostrando, el
+/// panel diría que el logout no funcionó cuando sí.
+#[test]
+fn una_cookie_vencida_desaparece_del_reporte() {
+    let log = ProxyLog::default();
+    log.record(exchange("http://x/login", &["sid=1; Path=/"]), 5_000_000);
+    assert_eq!(log.cookies(5_000_000).set.len(), 1);
+    log.record(exchange("http://x/logout", &["sid=; Path=/; Max-Age=0"]), 5_000_000);
+    assert!(log.cookies(5_000_000).set.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn el_proxy_anota_la_red_y_las_cookies_httponly() {
+    let port = fake_dev_server().await;
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
+
+    let c = client();
+    c.get(format!("{}/", target.proxy_origin)).send().await.unwrap().text().await.unwrap();
+    let resp = c.get(format!("{}/sesion", target.proxy_origin)).send().await.unwrap();
+    // El Domain se quita para que el iframe en 127.0.0.1 la acepte.
+    let set: Vec<_> = resp.headers().get_all("set-cookie").iter().map(|v| v.to_str().unwrap().to_string()).collect();
+    assert!(set.iter().any(|v| v.starts_with("tema=oscuro") && !v.contains("Domain")), "{set:?}");
+    c.get(format!("{}/no-existe", target.proxy_origin))
+        .header("cookie", "sid=abc; tema=oscuro")
+        .send().await.unwrap();
+
+    let page = preview_network(target.proxy_origin.clone(), before).await.unwrap();
+    let seen: Vec<_> = page.entries.iter().map(|e| (e.url.clone(), e.status)).collect();
+    assert_eq!(seen, vec![
+        (format!("http://127.0.0.1:{port}/"), Some(200)),
+        (format!("http://127.0.0.1:{port}/sesion"), Some(200)),
+        (format!("http://127.0.0.1:{port}/no-existe"), Some(404)),
+    ]);
+    // El HTML pierde su Content-Length al inyectarle el script; el tamaño igual se sabe.
+    assert!(page.entries[0].size.is_some_and(|s| s > 0), "{:?}", page.entries[0]);
+    assert!(page.entries[0].content_type.as_deref().is_some_and(|t| t.starts_with("text/html")));
+
+    let cookies = preview_cookies(target.proxy_origin.clone()).await.unwrap();
+    let sid = cookies.set.iter().find(|c| c.name == "sid").expect("la HttpOnly se ve");
+    assert!(sid.http_only);
+    assert_eq!(sid.path.as_deref(), Some("/app"));
+    assert_eq!(cookies.sent.unwrap().cookies.len(), 2);
+
+    // Borrarla la vence con el MISMO path con que se creó: con otro, el navegador la ignora.
+    let clear = c
+        .get(format!("{}/__controlcode__/cookies/clear?name=sid", target.proxy_origin))
+        .send().await.unwrap();
+    let expire: Vec<_> = clear.headers().get_all("set-cookie").iter().map(|v| v.to_str().unwrap().to_string()).collect();
+    assert!(expire.contains(&"sid=; Max-Age=0; Path=/app".to_string()), "{expire:?}");
+    assert!(preview_cookies(target.proxy_origin.clone()).await.unwrap().set.iter().all(|c| c.name != "sid"));
+
+    // Un nombre que colaría atributos en el Set-Cookie se rechaza.
+    let bad = c
+        .get(format!("{}/__controlcode__/cookies/clear?name=a%3B%20Domain%3Devil", target.proxy_origin))
+        .send().await.unwrap();
+    assert_eq!(bad.status(), 400);
+    // Lo propio del proxy no se anota como tráfico de la página.
+    let after = preview_network(target.proxy_origin.clone(), page.next).await.unwrap();
+    assert!(after.entries.is_empty(), "{:?}", after.entries);
 }

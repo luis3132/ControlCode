@@ -78,6 +78,9 @@ pub fn run() {
             crate::scm::scm_file_at,
             // Tabs de navegador (proxy con selector de elementos)
             crate::preview::preview_resolve,
+            crate::preview::preview_network,
+            crate::preview::preview_clear_network,
+            crate::preview::preview_cookies,
             crate::preview::preview_detect_servers,
             // Renderizado del WebView (texto nítido en Linux)
             crate::app::rendering_info,
@@ -136,6 +139,7 @@ pub fn run() {
             crate::skills::check_session_skills,
             crate::skills::restore_session_skills,
             crate::ipc::bridge::cli_respond,
+            crate::ipc::mcp::tab_browser_mcp,
             crate::ipc::install::cli_install_status,
             crate::ipc::install::install_cli,
             crate::ipc::install::uninstall_cli,

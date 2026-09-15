@@ -1,7 +1,7 @@
-import { readFile } from "node:fs/promises";
 import { fileURLToPath, URL } from "node:url";
 
-import { defineConfig, transformWithEsbuild, type Plugin } from "vite";
+import { build } from "esbuild";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -16,27 +16,40 @@ const isDebugBuild = !!process.env.TAURI_ENV_DEBUG;
  * `import fuente from "./archivo.ts?script"` — ese archivo compilado a JS, como string.
  *
  * Para el código que la app no corre sino que INYECTA en otra página: el selector de
- * elementos del navegador de las tabs vive adentro del iframe del proyecto. Se escribe en
- * TS y lo chequea tsc como a todo lo demás; lo único distinto es el resultado, un script
- * autocontenido (IIFE) en vez de un módulo del bundle.
+ * elementos y el runtime del navegador de las tabs viven adentro del iframe del proyecto.
+ * Se escriben en TS y los chequea tsc como a todo lo demás; lo único distinto es el
+ * resultado, un script autocontenido (IIFE) en vez de un módulo del bundle.
+ *
+ * Se empaqueta (y no solo se transpila) para que ese script pueda importar módulos puros
+ * —el serializador de la consola, el formato del snapshot— que así se prueban en Node
+ * como el resto de la lógica, en vez de quedar enterrados en código que solo corre
+ * adentro de una página.
  */
 function scriptAsString(): Plugin {
   const SUFFIX = "?script";
+  const root = fileURLToPath(new URL("./", import.meta.url));
   return {
     name: "controlcode:script-as-string",
     async load(id) {
       if (!id.endsWith(SUFFIX)) return null;
       const file = id.slice(0, -SUFFIX.length);
-      this.addWatchFile(file);
-      const source = await readFile(file, "utf8");
-      const { code } = await transformWithEsbuild(source, file, {
-        loader: "ts",
+      const result = await build({
+        entryPoints: [file],
+        absWorkingDir: root,
+        bundle: true,
+        write: false,
+        metafile: true,
         format: "iife",
+        platform: "browser",
         // Corre dentro de la página del usuario, no del webview de la app: se apunta bajo.
         target: "es2019",
         minify: true,
+        logLevel: "silent",
       });
-      return `export default ${JSON.stringify(code)};`;
+      for (const input of Object.keys(result.metafile.inputs)) {
+        this.addWatchFile(fileURLToPath(new URL(input, `file://${root}`)));
+      }
+      return `export default ${JSON.stringify(result.outputFiles[0].text)};`;
     },
   };
 }

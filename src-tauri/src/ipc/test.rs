@@ -314,3 +314,165 @@ fn la_ayuda_de_la_cli_menciona_los_comandos_de_skills() {
         assert!(src.contains(verbo), "la ayuda no menciona '{verbo}'");
     }
 }
+
+// ── `ccode mcp`: el puente MCP ──────────────────────────────────
+
+use super::mcp::{browser_tool_names, serve, McpContext};
+
+/// Corre el servidor sobre una conversación entera y devuelve las respuestas y lo que se
+/// le mandó a la app.
+fn mcp_session(
+    context: &McpContext,
+    lines: &[serde_json::Value],
+    reply: impl Fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>,
+) -> (Vec<serde_json::Value>, Vec<(String, serde_json::Value)>) {
+    let input: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    let mut output = Vec::new();
+    let mut sent = Vec::new();
+    serve(context, input.as_bytes(), &mut output, |command, payload| {
+        let answer = reply(command, &payload);
+        sent.push((command.to_string(), payload));
+        answer
+    })
+    .unwrap();
+    let responses = String::from_utf8(output)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    (responses, sent)
+}
+
+fn tool_names(response: &serde_json::Value) -> Vec<String> {
+    response["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+fn call(id: u64, name: &str, arguments: serde_json::Value) -> serde_json::Value {
+    json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": name, "arguments": arguments } })
+}
+
+/// Una tab interactiva no tiene broker: sus permisos los contesta la persona en la
+/// terminal. Ofrecerle `approve_tool_use` sería una tool que el modelo podría llamar para
+/// "aprobarse" algo a sí mismo.
+#[test]
+fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let (tab, _) = mcp_session(&McpContext::Cwd("/p".into()), std::slice::from_ref(&list), |_, _| Ok(json!({})));
+    let (task, _) = mcp_session(&McpContext::Task("t1".into()), &[list], |_, _| Ok(json!({})));
+
+    let tab = tool_names(&tab[0]);
+    let task = tool_names(&task[0]);
+    assert!(!tab.contains(&"approve_tool_use".to_string()));
+    assert!(tab.contains(&"browser_click".to_string()));
+    assert_eq!(task[0], "approve_tool_use");
+    assert_eq!(&task[1..], &tab[..]);
+
+    // Lo que se permite de antemano en `--allowedTools` es exactamente lo que se ofrece:
+    // un nombre de más no hace nada, uno de menos deja una tool pidiendo permiso por cada uso.
+    let allowed: Vec<String> = tab.iter().map(|n| format!("mcp__controlcode__{n}")).collect();
+    assert_eq!(browser_tool_names(), allowed);
+}
+
+#[test]
+fn una_tool_del_navegador_viaja_como_browser_run_con_su_carpeta() {
+    let (responses, sent) = mcp_session(
+        &McpContext::Cwd("/home/u/proyecto".into()),
+        &[
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            call(7, "browser_type", json!({ "target": "e3", "text": "ana@x.com", "submit": true })),
+        ],
+        |_, _| Ok(json!({ "text": "{\"typed\":\"input#email\"}" })),
+    );
+
+    // La notificación no lleva respuesta: contestarla rompe a los clientes estrictos.
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0]["id"], 7);
+    assert_eq!(responses[0]["result"]["content"][0]["text"], "{\"typed\":\"input#email\"}");
+    assert!(responses[0]["result"].get("isError").is_none());
+
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, "browser.run");
+    assert_eq!(
+        sent[0].1,
+        json!({ "cwd": "/home/u/proyecto", "request": { "op": "type", "target": "e3", "text": "ana@x.com", "submit": true } })
+    );
+}
+
+/// Desde una tarea, el navegador se pide por la tarea: la app sabe de qué proyecto es,
+/// aunque la tarea corra en un worktree con otra carpeta.
+#[test]
+fn desde_una_tarea_el_navegador_se_pide_por_la_tarea() {
+    let (_, sent) = mcp_session(
+        &McpContext::Task("t-9".into()),
+        &[call(1, "browser_snapshot", json!({}))],
+        |_, _| Ok(json!({ "text": "page: …" })),
+    );
+    assert_eq!(sent[0].1, json!({ "taskId": "t-9", "request": { "op": "snapshot" } }));
+}
+
+/// "No hay elemento e12" es algo que el agente tiene que leer para corregirse, no una
+/// falla del protocolo que lo corte.
+#[test]
+fn un_error_del_navegador_llega_al_agente_como_resultado_con_error() {
+    let (responses, _) = mcp_session(
+        &McpContext::Cwd("/p".into()),
+        &[call(2, "browser_click", json!({ "target": "e12" }))],
+        |_, _| Err("No hay ningún elemento e12: tomá un snapshot nuevo".into()),
+    );
+    let result = &responses[0]["result"];
+    assert_eq!(result["isError"], true);
+    assert!(result["content"][0]["text"].as_str().unwrap().contains("e12"));
+}
+
+#[test]
+fn desde_una_tab_no_se_puede_llamar_al_broker() {
+    let (responses, sent) = mcp_session(
+        &McpContext::Cwd("/p".into()),
+        &[call(3, "approve_tool_use", json!({ "tool_name": "Bash", "input": {} }))],
+        |_, _| Ok(json!({ "allow": true })),
+    );
+    assert!(sent.is_empty(), "no puede llegar a la app: {sent:?}");
+    assert_eq!(responses[0]["result"]["isError"], true);
+}
+
+#[test]
+fn el_broker_deniega_si_la_app_no_contesta() {
+    let (responses, _) = mcp_session(
+        &McpContext::Task("t1".into()),
+        &[call(4, "approve_tool_use", json!({ "tool_name": "Edit", "input": { "file_path": "a" } }))],
+        |_, _| Err("conexión rechazada".into()),
+    );
+    let text = responses[0]["result"]["content"][0]["text"].as_str().unwrap();
+    let verdict: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(verdict["behavior"], "deny");
+}
+
+#[test]
+fn el_initialize_devuelve_la_version_pedida_y_explica_el_navegador() {
+    let (responses, _) = mcp_session(
+        &McpContext::Cwd("/p".into()),
+        &[json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "protocolVersion": "2025-11-25" } })],
+        |_, _| Ok(json!({})),
+    );
+    assert_eq!(responses[0]["result"]["protocolVersion"], "2025-11-25");
+    assert!(responses[0]["result"]["instructions"].as_str().unwrap().contains("untrusted"));
+}
+
+/// Lo que el puente MCP le manda a la app también son comandos del despachador; y
+/// `browser.run` además tiene que atenderlo el frontend, que es donde vive la página.
+#[test]
+fn lo_que_manda_el_puente_mcp_lo_atienden_el_despachador_y_el_frontend() {
+    let dispatched = dispatched_commands();
+    let mcp = include_str!("mcp.rs");
+    for command in ["run.approve", "browser.run"] {
+        assert!(mcp.contains(&format!("send(\"{command}\"")), "el puente ya no manda {command}");
+        assert!(dispatched.contains(&command.to_string()), "nadie atiende {command}");
+    }
+    let bridge = include_str!("../../../src/features/orchestrator/cliBridge.ts");
+    assert!(bridge.contains("case \"browser.run\""), "el frontend no atiende browser.run");
+}

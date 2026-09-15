@@ -105,9 +105,9 @@ fn main() -> ExitCode {
         return ExitCode::from(EXIT_OK);
     }
 
-    // `ccode mcp --task <id>` se atiende antes que nada: no devuelve una línea JSON como
-    // el resto, sino que se queda con stdin y stdout hablando JSON-RPC con el agente que
-    // lo lanzó. Mezclarlo con el parseo de flags normal le ensuciaría el canal.
+    // `ccode mcp` se atiende antes que nada: no devuelve una línea JSON como el resto,
+    // sino que se queda con stdin y stdout hablando JSON-RPC con el agente que lo lanzó.
+    // Mezclarlo con el parseo de flags normal le ensuciaría el canal.
     if args[0] == "mcp" {
         return run_mcp(&args[1..]);
     }
@@ -364,6 +364,7 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         }
         // Los topes del backend suman ~40s (15 para que aparezca el PTY + 25 de arranque).
         "tab.create" if has_init_prompt(args) => Duration::from_secs(75),
+        "browser.run" => Duration::from_secs(controlcode_lib::ipc::mcp::BROWSER_TIMEOUT_SECS + 15),
         "run.approve" => {
             let requested = args
                 .get("timeout")
@@ -456,24 +457,27 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
     })
 }
 
-/// `ccode mcp --task <id>`: el puente de permisos de un agente headless.
+/// `ccode mcp`: el puente MCP de un agente. Con `--task` es el de una tarea de la flota
+/// (permisos y navegador); con `--cwd`, el de una tab de Claude Code (solo el navegador).
 ///
 /// Cada pedido se traduce a un comando del mismo protocolo que usa el resto de la CLI, así
 /// que no hay un canal nuevo ni una autorización nueva — el token del handshake es el
 /// mismo. Los errores van a stderr: stdout es del JSON-RPC y meterle una línea suelta
 /// rompe al cliente.
 fn run_mcp(args: &[String]) -> ExitCode {
-    let task_id = match args {
-        [flag, value, ..] if flag == "--task" => value.clone(),
+    use controlcode_lib::ipc::mcp::McpContext;
+    let context = match args {
+        [flag, value, ..] if flag == "--task" => McpContext::Task(value.clone()),
+        [flag, value, ..] if flag == "--cwd" => McpContext::Cwd(value.clone()),
         _ => {
-            eprintln!("Uso: ccode mcp --task <id-de-tarea>");
+            eprintln!("Uso: ccode mcp --task <id-de-tarea> | --cwd <carpeta>");
             return ExitCode::from(EXIT_USAGE);
         }
     };
 
     let stdin = std::io::stdin();
     let result = controlcode_lib::ipc::mcp::serve(
-        &task_id,
+        &context,
         stdin.lock(),
         std::io::stdout(),
         |command, payload| {

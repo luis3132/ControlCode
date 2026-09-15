@@ -101,6 +101,11 @@ impl HeadlessAgent for ClaudeCode {
                 args.push("default".into());
                 args.push("--permission-prompts".into());
                 args.push("host".into());
+                // El navegador de las tabs no pasa por el broker: solo toca la vista
+                // previa del proyecto adentro de la app, y pedir permiso por cada click
+                // haría imposible que una tarea pruebe una página.
+                args.push("--allowedTools".into());
+                args.push(crate::ipc::mcp::browser_tool_names().join(","));
             }
             // Sin broker no hay a quién preguntarle, así que lo que preguntaría se DENIEGA
             // en vez de colgar el proceso esperando a nadie.

@@ -42,6 +42,9 @@ export interface DiffView extends ViewBase {
 export interface BrowserView extends ViewBase {
   kind: "browser";
   url: string;
+  /** El tamaño de pantalla con que se está probando. Ausente = ocupa toda la tab. Se
+   *  persiste: volver a la tab es seguir probando en el mismo tamaño. */
+  viewport?: { width: number; height: number } | null;
 }
 
 export type ViewTab = FileView | DiffView | BrowserView;

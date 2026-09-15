@@ -7,13 +7,14 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::{Arc, LazyLock, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::TryStreamExt;
 use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};
 use hyper::body::{Frame, Incoming};
-use hyper::header::{HeaderValue, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, LOCATION, ORIGIN, REFERER, SET_COOKIE};
+use hyper::body::Body as _;
+use hyper::header::{HeaderValue, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, LOCATION, ORIGIN, REFERER, SET_COOKIE};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
@@ -23,22 +24,30 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
+use super::log::{CookieReport, Exchange, NetPage, ProxyLog, COOKIE_CLEAR_PATH};
 use super::rewrite::{
     inject_picker, is_local_host, parse_response_head, rewrite_location, rewrite_origin_value,
     skip_request_header, skip_response_header, strip_cookie_domain, PICKER_PATH,
 };
 
-/// El script del selector. Lo compila y lo manda la app (`src/features/browser/picker.ts`)
-/// en cada `preview_resolve`: así el backend no carga una copia de código de frontend que
-/// pueda quedar desactualizada, y en desarrollo un cambio al selector se ve sin recompilar
-/// Rust.
+/// El script que se inyecta: el selector y el runtime de la página. Lo compila y lo manda
+/// la app (`src/features/browser/picker.ts` y `page/runtime.ts`) en cada `preview_resolve`:
+/// así el backend no carga una copia de código de frontend que pueda quedar desactualizada,
+/// y en desarrollo un cambio se ve sin recompilar Rust.
 static PICKER: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new(String::new()));
 
 type Body = BoxBody<Bytes, std::io::Error>;
 
-/// Origen de destino → puerto del proxy que lo atiende. Viven lo que vive la app: abrir
-/// otra vez el mismo proyecto reusa el mismo proxy, y con él sus cookies.
-static PROXIES: LazyLock<Mutex<HashMap<String, u16>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Un proxy levantado: su puerto y lo que lleva anotado.
+#[derive(Clone)]
+struct Proxy {
+    port: u16,
+    log: Arc<ProxyLog>,
+}
+
+/// Origen de destino → el proxy que lo atiende. Viven lo que vive la app: abrir otra vez
+/// el mismo proyecto reusa el mismo proxy, y con él sus cookies y su log de red.
+static PROXIES: LazyLock<Mutex<HashMap<String, Proxy>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 struct Ctx {
     /// `http://localhost:5173`, sin barra final.
@@ -50,6 +59,7 @@ struct Ctx {
     is_http: bool,
     proxy_origin: String,
     client: reqwest::Client,
+    log: Arc<ProxyLog>,
 }
 
 #[derive(Debug, Serialize)]
@@ -89,6 +99,13 @@ fn is_websocket(req: &Request<Incoming>) -> bool {
         .is_some_and(|v| v.eq_ignore_ascii_case("websocket"))
 }
 
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Response<Body> {
     if req.uri().path() == PICKER_PATH {
         return Response::builder()
@@ -97,16 +114,88 @@ async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Response<Body> {
             .body(full(PICKER.read().map(|p| p.clone()).unwrap_or_default()))
             .expect("respuesta del selector válida");
     }
-    if is_websocket(&req) {
-        return match websocket(req, &ctx).await {
-            Ok(resp) => resp,
-            Err(e) => error_page(502, &ctx.target_origin, &e),
-        };
+    if req.uri().path() == COOKIE_CLEAR_PATH {
+        return clear_cookie(&req, &ctx);
     }
-    match forward(req, &ctx).await {
-        Ok(resp) => resp,
-        Err(e) => error_page(502, &ctx.target_origin, &e),
+
+    let started = Instant::now();
+    let method = req.method().to_string();
+    let url = format!("{}{}", ctx.target_origin, req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/"));
+    let cookie_header = req.headers().get(COOKIE).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let ws = is_websocket(&req);
+
+    let result = if ws { websocket(req, &ctx).await } else { forward(req, &ctx).await };
+    let (resp, error) = match result {
+        Ok(resp) => (resp, None),
+        Err(e) => (error_page(502, &ctx.target_origin, &e), Some(e)),
+    };
+
+    let header = |name| resp.headers().get(name).and_then(|v: &HeaderValue| v.to_str().ok());
+    ctx.log.record(
+        Exchange {
+            method: &method,
+            url,
+            cookie_header: cookie_header.as_deref(),
+            status: error.is_none().then(|| resp.status().as_u16()),
+            content_type: header(CONTENT_TYPE).map(str::to_string),
+            size: resp.body().size_hint().exact().or_else(|| header(CONTENT_LENGTH).and_then(|v| v.parse().ok())),
+            duration_ms: started.elapsed().as_millis() as u64,
+            error,
+            websocket: ws,
+            set_cookies: resp
+                .headers()
+                .get_all(SET_COOKIE)
+                .iter()
+                .filter_map(|v| v.to_str().ok().map(str::to_string))
+                .collect(),
+        },
+        now_ms(),
+    );
+    resp
+}
+
+/// Vence una cookie desde el servidor: la única forma de borrar una `HttpOnly`. Lo pide el
+/// runtime de la página, que desde JavaScript solo puede borrar las otras.
+fn clear_cookie(req: &Request<Incoming>, ctx: &Ctx) -> Response<Body> {
+    let name = req
+        .uri()
+        .query()
+        .and_then(|q| q.split('&').find_map(|pair| pair.strip_prefix("name=")))
+        .map(percent_decode)
+        .unwrap_or_default();
+    let mut builder = Response::builder().status(204).header("cache-control", "no-store");
+    // Un nombre con `;` o `=` inyectaría atributos en el `Set-Cookie`.
+    if name.is_empty() || name.contains([';', '=', ',', ' ', '\r', '\n']) {
+        return builder.status(400).body(full(Bytes::new())).expect("respuesta válida");
     }
+    for path in ctx.log.forget_cookie(&name) {
+        if let Ok(value) = HeaderValue::from_str(&format!("{name}=; Max-Age=0; Path={path}")) {
+            builder = builder.header(SET_COOKIE, value);
+        }
+    }
+    builder.body(full(Bytes::new())).expect("respuesta válida")
+}
+
+/// `%20` → espacio. Solo lo que hace falta para el nombre de una cookie en la query.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            // Sobre bytes y no sobre el `&str`: cortar `text` justo después de un `%` seguido
+            // de un carácter multibyte entraría en pánico.
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok();
+            if let Some(byte) = hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 async fn forward(req: Request<Incoming>, ctx: &Ctx) -> Result<Response<Body>, String> {
@@ -255,7 +344,7 @@ async fn websocket(mut req: Request<Incoming>, ctx: &Ctx) -> Result<Response<Bod
     builder.body(full(Bytes::new())).map_err(|e| e.to_string())
 }
 
-async fn start_proxy(url: &reqwest::Url) -> Result<u16, String> {
+async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
     let target_origin = url.origin().ascii_serialization();
     let host = url.host_str().ok_or("la URL no tiene host")?.to_string();
     let port = url.port_or_known_default().ok_or("la URL no tiene puerto")?;
@@ -279,7 +368,9 @@ async fn start_proxy(url: &reqwest::Url) -> Result<u16, String> {
         .build()
         .map_err(|e| e.to_string())?;
 
+    let log = Arc::new(ProxyLog::default());
     let ctx = Arc::new(Ctx {
+        log: log.clone(),
         is_http: url.scheme() == "http",
         proxy_origin: format!("http://127.0.0.1:{local_port}"),
         target_origin,
@@ -308,7 +399,7 @@ async fn start_proxy(url: &reqwest::Url) -> Result<u16, String> {
         }
     });
 
-    Ok(local_port)
+    Ok(Proxy { port: local_port, log })
 }
 
 /// Resuelve qué poner en el iframe para mostrar `url`, levantando su proxy si hace falta.
@@ -331,10 +422,11 @@ pub async fn preview_resolve(url: String, picker: String) -> Result<PreviewTarge
     let port = {
         let mut proxies = PROXIES.lock().await;
         match proxies.get(&target_origin) {
-            Some(port) => *port,
+            Some(proxy) => proxy.port,
             None => {
-                let port = start_proxy(&parsed).await?;
-                proxies.insert(target_origin.clone(), port);
+                let proxy = start_proxy(&parsed).await?;
+                let port = proxy.port;
+                proxies.insert(target_origin.clone(), proxy);
                 port
             }
         }
@@ -351,6 +443,40 @@ pub async fn preview_resolve(url: String, picker: String) -> Result<PreviewTarge
         rest.push_str(f);
     }
     Ok(PreviewTarget { proxied_url: format!("{proxy_origin}{rest}"), proxy_origin, target_origin })
+}
+
+/// El log del proxy que sirve `proxy_origin` (`http://127.0.0.1:<puerto>`).
+async fn log_for(proxy_origin: &str) -> Result<Arc<ProxyLog>, String> {
+    let port: u16 = proxy_origin
+        .rsplit(':')
+        .next()
+        .and_then(|p| p.trim_end_matches('/').parse().ok())
+        .ok_or_else(|| format!("'{proxy_origin}' no es el origen de un proxy"))?;
+    PROXIES
+        .lock()
+        .await
+        .values()
+        .find(|p| p.port == port)
+        .map(|p| p.log.clone())
+        .ok_or_else(|| format!("No hay ningún proxy en el puerto {port}"))
+}
+
+/// Los pedidos que pasaron por el proxy después de `since`.
+#[tauri::command]
+pub async fn preview_network(proxy_origin: String, since: u64) -> Result<NetPage, String> {
+    Ok(log_for(&proxy_origin).await?.since(since))
+}
+
+#[tauri::command]
+pub async fn preview_clear_network(proxy_origin: String) -> Result<(), String> {
+    log_for(&proxy_origin).await?.clear_network();
+    Ok(())
+}
+
+/// Las cookies que puso el servidor y las que el navegador le está mandando.
+#[tauri::command]
+pub async fn preview_cookies(proxy_origin: String) -> Result<CookieReport, String> {
+    Ok(log_for(&proxy_origin).await?.cookies(now_ms()))
 }
 
 /// Los puertos que usan por defecto los servidores de desarrollo más comunes: Next/CRA
