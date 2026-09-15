@@ -2,10 +2,16 @@
 //!
 //! El proxy es el mejor lugar para mirar la red de la página, mejor que la página misma:
 //! ve el documento HTML (que ningún script de la página alcanza a ver), el status exacto
-//! de cada recurso (WebKit no lo expone en el Resource Timing) y las cookies `HttpOnly`,
-//! que desde JavaScript son invisibles a propósito. Lo que no ve son los pedidos a OTROS
+//! de cada recurso (WebKit no lo expone en el Resource Timing), todas las cabeceras —las
+//! que la política de CORS le esconde a la página también— y las cookies `HttpOnly`, que
+//! desde JavaScript son invisibles a propósito. Lo que no ve son los pedidos a OTROS
 //! orígenes; esos los cuenta el runtime de la página.
+//!
+//! Cada pedido se anota en tres tiempos: cuando llega (`begin`, y ya se ve como pendiente),
+//! cuando responde el servidor (`head`) y cuando termina el cuerpo (`finish`). El listado
+//! viaja liviano; cabeceras y cuerpos se piden de a un pedido con `detail`.
 
+use base64::Engine as _;
 use serde::Serialize;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
@@ -18,23 +24,127 @@ pub(crate) const COOKIE_CLEAR_PATH: &str = "/__controlcode__/cookies/clear";
 /// carga; esto alcanza para varias recargas sin crecer sin techo.
 const MAX_ENTRIES: usize = 1500;
 
+/// Hasta cuánto de cada cuerpo se guarda. Alcanza para leer cualquier respuesta de una API
+/// o un formulario; un bundle entero no se lee en un panel.
+pub(crate) const MAX_REQUEST_BODY: usize = 256 * 1024;
+pub(crate) const MAX_RESPONSE_BODY: usize = 1024 * 1024;
+
+/// Entre todos los cuerpos guardados. Cuando se pasa se sueltan los de los pedidos más
+/// viejos —se queda lo demás—: una recarga de Vite son cientos de módulos, y guardarlos
+/// todos para siempre sería memoria que nadie va a mirar.
+const BODY_BUDGET: usize = 64 * 1024 * 1024;
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ErrorKind {
+    /// Nadie escucha en ese puerto: el servidor no está corriendo.
+    ConnectionRefused,
+    /// La conexión se cortó a mitad de camino (el servidor se cayó o la cerró).
+    ConnectionReset,
+    Timeout,
+    Dns,
+    Tls,
+    /// El servidor contestó algo que no es HTTP válido.
+    Protocol,
+    /// Falló a mitad del cuerpo.
+    Body,
+    /// La página cortó antes de que terminara (una navegación, un Server-Sent Events).
+    Aborted,
+    Other,
+}
+
+/// Lo que la vista previa le hizo a una cabecera, si le hizo algo.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum HeaderNote {
+    /// Cambió de valor en el camino: `Host`, `Origin` y `Referer` hacia el servidor; `Location`
+    /// y el `Domain` de `Set-Cookie` de vuelta hacia el iframe.
+    Rewritten,
+    /// No pasa: `Accept-Encoding` hacia el servidor; `X-Frame-Options` y la CSP hacia el iframe.
+    Removed,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Header {
+    pub name: String,
+    pub value: String,
+    pub note: Option<HeaderNote>,
+}
+
+impl Header {
+    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self { name: name.into(), value: value.into(), note: None }
+    }
+
+    pub fn noted(name: impl Into<String>, value: impl Into<String>, note: HeaderNote) -> Self {
+        Self { name: name.into(), value: value.into(), note: Some(note) }
+    }
+}
+
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NetEntry {
     pub seq: u64,
+    /// Sube cada vez que la entrada cambia (llegaron las cabeceras, terminó el cuerpo): es lo
+    /// que permite pedir "lo que cambió desde la última vez" y ver un pedido pendiente
+    /// terminar.
+    pub rev: u64,
     /// Milisegundos desde epoch.
     pub at: i64,
     pub method: String,
     /// La URL del servidor de verdad, no la del proxy: es la que se reconoce.
     pub url: String,
     pub status: Option<u16>,
+    /// `Not Found`, `Internal Server Error`: el texto estándar del código.
+    pub status_text: Option<String>,
     pub content_type: Option<String>,
+    /// Lo que midió el cuerpo que pasó; antes de terminar, lo que anunció `Content-Length`.
     pub size: Option<u64>,
-    /// Hasta que llegaron las cabeceras. Lo que tarda el cuerpo no se sabe: pasa como
-    /// stream, y un Server-Sent Events no termina nunca.
+    /// Hasta que llegaron las cabeceras de la respuesta.
+    pub ttfb_ms: Option<u64>,
+    /// Hasta ahora, o hasta que terminó el cuerpo.
     pub duration_ms: u64,
+    /// Terminó (bien o mal). Sin esto y sin error, el pedido sigue en curso.
+    pub finished: bool,
     pub error: Option<String>,
+    pub error_kind: Option<ErrorKind>,
     pub websocket: bool,
+}
+
+/// Un cuerpo tal como se guarda para mostrar.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BodyCapture {
+    /// Los bytes que pasaron en total: lo guardado puede ser menos.
+    pub size: u64,
+    /// El contenido, si es UTF-8.
+    pub text: Option<String>,
+    /// El contenido si no lo es (una imagen, un binario).
+    pub base64: Option<String>,
+    /// Se guardó solo el principio.
+    pub truncated: bool,
+    /// Se soltó para hacerle lugar a pedidos más nuevos.
+    pub evicted: bool,
+    pub content_type: Option<String>,
+    /// `Content-Encoding` de un cuerpo comprimido, que no se puede leer tal cual.
+    pub encoding: Option<String>,
+}
+
+/// Todo lo que se sabe de un pedido: lo del listado más cabeceras y cuerpos.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestDetail {
+    #[serde(flatten)]
+    pub entry: NetEntry,
+    /// Como las recibió el servidor.
+    pub request_headers: Vec<Header>,
+    /// Como las mandó el servidor.
+    pub response_headers: Vec<Header>,
+    pub http_version: Option<String>,
+    pub remote_address: Option<String>,
+    pub request_body: Option<BodyCapture>,
+    pub response_body: Option<BodyCapture>,
 }
 
 /// Una cookie tal como la mandó el servidor, con sus atributos.
@@ -80,34 +190,156 @@ pub struct CookieReport {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NetPage {
+    /// Las entradas nuevas o que cambiaron desde la lectura anterior.
     pub entries: Vec<NetEntry>,
-    /// El `seq` a pasar la próxima vez.
+    /// El `rev` a pasar la próxima vez.
     pub next: u64,
     /// Se perdieron entradas entre la última lectura y esta (el log dio la vuelta).
     pub dropped: bool,
 }
 
-/// Un pedido ya respondido, listo para anotar.
-pub struct Exchange<'a> {
+/// Un pedido que acaba de llegar, antes de reenviarlo.
+pub struct Begin<'a> {
     pub method: &'a str,
     pub url: String,
     pub cookie_header: Option<&'a str>,
-    pub status: Option<u16>,
-    pub content_type: Option<String>,
-    pub size: Option<u64>,
-    pub duration_ms: u64,
-    pub error: Option<String>,
+    pub request_headers: Vec<Header>,
+    pub request_body: &'a [u8],
+    pub request_content_type: Option<String>,
     pub websocket: bool,
+}
+
+/// Llegaron las cabeceras de la respuesta.
+pub struct Head {
+    pub status: u16,
+    pub headers: Vec<Header>,
+    pub http_version: Option<String>,
+    pub remote_address: Option<String>,
     pub set_cookies: Vec<String>,
+    pub content_type: Option<String>,
+    pub content_length: Option<u64>,
+    pub ttfb_ms: u64,
+}
+
+/// Terminó: con el cuerpo que pasó, o con un error.
+pub struct Finish {
+    pub body: Vec<u8>,
+    pub body_size: u64,
+    pub truncated: bool,
+    pub encoding: Option<String>,
+    pub duration_ms: u64,
+    pub error: Option<(ErrorKind, String)>,
+}
+
+impl Finish {
+    pub fn failed(kind: ErrorKind, message: impl Into<String>, duration_ms: u64) -> Self {
+        Self {
+            body: Vec::new(),
+            body_size: 0,
+            truncated: false,
+            encoding: None,
+            duration_ms,
+            error: Some((kind, message.into())),
+        }
+    }
+}
+
+struct Stored {
+    bytes: Vec<u8>,
+    size: u64,
+    truncated: bool,
+    evicted: bool,
+    content_type: Option<String>,
+    encoding: Option<String>,
+}
+
+impl Stored {
+    fn capture(&self) -> BodyCapture {
+        let (text, base64) = if self.evicted {
+            (None, None)
+        } else {
+            match std::str::from_utf8(&self.bytes) {
+                Ok(text) => (Some(text.to_string()), None),
+                // Cortado a mitad de un carácter multibyte sigue siendo texto: se descarta la
+                // cola incompleta en vez de mostrarlo como binario.
+                Err(e) if self.truncated && e.error_len().is_none() => {
+                    (Some(String::from_utf8_lossy(&self.bytes[..e.valid_up_to()]).into_owned()), None)
+                }
+                Err(_) => (None, Some(base64::engine::general_purpose::STANDARD.encode(&self.bytes))),
+            }
+        };
+        BodyCapture {
+            size: self.size,
+            text,
+            base64,
+            truncated: self.truncated,
+            evicted: self.evicted,
+            content_type: self.content_type.clone(),
+            encoding: self.encoding.clone(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct Detail {
+    request_headers: Vec<Header>,
+    response_headers: Vec<Header>,
+    http_version: Option<String>,
+    remote_address: Option<String>,
+    request_body: Option<Stored>,
+    response_body: Option<Stored>,
 }
 
 #[derive(Default)]
 struct Inner {
     last_seq: u64,
+    last_rev: u64,
+    /// El `rev` más alto de lo que se descartó por espacio: quien leyó hasta antes de eso se
+    /// perdió algo.
+    evicted_rev: u64,
     entries: VecDeque<NetEntry>,
+    details: BTreeMap<u64, Detail>,
+    body_bytes: usize,
     /// Por (nombre, path): la misma cookie en dos paths son dos cookies.
     set: BTreeMap<(String, String), SetCookie>,
     sent: Option<SentCookies>,
+}
+
+impl Inner {
+    fn touch(&mut self, seq: u64, update: impl FnOnce(&mut NetEntry)) {
+        self.last_rev += 1;
+        let rev = self.last_rev;
+        if let Some(entry) = self.entries.iter_mut().rev().find(|e| e.seq == seq) {
+            update(entry);
+            entry.rev = rev;
+        }
+    }
+
+    fn store_body(&mut self, seq: u64, stored: Stored, response: bool) {
+        let Some(detail) = self.details.get_mut(&seq) else { return };
+        self.body_bytes += stored.bytes.len();
+        let slot = if response { &mut detail.response_body } else { &mut detail.request_body };
+        if let Some(old) = slot.replace(stored) {
+            self.body_bytes -= old.bytes.len();
+        }
+        // Se sueltan de los más viejos para atrás; el pedido que acaba de terminar no, que es
+        // justo el que alguien está por mirar.
+        let seqs: Vec<u64> = self.details.keys().copied().filter(|&s| s != seq).collect();
+        for old in seqs {
+            if self.body_bytes <= BODY_BUDGET {
+                break;
+            }
+            if let Some(detail) = self.details.get_mut(&old) {
+                for body in [&mut detail.request_body, &mut detail.response_body].into_iter().flatten() {
+                    if !body.evicted {
+                        self.body_bytes -= body.bytes.len();
+                        body.bytes = Vec::new();
+                        body.evicted = true;
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -115,21 +347,84 @@ pub struct ProxyLog {
     inner: Mutex<Inner>,
 }
 
+/// Lo que se guarda de un cuerpo: el principio, hasta `max`.
+pub(crate) fn clip(bytes: &[u8], max: usize) -> (Vec<u8>, bool) {
+    if bytes.len() > max {
+        (bytes[..max].to_vec(), true)
+    } else {
+        (bytes.to_vec(), false)
+    }
+}
+
 impl ProxyLog {
-    pub fn record(&self, ex: Exchange<'_>, now_ms: i64) {
-        let Ok(mut inner) = self.inner.lock() else { return };
+    /// Anota un pedido que acaba de llegar. Devuelve su `seq`, con el que se lo completa.
+    pub fn begin(&self, b: Begin<'_>, now_ms: i64) -> u64 {
+        let Ok(mut inner) = self.inner.lock() else { return 0 };
         inner.last_seq += 1;
+        inner.last_rev += 1;
         let seq = inner.last_seq;
 
-        if let Some(header) = ex.cookie_header {
+        if let Some(header) = b.cookie_header {
             let cookies = parse_cookie_header(header);
             if !cookies.is_empty() {
-                inner.sent = Some(SentCookies { url: ex.url.clone(), at: now_ms, cookies });
+                inner.sent = Some(SentCookies { url: b.url.clone(), at: now_ms, cookies });
             }
         }
-        for line in &ex.set_cookies {
+
+        let entry = NetEntry {
+            seq,
+            rev: inner.last_rev,
+            at: now_ms,
+            method: b.method.to_string(),
+            url: b.url,
+            status: None,
+            status_text: None,
+            content_type: None,
+            size: None,
+            ttfb_ms: None,
+            duration_ms: 0,
+            finished: false,
+            error: None,
+            error_kind: None,
+            websocket: b.websocket,
+        };
+        inner.entries.push_back(entry);
+        inner.details.insert(seq, Detail { request_headers: b.request_headers, ..Default::default() });
+        if !b.request_body.is_empty() {
+            let (bytes, truncated) = clip(b.request_body, MAX_REQUEST_BODY);
+            let stored = Stored {
+                bytes,
+                size: b.request_body.len() as u64,
+                truncated,
+                evicted: false,
+                content_type: b.request_content_type,
+                encoding: None,
+            };
+            inner.store_body(seq, stored, false);
+        }
+
+        while inner.entries.len() > MAX_ENTRIES {
+            if let Some(old) = inner.entries.pop_front() {
+                inner.evicted_rev = inner.evicted_rev.max(old.rev);
+                if let Some(detail) = inner.details.remove(&old.seq) {
+                    let freed: usize = [detail.request_body, detail.response_body]
+                        .into_iter()
+                        .flatten()
+                        .map(|b| b.bytes.len())
+                        .sum();
+                    inner.body_bytes -= freed;
+                }
+            }
+        }
+        seq
+    }
+
+    pub fn head(&self, seq: u64, head: Head, now_ms: i64) {
+        let Ok(mut inner) = self.inner.lock() else { return };
+        let url = inner.entries.iter().rev().find(|e| e.seq == seq).map(|e| e.url.clone()).unwrap_or_default();
+        for line in &head.set_cookies {
             let Some(mut cookie) = parse_set_cookie(line, now_ms / 1000) else { continue };
-            cookie.url = ex.url.clone();
+            cookie.url = url.clone();
             cookie.at = now_ms;
             let key = (cookie.name.clone(), cookie.path.clone().unwrap_or_else(|| "/".to_string()));
             // Un `Set-Cookie` vencido es cómo un servidor borra una cookie.
@@ -139,40 +434,93 @@ impl ProxyLog {
                 inner.set.insert(key, cookie);
             }
         }
-
-        inner.entries.push_back(NetEntry {
-            seq,
-            at: now_ms,
-            method: ex.method.to_string(),
-            url: ex.url,
-            status: ex.status,
-            content_type: ex.content_type,
-            size: ex.size,
-            duration_ms: ex.duration_ms,
-            error: ex.error,
-            websocket: ex.websocket,
+        let status_text = hyper::StatusCode::from_u16(head.status)
+            .ok()
+            .and_then(|s| s.canonical_reason())
+            .map(str::to_string);
+        inner.touch(seq, |entry| {
+            entry.status = Some(head.status);
+            entry.status_text = status_text;
+            entry.content_type = head.content_type.clone();
+            entry.size = head.content_length;
+            entry.ttfb_ms = Some(head.ttfb_ms);
+            entry.duration_ms = head.ttfb_ms;
         });
-        while inner.entries.len() > MAX_ENTRIES {
-            inner.entries.pop_front();
+        if let Some(detail) = inner.details.get_mut(&seq) {
+            detail.response_headers = head.headers;
+            detail.http_version = head.http_version;
+            detail.remote_address = head.remote_address;
         }
     }
 
-    /// Lo anotado después de `since` (0 = todo lo que queda).
+    pub fn finish(&self, seq: u64, finish: Finish) {
+        let Ok(mut inner) = self.inner.lock() else { return };
+        let content_type = inner.entries.iter().rev().find(|e| e.seq == seq).and_then(|e| e.content_type.clone());
+        let has_body = finish.body_size > 0;
+        inner.touch(seq, |entry| {
+            entry.finished = true;
+            entry.duration_ms = finish.duration_ms;
+            if has_body || entry.status.is_some() {
+                entry.size = Some(finish.body_size);
+            }
+            if let Some((kind, message)) = &finish.error {
+                entry.error_kind = Some(*kind);
+                entry.error = Some(message.clone());
+            }
+        });
+        if has_body {
+            let stored = Stored {
+                bytes: finish.body,
+                size: finish.body_size,
+                truncated: finish.truncated,
+                evicted: false,
+                content_type,
+                encoding: finish.encoding,
+            };
+            inner.store_body(seq, stored, true);
+        }
+    }
+
+    /// Lo que cambió después de `since` (0 = todo lo que queda).
     pub fn since(&self, since: u64) -> NetPage {
         let Ok(inner) = self.inner.lock() else {
             return NetPage { entries: vec![], next: since, dropped: false };
         };
-        let first = inner.entries.front().map(|e| e.seq);
         NetPage {
-            entries: inner.entries.iter().filter(|e| e.seq > since).cloned().collect(),
-            next: inner.last_seq,
-            dropped: since > 0 && first.is_some_and(|f| f > since + 1),
+            entries: inner.entries.iter().filter(|e| e.rev > since).cloned().collect(),
+            next: inner.last_rev,
+            dropped: since > 0 && inner.evicted_rev > since,
         }
+    }
+
+    pub fn detail(&self, seq: u64) -> Option<RequestDetail> {
+        let inner = self.inner.lock().ok()?;
+        let entry = inner.entries.iter().rev().find(|e| e.seq == seq)?.clone();
+        let detail = inner.details.get(&seq)?;
+        Some(RequestDetail {
+            entry,
+            request_headers: detail.request_headers.clone(),
+            response_headers: detail.response_headers.clone(),
+            http_version: detail.http_version.clone(),
+            remote_address: detail.remote_address.clone(),
+            request_body: detail.request_body.as_ref().map(Stored::capture),
+            response_body: detail.response_body.as_ref().map(Stored::capture),
+        })
     }
 
     pub fn clear_network(&self) {
         if let Ok(mut inner) = self.inner.lock() {
-            inner.entries.clear();
+            // Lo que sigue en curso se queda: su respuesta todavía tiene que poder anotarse.
+            let pending: Vec<u64> = inner.entries.iter().filter(|e| !e.finished).map(|e| e.seq).collect();
+            inner.entries.retain(|e| !e.finished);
+            inner.details.retain(|seq, _| pending.contains(seq));
+            inner.body_bytes = inner
+                .details
+                .values()
+                .flat_map(|d| [&d.request_body, &d.response_body])
+                .flatten()
+                .map(|b| b.bytes.len())
+                .sum();
         }
     }
 

@@ -125,6 +125,41 @@ export interface ConsoleEntry {
 }
 
 /**
+ * Por qué falló un pedido. Los del proxy saben la causa (`connectionRefused`, `dns`…); la
+ * página solo ve que no hubo respuesta (`network`), que puede ser la red, el servidor
+ * apagado o CORS: el navegador no le deja distinguirlo a propósito.
+ */
+export type NetErrorKind =
+  | "connectionRefused" | "connectionReset" | "timeout" | "dns" | "tls" | "protocol" | "body" | "aborted"
+  | "network" | "other";
+
+/** Una cabecera. `note`: lo que la vista previa le hizo en el camino (solo las del proxy). */
+export interface NetHeader {
+  name: string;
+  value: string;
+  note?: "rewritten" | "removed" | null;
+}
+
+/** Un cuerpo guardado para mostrar. */
+export interface NetBody {
+  /** Bytes en total, si se saben: lo guardado puede ser menos. */
+  size: number | null;
+  /** El contenido, si es texto. */
+  text?: string | null;
+  /** El contenido si es binario (una imagen). */
+  base64?: string | null;
+  /** Se guardó solo el principio. */
+  truncated: boolean;
+  /** Se soltó para hacerle lugar a pedidos más nuevos. */
+  evicted?: boolean;
+  contentType?: string | null;
+  /** `Content-Encoding` de un cuerpo comprimido, que no se puede leer tal cual. */
+  encoding?: string | null;
+  /** Lo que no es contenido que se pueda mostrar: un FormData con archivos, un stream. */
+  summary?: string | null;
+}
+
+/**
  * Un pedido que vio la PÁGINA. Solo los de otro origen: los del propio servidor pasan por
  * el proxy, que los ve mejor (status exacto, el documento mismo, las cookies HttpOnly).
  */
@@ -139,6 +174,21 @@ export interface PageNetworkEntry {
   durationMs: number | null;
   size: number | null;
   error?: string;
+  errorKind?: NetErrorKind;
+  statusText?: string | null;
+  /** Hasta que llegaron las cabeceras de la respuesta. */
+  ttfbMs?: number | null;
+  requestHeaders?: NetHeader[];
+  /** Solo las que el navegador le deja ver a la página: para otro origen, las que permite
+   *  CORS (`Access-Control-Expose-Headers`). */
+  responseHeaders?: NetHeader[];
+  requestBody?: NetBody | null;
+  responseBody?: NetBody | null;
+  /** `basic`, `cors`, `opaque`… de un `fetch`. */
+  responseType?: string | null;
+  redirected?: boolean;
+  /** Adónde terminó, si hubo redirecciones. */
+  finalUrl?: string | null;
 }
 
 export function isPageMessage(data: unknown): data is PageMessage {

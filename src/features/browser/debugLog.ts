@@ -8,7 +8,7 @@
  * el MCP la formatea para un agente con las mismas funciones.
  */
 import type { CookieReport, ProxyNetworkPage, ProxyRequest } from "./ipc";
-import type { ConsoleEntry, ConsoleLevel, DebugBatch, PageNetworkEntry } from "./protocol";
+import type { ConsoleEntry, ConsoleLevel, DebugBatch, NetErrorKind, PageNetworkEntry } from "./protocol";
 
 export interface LoggedConsole extends ConsoleEntry {
   id: number;
@@ -36,6 +36,9 @@ export interface DebugLog {
   /** Lo que pasó por el proxy (el propio servidor). */
   proxy: ProxyRequest[];
   proxyNext: number;
+  /** De qué proxy son `proxy` y `proxyNext`: navegar a otro servidor en la misma tab es
+   *  otro proxy, que numera desde cero. */
+  proxyOrigin: string | null;
   /** Consola y documentos comparten numeración: así un cursor sirve para las dos. */
   nextId: number;
 }
@@ -43,7 +46,7 @@ export interface DebugLog {
 export const MAX_CONSOLE = 2000;
 export const MAX_REQUESTS = 1500;
 
-export const EMPTY_LOG: DebugLog = { console: [], docs: [], requests: [], proxy: [], proxyNext: 0, nextId: 1 };
+export const EMPTY_LOG: DebugLog = { console: [], docs: [], requests: [], proxy: [], proxyNext: 0, proxyOrigin: null, nextId: 1 };
 
 const tail = <T,>(items: T[], max: number) => (items.length > max ? items.slice(items.length - max) : items);
 
@@ -72,11 +75,25 @@ export function appendBatch(log: DebugLog, batch: DebugBatch): DebugLog {
   return next;
 }
 
-export function appendProxy(log: DebugLog, page: ProxyNetworkPage): DebugLog {
+/**
+ * Suma lo que trajo el proxy. Un pedido que ya estaba vuelve a llegar cuando cambia (le
+ * llegó la respuesta, terminó el cuerpo): reemplaza al anterior, no se duplica.
+ */
+export function appendProxy(log: DebugLog, page: ProxyNetworkPage, origin: string | null = log.proxyOrigin): DebugLog {
+  // Otro servidor: lo anotado era del proxy anterior, con otra numeración. Mezclarlo daría
+  // dos `p1` distintos, y el detalle de uno se buscaría en el proxy del otro.
+  if (origin !== log.proxyOrigin) log = { ...log, proxy: [], proxyNext: 0, proxyOrigin: origin };
   if (page.entries.length === 0 && page.next === log.proxyNext) return log;
-  const known = log.proxy[log.proxy.length - 1]?.seq ?? 0;
-  const fresh = page.entries.filter((e) => e.seq > known);
-  return { ...log, proxy: tail([...log.proxy, ...fresh], MAX_REQUESTS), proxyNext: page.next };
+  if (page.entries.length === 0) return { ...log, proxyNext: Math.max(log.proxyNext, page.next) };
+  const bySeq = new Map(log.proxy.map((e) => [e.seq, e]));
+  for (const entry of page.entries) {
+    const known = bySeq.get(entry.seq);
+    // Dos lecturas que se pisan (el panel y un agente) pueden traer una versión vieja
+    // después de una nueva.
+    if (!known || (known.rev ?? 0) <= (entry.rev ?? 0)) bySeq.set(entry.seq, entry);
+  }
+  const merged = [...bySeq.values()].sort((a, b) => a.seq - b.seq);
+  return { ...log, proxy: tail(merged, MAX_REQUESTS), proxyNext: Math.max(log.proxyNext, page.next) };
 }
 
 export function clearConsole(log: DebugLog): DebugLog {
@@ -106,16 +123,25 @@ export function currentCounts(log: DebugLog): { errors: number; warnings: number
 export type RequestType = "document" | "script" | "style" | "image" | "font" | "fetch" | "websocket" | "media" | "other";
 
 export interface RequestRow {
+  /** `p<seq>` si lo vio el proxy, `g<id>` si la página. Es lo que se le pasa a un agente
+   *  para pedir el detalle. */
   key: string;
   at: number;
   method: string;
   url: string;
   status: number | null;
+  statusText: string | null;
   type: RequestType;
+  ttfbMs: number | null;
   durationMs: number | null;
   size: number | null;
   error: string | null;
+  errorKind: NetErrorKind | null;
   contentType: string | null;
+  /** Todavía no terminó. */
+  pending: boolean;
+  /** Cambia cuando cambia el pedido: sirve para volver a traer su detalle. */
+  version: number;
   /** Quién lo vio: el proxy (mismo servidor) o la página (otro origen). */
   via: "proxy" | "page";
 }
@@ -160,14 +186,18 @@ const INITIATOR: Record<string, RequestType> = {
 export function requestRows(log: DebugLog): RequestRow[] {
   const rows: RequestRow[] = [
     ...log.proxy.map((e): RequestRow => ({
-      key: `p${e.seq}`, at: e.at, method: e.method, url: e.url, status: e.status,
-      type: typeOf(e.contentType, e.url, e.websocket), durationMs: e.durationMs, size: e.size,
-      error: e.error, contentType: e.contentType, via: "proxy",
+      key: `p${e.seq}`, at: e.at, method: e.method, url: e.url, status: e.status, statusText: e.statusText ?? null,
+      type: typeOf(e.contentType, e.url, e.websocket), ttfbMs: e.ttfbMs ?? null, durationMs: e.durationMs, size: e.size,
+      error: e.error, errorKind: e.errorKind ?? null, contentType: e.contentType,
+      // Una entrada vieja (sin `finished`) ya había terminado: el proxy anotaba al final.
+      pending: e.finished === false && !e.error, version: e.rev ?? 0, via: "proxy",
     })),
     ...log.requests.map((e): RequestRow => ({
-      key: `g${e.id}`, at: e.at, method: e.method, url: e.url, status: e.status,
-      type: INITIATOR[e.type] ?? typeOf(null, e.url), durationMs: e.durationMs, size: e.size,
-      error: e.error ?? null, contentType: null, via: "page",
+      key: `g${e.id}`, at: e.at, method: e.method, url: e.url, status: e.status, statusText: e.statusText ?? null,
+      type: INITIATOR[e.type] ?? typeOf(null, e.url), ttfbMs: e.ttfbMs ?? null, durationMs: e.durationMs, size: e.size,
+      error: e.error ?? null, errorKind: e.errorKind ?? null,
+      contentType: e.responseBody?.contentType ?? e.responseHeaders?.find((h) => h.name === "content-type")?.value ?? null,
+      pending: false, version: 0, via: "page",
     })),
   ];
   return rows.sort((a, b) => a.at - b.at);
@@ -314,10 +344,11 @@ export function networkForAgent(
   const fresh = rows.filter((r) => r.at > since && (!failedOnly || isFailed(r)));
   const shown = fresh.slice(-limit);
   const lines = shown.map((r) => {
-    const status = r.error ? `ERR` : String(r.status ?? "—");
+    const status = r.error ? `ERR` : r.pending ? "…" : String(r.status ?? "—");
     const extra = [r.durationMs !== null ? `${r.durationMs}ms` : null, r.size !== null ? formatBytes(r.size) : null]
       .filter(Boolean).join(" ");
-    return `${formatClock(r.at)} ${r.method.padEnd(6)} ${status.padEnd(3)} ${r.type.padEnd(9)} ${r.url}${extra ? `  ${extra}` : ""}${r.error ? `  — ${r.error}` : ""}`;
+    const failure = r.error ? `  — ${r.errorKind ? `${r.errorKind}: ` : ""}${r.error}` : "";
+    return `${formatClock(r.at)} [${r.key}] ${r.method.padEnd(6)} ${status.padEnd(3)} ${r.type.padEnd(9)} ${r.url}${extra ? `  ${extra}` : ""}${failure}`;
   });
   if (fresh.length > shown.length) lines.unshift(`… ${fresh.length - shown.length} pedidos anteriores omitidos`);
   const next = rows.length ? Math.max(since, ...rows.map((r) => r.at)) : since;

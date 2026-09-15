@@ -20,8 +20,9 @@ function batch(doc: string, console: ConsoleEntry[], url = `http://127.0.0.1:1/$
 
 function proxied(seq: number, patch: Partial<ProxyRequest> = {}): ProxyRequest {
   return {
-    seq, at: 1000 + seq, method: "GET", url: `http://localhost:5173/${seq}`, status: 200,
-    contentType: "application/javascript", size: 10, durationMs: 3, error: null, websocket: false, ...patch,
+    seq, rev: seq, at: 1000 + seq, method: "GET", url: `http://localhost:5173/${seq}`, status: 200, statusText: "OK",
+    contentType: "application/javascript", size: 10, ttfbMs: 2, durationMs: 3, finished: true,
+    error: null, errorKind: null, websocket: false, ...patch,
   };
 }
 
@@ -137,6 +138,31 @@ describe("red", () => {
     expect(log.proxy.map((e) => e.seq)).toEqual([1, 2]);
   });
 
+  /// Un pedido pendiente vuelve a llegar al terminar: la fila se actualiza en su lugar, y una
+  /// lectura atrasada que trae la versión vieja no la pisa.
+  it("un pedido que termina reemplaza a su versión pendiente", () => {
+    const pending = proxied(1, { rev: 1, status: null, statusText: null, finished: false, durationMs: 0 });
+    let log = appendProxy(EMPTY_LOG, { entries: [pending, proxied(2, { rev: 2 })], next: 2, dropped: false });
+    expect(requestRows(log)[0]!.pending).toBe(true);
+
+    log = appendProxy(log, { entries: [proxied(1, { rev: 3, status: 404, statusText: "Not Found" })], next: 3, dropped: false });
+    expect(log.proxy.map((e) => [e.seq, e.status])).toEqual([[1, 404], [2, 200]]);
+    const row = requestRows(log)[0]!;
+    expect([row.pending, row.statusText, row.version]).toEqual([false, "Not Found", 3]);
+
+    log = appendProxy(log, { entries: [pending], next: 3, dropped: false });
+    expect(log.proxy[0]!.status).toBe(404);
+  });
+
+  /// Navegar a otro servidor es otro proxy que numera desde cero: su `p1` no es el `p1` del
+  /// anterior, y su cursor tampoco.
+  it("otro proxy empieza su lista de cero", () => {
+    let log = appendProxy(EMPTY_LOG, { entries: [proxied(1), proxied(2)], next: 40, dropped: false }, "http://127.0.0.1:1");
+    log = appendProxy(log, { entries: [proxied(1, { url: "http://localhost:3000/" })], next: 2, dropped: false }, "http://127.0.0.1:2");
+    expect(log.proxy.map((e) => e.url)).toEqual(["http://localhost:3000/"]);
+    expect([log.proxyNext, log.proxyOrigin]).toEqual([2, "http://127.0.0.1:2"]);
+  });
+
   it("filtra por texto, tipo y fallidos", () => {
     const log = appendProxy(EMPTY_LOG, {
       entries: [proxied(1), proxied(2, { status: 404, url: "http://localhost:5173/logo.png", contentType: "image/png" })],
@@ -153,7 +179,7 @@ describe("red", () => {
     const rows = requestRows(log);
     const all = networkForAgent(rows, {});
     expect(all.text.split("\n")).toHaveLength(2);
-    expect(all.text).toMatch(/GET {4}500 script {4}http:\/\/localhost:5173\/2 {2}3ms 10 B$/);
+    expect(all.text).toMatch(/\[p2\] GET {4}500 script {4}http:\/\/localhost:5173\/2 {2}3ms 10 B$/);
     expect(networkForAgent(rows, { since: all.next }).text).toBe("(sin pedidos)");
     expect(networkForAgent(rows, { failedOnly: true }).text.split("\n")).toHaveLength(1);
   });

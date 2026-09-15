@@ -37,6 +37,7 @@ export function debugLogOf(viewId: string): DebugLog {
 
 /** Trae lo que el proxy anotó desde la última vez. */
 export async function refreshProxyLog(viewId: string, proxyOrigin: string): Promise<void> {
-  const page = await previewNetwork(proxyOrigin, debugLogOf(viewId).proxyNext);
-  useDebugStore.getState().apply(viewId, (log) => appendProxy(log, page));
+  const log = debugLogOf(viewId);
+  const page = await previewNetwork(proxyOrigin, log.proxyOrigin === proxyOrigin ? log.proxyNext : 0);
+  useDebugStore.getState().apply(viewId, (current) => appendProxy(current, page, proxyOrigin));
 }

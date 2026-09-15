@@ -138,12 +138,14 @@ async fn fake_dev_server() -> u16 {
                     return;
                 }
 
-                let (status, extra, body) = match path.as_str() {
+                let (status, extra, body) = match path.split('?').next().unwrap_or("/") {
                     "/" => ("200 OK", "Content-Type: text/html; charset=utf-8\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: frame-ancestors 'none'\r\n",
                             "<html><head><title>Hola</title></head><body>hola</body></html>".to_string()),
                     "/app.js" => ("200 OK", "Content-Type: application/javascript\r\n", "console.log(1)".to_string()),
                     "/sesion" => ("200 OK", "Set-Cookie: sid=abc; Path=/app; HttpOnly; SameSite=Lax\r\nSet-Cookie: tema=oscuro; Domain=localhost\r\n", String::new()),
                     "/login" => ("302 Found", &*Box::leak(format!("Location: http://127.0.0.1:{port}/panel\r\n").into_boxed_str()), String::new()),
+                    "/api/datos" => ("201 Created", "Content-Type: application/json\r\nX-Request-Id: abc-123\r\n",
+                                     format!("{{\"recibido\":{}}}", req.split("\r\n\r\n").nth(1).unwrap_or("").len())),
                     _ => ("404 Not Found", "", String::new()),
                 };
                 let resp = format!(
@@ -236,8 +238,11 @@ async fn el_websocket_del_recargado_en_caliente_atraviesa_el_proxy() {
 
 // ── El log del proxy: red y cookies ──────────────────────────────
 
-use super::log::{parse_cookie_header, parse_http_date, parse_set_cookie, Exchange, ProxyLog};
-use super::proxy::{preview_cookies, preview_network};
+use super::log::{
+    parse_cookie_header, parse_http_date, parse_set_cookie, Begin, ErrorKind, Finish, Head, Header, HeaderNote,
+    ProxyLog, MAX_RESPONSE_BODY,
+};
+use super::proxy::{preview_cookies, preview_network, preview_request};
 
 #[test]
 fn las_fechas_http_se_leen_en_sus_dos_grafias() {
@@ -269,18 +274,35 @@ fn la_cabecera_cookie_se_parte_en_pares() {
     assert_eq!(names, vec![("a", "1"), ("b", "x=y")]);
 }
 
-fn exchange(url: &str, set_cookies: &[&str]) -> Exchange<'static> {
-    Exchange {
-        method: "GET",
-        url: url.to_string(),
-        cookie_header: None,
-        status: Some(200),
-        content_type: None,
-        size: None,
-        duration_ms: 1,
-        error: None,
-        websocket: false,
+/// Un pedido entero por el log: llega, responde y termina.
+fn record(log: &ProxyLog, url: &str, set_cookies: &[&str], now: i64) -> u64 {
+    let seq = log.begin(
+        Begin {
+            method: "GET",
+            url: url.to_string(),
+            cookie_header: None,
+            request_headers: vec![],
+            request_body: &[],
+            request_content_type: None,
+            websocket: false,
+        },
+        now,
+    );
+    log.head(seq, head(200, set_cookies), now);
+    log.finish(seq, Finish { body: vec![], body_size: 0, truncated: false, encoding: None, duration_ms: 1, error: None });
+    seq
+}
+
+fn head(status: u16, set_cookies: &[&str]) -> Head {
+    Head {
+        status,
+        headers: vec![],
+        http_version: Some("HTTP/1.1".into()),
+        remote_address: None,
         set_cookies: set_cookies.iter().map(|s| s.to_string()).collect(),
+        content_type: None,
+        content_length: None,
+        ttfb_ms: 1,
     }
 }
 
@@ -288,22 +310,92 @@ fn exchange(url: &str, set_cookies: &[&str]) -> Exchange<'static> {
 fn el_log_se_lee_por_partes_y_avisa_si_se_perdio_algo() {
     let log = ProxyLog::default();
     for i in 0..3 {
-        log.record(exchange(&format!("http://x/{i}"), &[]), 0);
+        record(&log, &format!("http://x/{i}"), &[], 0);
     }
     let first = log.since(0);
     assert_eq!(first.entries.len(), 3);
-    assert_eq!(first.next, 3);
     assert!(!first.dropped);
 
-    log.record(exchange("http://x/3", &[]), 0);
+    record(&log, "http://x/3", &[], 0);
     let second = log.since(first.next);
     assert_eq!(second.entries.iter().map(|e| e.url.as_str()).collect::<Vec<_>>(), vec!["http://x/3"]);
 
     // Más de lo que entra: quien leyó hasta el 4 se perdió entradas y tiene que saberlo.
     for i in 0..2000 {
-        log.record(exchange(&format!("http://x/n{i}"), &[]), 0);
+        record(&log, &format!("http://x/n{i}"), &[], 0);
     }
     assert!(log.since(second.next).dropped);
+}
+
+/// El panel muestra un pedido en curso y lo tiene que ver terminar: la entrada vuelve a
+/// llegar cuando cambia, con el mismo `seq`.
+#[test]
+fn un_pedido_pendiente_vuelve_a_llegar_cuando_termina() {
+    let log = ProxyLog::default();
+    let seq = log.begin(
+        Begin {
+            method: "POST",
+            url: "http://x/api".into(),
+            cookie_header: None,
+            request_headers: vec![Header::new("content-type", "application/json")],
+            request_body: br#"{"a":1}"#,
+            request_content_type: Some("application/json".into()),
+            websocket: false,
+        },
+        0,
+    );
+    let pending = log.since(0);
+    assert_eq!(pending.entries.len(), 1);
+    assert!(!pending.entries[0].finished && pending.entries[0].status.is_none());
+
+    log.head(seq, head(404, &[]), 0);
+    log.finish(seq, Finish { body: b"nope".to_vec(), body_size: 4, truncated: false, encoding: None, duration_ms: 9, error: None });
+    let done = log.since(pending.next);
+    assert_eq!(done.entries.len(), 1);
+    let entry = &done.entries[0];
+    assert_eq!((entry.seq, entry.status, entry.status_text.as_deref()), (seq, Some(404), Some("Not Found")));
+    assert!(entry.finished);
+    assert_eq!((entry.size, entry.duration_ms, entry.ttfb_ms), (Some(4), 9, Some(1)));
+
+    let detail = log.detail(seq).unwrap();
+    assert_eq!(detail.request_body.unwrap().text.as_deref(), Some(r#"{"a":1}"#));
+    assert_eq!(detail.response_body.unwrap().text.as_deref(), Some("nope"));
+}
+
+#[test]
+fn un_cuerpo_binario_viaja_en_base64_y_uno_cortado_sigue_siendo_texto() {
+    let log = ProxyLog::default();
+    let seq = record(&log, "http://x/img", &[], 0);
+    log.finish(seq, Finish { body: vec![0xff, 0x00, 0x89], body_size: 3, truncated: false, encoding: None, duration_ms: 1, error: None });
+    let body = log.detail(seq).unwrap().response_body.unwrap();
+    assert_eq!((body.text, body.base64.as_deref()), (None, Some("/wCJ")));
+
+    // "ñ" son dos bytes: cortar entre los dos no lo vuelve binario.
+    let seq = record(&log, "http://x/txt", &[], 0);
+    log.finish(seq, Finish { body: "añ".as_bytes()[..2].to_vec(), body_size: 50, truncated: true, encoding: None, duration_ms: 1, error: None });
+    let body = log.detail(seq).unwrap().response_body.unwrap();
+    assert_eq!(body.text.as_deref(), Some("a"));
+    assert!(body.truncated && body.size == 50);
+}
+
+#[test]
+fn pasado_el_presupuesto_se_sueltan_los_cuerpos_mas_viejos_y_no_el_ultimo() {
+    let log = ProxyLog::default();
+    let seqs: Vec<u64> = (0..70)
+        .map(|i| {
+            let seq = record(&log, &format!("http://x/{i}"), &[], 0);
+            log.finish(seq, Finish {
+                body: vec![b'a'; MAX_RESPONSE_BODY], body_size: MAX_RESPONSE_BODY as u64,
+                truncated: false, encoding: None, duration_ms: 1, error: None,
+            });
+            seq
+        })
+        .collect();
+    let first = log.detail(seqs[0]).unwrap().response_body.unwrap();
+    assert!(first.evicted && first.text.is_none(), "el más viejo se soltó");
+    assert_eq!(first.size, MAX_RESPONSE_BODY as u64, "pero se sigue sabiendo cuánto medía");
+    let last = log.detail(*seqs.last().unwrap()).unwrap().response_body.unwrap();
+    assert!(!last.evicted && last.text.is_some());
 }
 
 /// Un servidor borra una cookie mandándola vencida: si el log la siguiera mostrando, el
@@ -311,9 +403,9 @@ fn el_log_se_lee_por_partes_y_avisa_si_se_perdio_algo() {
 #[test]
 fn una_cookie_vencida_desaparece_del_reporte() {
     let log = ProxyLog::default();
-    log.record(exchange("http://x/login", &["sid=1; Path=/"]), 5_000_000);
+    record(&log, "http://x/login", &["sid=1; Path=/"], 5_000_000);
     assert_eq!(log.cookies(5_000_000).set.len(), 1);
-    log.record(exchange("http://x/logout", &["sid=; Path=/; Max-Age=0"]), 5_000_000);
+    record(&log, "http://x/logout", &["sid=; Path=/; Max-Age=0"], 5_000_000);
     assert!(log.cookies(5_000_000).set.is_empty());
 }
 
@@ -366,4 +458,70 @@ async fn el_proxy_anota_la_red_y_las_cookies_httponly() {
     // Lo propio del proxy no se anota como tráfico de la página.
     let after = preview_network(target.proxy_origin.clone(), page.next).await.unwrap();
     assert!(after.entries.is_empty(), "{:?}", after.entries);
+}
+
+/// Lo que el panel necesita para depurar un pedido: las cabeceras de las dos puntas (con lo
+/// que cambió la vista previa), los cuerpos, el código con su texto y los tiempos.
+#[tokio::test(flavor = "multi_thread")]
+async fn el_detalle_trae_cabeceras_cuerpos_y_lo_que_cambio_la_vista_previa() {
+    let port = fake_dev_server().await;
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
+
+    let c = client();
+    c.get(format!("{}/", target.proxy_origin)).send().await.unwrap().text().await.unwrap();
+    let created = c
+        .post(format!("{}/api/datos?pagina=2", target.proxy_origin))
+        .header("content-type", "application/json")
+        .header("origin", target.proxy_origin.clone())
+        .header("accept-encoding", "gzip")
+        .body(r#"{"nombre":"Ana"}"#)
+        .send().await.unwrap();
+    assert_eq!(created.status(), 201);
+    assert_eq!(created.text().await.unwrap(), r#"{"recibido":16}"#);
+    c.get(format!("{}/no-existe", target.proxy_origin)).send().await.unwrap().text().await.unwrap();
+
+    let entries = preview_network(target.proxy_origin.clone(), before).await.unwrap().entries;
+    let find = |path: &str| entries.iter().filter(|e| e.url.ends_with(path)).max_by_key(|e| e.rev).unwrap().clone();
+
+    let post = find("/api/datos?pagina=2");
+    assert!(post.finished && post.error.is_none(), "{post:?}");
+    assert_eq!((post.status, post.status_text.as_deref()), (Some(201), Some("Created")));
+    let detail = preview_request(target.proxy_origin.clone(), post.seq).await.unwrap().unwrap();
+    let request = |name: &str| detail.request_headers.iter().find(|h| h.name == name).cloned();
+    assert_eq!(request("host").unwrap(), Header::noted("host", format!("127.0.0.1:{port}"), HeaderNote::Rewritten));
+    assert_eq!(request("origin").unwrap(), Header::noted("origin", format!("http://127.0.0.1:{port}"), HeaderNote::Rewritten));
+    assert_eq!(request("accept-encoding").unwrap().note, Some(HeaderNote::Removed));
+    assert_eq!(request("content-type").unwrap().note, None);
+    assert_eq!(detail.request_body.unwrap().text.as_deref(), Some(r#"{"nombre":"Ana"}"#));
+    assert!(detail.response_headers.iter().any(|h| h.name == "x-request-id" && h.value == "abc-123"));
+    assert_eq!(detail.response_body.unwrap().text.as_deref(), Some(r#"{"recibido":16}"#));
+    assert_eq!(detail.http_version.as_deref(), Some("HTTP/1.1"));
+    assert_eq!(detail.remote_address.as_deref(), Some(format!("127.0.0.1:{port}").as_str()));
+
+    // Las cabeceras que la vista previa le saca al iframe se ven igual, marcadas.
+    let html = preview_request(target.proxy_origin.clone(), find("/").seq).await.unwrap().unwrap();
+    let xfo = html.response_headers.iter().find(|h| h.name == "x-frame-options").unwrap();
+    assert_eq!((xfo.value.as_str(), xfo.note), ("DENY", Some(HeaderNote::Removed)));
+    assert!(html.response_body.unwrap().text.unwrap().contains("<title>Hola</title>"), "el HTML como lo mandó el servidor");
+
+    let missing = find("/no-existe");
+    assert_eq!((missing.status, missing.status_text.as_deref()), (Some(404), Some("Not Found")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn un_servidor_apagado_se_anota_como_conexion_rechazada() {
+    // Un puerto que se abre y se cierra: nadie escucha ahí.
+    let port = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let resp = client().get(format!("{}/api", target.proxy_origin)).send().await.unwrap();
+    assert_eq!(resp.status(), 502);
+    // La página de error trae el runtime como cualquier otra: la app se entera de que cargó y
+    // un agente que navegó ahí ve el error enseguida, sin esperar a que se venza.
+    assert!(resp.text().await.unwrap().contains(TAG));
+
+    let entry = preview_network(target.proxy_origin.clone(), 0).await.unwrap().entries.pop().unwrap();
+    assert!(entry.finished && entry.status.is_none());
+    assert_eq!(entry.error_kind, Some(ErrorKind::ConnectionRefused), "{:?}", entry.error);
+    assert!(entry.error.unwrap().to_ascii_lowercase().contains("refused"));
 }

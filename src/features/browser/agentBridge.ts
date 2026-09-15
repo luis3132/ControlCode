@@ -18,7 +18,8 @@ import {
   consoleForAgent, isFailed, mergeCookies, networkForAgent, requestRows, type CookieRow,
 } from "./debugLog";
 import { debugLogOf, refreshProxyLog } from "./debugStore";
-import { previewCookies } from "./ipc";
+import { previewCookies, previewRequest } from "./ipc";
+import { detailForAgent, detailFromPage, detailFromProxy } from "./networkDetail";
 import type { PageChannel } from "./pageChannel";
 import type { PageCommand, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
@@ -177,6 +178,22 @@ function timeoutFor(command: PageCommand): number {
 
 /** Lo que viene de la página habla en URLs del proxy (`127.0.0.1:40111`); el agente las
  *  busca y las escribe en términos del servidor que conoce (`localhost:5173`). */
+/** El detalle de un pedido por su id del listado (`p12` si pasó por el proxy, `g5` si lo vio la página). */
+async function requestDetailText(host: BrowserHost, id: string): Promise<string> {
+  const log = debugLogOf(host.viewId);
+  if (id.startsWith("g")) {
+    const entry = log.requests.find((e) => `g${e.id}` === id);
+    if (!entry) throw new Error(`No hay ningún pedido ${id}: pedí el listado de nuevo.`);
+    return detailForAgent(detailFromPage(entry));
+  }
+  const origin = host.proxyOrigin();
+  const seq = Number(id.replace(/^p/, ""));
+  if (!origin || !Number.isInteger(seq)) throw new Error(`'${id}' no es un id del listado (son como p12 o g5).`);
+  const detail = await previewRequest(origin, seq);
+  if (!detail) throw new Error(`El pedido ${id} ya no está en el registro del proxy.`);
+  return detailForAgent(detailFromProxy(detail));
+}
+
 function inServerTerms(host: BrowserHost, text: string): string {
   const proxy = host.proxyOrigin();
   const target = host.targetOrigin();
@@ -248,12 +265,15 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
     case "network": {
       const origin = host.proxyOrigin();
       if (origin) await refreshProxyLog(host.viewId, origin);
+      const wanted = str(request, "request");
+      if (wanted) return inServerTerms(host, await requestDetailText(host, wanted.replace(/^\[|\]$/g, "")));
       const { text, next } = networkForAgent(requestRows(debugLogOf(host.viewId)), {
         since: num(request, "since"),
         failedOnly: bool(request, "failed_only"),
         limit: num(request, "limit"),
       });
-      return `${inServerTerms(host, text)}\n\n[cursor: ${next} — pasá since=${next} para ver solo lo que llegue después]`;
+      return `${inServerTerms(host, text)}\n\n[cursor: ${next} — pasá since=${next} para ver solo lo que llegue después; `
+        + `request=<id entre corchetes> para ver cabeceras, cuerpos y tiempos de uno]`;
     }
     case "cookies": {
       const action = str(request, "action") ?? "list";

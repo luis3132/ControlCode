@@ -22,6 +22,9 @@ import type {
   AppMessage, ConsoleEntry, ConsoleLevel, DebugBatch, PageCommand, PageMessage, PageNetworkEntry, StorageArea,
 } from "../protocol";
 import { describeElement, selectorOf } from "./dom";
+import {
+  errorKindOf, headerList, headerValue, parseRawHeaders, readResponseBody, requestBodyPreview, MAX_PAGE_BODY,
+} from "./netCapture";
 import { callerOf, clip, displayPath, formatConsoleArgs, formatValue, toTransferable } from "./serialize";
 import {
   displayHref, formatSnapshot, normalizeName, parseKeyCombo, parseTarget, type SnapshotNode,
@@ -200,47 +203,116 @@ declare global {
       if (!url || !isForeign(url)) return result;
       const at = Date.now();
       const started = performance.now();
-      const base = { at, method, url: absolute(url), type: "fetch" };
+      let detail: Pick<PageNetworkEntry, "requestHeaders" | "requestBody"> = {};
+      try {
+        const requestHeaders = headerList(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+        detail = {
+          requestHeaders,
+          requestBody: requestBodyPreview(init?.body ?? null, headerValue(requestHeaders, "content-type")),
+        };
+      } catch {
+        /* capturar nunca puede romper el pedido */
+      }
+      const base = { at, method, url: absolute(url), type: "fetch", ...detail };
       return result.then(
         (response) => {
-          pushNetwork({
-            ...base, status: response.status, durationMs: Math.round(performance.now() - started),
-            size: sizeFrom(response.headers.get("content-length")),
-          });
+          const ttfbMs = Math.round(performance.now() - started);
+          // El cuerpo se lee de un clon y sin demorar a la página: ella recibe su respuesta ya.
+          readResponseBody(response, { timer: setTimer as typeof setTimeout })
+            .catch(() => null)
+            .then((responseBody) => {
+              pushNetwork({
+                ...base,
+                status: response.status || null,
+                statusText: response.statusText || null,
+                ttfbMs,
+                durationMs: Math.round(performance.now() - started),
+                size: responseBody?.size ?? sizeFrom(response.headers.get("content-length")),
+                responseHeaders: headerList(response.headers),
+                responseBody,
+                responseType: response.type,
+                redirected: response.redirected,
+                finalUrl: response.redirected ? response.url : null,
+              });
+            });
           return response;
         },
         (error: unknown) => {
-          pushNetwork({ ...base, status: null, durationMs: Math.round(performance.now() - started), size: null, error: formatValue(error) });
+          pushNetwork({
+            ...base, status: null, durationMs: Math.round(performance.now() - started), size: null,
+            error: formatValue(error), errorKind: errorKindOf(error),
+          });
           throw error;
         }
       );
     };
   }
 
-  const xhrInfo = new WeakMap<XMLHttpRequest, { method: string; url: string }>();
+  const xhrInfo = new WeakMap<XMLHttpRequest, { method: string; url: string; headers: { name: string; value: string }[] }>();
   const xhrOpen = XMLHttpRequest.prototype.open;
   const xhrSend = XMLHttpRequest.prototype.send;
+  const xhrSetHeader = XMLHttpRequest.prototype.setRequestHeader;
   XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
-    xhrInfo.set(this, { method: String(method).toUpperCase(), url: String(url) });
+    xhrInfo.set(this, { method: String(method).toUpperCase(), url: String(url), headers: [] });
     return (xhrOpen as (...args: unknown[]) => void).call(this, method, url, ...rest);
+  };
+  XMLHttpRequest.prototype.setRequestHeader = function (this: XMLHttpRequest, name: string, value: string) {
+    xhrInfo.get(this)?.headers.push({ name: String(name).toLowerCase(), value: String(value) });
+    return xhrSetHeader.call(this, name, value);
   };
   XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     const info = xhrInfo.get(this);
     if (info && isForeign(info.url)) {
       const at = Date.now();
       const started = performance.now();
+      let ttfbMs: number | null = null;
+      let ended: "abort" | "timeout" | null = null;
+      this.addEventListener("readystatechange", () => {
+        if (this.readyState === XMLHttpRequest.HEADERS_RECEIVED && ttfbMs === null) ttfbMs = Math.round(performance.now() - started);
+      });
+      this.addEventListener("abort", () => { ended = "abort"; });
+      this.addEventListener("timeout", () => { ended = "timeout"; });
       this.addEventListener("loadend", () => {
-        pushNetwork({
-          at, method: info.method, url: absolute(info.url), type: "xhr",
-          status: this.status || null,
-          durationMs: Math.round(performance.now() - started),
-          size: sizeFrom(this.getResponseHeader("content-length")),
-          error: this.status === 0 ? "sin respuesta (red caída o bloqueado por CORS)" : undefined,
-        });
+        try {
+          const responseHeaders = parseRawHeaders(this.getAllResponseHeaders());
+          const contentType = headerValue(responseHeaders, "content-type");
+          const failed = this.status === 0;
+          pushNetwork({
+            at, method: info.method, url: absolute(info.url), type: "xhr",
+            status: this.status || null,
+            statusText: this.statusText || null,
+            ttfbMs,
+            durationMs: Math.round(performance.now() - started),
+            size: sizeFrom(this.getResponseHeader("content-length")),
+            requestHeaders: info.headers,
+            requestBody: requestBodyPreview(body ?? null, headerValue(info.headers, "content-type")),
+            responseHeaders,
+            responseBody: failed ? null : xhrBody(this, contentType),
+            error: failed
+              ? ended === "abort" ? "cancelado" : ended === "timeout" ? "se venció el tiempo de espera" : "sin respuesta (red caída o bloqueado por CORS)"
+              : undefined,
+            errorKind: failed ? (ended === "abort" ? "aborted" : ended === "timeout" ? "timeout" : "network") : undefined,
+          });
+        } catch {
+          /* capturar nunca puede romper el pedido */
+        }
       });
     }
     return xhrSend.call(this, body);
   };
+
+  /** El cuerpo de un XHR ya terminado, según cómo pidió la página leerlo. */
+  function xhrBody(xhr: XMLHttpRequest, contentType: string | null): PageNetworkEntry["responseBody"] {
+    if (xhr.responseType === "" || xhr.responseType === "text") {
+      const text = xhr.responseText ?? "";
+      return { size: text.length, text: text.slice(0, MAX_PAGE_BODY), truncated: text.length > MAX_PAGE_BODY, contentType };
+    }
+    if (xhr.responseType === "json") {
+      const text = JSON.stringify(xhr.response) ?? "";
+      return { size: null, text: text.slice(0, MAX_PAGE_BODY), truncated: text.length > MAX_PAGE_BODY, contentType };
+    }
+    return { size: null, truncated: false, contentType, summary: `responseType "${xhr.responseType}"` };
+  }
 
   const vitals: { lcp: number | null; cls: number | null; longTasks: { count: number; totalMs: number } | null } = {
     lcp: null, cls: null, longTasks: null,

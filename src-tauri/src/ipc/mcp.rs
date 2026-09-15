@@ -218,12 +218,15 @@ kept across reloads. Returns a cursor: pass it as `since` to get only newer mess
     BrowserTool {
         name: "browser_network",
         op: "network",
-        description: "Requests the page made: method, status, type, URL, time and size (the page's own server via \
-the proxy, other origins from inside the page). Returns a cursor for `since`.",
+        description: "Requests the page made: id, method, status, type, URL, time and size (the page's own server via \
+the proxy, other origins from inside the page). Returns a cursor for `since`. Pass `request` with an id from the \
+list (e.g. \"p12\") to get that request in full: status text, request and response headers, query parameters, \
+request and response bodies, timing and the cause of a network error.",
         properties: || json!({
             "since": { "type": "number" },
             "failed_only": { "type": "boolean" },
             "limit": { "type": "number" },
+            "request": { "type": "string", "description": "Id of one request from the list (p12, g5) to see its details." },
         }),
         required: &[],
     },
