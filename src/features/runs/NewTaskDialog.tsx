@@ -7,22 +7,37 @@ import { repoInfo } from "@/features/explorer/ipc";
 import { AccountPickerStep, AUTO_ACCOUNT } from "@/features/tabs/wizard/AccountPickerStep";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
-import { getRoster, previewRoute, type RouteInput, type StartTaskInput } from "./ipc";
+import { getRoster, previewRoute, type RouteInput, type StartOrchestrationInput, type StartTaskInput } from "./ipc";
 import { COMPLEXITIES, describeAssignment, launchableAgents } from "./routingView";
 import type { Assignment, Complexity, Roster } from "./types";
 
 /** Cómo se elige el modelo: por complejidad (lo decide el ruteo) o uno fijo. */
 type ModelMode = Complexity | "fixed";
 
-/** Lanzar un agente headless: qué tiene que hacer, con qué modelo y cuenta, y hasta cuánto gastar. */
+/** Una tarea para un agente, o un objetivo para que un lead lo reparta entre varios. */
+type LaunchKind = "task" | "orchestrate";
+
+export type NewLaunch =
+  | ({ kind: "task" } & Omit<StartTaskInput, "workspaceId" | "cwd">)
+  | ({ kind: "orchestrate" } & Omit<StartOrchestrationInput, "workspaceId" | "cwd">);
+
+const PARALLEL = [1, 2, 3, 4] as const;
+
+/**
+ * Lanzar trabajo en segundo plano: una tarea para un agente, o un objetivo que un lead
+ * reparte en un plan de tareas para varios. Qué tiene que hacer, con qué modelo y cuenta,
+ * y hasta cuánto gastar.
+ */
 export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
   cwd: string;
   /** Agentes trabajando YA sobre esta carpeta (no en un worktree propio). */
   busyInFolder: number;
   onClose: () => void;
-  onStart: (input: Omit<StartTaskInput, "workspaceId" | "cwd">) => Promise<void>;
+  onStart: (input: NewLaunch) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const [kind, setKind] = useState<LaunchKind>("task");
+  const [maxParallel, setMaxParallel] = useState<number>(2);
   const [roster, setRoster] = useState<Roster | null>(null);
   // Hasta que llega el roster se asume la única que se sabe correr hoy: el diálogo no
   // puede quedar en blanco esperando un sondeo que la primera vez lanza procesos.
@@ -97,19 +112,29 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
 
   const canStart = prompt.trim().length > 0 && !busy && !routeError;
 
+  const changeKind = (next: LaunchKind) => {
+    setKind(next);
+    // De cómo reparte el lead depende lo que cuesta todo lo demás: se propone el tramo
+    // difícil, y al volver a una tarea suelta, el de todos los días.
+    if (mode !== "fixed") setMode(next === "orchestrate" ? "hard" : "standard");
+  };
+
   const start = async () => {
     setBusy(true);
     setError("");
     try {
-      await onStart({
-        ...route,
-        // Sin título propio, la primera línea del pedido: es lo que el usuario escribió
-        // para describirlo, así que es mejor nombre que "Tarea 3".
-        title: title.trim() || firstLine(prompt),
-        prompt: prompt.trim(),
-        budgetUsd: parseBudget(budget),
-        isolate: Boolean(isRepo) && isolate,
-      });
+      await onStart(kind === "orchestrate"
+        ? { kind, ...route, objective: prompt.trim(), maxParallel, budgetUsd: parseBudget(budget) }
+        : {
+          kind,
+          ...route,
+          // Sin título propio, la primera línea del pedido: es lo que el usuario escribió
+          // para describirlo, así que es mejor nombre que "Tarea 3".
+          title: title.trim() || firstLine(prompt),
+          prompt: prompt.trim(),
+          budgetUsd: parseBudget(budget),
+          isolate: Boolean(isRepo) && isolate,
+        });
       onClose();
     } catch (e) {
       setError(String(e));
@@ -121,7 +146,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
 
   return (
     <AppDialog
-      title={t("fleet.new.title")}
+      title={kind === "orchestrate" ? t("fleet.orchestrate.title") : t("fleet.new.title")}
       icon={<Icon className="w-4 h-4 text-gray-500 dark:text-white/50" />}
       size="md"
       closeOnEsc
@@ -140,12 +165,28 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
             onClick={start}
             leftIcon={busy ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
           >
-            {t("fleet.new.start")}
+            {kind === "orchestrate" ? t("fleet.orchestrate.start") : t("fleet.new.start")}
           </Button>
         </div>
       }
     >
       <div className="flex flex-col gap-3.5">
+        <SegmentedControl
+          size="sm"
+          aria-label={t("fleet.orchestrate.kind")}
+          value={kind}
+          onChange={(v) => changeKind(v as LaunchKind)}
+          options={[
+            { value: "task", label: t("fleet.orchestrate.kindTask") },
+            { value: "orchestrate", label: t("fleet.orchestrate.kindOrchestrate") },
+          ]}
+        />
+        {kind === "orchestrate" && (
+          <p className="-mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-white/40">
+            {t("fleet.orchestrate.explain")}
+          </p>
+        )}
+
         {agents.length > 1 && (
           <Field group label={t("fleet.new.agent")}>
             <div className="flex gap-1.5">
@@ -165,13 +206,16 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
           </Field>
         )}
 
-        <Field label={t("fleet.new.prompt")} hint={t("fleet.new.promptHint")}>
+        <Field
+          label={kind === "orchestrate" ? t("fleet.orchestrate.objective") : t("fleet.new.prompt")}
+          hint={kind === "orchestrate" ? t("fleet.orchestrate.objectiveHint") : t("fleet.new.promptHint")}
+        >
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            rows={5}
+            rows={kind === "orchestrate" ? 6 : 5}
             autoFocus
-            placeholder={t("fleet.new.promptPlaceholder")}
+            placeholder={kind === "orchestrate" ? t("fleet.orchestrate.objectivePlaceholder") : t("fleet.new.promptPlaceholder")}
             className="w-full resize-none rounded-lg px-2.5 py-2 outline-none
               bg-gray-100 dark:bg-white/5
               border border-gray-200 dark:border-white/10
@@ -180,15 +224,33 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
           />
         </Field>
 
-        <Field label={t("fleet.new.name")} hint={t("fleet.new.nameHint")}>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className={INPUT}
-          />
-        </Field>
+        {kind === "task" && (
+          <Field label={t("fleet.new.name")} hint={t("fleet.new.nameHint")}>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className={INPUT}
+            />
+          </Field>
+        )}
 
-        <Field group label={t("fleet.new.model")} hint={mode === "fixed" ? undefined : t("fleet.new.modelHint")}>
+        {kind === "orchestrate" && (
+          <Field group label={t("fleet.orchestrate.parallel")} hint={t("fleet.orchestrate.parallelHint")}>
+            <SegmentedControl
+              size="sm"
+              aria-label={t("fleet.orchestrate.parallel")}
+              value={String(maxParallel)}
+              onChange={(v) => setMaxParallel(Number(v))}
+              options={PARALLEL.map((n) => ({ value: String(n), label: String(n) }))}
+            />
+          </Field>
+        )}
+
+        <Field
+          group
+          label={kind === "orchestrate" ? t("fleet.orchestrate.leadModel") : t("fleet.new.model")}
+          hint={mode === "fixed" ? undefined : t("fleet.new.modelHint")}
+        >
           <div className="flex flex-wrap items-center gap-2">
             <SegmentedControl
               size="sm"
@@ -224,7 +286,10 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
         </Field>
 
         <div className="w-40">
-          <Field label={t("fleet.new.budget")} hint={t("fleet.new.budgetHint")}>
+          <Field
+            label={kind === "orchestrate" ? t("fleet.orchestrate.budget") : t("fleet.new.budget")}
+            hint={t("fleet.new.budgetHint")}
+          >
             <input
               value={budget}
               onChange={(e) => setBudget(e.target.value)}
@@ -237,7 +302,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
 
         <RoutePreview roster={roster} assignment={assignment} error={routeError} />
 
-        <div className="flex flex-col gap-1.5">
+        {kind === "task" && <div className="flex flex-col gap-1.5">
           <label className={`flex items-start gap-2 select-none
             ${isRepo ? "cursor-pointer" : "opacity-50 cursor-not-allowed"}`}>
             <input
@@ -261,7 +326,10 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
           {busyInFolder > 0 && !(isRepo && isolate) && (
             <Alert variant="warning">{t("fleet.new.collision", { n: busyInFolder })}</Alert>
           )}
-        </div>
+        </div>}
+        {kind === "orchestrate" && isRepo === false && (
+          <Alert variant="warning">{t("fleet.orchestrate.noRepo")}</Alert>
+        )}
 
         {error && <Alert variant="danger">{error}</Alert>}
       </div>

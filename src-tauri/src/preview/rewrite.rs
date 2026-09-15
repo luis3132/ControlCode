@@ -71,8 +71,9 @@ pub(crate) fn rewrite_location(value: &str, target_origin: &str, proxy_origin: &
     }
 }
 
-/// El iframe habla con `127.0.0.1:<puerto>`, no con el host del servidor: una cookie con
-/// `Domain=localhost` se descartaría. Sin `Domain` queda atada al host que la recibe.
+/// El iframe habla con el proxy (`localhost:<puerto>`), no con el host del servidor: una
+/// cookie con `Domain=` de otro host se descartaría. Sin `Domain` queda atada al host que la
+/// recibe.
 pub(crate) fn strip_cookie_domain(cookie: &str) -> String {
     cookie
         .split(';')

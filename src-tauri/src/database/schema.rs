@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 15;
+const SCHEMA_VERSION: i32 = 16;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -496,6 +496,54 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         conn.execute("ALTER TABLE tasks ADD COLUMN routed_by TEXT", [])?;
         conn.execute("ALTER TABLE tasks ADD COLUMN route_note TEXT", [])?;
     }
+
+    // v16 — Runs orquestados: un lead que planifica y tareas que dependen de otras.
+    //
+    // `role` distingue al lead (el agente que reparte) de los workers que lanzó; NULL es una
+    // tarea lanzada a mano como hasta ahora. `plan_key` es el nombre corto con el que el lead
+    // se refiere a una tarea en su plan (`api`, `tests`): los ids son de la app y el modelo
+    // no tiene por qué recordarlos. `parent_id` y `depth` son quién la delegó y a qué
+    // profundidad, que es lo que topa la delegación recursiva. `isolate` se decide al
+    // planificar pero el worktree se crea al despachar: crearlo antes dejaría carpetas de
+    // tareas que quizá nunca corran. `last_error` es el motivo del intento anterior, que se
+    // le cuenta al reintento en vez de repetirle el mismo pedido.
+    if !has_column(conn, "tasks", "role") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN role TEXT", [])?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN plan_key TEXT", [])?;
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN parent_id TEXT REFERENCES tasks(id) ON DELETE SET NULL",
+            [],
+        )?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN depth INTEGER NOT NULL DEFAULT 0", [])?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN isolate INTEGER NOT NULL DEFAULT 0", [])?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN result_schema TEXT", [])?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN last_error TEXT", [])?;
+    }
+    conn.execute_batch(
+        "-- Tabla de unión y no una columna JSON: 'qué tareas quedaron libres' es la consulta
+         -- del scheduler cada vez que algo termina, y en JSON habría que leer y parsear todas.
+         CREATE TABLE IF NOT EXISTS task_deps (
+             task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+             depends_on TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+             PRIMARY KEY (task_id, depends_on)
+         );
+         CREATE INDEX IF NOT EXISTS idx_task_deps_dep ON task_deps(depends_on);
+
+         -- Lo que los agentes de un run se dejan escrito unos a otros. Append-only: dos
+         -- agentes escribiendo a la vez no pueden pisarse, y lo que alguien afirmó queda
+         -- con su autor. Es DATO para quien lo lee, nunca instrucciones (ver runs/context.rs).
+         CREATE TABLE IF NOT EXISTS run_facts (
+             id         TEXT PRIMARY KEY,
+             run_id     TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+             -- Quién lo escribió. NULL = un agente de una tab o el usuario.
+             task_id    TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+             -- decision | finding | file | constraint | note
+             kind       TEXT NOT NULL,
+             body       TEXT NOT NULL,
+             created_at INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_run_facts_run ON run_facts(run_id);",
+    )?;
 
     // Columna agregada después de que `tabs` ya existía en instalaciones reales, así que
     // se suma con ALTER en vez de recrear la tabla (que perdería las tabs guardadas).

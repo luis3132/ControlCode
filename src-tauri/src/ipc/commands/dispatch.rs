@@ -14,8 +14,9 @@ use tauri::AppHandle;
 
 use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
+use super::browser::browser_run;
 use super::shared::bridge_call;
-use super::runs::run_approve;
+use super::runs::{run_approve, run_orchestrate};
 use super::skills::{skill_edit, skill_install, skill_list, skill_new, skill_search, skill_show};
 use super::tabs::{tab_create, tab_list, tab_output, tab_send};
 use super::watch::{watch_add, watch_list, watch_remove, watch_wait};
@@ -48,9 +49,20 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "skill.show" => skill_show(app, args),
         "skill.new" => skill_new(app, args),
         "skill.edit" => skill_edit(app, args),
-        // El único que manda un agente, no una persona: llega desde el `ccode mcp` que
-        // la propia tarea lanzó, y bloquea hasta que alguien decide.
+        // Los que manda un agente y no una persona, desde el `ccode mcp` que lanzó su TUI.
+        // `run.approve` bloquea hasta que alguien decide; `browser.run` maneja el
+        // navegador de las tabs del proyecto.
         "run.approve" => run_approve(app, args),
+        "browser.run" => browser_run(app, args),
+        "run.roster" => run_orchestrate(app, "run.roster", args),
+        "run.plan" => run_orchestrate(app, "run.plan", args),
+        "run.addTask" => run_orchestrate(app, "run.addTask", args),
+        "run.status" => run_orchestrate(app, "run.status", args),
+        "run.result" => run_orchestrate(app, "run.result", args),
+        "run.await" => run_orchestrate(app, "run.await", args),
+        "run.addFact" => run_orchestrate(app, "run.addFact", args),
+        "run.facts" => run_orchestrate(app, "run.facts", args),
+        "run.cancelTask" => run_orchestrate(app, "run.cancelTask", args),
         "app.status" => app_status(app),
         other => Err(format!("Comando desconocido: {other}")),
     };

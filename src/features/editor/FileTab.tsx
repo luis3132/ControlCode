@@ -34,8 +34,11 @@ function formatBytes(n: number): string {
  * se vigila el archivo; si cambió y no hay nada sin guardar, se recarga solo. Si hay
  * cambios sin guardar no se pisa nada — se avisa, y guardar pide confirmación explícita
  * para sobrescribir lo que escribió otro.
+ *
+ * `active`: se está viendo (se vigila el disco). `focused`: además es la del grupo enfocado,
+ * la que recibe el teclado — con la pantalla dividida se ven varias y el foco va a una.
  */
-export function FileTab({ view, active }: { view: FileView; active: boolean }) {
+export function FileTab({ view, active, focused = active }: { view: FileView; active: boolean; focused?: boolean }) {
   const { t } = useTranslation();
   const updateView = useViewTabsStore((s) => s.updateView);
   const [content, setContent] = useState<FileContent | null>(null);
@@ -121,10 +124,10 @@ export function FileTab({ view, active }: { view: FileView; active: boolean }) {
   // Volver a la tab es para escribir en ella. En vista previa no: el editor está debajo, y
   // lo que se tipeara iría a un documento que no se ve.
   useEffect(() => {
-    if (!active || preview) return;
+    if (!focused || preview) return;
     const frame = requestAnimationFrame(() => editor.current?.focus());
     return () => cancelAnimationFrame(frame);
-  }, [active, preview]);
+  }, [focused, preview]);
 
   // Al pasar a la vista previa se toma lo que hay en el editor en ese momento.
   useEffect(() => {

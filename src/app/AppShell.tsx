@@ -14,8 +14,8 @@ import { ExplorerPanel } from "@/features/explorer/ExplorerPanel";
 import { SettingsModal } from "@/features/settings/SettingsModal";
 import { AccountsModal } from "@/features/accounts/AccountsModal";
 import { RouteModal } from "@/app/RouteModal";
-import { TerminalPanel } from "@/features/terminal/TerminalPanel";
-import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
+import { EditorArea } from "@/features/tabs/EditorArea";
+import { initLayoutSync } from "@/features/tabs/layout/layoutStore";
 import { initViewTabsPersistence } from "@/features/tabs/viewStore";
 import { useUiStore } from "@/app/uiStore";
 import { buildWorkspaceTree } from "@/features/workspaces/workspaceTree";
@@ -136,6 +136,8 @@ export function AppShell() {
     initTabsPersistence();
     const myLabel = getCurrentWindow().label;
     initViewTabsPersistence(myLabel);
+    // Después de las vistas: el árbol guardado se contrasta contra las tabs que existen.
+    initLayoutSync(myLabel);
     loadWindowState(myLabel)
       .then((restored) => {
         if (restored) {
@@ -211,7 +213,8 @@ export function AppShell() {
         {!workspacesCollapsed && <WorkspacesPanel groups={groups} width={PANEL_W} />}
 
         <div className="relative flex-1 min-w-0 overflow-hidden">
-          {/* TerminalPanel siempre montado para preservar PTYs */}
+          {/* Las terminales y las demás tabs, siempre montadas para preservar los PTYs, en
+              los grupos de la pantalla dividida. */}
           <div
             style={{
               position: "absolute",
@@ -221,9 +224,7 @@ export function AppShell() {
               zIndex: 0,
             }}
           >
-            <TerminalPanel />
-            {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. */}
-            <ViewTabsHost />
+            <EditorArea />
           </div>
 
           {/* `overflow-hidden` y no `cc-scroll`: cada página arma su propio alto y

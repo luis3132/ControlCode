@@ -10,13 +10,14 @@
 import { create } from "zustand";
 
 import * as ipc from "./ipc";
-import type { AgentEvent, PendingApproval, Task, TaskEventPayload } from "./types";
+import type { AgentEvent, PendingApproval, Run, Task, TaskEventPayload } from "./types";
 
 /** Cuántas líneas de actividad conserva una tarjeta. Lo de más atrás está en el `.jsonl`. */
 export const CARD_LINES = 5;
 
 interface RunsState {
   tasks: Task[];
+  runs: Run[];
   /** Los permisos que hay esperando, por tarea. */
   approvals: PendingApproval[];
   /** Por tarea, las últimas líneas de actividad. */
@@ -24,6 +25,8 @@ interface RunsState {
   loaded: boolean;
   loadTasks: (workspaceId: string) => Promise<void>;
   startTask: (input: ipc.StartTaskInput) => Promise<Task>;
+  startOrchestration: (input: ipc.StartOrchestrationInput) => Promise<Task>;
+  cancelRun: (workspaceId: string, runId: string) => Promise<void>;
   cancelTask: (taskId: string) => Promise<void>;
   /** Para la tarea si hace falta y devuelve la fila con lo necesario para reabrirla. */
   handOffTask: (taskId: string) => Promise<Task>;
@@ -53,19 +56,33 @@ export function lineOf(event: AgentEvent): string | null {
 
 export const useRunsStore = create<RunsState>((set) => ({
   tasks: [],
+  runs: [],
   approvals: [],
   activity: {},
   loaded: false,
 
   loadTasks: async (workspaceId) => {
-    const tasks = await ipc.listTasks(workspaceId);
-    set({ tasks, loaded: true });
+    const [tasks, runs] = await Promise.all([ipc.listTasks(workspaceId), ipc.listRuns(workspaceId)]);
+    set({ tasks, runs, loaded: true });
   },
 
   startTask: async (input) => {
     const task = await ipc.startTask(input);
     set((s) => ({ tasks: [task, ...s.tasks.filter((t) => t.id !== task.id)] }));
     return task;
+  },
+
+  startOrchestration: async (input) => {
+    const lead = await ipc.startOrchestration(input);
+    const runs = await ipc.listRuns(input.workspaceId);
+    set((s) => ({ runs, tasks: [lead, ...s.tasks.filter((t) => t.id !== lead.id)] }));
+    return lead;
+  },
+
+  cancelRun: async (workspaceId, runId) => {
+    await ipc.cancelRun(runId);
+    const [tasks, runs] = await Promise.all([ipc.listTasks(workspaceId), ipc.listRuns(workspaceId)]);
+    set({ tasks, runs });
   },
 
   cancelTask: async (taskId) => {
@@ -113,8 +130,8 @@ export const useRunsStore = create<RunsState>((set) => ({
     // Se relee la lista entera y no la fila: no hay comando de "una tarea" y pedirlo por
     // un cambio de estado (que pasa dos o tres veces por tarea, no por segundo) no
     // justifica otro comando más.
-    const tasks = await ipc.listTasks(workspaceId);
-    set({ tasks });
+    const [tasks, runs] = await Promise.all([ipc.listTasks(workspaceId), ipc.listRuns(workspaceId)]);
+    set({ tasks, runs });
     if (!tasks.some((t) => t.id === taskId)) {
       // La tarea ya no está (se borró su run): su actividad tampoco tiene dueño.
       set((s) => {

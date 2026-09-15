@@ -52,6 +52,22 @@ pub struct Task {
     pub routed_by: Option<String>,
     /// Qué se descartó al asignarla y por qué.
     pub route_note: Option<String>,
+    /// `lead` | `worker`. `None` = lanzada a mano, fuera de un plan.
+    pub role: Option<String>,
+    /// El nombre corto con que el plan se refiere a ella (`api`, `tests`).
+    pub plan_key: Option<String>,
+    /// Quién la delegó.
+    pub parent_id: Option<String>,
+    /// A cuántas delegaciones está del lead (0 = el lead o una tarea suelta).
+    pub depth: i64,
+    /// Corre en su propio worktree. El worktree se crea al despacharla, no al planificarla.
+    pub isolate: bool,
+    /// JSON Schema que tiene que cumplir su resultado (`--json-schema`).
+    pub result_schema: Option<String>,
+    /// Por qué falló el intento anterior; se le cuenta al reintento.
+    pub last_error: Option<String>,
+    /// Las tareas que tienen que terminar bien antes de que esta arranque.
+    pub depends_on: Vec<String>,
     pub started_at: Option<i64>,
     pub ended_at: Option<i64>,
     pub created_at: i64,
@@ -60,6 +76,8 @@ pub struct Task {
 /// Los estados por los que pasa una tarea. Son strings en SQLite (como `scope` en
 /// `project_skills`) y se escriben desde acá para que no haya dos grafías del mismo estado.
 pub mod status {
+    /// Esperando que terminen sus dependencias o que haya lugar en el run.
+    pub const PENDING: &str = "pending";
     pub const READY: &str = "ready";
     pub const RUNNING: &str = "running";
     pub const DONE: &str = "done";
@@ -68,6 +86,35 @@ pub mod status {
     /// El usuario la tomó en una terminal. No es lo mismo que cancelarla: el trabajo
     /// sigue, solo que ahora en una tab, y la tarjeta tiene que decir eso y no "parada".
     pub const HANDED_OFF: &str = "handed_off";
+    /// No llegó a correr: una dependencia no terminó bien, o se acabó el presupuesto del run.
+    pub const SKIPPED: &str = "skipped";
+
+    /// Lo que ya no va a cambiar solo.
+    pub fn is_final(status: &str) -> bool {
+        matches!(status, DONE | FAILED | CANCELLED | HANDED_OFF | SKIPPED)
+    }
+}
+
+pub mod role {
+    /// El agente que planifica y reparte.
+    pub const LEAD: &str = "lead";
+    /// Una tarea de un plan.
+    pub const WORKER: &str = "worker";
+}
+
+/// Algo que un agente de un run le dejó escrito a los demás.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Fact {
+    pub id: String,
+    pub run_id: String,
+    /// Quién lo escribió. `None` = un agente de una tab o el usuario.
+    pub task_id: Option<String>,
+    /// El título de esa tarea, para mostrar el autor sin otra consulta.
+    pub author: Option<String>,
+    pub kind: String,
+    pub body: String,
+    pub created_at: i64,
 }
 
 /// Lo que pasó en una tarea, ya traducido del dialecto de su TUI.

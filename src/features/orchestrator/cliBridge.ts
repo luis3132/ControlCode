@@ -5,6 +5,7 @@ import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useAgentsStore } from "@/features/agents/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
+import { runBrowserRequest, type BrowserRequest } from "@/features/browser/agentBridge";
 import { respondToCli } from "./ipc";
 
 /**
@@ -122,11 +123,21 @@ function handlePtyId(args: Record<string, unknown>): unknown {
   return { ptyId: tab.ptyId };
 }
 
+/** Un agente usando el navegador de su proyecto, desde el MCP (`ccode mcp`). */
+async function handleBrowser(args: Record<string, unknown>): Promise<unknown> {
+  const cwd = str(args, "cwd");
+  if (!cwd) throw new Error("Falta la carpeta del proyecto");
+  const request = args.request as BrowserRequest | undefined;
+  if (!request || typeof request.op !== "string") throw new Error("Falta qué hacer en el navegador");
+  return { text: await runBrowserRequest(cwd, request) };
+}
+
 async function handle(command: string, args: Record<string, unknown>): Promise<unknown> {
   switch (command) {
     case "tab.create": return handleCreateTab(args);
     case "tab.close": return handleCloseTab(args);
     case "tab.ptyId": return handlePtyId(args);
+    case "browser.run": return handleBrowser(args);
     default: throw new Error(`El frontend no sabe atender '${command}'`);
   }
 }

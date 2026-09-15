@@ -31,7 +31,9 @@ interface TabsState {
   closeTab: (id: string) => void;
   activateTab: (id: string) => void;
   renameTab: (id: string, title: string) => void;
-  reorderTabs: (fromIndex: number, toIndex: number) => void;
+  /** Deja las tabs de `ids` en ese orden, en los lugares que ya ocupaban entre todas: las
+   *  de otras carpetas no se mueven. */
+  arrangeTabs: (ids: string[]) => void;
   setPtyId: (tabId: string, ptyId: number) => void;
   setSessionId: (tabId: string, sessionId: string) => void;
   updateTab: (tabId: string, patch: Partial<Tab>) => void;
@@ -100,12 +102,15 @@ export const useTabsStore = create<TabsState>((set) => ({
       tabs: state.tabs.map((t) => (t.id === id ? { ...t, title, titleIsCustom: true } : t)),
     })),
 
-  reorderTabs: (fromIndex, toIndex) =>
+  arrangeTabs: (ids) =>
     set((state) => {
-      const tabs = [...state.tabs];
-      const [moved] = tabs.splice(fromIndex, 1);
-      tabs.splice(toIndex, 0, moved);
-      return { tabs };
+      const wanted = new Set(ids);
+      const byId = new Map(state.tabs.map((tab) => [tab.id, tab]));
+      const order = ids.filter((id) => byId.has(id));
+      if (order.length !== state.tabs.filter((tab) => wanted.has(tab.id)).length) return state;
+      let next = 0;
+      const tabs = state.tabs.map((tab) => (wanted.has(tab.id) ? byId.get(order[next++]!)! : tab));
+      return tabs.every((tab, i) => tab === state.tabs[i]) ? state : { tabs };
     }),
 
   setPtyId: (tabId, ptyId) =>

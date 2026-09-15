@@ -6,9 +6,10 @@
  * Vive adentro del iframe, así que ve la página; la app no puede (es otro origen). Todo lo
  * que sabe lo cuenta por `postMessage`, y solo actúa cuando la app se lo pide.
  *
- * Por eso no puede importar nada en tiempo de ejecución: solo `import type`, que se borra
- * al compilar.
+ * Se empaqueta como script suelto, así que lo que importa viaja adentro: nada de acá puede
+ * depender de la app.
  */
+import { describeElement, selectorOf } from "./page/dom";
 import type { AppMessage, PageMessage, PickedComponent, PickedElement } from "./protocol";
 
 declare global {
@@ -52,13 +53,6 @@ type Named = { displayName?: string; name?: string; __name?: string; render?: Na
     }
   }
 
-  function describe(el: Element): string {
-    const name = el.tagName.toLowerCase();
-    if (el.id) return `${name}#${el.id}`;
-    const classes = Array.from(el.classList).slice(0, 2);
-    return classes.length ? `${name}.${classes.join(".")}` : name;
-  }
-
   function overlay(): { box: HTMLDivElement; label: HTMLDivElement } {
     if (box && label) return { box, label };
     box = document.createElement("div");
@@ -91,7 +85,7 @@ type Named = { displayName?: string; name?: string; __name?: string; render?: Na
     Object.assign(o.box.style, {
       display: "block", left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px`,
     });
-    o.label.textContent = `${describe(el)}  ${Math.round(r.width)}×${Math.round(r.height)}`;
+    o.label.textContent = `${describeElement(el)}  ${Math.round(r.width)}×${Math.round(r.height)}`;
     Object.assign(o.label.style, {
       display: "block",
       left: `${Math.max(0, r.left)}px`,
@@ -100,32 +94,6 @@ type Named = { displayName?: string; name?: string; __name?: string; render?: Na
   }
 
   const isOurs = (el: Element | null) => !!el?.hasAttribute(MARK);
-
-  /** Un selector que vuelva a encontrar el elemento, lo más corto posible. Las clases con
-   *  `:`, `[` o `/` (Tailwind) se saltean: válidas, pero ilegibles como referencia. */
-  function selectorOf(el: Element): string {
-    const parts: string[] = [];
-    for (let node: Element | null = el; node && node !== document.documentElement; node = node.parentElement) {
-      if (node.id) {
-        parts.unshift(`#${CSS.escape(node.id)}`);
-        break;
-      }
-      let part = node.tagName.toLowerCase();
-      const classes = Array.from(node.classList)
-        .filter((c) => c.length < 32 && !/[:[\]/]/.test(c))
-        .slice(0, 2);
-      if (classes.length) part += `.${classes.map((c) => CSS.escape(c)).join(".")}`;
-      const parent: Element | null = node.parentElement;
-      if (parent) {
-        const tag = node.tagName;
-        const same = Array.from(parent.children).filter((c) => c.tagName === tag);
-        if (same.length > 1) part += `:nth-of-type(${same.indexOf(node) + 1})`;
-      }
-      parts.unshift(part);
-      if (parts.length >= 5) break;
-    }
-    return parts.join(" > ");
-  }
 
   const nameOf = (type: unknown): string | undefined => {
     if (!type || (typeof type !== "function" && typeof type !== "object")) return undefined;

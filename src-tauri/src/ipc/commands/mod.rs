@@ -2,6 +2,7 @@
 
 mod agents;
 mod app;
+mod browser;
 mod dispatch;
 mod shared;
 mod runs;

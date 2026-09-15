@@ -28,6 +28,12 @@ pub struct LaunchCtx<'a> {
     /// El `--mcp-config` con el puente de permisos de ESTA tarea. `None` = sin broker: el
     /// agente corre con lo que su modo de permisos decida solo.
     pub mcp_config: Option<std::path::PathBuf>,
+    /// Reglas del entorno que no son parte del pedido: qué es un run, cómo repartir.
+    pub system_prompt: Option<String>,
+    /// Tools del servidor de Control Code permitidas sin preguntar, además del navegador.
+    pub allowed_tools: Vec<String>,
+    /// JSON Schema que la CLI hace cumplir al resultado.
+    pub json_schema: Option<String>,
 }
 
 pub trait HeadlessAgent {
@@ -101,6 +107,14 @@ impl HeadlessAgent for ClaudeCode {
                 args.push("default".into());
                 args.push("--permission-prompts".into());
                 args.push("host".into());
+                // El navegador de las tabs no pasa por el broker: solo toca la vista
+                // previa del proyecto adentro de la app, y pedir permiso por cada click
+                // haría imposible que una tarea pruebe una página. Las de orquestación
+                // van según el rol: las decide quien arma el lanzamiento.
+                let mut allowed = crate::ipc::mcp::browser_tool_names();
+                allowed.extend(ctx.allowed_tools.iter().cloned());
+                args.push("--allowedTools".into());
+                args.push(allowed.join(","));
             }
             // Sin broker no hay a quién preguntarle, así que lo que preguntaría se DENIEGA
             // en vez de colgar el proceso esperando a nadie.
@@ -114,6 +128,14 @@ impl HeadlessAgent for ClaudeCode {
         if let Some(m) = model {
             args.push("--model".into());
             args.push(m.into());
+        }
+        if let Some(system) = &ctx.system_prompt {
+            args.push("--append-system-prompt".into());
+            args.push(system.clone());
+        }
+        if let Some(schema) = &ctx.json_schema {
+            args.push("--json-schema".into());
+            args.push(schema.clone());
         }
         if let Some(b) = budget_usd {
             // El único presupuesto que la CLI hace cumplir. `--max-turns` no existe en

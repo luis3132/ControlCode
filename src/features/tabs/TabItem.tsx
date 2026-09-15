@@ -5,22 +5,22 @@ import type { Tab } from "@/features/tabs/types";
 
 interface TabItemProps {
   tab: Tab;
+  /** La clave de la tab en los grupos: el arrastre la busca por ahí. */
+  tabKey: string;
+  className?: string;
   isActive: boolean;
-  isDragOver: boolean;
+  /** `false` en un grupo sin el foco: la línea de la activa va en gris. */
+  groupFocused?: boolean;
   onActivate: () => void;
   onClose: (e: React.MouseEvent) => void;
   onRenameCommit: (title: string) => void;
-  onDragStart: () => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDrop: () => void;
-  onDragEnd: (e: React.DragEvent) => void;
+  onPointerDown?: (e: React.PointerEvent<HTMLElement>) => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }
 
 export function TabItem({
-  tab, isActive, isDragOver,
-  onActivate, onClose, onRenameCommit,
-  onDragStart, onDragOver, onDrop, onDragEnd, onContextMenu,
+  tab, tabKey, className = "", isActive, groupFocused = true,
+  onActivate, onClose, onRenameCommit, onPointerDown, onContextMenu,
 }: TabItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(tab.title);
@@ -40,16 +40,8 @@ export function TabItem({
 
   return (
     <div
-      draggable
-      style={{ WebkitUserDrag: "element" } as React.CSSProperties}
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", tab.id);
-        onDragStart();
-      }}
-      onDragOver={onDragOver}
-      onDrop={(e) => { e.stopPropagation(); onDrop(); }}
-      onDragEnd={onDragEnd}
+      data-tab-key={tabKey}
+      onPointerDown={isEditing ? undefined : onPointerDown}
       onClick={onActivate}
       onDoubleClick={(e) => {
         e.preventDefault();
@@ -63,8 +55,7 @@ export function TabItem({
       className={`
         group relative flex items-center gap-2 h-10 pl-3 pr-1.5 shrink-0
         max-w-48 min-w-27 rounded-t-[9px] cursor-pointer select-none
-        transition-colors duration-150
-        ${isDragOver ? "border-l-2 border-l-blue-500" : ""}
+        transition-colors duration-150 ${className}
         ${isActive
           ? "bg-gray-50 dark:bg-[#0d1117] text-gray-900 dark:text-white"
           : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-white/5 hover:text-gray-800 dark:hover:text-gray-200"}
@@ -72,7 +63,7 @@ export function TabItem({
     >
       {/* La tab activa se funde con el área de abajo; la línea la remata. */}
       {isActive && (
-        <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500" />
+        <span className={`absolute bottom-0 left-0 right-0 h-[2px] ${groupFocused ? "bg-blue-500" : "bg-gray-300 dark:bg-white/20"}`} />
       )}
 
       <AgentIcon className="w-3.5 h-3.5 shrink-0 opacity-70" />

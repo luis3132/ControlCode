@@ -67,6 +67,18 @@ pub fn ask_frontend(
     args: &Value,
     window: Option<&str>,
 ) -> Result<Value, String> {
+    ask_frontend_within(app, command, args, window, RESPONSE_TIMEOUT)
+}
+
+/// Igual que `ask_frontend`, con otro tope: lo que el frontend hace para responder puede
+/// tardar más que crear una tab (esperar a que cargue una página, por ejemplo).
+pub fn ask_frontend_within(
+    app: &AppHandle,
+    command: &str,
+    args: &Value,
+    window: Option<&str>,
+    timeout: Duration,
+) -> Result<Value, String> {
     let target_label = resolve_target(app, window)?;
     let request_id = Uuid::new_v4().to_string();
     let (tx, rx) = channel();
@@ -84,7 +96,7 @@ pub fn ask_frontend(
         return Err(format!("No se pudo notificar a la ventana: {e}"));
     }
 
-    let result = rx.recv_timeout(RESPONSE_TIMEOUT).map_err(|_| {
+    let result = rx.recv_timeout(timeout).map_err(|_| {
         "La ventana no respondió a tiempo (¿está la app respondiendo?)".to_string()
     });
 

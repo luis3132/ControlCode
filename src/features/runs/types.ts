@@ -29,13 +29,59 @@ export interface Task {
   routedBy: RoutedBy | null;
   /** Qué se descartó al asignarla y por qué, una cosa por línea. */
   routeNote: string | null;
+  /** `lead` reparte el objetivo; `worker` es una tarea de su plan. `null` = lanzada a mano. */
+  role: TaskRole | null;
+  /** El nombre corto con que el plan se refiere a ella (`api`, `tests`). */
+  planKey: string | null;
+  /** Quién la delegó. */
+  parentId: string | null;
+  depth: number;
+  /** Va en su propio worktree (se crea cuando le toca correr). */
+  isolate: boolean;
+  resultSchema: string | null;
+  /** Por qué falló el intento anterior. */
+  lastError: string | null;
+  /** Las tareas que tienen que terminar bien antes de que esta arranque. */
+  dependsOn: string[];
   startedAt: number | null;
   endedAt: number | null;
   createdAt: number;
 }
 
-/** `handed_off` = el usuario la siguió en una terminal: el trabajo no se paró, se mudó. */
-export type TaskStatus = "ready" | "running" | "done" | "failed" | "cancelled" | "handed_off";
+/**
+ * `handed_off` = el usuario la siguió en una terminal: el trabajo no se paró, se mudó.
+ * `pending` = de un plan, esperando sus dependencias o lugar. `skipped` = no llegó a
+ * correr: una dependencia no terminó bien o se acabó el presupuesto del run.
+ */
+export type TaskStatus = "pending" | "ready" | "running" | "done" | "failed" | "cancelled" | "handed_off" | "skipped";
+
+export type TaskRole = "lead" | "worker";
+
+/** Un lote de tareas: una suelta, o un objetivo que un lead repartió. */
+export interface Run {
+  id: string;
+  workspaceId: string;
+  objective: string;
+  cwd: string;
+  status: "running" | "done" | "failed" | "cancelled";
+  maxParallel: number;
+  budgetUsd: number | null;
+  spentUsd: number;
+  createdAt: number;
+  endedAt: number | null;
+}
+
+/** Algo que un agente del run les dejó escrito a los demás. */
+export interface Fact {
+  id: string;
+  runId: string;
+  taskId: string | null;
+  /** El título de la tarea que lo escribió. `null` = una tab o el usuario. */
+  author: string | null;
+  kind: "decision" | "finding" | "file" | "constraint" | "note";
+  body: string;
+  createdAt: number;
+}
 
 /** Lo que pasó en una tarea, ya traducido del dialecto de su TUI. */
 export type AgentEvent =

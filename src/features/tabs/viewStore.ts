@@ -11,10 +11,15 @@ interface ViewTabsState {
   views: ViewTab[];
   /** `null` = se ve la terminal del agente activo. */
   activeViewId: string | null;
+  /** Tabs que se montan aunque nadie las haya mirado: un navegador que maneja un agente
+   *  tiene que tener su página cargada aunque el usuario siga en la terminal. */
+  keepMountedIds: string[];
 
   openFile: (cwd: string, path: string, reveal?: { line: number; column: number }) => void;
   openDiff: (cwd: string, root: string, path: string, staged: boolean) => void;
-  openBrowser: (cwd: string, url?: string) => void;
+  /** Devuelve el id de la tab. `activate: false` la abre sin sacar al usuario de lo que mira. */
+  openBrowser: (cwd: string, url?: string, opts?: { activate?: boolean }) => string;
+  keepMounted: (id: string) => void;
   activateView: (id: string) => void;
   /** Volver a la terminal. */
   showTerminal: () => void;
@@ -26,6 +31,7 @@ interface ViewTabsState {
 export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
   views: [],
   activeViewId: null,
+  keepMountedIds: [],
 
   openFile: (cwd, path, reveal) => {
     const wanted = { kind: "file", cwd, path } as const;
@@ -57,10 +63,19 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
     set((s) => ({ views: [...s.views, view], activeViewId: view.id }));
   },
 
-  openBrowser: (cwd, url = "") => {
+  openBrowser: (cwd, url = "", opts) => {
     const view: BrowserView = { kind: "browser", cwd, url, id: crypto.randomUUID(), title: "" };
-    set((s) => ({ views: [...s.views, view], activeViewId: view.id }));
+    const activate = opts?.activate ?? true;
+    set((s) => ({
+      views: [...s.views, view],
+      activeViewId: activate ? view.id : s.activeViewId,
+      keepMountedIds: activate ? s.keepMountedIds : [...s.keepMountedIds, view.id],
+    }));
+    return view.id;
   },
+
+  keepMounted: (id) =>
+    set((s) => (s.keepMountedIds.includes(id) ? s : { keepMountedIds: [...s.keepMountedIds, id] })),
 
   activateView: (id) => set({ activeViewId: id }),
   showTerminal: () => set({ activeViewId: null }),
@@ -69,6 +84,7 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
     set((s) => ({
       activeViewId: nextActiveAfterClose(s.views, id, s.activeViewId),
       views: s.views.filter((v) => v.id !== id),
+      keepMountedIds: s.keepMountedIds.filter((k) => k !== id),
     })),
 
   updateView: (id, patch) =>

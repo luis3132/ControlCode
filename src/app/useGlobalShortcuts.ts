@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
+import { activateItem, currentLayout } from "@/features/tabs/layout/layoutStore";
+import { findGroup } from "@/features/tabs/layout/layoutTree";
 import { useTabsStore } from "@/features/tabs/store";
 import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -44,6 +46,17 @@ export function useGlobalShortcuts() {
       if (shortcut.action.kind === "goto") {
         const target = resolveGoto(shortcut.action.path, location.pathname, tabs.length > 0);
         if (target) navigate(target);
+        return;
+      }
+
+      // Con grupos, cicla por las tabs del grupo enfocado: son las de la tira donde se
+      // está trabajando, igual que en VS Code.
+      const layout = currentLayout();
+      const group = layout ? findGroup(layout, layout.focused) : undefined;
+      if (group) {
+        const key = nextTabId(group.items, group.active, shortcut.action.delta);
+        if (key) activateItem(key);
+        navigate(WORKSPACE_PATH);
         return;
       }
 

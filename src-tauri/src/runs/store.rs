@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::database::DbConnection;
 use crate::util::now_ts;
 
-use super::types::{status, Run, Task, TaskOutcome};
+use super::types::{status, Fact, Run, Task, TaskOutcome};
 
 const RUN_COLUMNS: &str = "id, workspace_id, objective, cwd, status, max_parallel, budget_usd, \
                            spent_usd, created_at, ended_at";
@@ -20,7 +20,8 @@ const TASK_COLUMNS: &str = "id, run_id, title, prompt, agent_id, account_id, mod
                             budget_usd, status, session_id, attempt, result, error, cost_usd, \
                             tokens_in, tokens_out, events_path, started_at, ended_at, created_at, \
                             worktree_path, branch, worktree_removed, complexity, routed_by, \
-                            route_note";
+                            route_note, role, plan_key, parent_id, depth, isolate, result_schema, \
+                            last_error";
 
 fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
     Ok(Run {
@@ -66,7 +67,39 @@ fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         complexity: row.get(24)?,
         routed_by: row.get(25)?,
         route_note: row.get(26)?,
+        role: row.get(27)?,
+        plan_key: row.get(28)?,
+        parent_id: row.get(29)?,
+        depth: row.get(30)?,
+        isolate: row.get::<_, i64>(31)? != 0,
+        result_schema: row.get(32)?,
+        last_error: row.get(33)?,
+        // Lo llena `with_deps`: vive en otra tabla.
+        depends_on: Vec::new(),
     })
+}
+
+/// Completa `depends_on` de cada tarea con una sola consulta por lote.
+fn with_deps(conn: &Connection, mut tasks: Vec<Task>) -> Result<Vec<Task>, String> {
+    if tasks.is_empty() {
+        return Ok(tasks);
+    }
+    let placeholders = vec!["?"; tasks.len()].join(",");
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT task_id, depends_on FROM task_deps WHERE task_id IN ({placeholders}) ORDER BY rowid"
+        ))
+        .map_err(|e| e.to_string())?;
+    let ids: Vec<&str> = tasks.iter().map(|t| t.id.as_str()).collect();
+    let pairs: Vec<(String, String)> = stmt
+        .query_map(rusqlite::params_from_iter(ids), |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    for task in &mut tasks {
+        task.depends_on = pairs.iter().filter(|(t, _)| *t == task.id).map(|(_, d)| d.clone()).collect();
+    }
+    Ok(tasks)
 }
 
 // ── Crear ───────────────────────────────────────────────────────
@@ -77,17 +110,30 @@ pub fn create_run(
     objective: &str,
     cwd: &str,
 ) -> Result<Run, String> {
+    create_run_with(conn, workspace_id, objective, cwd, 2, None)
+}
+
+/// Un run con su paralelismo y su presupuesto: lo que declara un plan.
+pub fn create_run_with(
+    conn: &Connection,
+    workspace_id: &str,
+    objective: &str,
+    cwd: &str,
+    max_parallel: i64,
+    budget_usd: Option<f64>,
+) -> Result<Run, String> {
     let id = Uuid::new_v4().to_string();
     let now = now_ts();
     conn.execute(
-        "INSERT INTO runs (id, workspace_id, objective, cwd, status, created_at)
-         VALUES (?1, ?2, ?3, ?4, 'running', ?5)",
-        rusqlite::params![id, workspace_id, objective, cwd, now],
+        "INSERT INTO runs (id, workspace_id, objective, cwd, status, max_parallel, budget_usd, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'running', ?5, ?6, ?7)",
+        rusqlite::params![id, workspace_id, objective, cwd, max_parallel, budget_usd, now],
     )
     .map_err(|e| e.to_string())?;
     run_by_id(conn, &id)?.ok_or_else(|| "el run no quedó guardado".to_string())
 }
 
+#[derive(Default)]
 pub struct NewTask<'a> {
     pub run_id: &'a str,
     pub title: &'a str,
@@ -100,14 +146,25 @@ pub struct NewTask<'a> {
     pub complexity: Option<&'a str>,
     pub routed_by: Option<&'a str>,
     pub route_note: Option<&'a str>,
+    /// `None` = lanzada a mano.
+    pub role: Option<&'a str>,
+    pub plan_key: Option<&'a str>,
+    pub parent_id: Option<&'a str>,
+    pub depth: i64,
+    pub isolate: bool,
+    pub result_schema: Option<&'a str>,
+    /// Arranca esperando (`pending`) en vez de lista para lanzar. Es lo que crea un plan: la
+    /// tarea existe, pero la lanza el scheduler cuando le toca.
+    pub queued: bool,
 }
 
 pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO tasks (id, run_id, title, prompt, agent_id, account_id, model, cwd,
-                            budget_usd, status, created_at, complexity, routed_by, route_note)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                            budget_usd, status, created_at, complexity, routed_by, route_note,
+                            role, plan_key, parent_id, depth, isolate, result_schema)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         rusqlite::params![
             id,
             new.run_id,
@@ -118,11 +175,17 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
             new.model,
             new.cwd,
             new.budget_usd,
-            status::READY,
+            if new.queued { status::PENDING } else { status::READY },
             now_ts(),
             new.complexity,
             new.routed_by,
             new.route_note,
+            new.role,
+            new.plan_key,
+            new.parent_id,
+            new.depth,
+            new.isolate as i64,
+            new.result_schema,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -141,12 +204,54 @@ pub fn run_by_id(conn: &Connection, id: &str) -> Result<Option<Run>, String> {
 }
 
 pub fn task_by_id(conn: &Connection, id: &str) -> Result<Option<Task>, String> {
-    conn.query_row(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"), [id], row_to_task)
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            other => Err(other.to_string()),
-        })
+    let task = conn
+        .query_row(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"), [id], row_to_task)
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(match task {
+        Some(t) => with_deps(conn, vec![t])?.pop(),
+        None => None,
+    })
+}
+
+/// Las tareas de un run, en el orden en que se crearon: el orden del plan.
+pub fn tasks_of_run(conn: &Connection, run_id: &str) -> Result<Vec<Task>, String> {
+    let mut stmt = conn
+        .prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE run_id = ?1 ORDER BY created_at, rowid"))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([run_id], row_to_task)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    with_deps(conn, rows)
+}
+
+/// Una tarea del run por su nombre en el plan o por su id.
+pub fn task_in_run(conn: &Connection, run_id: &str, key_or_id: &str) -> Result<Option<Task>, String> {
+    let id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM tasks WHERE run_id = ?1 AND (id = ?2 OR plan_key = ?2) ORDER BY created_at LIMIT 1",
+            [run_id, key_or_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    match id {
+        Some(id) => task_by_id(conn, &id),
+        None => Ok(None),
+    }
+}
+
+pub fn run_of_task(conn: &Connection, task_id: &str) -> Result<Option<Run>, String> {
+    let run_id: Option<String> = conn
+        .query_row("SELECT run_id FROM tasks WHERE id = ?1", [task_id], |r| r.get(0))
+        .optional()
+        .map_err(|e| e.to_string())?;
+    match run_id {
+        Some(id) => run_by_id(conn, &id),
+        None => Ok(None),
+    }
 }
 
 pub fn list_runs(conn: &Connection, workspace_id: &str) -> Result<Vec<Run>, String> {
@@ -178,6 +283,194 @@ pub fn list_tasks(conn: &Connection, workspace_id: &str) -> Result<Vec<Task>, St
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([workspace_id], row_to_task)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    with_deps(conn, rows)
+}
+
+/// El workspace de una carpeta: el de la ventana abierta más reciente que tiene una tab ahí.
+/// Es cómo un agente de una tab, que solo conoce su carpeta, crea un run donde se vea.
+pub fn workspace_of_folder(conn: &Connection, cwd: &str) -> Option<String> {
+    let norm = |p: &str| p.replace('\\', "/").trim_end_matches('/').to_string();
+    let wanted = norm(cwd);
+    let mut stmt = conn
+        .prepare(
+            "SELECT w.workspace_id, t.cwd FROM tabs t JOIN windows w ON w.id = t.window_id
+             ORDER BY w.is_open DESC, w.last_active DESC",
+        )
+        .ok()?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).ok()?;
+    // En una variable a propósito: devolverlo directo haría vivir el iterador (que toma
+    // prestado `stmt`) más que `stmt` mismo.
+    #[allow(clippy::let_and_return)]
+    let found = rows.filter_map(Result::ok).find(|(_, c)| norm(c) == wanted).map(|(w, _)| w);
+    found
+}
+
+/// El run más reciente creado desde esa carpeta en ese workspace.
+pub fn latest_run_in_folder(conn: &Connection, workspace_id: &str, cwd: &str) -> Result<Option<Run>, String> {
+    conn.query_row(
+        &format!(
+            "SELECT {RUN_COLUMNS} FROM runs WHERE workspace_id = ?1 AND cwd = ?2
+             ORDER BY created_at DESC, rowid DESC LIMIT 1"
+        ),
+        [workspace_id, cwd],
+        row_to_run,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+// ── El plan ─────────────────────────────────────────────────────
+
+pub fn add_dep(conn: &Connection, task_id: &str, depends_on: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO task_deps (task_id, depends_on) VALUES (?1, ?2)",
+        [task_id, depends_on],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Cambia el paralelismo o el presupuesto de un run, si vienen.
+pub fn update_run_limits(conn: &Connection, run_id: &str, max_parallel: Option<i64>, budget_usd: Option<f64>) -> Result<(), String> {
+    if let Some(n) = max_parallel {
+        conn.execute("UPDATE runs SET max_parallel = ?1 WHERE id = ?2", rusqlite::params![n, run_id])
+            .map_err(|e| e.to_string())?;
+    }
+    if let Some(b) = budget_usd {
+        conn.execute("UPDATE runs SET budget_usd = ?1 WHERE id = ?2", rusqlite::params![b, run_id])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Cancela una tarea que todavía esperaba turno.
+pub fn cancel_one_pending(conn: &Connection, task_id: &str) -> Result<bool, String> {
+    let n = conn
+        .execute(
+            "UPDATE tasks SET status = ?1, ended_at = ?2 WHERE id = ?3 AND status = ?4",
+            rusqlite::params![status::CANCELLED, now_ts(), task_id, status::PENDING],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(n > 0)
+}
+
+pub fn set_run_objective(conn: &Connection, run_id: &str, objective: &str) -> Result<(), String> {
+    conn.execute("UPDATE runs SET objective = ?1 WHERE id = ?2", [objective, run_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Le toca correr: de `pending` a `ready`. `false` si otro ya la despachó o se canceló.
+pub fn mark_dispatched(conn: &Connection, task_id: &str) -> Result<bool, String> {
+    let n = conn
+        .execute(
+            "UPDATE tasks SET status = ?1 WHERE id = ?2 AND status = ?3",
+            rusqlite::params![status::READY, task_id, status::PENDING],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(n > 0)
+}
+
+/// No va a correr, y por qué. Solo sobre tareas que esperaban.
+pub fn skip_task(conn: &Connection, task_id: &str, reason: &str) -> Result<bool, String> {
+    let n = conn
+        .execute(
+            "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE id = ?4 AND status = ?5",
+            rusqlite::params![status::SKIPPED, reason, now_ts(), task_id, status::PENDING],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(n > 0)
+}
+
+/// Vuelve a la cola para un segundo intento, con el motivo del primero.
+pub fn requeue_for_retry(conn: &Connection, task_id: &str, error: &str) -> Result<bool, String> {
+    let n = conn
+        .execute(
+            "UPDATE tasks SET status = ?1, last_error = ?2, error = NULL, result = NULL,
+                              ended_at = NULL, session_id = NULL
+             WHERE id = ?3 AND status = ?4",
+            rusqlite::params![status::PENDING, error, task_id, status::FAILED],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(n > 0)
+}
+
+/// Cancela lo que esperaba en un run. Devuelve cuántas.
+pub fn cancel_pending(conn: &Connection, run_id: &str, reason: &str) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE run_id = ?4 AND status = ?5",
+        rusqlite::params![status::CANCELLED, reason, now_ts(), run_id, status::PENDING],
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Recalcula el estado del run a partir de sus tareas y lo guarda. Devuelve el nuevo.
+///
+/// `running` mientras quede algo que pueda cambiar solo; al cerrarse todo, `done` si todas
+/// terminaron bien, `cancelled` si alguna se canceló y ninguna falló, y `failed` si no.
+pub fn refresh_run_status(conn: &Connection, run_id: &str) -> Result<String, String> {
+    let statuses: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT status FROM tasks WHERE run_id = ?1").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([run_id], |r| r.get(0)).map_err(|e| e.to_string())?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    let next = if statuses.iter().any(|s| !status::is_final(s)) {
+        "running"
+    } else if statuses.iter().all(|s| s == status::DONE) {
+        "done"
+    } else if statuses.iter().any(|s| s == status::FAILED || s == status::SKIPPED) {
+        "failed"
+    } else {
+        "cancelled"
+    };
+    conn.execute(
+        "UPDATE runs SET status = ?1,
+                         ended_at = CASE WHEN ?1 = 'running' THEN NULL ELSE COALESCE(ended_at, ?2) END
+         WHERE id = ?3",
+        rusqlite::params![next, now_ts(), run_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(next.to_string())
+}
+
+// ── Lo que se dejan escrito ─────────────────────────────────────
+
+pub fn add_fact(conn: &Connection, run_id: &str, task_id: Option<&str>, kind: &str, body: &str) -> Result<Fact, String> {
+    let id = Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO run_facts (id, run_id, task_id, kind, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![id, run_id, task_id, kind, body, now_ts()],
+    )
+    .map_err(|e| e.to_string())?;
+    facts_of_run(conn, run_id)?
+        .into_iter()
+        .find(|f| f.id == id)
+        .ok_or_else(|| "el hecho no quedó guardado".to_string())
+}
+
+pub fn facts_of_run(conn: &Connection, run_id: &str) -> Result<Vec<Fact>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT f.id, f.run_id, f.task_id, t.title, f.kind, f.body, f.created_at
+             FROM run_facts f LEFT JOIN tasks t ON t.id = f.task_id
+             WHERE f.run_id = ?1 ORDER BY f.created_at, f.rowid",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([run_id], |r| {
+            Ok(Fact {
+                id: r.get(0)?,
+                run_id: r.get(1)?,
+                task_id: r.get(2)?,
+                author: r.get(3)?,
+                kind: r.get(4)?,
+                body: r.get(5)?,
+                created_at: r.get(6)?,
+            })
+        })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
@@ -242,8 +535,13 @@ pub fn mark_running(
 pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> Result<(), String> {
     let state = if outcome.ok { status::DONE } else { status::FAILED };
     conn.execute(
-        "UPDATE tasks SET status = ?1, result = ?2, error = ?3, cost_usd = ?4,
-                          tokens_in = ?5, tokens_out = ?6, ended_at = ?7
+        // Costo y tokens SUMAN: con reintentos, la tarea gastó lo de todos sus intentos, y
+        // mostrar solo el último escondería lo que costó que fallara la primera vez.
+        "UPDATE tasks SET status = ?1, result = ?2, error = ?3,
+                          cost_usd = CASE WHEN ?4 IS NULL THEN cost_usd ELSE COALESCE(cost_usd, 0) + ?4 END,
+                          tokens_in = CASE WHEN ?5 IS NULL THEN tokens_in ELSE COALESCE(tokens_in, 0) + ?5 END,
+                          tokens_out = CASE WHEN ?6 IS NULL THEN tokens_out ELSE COALESCE(tokens_out, 0) + ?6 END,
+                          ended_at = ?7
          WHERE id = ?8 AND status IN ('ready', 'running')",
         rusqlite::params![
             state,
@@ -277,18 +575,30 @@ pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> R
 /// trabajando. Corre en el arranque, junto al resto de la puesta a punto de la base.
 pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
+    let now = now_ts();
     let n = conn
         .execute(
-            "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE status = ?4",
-            rusqlite::params![
-                status::FAILED,
-                "la app se cerró mientras esta tarea corría",
-                now_ts(),
-                status::RUNNING,
-            ],
+            "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE status IN ('ready', 'running')",
+            rusqlite::params![status::FAILED, "la app se cerró mientras esta tarea corría", now],
         )
         .map_err(|e| e.to_string())?;
-    Ok(n)
+    // Las que esperaban turno no se relanzan solas al reabrir: su lead murió con la app, y
+    // un plan a medias corriendo sin nadie que lo mire no es lo que alguien dejó andando.
+    let waiting = conn
+        .execute(
+            "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE status = ?4",
+            rusqlite::params![status::CANCELLED, "la app se cerró antes de que le tocara correr", now, status::PENDING],
+        )
+        .map_err(|e| e.to_string())?;
+    let open_runs: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT id FROM runs WHERE status = 'running'").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |r| r.get(0)).map_err(|e| e.to_string())?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    for run in open_runs {
+        refresh_run_status(&conn, &run)?;
+    }
+    Ok(n + waiting)
 }
 
 // ── Reglas de permisos ──────────────────────────────────────────
