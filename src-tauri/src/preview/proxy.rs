@@ -1,8 +1,15 @@
-//! El servidor del proxy: uno por origen de destino, en `127.0.0.1` y un puerto libre.
+//! El servidor del proxy: uno por origen de destino, en el loopback.
 //!
 //! Uno por origen (y no uno solo con el destino en la ruta) porque así las rutas absolutas
 //! de la página (`/assets/app.js`, `/api/login`) siguen funcionando sin reescribir nada:
 //! para el iframe, el proxy ES el servidor.
+//!
+//! Eso tiene una consecuencia que no se ve hasta que falla: el origen de la página deja de
+//! ser el del servidor (`http://localhost:5173`) y pasa a ser el del proxy. Todo lo que
+//! depende del origen —el CORS de una API en otro puerto, el localStorage, las cookies— lo
+//! ve a él. Por eso el proxy se sirve con el mismo nombre con que se abrió el servidor
+//! (`localhost`, no `127.0.0.1`) y en un puerto que no cambia entre arranques; ver
+//! `proxy_host` y `preferred_port`.
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -44,10 +51,12 @@ static PICKER: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new(String::n
 
 type Body = BoxBody<Bytes, std::io::Error>;
 
-/// Un proxy levantado: su puerto y lo que lleva anotado.
+/// Un proxy levantado: dónde atiende y lo que lleva anotado.
 #[derive(Clone)]
 struct Proxy {
     port: u16,
+    /// `http://localhost:41234`: el origen que tiene la página.
+    origin: String,
     log: Arc<ProxyLog>,
 }
 
@@ -645,6 +654,58 @@ async fn websocket(mut req: Request<Incoming>, ctx: &Ctx, started: Instant) -> R
     builder.body(full(Bytes::new())).unwrap_or_else(|e| error_page(502, &ctx.target_origin, &e.to_string()))
 }
 
+/// Los puertos de donde sale el de cada proxy. Adentro del rango efímero a propósito: los
+/// servicios no se instalan ahí, así que un proxy no le va a ganar el puerto a un programa
+/// del usuario que arranque después.
+const PREFERRED_PORTS: std::ops::Range<u16> = 41_000..49_000;
+
+/// Con qué nombre se sirve la página —y por lo tanto su origen—: el mismo loopback con que
+/// se abrió el servidor, como lo vería un navegador. Un backend en desarrollo suele aceptar
+/// CORS de `http://localhost:*` y no de `127.0.0.1` (o al revés): servida siempre desde
+/// `127.0.0.1`, una página abierta como `localhost:5173` veía fallar todas sus llamadas a la
+/// API con un "Failed to fetch" que en un navegador normal no pasaba.
+pub(crate) fn proxy_host(target_host: &str) -> &'static str {
+    let bare = target_host.trim_start_matches('[').trim_end_matches(']');
+    if bare.starts_with("127.") {
+        "127.0.0.1"
+    } else if bare == "::1" {
+        "[::1]"
+    } else {
+        "localhost"
+    }
+}
+
+/// El puerto que le toca al proxy de un servidor, siempre el mismo. Con uno al azar en cada
+/// arranque el origen de la página cambiaba cada vez: se perdían su localStorage y sus
+/// cookies (la sesión iniciada), y no había forma de agregarlo a la lista de CORS de una API.
+pub(crate) fn preferred_port(target_origin: &str) -> u16 {
+    // FNV-1a y no el `Hasher` de la biblioteca estándar, que no promete dar lo mismo entre
+    // versiones de Rust: una actualización cambiaría todos los orígenes.
+    let hash = target_origin.bytes().fold(0x811c_9dc5_u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193));
+    let span = (PREFERRED_PORTS.end - PREFERRED_PORTS.start) as u32;
+    PREFERRED_PORTS.start + (hash % span) as u16
+}
+
+/// Escucha en el loopback, en el puerto preferido o el primero libre cerca de él.
+///
+/// `localhost` puede resolverse a `::1` o a `127.0.0.1`, y el navegador prueba el primero
+/// que le da el sistema: si en ESE hubiera otro programa escuchando en el mismo puerto, la
+/// página le hablaría a él. Por eso se toman las dos direcciones o se busca otro puerto. Sin
+/// IPv6 en la máquina alcanza con la de IPv4. Devuelve también si quedó escuchando en `::1`.
+async fn bind_loopback(preferred: u16) -> Result<(Vec<TcpListener>, u16, bool), String> {
+    let near = (0..8u16).map(|i| preferred + i).filter(|p| PREFERRED_PORTS.contains(p));
+    for port in near.chain(std::iter::repeat_n(0, 4)) {
+        let Ok(v4) = TcpListener::bind(("127.0.0.1", port)).await else { continue };
+        let port = v4.local_addr().map_err(|e| e.to_string())?.port();
+        match TcpListener::bind(("::1", port)).await {
+            Ok(v6) => return Ok((vec![v4, v6], port, true)),
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => continue,
+            Err(_) => return Ok((vec![v4], port, false)),
+        }
+    }
+    Err("no se encontró un puerto libre para la vista previa".to_string())
+}
+
 async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
     let target_origin = url.origin().ascii_serialization();
     let host = url.host_str().ok_or("la URL no tiene host")?.to_string();
@@ -654,8 +715,12 @@ async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
         None => host.clone(),
     };
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
-    let local_port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let (listeners, local_port, ipv6) = bind_loopback(preferred_port(&target_origin)).await?;
+    let serve_host = match proxy_host(&host) {
+        "[::1]" if !ipv6 => "127.0.0.1",
+        other => other,
+    };
+    let proxy_origin = format!("http://{serve_host}:{local_port}");
 
     let client = reqwest::Client::builder()
         // Las redirecciones las sigue el iframe (con `Location` reescrito): siguiéndolas
@@ -673,7 +738,7 @@ async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
     let ctx = Arc::new(Ctx {
         log: log.clone(),
         is_http: url.scheme() == "http",
-        proxy_origin: format!("http://127.0.0.1:{local_port}"),
+        proxy_origin: proxy_origin.clone(),
         target_origin,
         target_host: host,
         target_port: port,
@@ -683,24 +748,27 @@ async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
 
     // `tokio::spawn` y no el runtime de Tauri: esto ya corre adentro de un comando async,
     // y el listener tiene que vivir en el mismo runtime donde se creó.
-    tokio::spawn(async move {
-        loop {
-            let Ok((stream, _)) = listener.accept().await else { continue };
-            let ctx = ctx.clone();
-            tokio::spawn(async move {
-                let service = service_fn(move |req| {
-                    let ctx = ctx.clone();
-                    async move { Ok::<_, Infallible>(handle(req, ctx).await) }
+    for listener in listeners {
+        let ctx = ctx.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else { continue };
+                let ctx = ctx.clone();
+                tokio::spawn(async move {
+                    let service = service_fn(move |req| {
+                        let ctx = ctx.clone();
+                        async move { Ok::<_, Infallible>(handle(req, ctx).await) }
+                    });
+                    let _ = http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), service)
+                        .with_upgrades()
+                        .await;
                 });
-                let _ = http1::Builder::new()
-                    .serve_connection(TokioIo::new(stream), service)
-                    .with_upgrades()
-                    .await;
-            });
-        }
-    });
+            }
+        });
+    }
 
-    Ok(Proxy { port: local_port, log })
+    Ok(Proxy { port: local_port, origin: proxy_origin, log })
 }
 
 /// Resuelve qué poner en el iframe para mostrar `url`, levantando su proxy si hace falta.
@@ -720,20 +788,19 @@ pub async fn preview_resolve(url: String, picker: String) -> Result<PreviewTarge
     }
     let target_origin = parsed.origin().ascii_serialization();
 
-    let port = {
+    let proxy_origin = {
         let mut proxies = PROXIES.lock().await;
         match proxies.get(&target_origin) {
-            Some(proxy) => proxy.port,
+            Some(proxy) => proxy.origin.clone(),
             None => {
                 let proxy = start_proxy(&parsed).await?;
-                let port = proxy.port;
+                let origin = proxy.origin.clone();
                 proxies.insert(target_origin.clone(), proxy);
-                port
+                origin
             }
         }
     };
 
-    let proxy_origin = format!("http://127.0.0.1:{port}");
     let mut rest = parsed.path().to_string();
     if let Some(q) = parsed.query() {
         rest.push('?');
@@ -746,7 +813,7 @@ pub async fn preview_resolve(url: String, picker: String) -> Result<PreviewTarge
     Ok(PreviewTarget { proxied_url: format!("{proxy_origin}{rest}"), proxy_origin, target_origin })
 }
 
-/// El log del proxy que sirve `proxy_origin` (`http://127.0.0.1:<puerto>`).
+/// El log del proxy que sirve `proxy_origin` (`http://localhost:<puerto>`).
 async fn log_for(proxy_origin: &str) -> Result<Arc<ProxyLog>, String> {
     let port: u16 = proxy_origin
         .rsplit(':')
@@ -793,12 +860,18 @@ const DEV_PORTS: &[u16] = &[3000, 3001, 4173, 4200, 4321, 5000, 5173, 5174, 8000
 
 /// Qué servidores de desarrollo están escuchando en esta máquina, para ofrecerlos al abrir
 /// un navegador vacío en vez de hacer tipear un puerto que probablemente ya está a la vista.
+///
+/// En las dos direcciones del loopback: Vite y Node ≥ 17 escuchan en `localhost`, que en
+/// muchas máquinas es solo `::1`, y probando únicamente `127.0.0.1` no se los encontraba.
 #[tauri::command]
 pub async fn preview_detect_servers() -> Vec<String> {
-    let probes = DEV_PORTS.iter().map(|&port| async move {
-        let open = tokio::time::timeout(Duration::from_millis(250), TcpStream::connect(("127.0.0.1", port)))
+    let listening = |addr: &'static str, port: u16| async move {
+        tokio::time::timeout(Duration::from_millis(250), TcpStream::connect((addr, port)))
             .await
-            .is_ok_and(|r| r.is_ok());
+            .is_ok_and(|r| r.is_ok())
+    };
+    let probes = DEV_PORTS.iter().map(|&port| async move {
+        let open = listening("127.0.0.1", port).await || listening("::1", port).await;
         open.then(|| format!("http://localhost:{port}"))
     });
     futures_util::future::join_all(probes).await.into_iter().flatten().collect()

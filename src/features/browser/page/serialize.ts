@@ -214,7 +214,7 @@ export function callerOf(stack: string | undefined, ownMarker = "/__controlcode_
   return undefined;
 }
 
-/** `http://127.0.0.1:40111/src/App.tsx?t=17` → `/src/App.tsx`. */
+/** `http://localhost:41234/src/App.tsx?t=17` → `/src/App.tsx`. */
 export function displayPath(url: string): string {
   const noQuery = url.replace(/[?#].*$/, "");
   const match = /^https?:\/\/[^/]+(\/.*)?$/.exec(noQuery);

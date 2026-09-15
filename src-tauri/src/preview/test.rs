@@ -242,7 +242,7 @@ use super::log::{
     parse_cookie_header, parse_http_date, parse_set_cookie, Begin, ErrorKind, Finish, Head, Header, HeaderNote,
     ProxyLog, MAX_RESPONSE_BODY,
 };
-use super::proxy::{preview_cookies, preview_network, preview_request};
+use super::proxy::{preferred_port, preview_cookies, preview_network, preview_request, proxy_host};
 
 #[test]
 fn las_fechas_http_se_leen_en_sus_dos_grafias() {
@@ -524,4 +524,46 @@ async fn un_servidor_apagado_se_anota_como_conexion_rechazada() {
     assert!(entry.finished && entry.status.is_none());
     assert_eq!(entry.error_kind, Some(ErrorKind::ConnectionRefused), "{:?}", entry.error);
     assert!(entry.error.unwrap().to_ascii_lowercase().contains("refused"));
+}
+
+/// La página tiene el origen del proxy: tiene que ser el mismo tipo de loopback con que se
+/// abrió el servidor, o un backend que acepta CORS de `localhost:*` rechaza todo.
+#[test]
+fn el_proxy_se_sirve_con_el_mismo_nombre_que_el_servidor() {
+    assert_eq!(proxy_host("localhost"), "localhost");
+    assert_eq!(proxy_host("127.0.0.1"), "127.0.0.1");
+    assert_eq!(proxy_host("127.0.1.1"), "127.0.0.1");
+    assert_eq!(proxy_host("[::1]"), "[::1]");
+    assert_eq!(proxy_host("app.localhost"), "localhost");
+    // Un servidor en otra máquina se sirve igual desde esta: como localhost.
+    assert_eq!(proxy_host("192.168.1.40"), "localhost");
+}
+
+/// Con el mismo puerto en cada arranque, el origen de la página no cambia: su localStorage y
+/// sus cookies sobreviven a reiniciar la app, y se lo puede agregar a una lista de CORS.
+#[test]
+fn cada_servidor_tiene_siempre_el_mismo_puerto() {
+    let a = preferred_port("http://localhost:5173");
+    assert_eq!(a, preferred_port("http://localhost:5173"));
+    assert_ne!(a, preferred_port("http://localhost:3000"));
+    for origin in ["http://localhost:5173", "http://127.0.0.1:8080", "https://example.com"] {
+        assert!((41_000..49_000).contains(&preferred_port(origin)), "{origin}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn un_servidor_abierto_como_localhost_se_ve_desde_localhost() {
+    let port = fake_dev_server().await;
+    let target = preview_resolve(format!("http://localhost:{port}/"), String::new()).await.unwrap();
+    assert!(target.proxy_origin.starts_with("http://localhost:"), "{}", target.proxy_origin);
+    let proxy_port: u16 = target.proxy_origin.rsplit(':').next().unwrap().parse().unwrap();
+    assert!((41_000..49_008).contains(&proxy_port), "{proxy_port}");
+
+    // La página carga por `localhost`, resuelva a la dirección que resuelva.
+    let html = client().get(&target.proxied_url).send().await.unwrap().text().await.unwrap();
+    assert!(html.contains("<title>Hola</title>"), "{html}");
+
+    // Otra ruta del mismo servidor usa el mismo proxy, con el mismo origen.
+    let again = preview_resolve(format!("http://localhost:{port}/otra"), String::new()).await.unwrap();
+    assert_eq!(again.proxy_origin, target.proxy_origin);
 }

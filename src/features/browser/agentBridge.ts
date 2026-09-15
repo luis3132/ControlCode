@@ -176,7 +176,7 @@ function timeoutFor(command: PageCommand): number {
   return 12_000;
 }
 
-/** Lo que viene de la página habla en URLs del proxy (`127.0.0.1:40111`); el agente las
+/** Lo que viene de la página habla en URLs del proxy (`localhost:41234`); el agente las
  *  busca y las escribe en términos del servidor que conoce (`localhost:5173`). */
 /** El detalle de un pedido por su id del listado (`p12` si pasó por el proxy, `g5` si lo vio la página). */
 async function requestDetailText(host: BrowserHost, id: string): Promise<string> {
