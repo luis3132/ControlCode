@@ -62,3 +62,20 @@ describe("hydrateFromBackend", () => {
     expect(useTabsStore.getState().workspaceId).toBe("ws-nuevo");
   });
 });
+
+describe("arrangeTabs", () => {
+  it("ordena las de una carpeta sin mover las de otra", () => {
+    useTabsStore.setState({ tabs: [row("a"), row("x", "/otra"), row("b"), row("c")], activeTabId: "a" });
+    useTabsStore.getState().arrangeTabs(["c", "a", "b"]);
+    expect(useTabsStore.getState().tabs.map((t) => t.id)).toEqual(["c", "x", "a", "b"]);
+  });
+
+  it("ignora las que ya no existen, y sin cambios no crea un estado nuevo", () => {
+    const tabs = [row("a"), row("b")];
+    useTabsStore.setState({ tabs, activeTabId: "a" });
+    useTabsStore.getState().arrangeTabs(["fantasma", "a", "b"]);
+    expect(useTabsStore.getState().tabs).toBe(tabs);
+    useTabsStore.getState().arrangeTabs(["b", "a", "a"]);
+    expect(useTabsStore.getState().tabs).toBe(tabs);
+  });
+});

@@ -206,6 +206,26 @@ export function BugIcon({ className }: IconProps) {
   );
 }
 
+/** Un panel partido al medio de arriba a abajo: dividir a la derecha. */
+export function SplitRightIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M12 4v16" />
+    </svg>
+  );
+}
+
+/** Un panel partido al medio de lado a lado: dividir abajo. */
+export function SplitDownIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 12h18" />
+    </svg>
+  );
+}
+
 /** Flecha que gira sobre un rectángulo: cambiar la orientación. */
 export function RotateIcon({ className }: IconProps) {
   return (

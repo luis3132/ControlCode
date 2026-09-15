@@ -1,23 +1,27 @@
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import { Terminal } from "@/features/terminal/Terminal";
 import { useTabsStore } from "@/features/tabs/store";
-import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
+import { agentKey } from "@/features/tabs/layout/layoutTree";
 import { buildResumeCommand, isResumable } from "@/features/sessions/agentResume";
 
 export function TerminalPanel() {
   const { t } = useTranslation();
   const tabs = useTabsStore((s) => s.tabs);
-  const activeTabId = useTabsStore((s) => s.activeTabId);
   const setPtyId = useTabsStore((s) => s.setPtyId);
   const setSessionId = useTabsStore((s) => s.setSessionId);
   // El panel sigue montado (para no matar los PTYs) pero oculto fuera de /workspace, así
   // que "ser la tab activa" no alcanza para enfocar: en Skills o Settings el foco tiene que
   // quedarse en esa página, no robárselo una terminal invisible.
   const onWorkspace = useLocation().pathname.startsWith("/workspace");
-  // Con un archivo o un navegador abierto encima, la terminal no se ve: no puede quedarse
-  // con el foco, o lo que se tipee en el editor le llegaría al agente.
-  const viewOnTop = useViewTabsStore((s) => s.activeViewId !== null);
+  // Con la pantalla dividida se ven varias, pero el teclado va a una sola: la del grupo
+  // enfocado. Si ahí hay un archivo o un navegador, a ninguna terminal.
+  const { visible, focusedItem } = usePlacements();
+  // Una oculta se queda con el último lugar que tuvo: cambiarle el tamaño sin que se vea le
+  // mandaría a su TUI un resize para nada, y otro al volver a mostrarse.
+  const lastRect = useRef(new Map<string, Rect | null>());
 
   return (
     // h-full en lugar de flex-1: el padre es position:absolute;inset:0 (no flex),
@@ -27,18 +31,22 @@ export function TerminalPanel() {
         // El resume del agente ya reconstruye su propia conversación; reproducir
         // también el scrollback crudo aquí duplicaría/ensuciaría la salida.
         const isResuming = !!tab.sessionId && isResumable(tab.agentId);
+        const key = agentKey(tab.id);
+        const placement = visible.get(key);
+        if (placement) lastRect.current.set(key, placement.rect);
+        const shown = placement !== undefined;
         return (
           <div
             key={tab.id}
             style={{
-              position: "absolute",
-              inset: 0,
+              ...placeStyle(lastRect.current.get(key) ?? null),
               // Sin "visible" explícito: así hereda el visibility del contenedor de
               // AppShell (que lo oculta fuera de /workspace) en vez de sobreescribirlo.
-              visibility: tab.id === activeTabId ? undefined : "hidden",
-              pointerEvents: tab.id === activeTabId ? "auto" : "none",
-              zIndex: tab.id === activeTabId ? 1 : 0,
+              visibility: shown ? undefined : "hidden",
+              pointerEvents: shown ? "auto" : "none",
+              zIndex: shown ? 1 : 0,
             }}
+            onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
           >
             <Terminal
               tabId={tab.id}
@@ -49,7 +57,8 @@ export function TerminalPanel() {
               prelaunch={tab.prelaunch}
               attachPtyId={tab.ptyId ?? undefined}
               initialScrollback={isResuming ? undefined : tab.scrollback}
-              isActive={tab.id === activeTabId && onWorkspace && !viewOnTop}
+              isActive={key === focusedItem && onWorkspace}
+              isVisible={shown}
               openedAt={tab.openedAt}
               knownSessionId={tab.sessionId}
               onReady={(ptyId) => setPtyId(tab.id, ptyId)}

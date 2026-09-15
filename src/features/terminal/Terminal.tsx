@@ -49,6 +49,9 @@ interface TerminalProps {
   /** Si esta terminal es la que el usuario está viendo ahora mismo. Al pasar a `true` se
    * enfoca sola, para poder escribir sin un click extra. */
   isActive?: boolean;
+  /** Si se ve, tenga o no el teclado: con la pantalla dividida se ven varias a la vez, y
+   *  todas se dibujan por GPU. Sin pasarlo, vale lo mismo que `isActive`. */
+  isVisible?: boolean;
   /** Momento (epoch en segundos) en que se abrió la tab. Es el piso temporal para buscar
    * su sesión al RECONECTAR a un PTY ya vivo: ahí el proceso puede llevar horas corriendo,
    * así que usar "ahora" como piso descartaría la sesión que se está buscando. */
@@ -88,6 +91,7 @@ export function Terminal({
   attachPtyId,
   initialScrollback,
   isActive = false,
+  isVisible = isActive,
   openedAt,
   knownSessionId,
   env,
@@ -115,24 +119,24 @@ export function Terminal({
   const gpuRenderer = useTerminalPrefsStore((s) => s.gpuRenderer && s.compositing);
   const zoom = useTerminalPrefsStore((s) => s.zoom);
 
-  // ── Renderizador por GPU, SOLO en la terminal activa ─────────────────────
+  // ── Renderizador por GPU, SOLO en las terminales que se ven ──────────────
   //
   // Por defecto xterm dibuja con el DOM: un `<span>` por tramo de texto. Es el camino más
   // compatible y el más borroso — el navegador redondea cada celda a píxeles CSS, y con
   // escalado fraccionario (Wayland al 125%) la grilla queda corrida. WebGL rasteriza los
   // glifos a la resolución REAL del dispositivo.
   //
-  // Lo importante es el "solo en la activa". Cada terminal viva pedía su propio contexto
-  // WebGL, y acá TODAS las tabs quedan montadas para no matar sus procesos: con unas
-  // pocas abiertas se llega al tope de contextos del motor, y a partir de ahí se pierden
-  // en cadena — parpadeos, paneles en blanco, terminales que dejan de pintar. Atado a la
-  // tab que se está mirando, nunca hay más de uno.
+  // Lo importante es el "solo en las que se ven". Cada terminal viva pedía su propio
+  // contexto WebGL, y acá TODAS las tabs quedan montadas para no matar sus procesos: con
+  // unas pocas abiertas se llega al tope de contextos del motor, y a partir de ahí se
+  // pierden en cadena — parpadeos, paneles en blanco, terminales que dejan de pintar.
+  // Atado a lo que está en pantalla, nunca hay más que grupos en la pantalla dividida.
   //
   // Y si el contexto igual se pierde, no se reintenta: se queda en DOM para siempre. Un
   // reintento en bucle es peor que el problema que arregla.
   useEffect(() => {
     const term = termRef.current;
-    if (!term || !isActive || !gpuRenderer || gpuBrokenRef.current) return;
+    if (!term || !isVisible || !gpuRenderer || gpuBrokenRef.current) return;
 
     let addon: WebglAddon | null = null;
     try {
@@ -153,7 +157,7 @@ export function Terminal({
       addon?.dispose();
       addon = null;
     };
-  }, [isActive, gpuRenderer]);
+  }, [isVisible, gpuRenderer]);
 
   useEffect(() => {
     if (!containerRef.current) return;
