@@ -1,10 +1,39 @@
 /** Comandos de los agentes headless. */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { Assignment, Complexity, PendingApproval, PermissionRule, Roster, Task, Tiers } from "./types";
+import type { Assignment, Complexity, Fact, PendingApproval, PermissionRule, Roster, Run, Task, Tiers } from "./types";
 
 export const listTasks = (workspaceId: string) =>
   invoke<Task[]>("run_list_tasks", { workspaceId });
+
+export const listRuns = (workspaceId: string) =>
+  invoke<Run[]>("run_list_runs", { workspaceId });
+
+export const listFacts = (runId: string) => invoke<Fact[]>("run_list_facts", { runId });
+
+/** Para un run entero: lo que espera no arranca y lo que corre se detiene. */
+export const cancelRun = (runId: string) => invoke<void>("run_cancel_run", { runId });
+
+export interface StartOrchestrationInput extends RouteInput {
+  workspaceId: string;
+  cwd: string;
+  objective: string;
+  /** Cuántas tareas del plan corren a la vez (1-6). */
+  maxParallel: number;
+  /** Ninguna tarea nueva arranca después de gastarlo. */
+  budgetUsd?: number | null;
+}
+
+/** Lanza un lead: el agente que reparte el objetivo en tareas para otros agentes. */
+export const startOrchestration = (input: StartOrchestrationInput) =>
+  invoke<Task>("run_start_orchestration", {
+    workspaceId: input.workspaceId,
+    cwd: input.cwd,
+    objective: input.objective,
+    maxParallel: input.maxParallel,
+    budgetUsd: input.budgetUsd ?? null,
+    ...routeArgs(input),
+  });
 
 /** A quién le toca: o se nombra el modelo, o se declara la complejidad y elige la app. */
 export interface RouteInput {

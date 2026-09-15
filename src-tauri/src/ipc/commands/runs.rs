@@ -1,8 +1,8 @@
-//! El único comando que un agente headless manda por su cuenta: pedir permiso.
+//! Lo que un agente manda por su cuenta desde `ccode mcp`: pedir permiso y orquestar.
 //!
-//! Llega desde el `ccode mcp --task <id>` que la propia tarea lanzó, no desde una persona
-//! escribiendo en una terminal. Por eso es el único de la CLI que **bloquea de verdad**
-//! hasta una hora: del otro lado hay alguien que tiene que mirar un diff.
+//! No llegan desde una persona escribiendo en una terminal, sino desde el MCP de una tarea
+//! o de una tab. Por eso son los que **bloquean de verdad**: `run.approve` hasta una hora
+//! (del otro lado hay alguien mirando un diff) y `run.await` lo que el agente pida.
 
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -30,4 +30,9 @@ pub(super) fn run_approve(app: &AppHandle, args: &Value) -> Result<Value, String
         crate::runs::resolve_permission(app, &db, &task_id, &tool_name, input, Duration::from_secs(timeout));
 
     Ok(json!({ "allow": verdict.allow, "reason": verdict.reason }))
+}
+
+/// `run.plan`, `run.status`, `run.await`… — ver `runs::orchestration`.
+pub(super) fn run_orchestrate(app: &AppHandle, command: &str, args: &Value) -> Result<Value, String> {
+    crate::runs::orchestration::handle(app, command, args)
 }

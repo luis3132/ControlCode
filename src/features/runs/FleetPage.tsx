@@ -9,8 +9,11 @@ import { useTabsStore } from "@/features/tabs/store";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { AgentCard } from "./AgentCard";
-import { countByGroup, filterFleet, FLEET_GROUPS, liveInFolder, sortFleet, type FleetGroup } from "./fleetOrder";
+import {
+  countByGroup, filterFleet, FLEET_GROUPS, liveInFolder, orchestratedRuns, sortFleet, waitingOn, type FleetGroup,
+} from "./fleetOrder";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { RunStrip } from "./RunStrip";
 import { RulesDialog } from "./RulesDialog";
 import { useRunsStore } from "./store";
 import type { PendingApproval, Task } from "./types";
@@ -28,9 +31,12 @@ export function FleetPage() {
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
 
-  const tasks = useRunsStore((s) => s.tasks);
+  const allTasks = useRunsStore((s) => s.tasks);
+  const runs = useRunsStore((s) => s.runs);
   const activity = useRunsStore((s) => s.activity);
   const startTask = useRunsStore((s) => s.startTask);
+  const startOrchestration = useRunsStore((s) => s.startOrchestration);
+  const cancelRun = useRunsStore((s) => s.cancelRun);
   const cancelTask = useRunsStore((s) => s.cancelTask);
   const approvals = useRunsStore((s) => s.approvals);
   const decideApproval = useRunsStore((s) => s.decideApproval);
@@ -42,6 +48,16 @@ export function FleetPage() {
   const [newOpen, setNewOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [detail, setDetail] = useState<string | null>(null);
+  /** El run al que se está mirando. `null` = toda la flota. */
+  const [runFilter, setRunFilter] = useState<string | null>(null);
+  const summaries = useMemo(() => orchestratedRuns(runs, allTasks), [runs, allTasks]);
+  // Un run que desapareció (se borró) no puede seguir filtrando: la consola quedaría vacía
+  // sin decir por qué.
+  const activeRun = runFilter ? summaries.find((s) => s.run.id === runFilter) ?? null : null;
+  const tasks = useMemo(
+    () => (activeRun ? allTasks.filter((tk) => tk.runId === activeRun.run.id) : allTasks),
+    [allTasks, activeRun]
+  );
 
   // La carpeta donde se lanza: la de la tab activa, igual que el "+" de la barra de tabs.
   const cwd = tabs.find((tb) => tb.id === activeTabId)?.cwd ?? tabs[0]?.cwd ?? "";
@@ -207,6 +223,18 @@ export function FleetPage() {
         </div>
       )}
 
+      {summaries.length > 0 && (
+        <RunStrip
+          summaries={summaries}
+          selected={activeRun?.run.id ?? null}
+          onSelect={setRunFilter}
+          onCancel={(runId) => {
+            if (!workspaceId) return;
+            cancelRun(workspaceId, runId).catch((e) => setNotice({ error: true, text: String(e) }));
+          }}
+        />
+      )}
+
       {/* ══ la grilla ═══════════════════════════════════════════════ */}
       <div className="flex-1 min-h-0 cc-scroll p-3">
         {tasks.length === 0 ? (
@@ -223,6 +251,7 @@ export function FleetPage() {
                 key={task.id}
                 task={task}
                 activity={activity[task.id] ?? []}
+                waiting={task.status === "pending" ? waitingOn(task, allTasks) : undefined}
                 approval={byTask.get(task.id)}
                 focused={task.id === focusedId}
                 onDecide={(allow, remember) => {
@@ -271,9 +300,15 @@ export function FleetPage() {
           cwd={cwd}
           busyInFolder={liveInFolder(tasks, cwd)}
           onClose={() => setNewOpen(false)}
-          onStart={async (input) => {
+          onStart={async ({ kind, ...input }) => {
             if (!workspaceId) throw new Error(t("fleet.error.noWorkspace"));
-            await startTask({ ...input, workspaceId, cwd });
+            if (kind === "orchestrate" && "objective" in input) {
+              const lead = await startOrchestration({ ...input, workspaceId, cwd });
+              // Se abre mirando ese run: es lo que se acaba de pedir.
+              setRunFilter(lead.runId);
+            } else if ("prompt" in input) {
+              await startTask({ ...input, workspaceId, cwd });
+            }
           }}
         />
       )}

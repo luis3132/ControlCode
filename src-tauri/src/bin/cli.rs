@@ -365,6 +365,13 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         // Los topes del backend suman ~40s (15 para que aparezca el PTY + 25 de arranque).
         "tab.create" if has_init_prompt(args) => Duration::from_secs(75),
         "browser.run" => Duration::from_secs(controlcode_lib::ipc::mcp::BROWSER_TIMEOUT_SECS + 15),
+        // Esperar a que terminen workers: lo que pidió el agente, más margen.
+        "run.await" => {
+            let requested = args.pointer("/args/timeout_s").and_then(Value::as_u64).unwrap_or(300).clamp(10, 1800);
+            Duration::from_secs(requested + 30)
+        }
+        // Validar un plan puede sondear el roster (lanzar `opencode models`) y crear worktrees.
+        "run.plan" | "run.addTask" | "run.roster" => Duration::from_secs(120),
         "run.approve" => {
             let requested = args
                 .get("timeout")

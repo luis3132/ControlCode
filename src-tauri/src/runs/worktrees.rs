@@ -98,11 +98,19 @@ pub fn branch_slug(title: &str) -> String {
     if slug.is_empty() { "tarea".into() } else { slug }
 }
 
-/// Crea el worktree de una tarea lanzada desde `project_cwd`.
+/// Desde `HEAD`, como una tarea suelta.
+#[cfg(test)]
+pub fn create(base: &Path, project_cwd: &Path, title: &str) -> Result<Worktree, String> {
+    create_from(base, project_cwd, title, "HEAD")
+}
+
+/// Crea el worktree de una tarea lanzada desde `project_cwd`, partiendo de `start` (una
+/// rama o un commit). Una tarea que depende de otra aislada parte de la rama de esa: su
+/// trabajo tiene que empezar desde lo que la otra dejó, no desde el proyecto de antes.
 ///
 /// `base` es la carpeta donde viven los worktrees de la app (`~/.controlcode/worktrees`);
 /// se recibe como parámetro para poder probarlo sin tocar el home.
-pub fn create(base: &Path, project_cwd: &Path, title: &str) -> Result<Worktree, String> {
+pub fn create_from(base: &Path, project_cwd: &Path, title: &str, start: &str) -> Result<Worktree, String> {
     let repo = repo_root(project_cwd)?;
     // Canónicas las dos: en macOS `/tmp` es un symlink a `/private/tmp`, y comparar una
     // ruta resuelta con otra sin resolver haría fallar el `strip_prefix` de abajo.
@@ -117,7 +125,7 @@ pub fn create(base: &Path, project_cwd: &Path, title: &str) -> Result<Worktree, 
     std::fs::create_dir_all(base).map_err(|e| e.to_string())?;
     git(
         &repo,
-        &["worktree", "add", "-b", &branch, &root.to_string_lossy(), "HEAD"],
+        &["worktree", "add", "-b", &branch, &root.to_string_lossy(), start],
         GIT_SLOW,
     )?;
 

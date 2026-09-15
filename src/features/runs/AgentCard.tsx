@@ -40,6 +40,8 @@ function formatTokens(n: number): string {
 }
 
 const BADGE: Record<TaskStatus, string> = {
+  pending: "text-sky-700 dark:text-sky-300 bg-sky-500/12",
+  skipped: "text-gray-500 dark:text-white/35 bg-gray-200/70 dark:bg-white/8",
   ready: "text-gray-500 dark:text-white/40 bg-gray-200/70 dark:bg-white/8",
   running: "text-emerald-700 dark:text-emerald-400 bg-emerald-500/12",
   done: "text-gray-500 dark:text-white/40 bg-gray-200/70 dark:bg-white/8",
@@ -55,9 +57,11 @@ const BADGE: Record<TaskStatus, string> = {
  * que "qué archivo tocó" viene como dato: las líneas son ya la forma corta (`Bash(cargo
  * test)`), no un recorte de su salida. Quien quiera el detalle abre la tarea como pane.
  */
-export function AgentCard({ task, activity, approval, focused, onCancel, onOpenPane, onShowResult, onDecide, onDiscardWorktree }: {
+export function AgentCard({ task, activity, waiting = [], approval, focused, onCancel, onOpenPane, onShowResult, onDecide, onDiscardWorktree }: {
   task: Task;
   activity: string[];
+  /** Las dependencias que todavía no terminaron, por su key. */
+  waiting?: string[];
   /** El permiso que esta tarea está esperando, si hay uno. */
   approval?: PendingApproval;
   /** Si es la tarjeta que responde a `y`/`n`. */
@@ -88,6 +92,17 @@ export function AgentCard({ task, activity, approval, focused, onCancel, onOpenP
         <Icon className="w-[15px] h-[15px] mt-px shrink-0 text-gray-500 dark:text-white/50" />
         <div className="flex flex-col gap-0.5 min-w-0 flex-1">
           <span className="flex items-baseline gap-1.5 min-w-0">
+            {task.role === "lead" && (
+              <span className="shrink-0 px-1 rounded text-[9px] font-bold uppercase tracking-wider
+                text-violet-700 dark:text-violet-300 bg-violet-500/15">
+                {t("fleet.card.lead")}
+              </span>
+            )}
+            {task.planKey && (
+              <span className="shrink-0 font-mono text-[10px] font-semibold text-sky-700 dark:text-sky-300">
+                {task.planKey}
+              </span>
+            )}
             <span className="shrink-0 font-mono text-[10px] text-gray-400 dark:text-white/30">
               {task.agentId}
               {task.model && <RoutedModel task={task} />}
@@ -123,7 +138,14 @@ export function AgentCard({ task, activity, approval, focused, onCancel, onOpenP
       <div className="flex flex-col gap-0.5 px-3 py-2.5 min-h-[4.5rem]">
         {activity.length === 0 && !task.error && (
           <span className="text-[11px] italic text-gray-400 dark:text-white/25">
-            {live ? t("fleet.card.starting") : t("fleet.card.noActivity")}
+            {task.status === "pending"
+              ? (waiting.length > 0 ? t("fleet.card.waitingOn", { deps: waiting.join(", ") }) : t("fleet.card.queued"))
+              : live ? t("fleet.card.starting") : t("fleet.card.noActivity")}
+          </span>
+        )}
+        {task.lastError && task.status !== "failed" && (
+          <span className="truncate text-[10.5px] text-amber-700 dark:text-amber-400/90" title={task.lastError}>
+            {t("fleet.card.retrying", { error: task.lastError })}
           </span>
         )}
         {activity.map((line, i) => (
@@ -152,9 +174,13 @@ export function AgentCard({ task, activity, approval, focused, onCancel, onOpenP
         border-t border-gray-200 dark:border-white/8
         bg-gray-100/50 dark:bg-black/15">
         <span className="flex items-center gap-1.5 shrink-0">
-          <span className={`w-1.5 h-1.5 rounded-full ${live
-            ? "bg-emerald-500"
-            : task.status === "failed" ? "bg-red-500" : "bg-gray-300 dark:bg-white/20"}`} />
+          {/* En cola no es trabajando: el reloj corre (lleva esperando eso), pero sin el verde
+              de un proceso vivo. */}
+          <span className={`w-1.5 h-1.5 rounded-full ${task.status === "pending"
+            ? "bg-sky-400"
+            : live
+              ? "bg-emerald-500"
+              : task.status === "failed" ? "bg-red-500" : "bg-gray-300 dark:bg-white/20"}`} />
           <span className="tabular-nums text-[10px] text-gray-500 dark:text-white/40">
             {formatElapsed(elapsed)}
           </span>

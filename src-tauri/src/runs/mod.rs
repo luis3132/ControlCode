@@ -12,10 +12,14 @@
 mod activity;
 mod agents;
 mod broker;
+mod context;
+pub mod orchestration;
+mod plan;
 mod quota;
 mod roster;
 mod routing;
 mod rules;
+mod scheduler;
 mod store;
 mod supervisor;
 mod types;
@@ -24,7 +28,7 @@ mod worktrees;
 mod test;
 
 pub use store::sweep_orphans;
-pub use types::{Run, Task};
+pub use types::{Fact, Run, Task};
 
 use std::time::Duration;
 
@@ -110,6 +114,7 @@ pub async fn run_start_task(
                 complexity: complexity.map(routing::Complexity::as_str),
                 routed_by: Some(assignment.routed_by.as_str()),
                 route_note: note.as_deref(),
+                ..Default::default()
             },
         )?
     };
@@ -131,12 +136,183 @@ pub async fn run_start_task(
         }
     }
 
-    if let Err(e) = supervisor::start(&app, task.clone()) {
+    if let Err(e) = supervisor::start(&app, task.clone(), supervisor::LaunchExtras::default()) {
         return fail(&task.id, e);
     }
 
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::task_by_id(&conn, &task.id)?.ok_or_else(|| "la tarea se perdió al lanzarla".into())
+}
+
+/// Lanza un lead: el agente que va a repartir `objective` en tareas para otros agentes.
+///
+/// El run nace con el paralelismo y el presupuesto que se piden acá; el plan lo declara el
+/// lead cuando entiende el proyecto. Sin modelo ni complejidad, el lead va a `hard`: de
+/// cómo reparte depende lo que cuesta todo lo demás.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn run_start_orchestration(
+    app: AppHandle,
+    workspace_id: String,
+    cwd: String,
+    objective: String,
+    max_parallel: i64,
+    budget_usd: Option<f64>,
+    agent_id: Option<String>,
+    model: Option<String>,
+    complexity: Option<routing::Complexity>,
+    account_id: Option<String>,
+    auto_account: bool,
+) -> Result<Task, String> {
+    let objective = objective.trim().to_string();
+    if objective.is_empty() {
+        return Err("falta el objetivo".into());
+    }
+    let db = db_of(&app)?;
+    let complexity = complexity.or((agent_id.is_none() && model.is_none()).then_some(routing::Complexity::Hard));
+    let assignment = assign(&db, route_request(agent_id, model, complexity, account_id, auto_account)).await?;
+    let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
+    let max_parallel = max_parallel.clamp(1, 6);
+
+    let task = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let run = store::create_run_with(&conn, &workspace_id, &objective, &cwd, max_parallel, budget_usd)?;
+        let title: String = objective.lines().next().unwrap_or("").chars().take(80).collect();
+        let budget = budget_usd.map(|b| format!(" El run tiene un presupuesto de ${b:.2}: ninguna tarea nueva arranca después de gastarlo."))
+            .unwrap_or_default();
+        let prompt = format!("{objective}\n\n(Hasta {max_parallel} tareas en paralelo.{budget})");
+        store::create_task(
+            &conn,
+            &store::NewTask {
+                run_id: &run.id,
+                title: &title,
+                prompt: &prompt,
+                agent_id: &assignment.agent_id,
+                account_id: assignment.account_id.as_deref(),
+                model: assignment.model.as_deref(),
+                cwd: &cwd,
+                complexity: complexity.map(routing::Complexity::as_str),
+                routed_by: Some(assignment.routed_by.as_str()),
+                route_note: note.as_deref(),
+                role: Some(types::role::LEAD),
+                ..Default::default()
+            },
+        )?
+    };
+
+    use crate::ipc::mcp::{orchestration_tool_names, OrchestrationPower::*};
+    let extras = supervisor::LaunchExtras {
+        prompt: None,
+        system_prompt: Some(context::LEAD_SYSTEM_PROMPT.to_string()),
+        allowed_tools: orchestration_tool_names(&[Read, Note, Spawn]),
+    };
+    if let Err(e) = supervisor::start(&app, task.clone(), extras) {
+        let conn = db.lock().map_err(|err| err.to_string())?;
+        store::finish_task(&conn, &task.id, &types::TaskOutcome::failed(e.clone()))?;
+        let _ = store::refresh_run_status(&conn, &task.run_id);
+        return Err(e);
+    }
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    store::task_by_id(&conn, &task.id)?.ok_or_else(|| "la tarea se perdió al lanzarla".into())
+}
+
+/// Lanza una tarea de un plan que le tocó correr: su worktree si va aislada, y su prompt con
+/// lo que entregaron sus dependencias y los hechos del run. `false` si no se pudo — la fila
+/// ya queda cerrada como fallida, y quien despacha tiene que volver a mirar el run.
+pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> bool {
+    let task_id = task.id.clone();
+    let launched = (|| -> Result<(), String> {
+        let (run, deps, facts) = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let run = store::run_by_id(&conn, &task.run_id)?.ok_or("el run ya no existe")?;
+            let mut deps = Vec::new();
+            for id in &task.depends_on {
+                if let Some(dep) = store::task_by_id(&conn, id)? {
+                    deps.push(dep);
+                }
+            }
+            let facts = store::facts_of_run(&conn, &run.id)?;
+            (run, deps, facts)
+        };
+
+        // De qué rama parte: la de su única dependencia aislada, para empezar desde lo que
+        // esa dejó. Con varias, desde HEAD, y el prompt le pide integrarlas primero.
+        let dep_branches: Vec<String> = deps
+            .iter()
+            .filter(|d| !d.worktree_removed)
+            .filter_map(|d| d.branch.clone())
+            .collect();
+        let mut task = task.clone();
+        if task.isolate {
+            let start = if dep_branches.len() == 1 { dep_branches[0].as_str() } else { "HEAD" };
+            task = isolate_task_from(&worktrees_base()?, db, &task, start)?;
+        }
+        let to_merge: &[String] = if task.isolate && dep_branches.len() > 1 { &dep_branches } else { &[] };
+
+        let deps_refs: Vec<&Task> = deps.iter().collect();
+        let prompt = context::worker_prompt(&task, &run.objective, &deps_refs, &facts, to_merge);
+        let can_delegate = task.depth < plan::MAX_DEPTH;
+        use crate::ipc::mcp::{orchestration_tool_name, orchestration_tool_names, OrchestrationPower::*};
+        let mut allowed = orchestration_tool_names(&[Read, Note]);
+        if can_delegate {
+            allowed.push(orchestration_tool_name("task_add"));
+        }
+        supervisor::start(
+            app,
+            task.clone(),
+            supervisor::LaunchExtras {
+                prompt: Some(prompt),
+                system_prompt: Some(context::worker_system_prompt(&task, can_delegate)),
+                allowed_tools: allowed,
+            },
+        )
+    })();
+
+    match launched {
+        Ok(()) => true,
+        Err(e) => {
+            if let Ok(conn) = db.lock() {
+                let _ = store::finish_task(&conn, &task_id, &types::TaskOutcome::failed(e));
+            }
+            supervisor::notify_changed(app, &task_id);
+            false
+        }
+    }
+}
+
+/// Para un run entero: lo que espera no arranca y lo que corre se detiene.
+#[tauri::command]
+pub fn run_cancel_run(app: AppHandle, run_id: String) -> Result<(), String> {
+    let db = db_of(&app)?;
+    let live: Vec<String> = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::cancel_pending(&conn, &run_id, "se canceló el run")?;
+        store::tasks_of_run(&conn, &run_id)?
+            .into_iter()
+            .filter(|t| matches!(t.status.as_str(), types::status::READY | types::status::RUNNING))
+            .map(|t| t.id)
+            .collect()
+    };
+    for id in &live {
+        supervisor::cancel(&app, id)?;
+    }
+    let ids: Vec<String> = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::refresh_run_status(&conn, &run_id)?;
+        store::tasks_of_run(&conn, &run_id)?.into_iter().map(|t| t.id).collect()
+    };
+    scheduler::bump(&run_id);
+    for id in &ids {
+        supervisor::notify_changed(&app, id);
+    }
+    Ok(())
+}
+
+/// Lo que se dejaron escrito los agentes de un run.
+#[tauri::command]
+pub fn run_list_facts(run_id: String, db: tauri::State<DbConnection>) -> Result<Vec<Fact>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    store::facts_of_run(&conn, &run_id)
 }
 
 fn route_request(
@@ -235,8 +411,12 @@ fn worktrees_base() -> Result<std::path::PathBuf, String> {
 /// Crea el worktree de una tarea, le monta las skills del proyecto y deja la fila
 /// apuntando adentro. `base` se recibe para que los tests no escriban en el home.
 pub(crate) fn isolate_task(base: &std::path::Path, db: &DbConnection, task: &Task) -> Result<Task, String> {
+    isolate_task_from(base, db, task, "HEAD")
+}
+
+pub(crate) fn isolate_task_from(base: &std::path::Path, db: &DbConnection, task: &Task, start: &str) -> Result<Task, String> {
     let project = std::path::Path::new(&task.cwd);
-    let wt = worktrees::create(base, project, &task.title)?;
+    let wt = worktrees::create_from(base, project, &task.title, start)?;
 
     let conn = db.lock().map_err(|e| e.to_string())?;
     // Las skills que el usuario ve en el proyecto, también adentro. Best-effort: sin la

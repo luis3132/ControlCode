@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { countByGroup, filterFleet, fleetSummary, groupOf, isLive, liveInFolder, sortFleet } from "../fleetOrder";
+import {
+  countByGroup, filterFleet, fleetSummary, groupOf, isLive, liveInFolder, orchestratedRuns, sortFleet, waitingOn,
+} from "../fleetOrder";
 import { lineOf } from "../store";
-import type { PendingApproval, Task, TaskStatus } from "../types";
+import type { PendingApproval, Run, Task, TaskStatus } from "../types";
 
 function task(patch: Partial<Task> & { id: string }): Task {
   return {
@@ -29,6 +31,14 @@ function task(patch: Partial<Task> & { id: string }): Task {
     complexity: null,
     routedBy: null,
     routeNote: null,
+    role: null,
+    planKey: null,
+    parentId: null,
+    depth: 0,
+    isolate: false,
+    resultSchema: null,
+    lastError: null,
+    dependsOn: [],
     startedAt: null,
     endedAt: null,
     createdAt: 0,
@@ -262,5 +272,55 @@ describe("liveInFolder", () => {
     ];
     expect(liveInFolder(flota, "/p")).toBe(2);
     expect(liveInFolder(flota, "/nadie")).toBe(0);
+  });
+});
+
+describe("runs orquestados", () => {
+  function run(patch: Partial<Run> & { id: string }): Run {
+    return {
+      workspaceId: "w", objective: "o", cwd: "/p", status: "running", maxParallel: 2,
+      budgetUsd: null, spentUsd: 0, createdAt: 0, endedAt: null, ...patch,
+    };
+  }
+
+  /// Una tarea en cola va a arrancar sola: sigue viva y es parte del trabajo en curso.
+  /// Pero no tiene proceso, así que no cuenta como "en segundo plano" en la barra.
+  it("una tarea en cola está viva pero no ocupa lugar en la barra", () => {
+    const enCola = task({ id: "p", status: "pending" });
+    expect(isLive("pending")).toBe(true);
+    expect(groupOf(enCola)).toBe("running");
+    expect(fleetSummary([enCola, task({ id: "r", status: "running" })], []).running).toBe(1);
+    expect(groupOf(task({ id: "s", status: "skipped" }))).toBe("idle");
+  });
+
+  it("resume el avance de cada plan y deja afuera las tareas sueltas", () => {
+    const tasks = [
+      task({ id: "lead", runId: "r1", role: "lead", status: "running" }),
+      task({ id: "a", runId: "r1", role: "worker", status: "done" }),
+      task({ id: "b", runId: "r1", role: "worker", status: "skipped" }),
+      task({ id: "c", runId: "r1", role: "worker", status: "pending" }),
+      task({ id: "suelta", runId: "r2", status: "done" }),
+    ];
+    const summaries = orchestratedRuns([run({ id: "r2", createdAt: 9 }), run({ id: "r1", createdAt: 1 })], tasks);
+    expect(summaries.map((s) => [s.run.id, s.lead?.id, s.total, s.done, s.broken, s.active]))
+      .toEqual([["r1", "lead", 3, 1, 1, 1]]);
+  });
+
+  it("los que siguen andando van primero", () => {
+    const tasks = [task({ id: "a", runId: "viejo", role: "worker" }), task({ id: "b", runId: "nuevo", role: "worker" })];
+    const summaries = orchestratedRuns([
+      run({ id: "nuevo", status: "done", createdAt: 9 }),
+      run({ id: "viejo", status: "running", createdAt: 1 }),
+    ], tasks);
+    expect(summaries.map((s) => s.run.id)).toEqual(["viejo", "nuevo"]);
+  });
+
+  it("dice a quién espera una tarea, por su key", () => {
+    const tasks = [
+      task({ id: "a", planKey: "api", status: "done" }),
+      task({ id: "b", planKey: "db", status: "running" }),
+      task({ id: "c", planKey: "ui", status: "pending", dependsOn: ["a", "b"] }),
+    ];
+    expect(waitingOn(tasks[2], tasks)).toEqual(["db"]);
   });
 });

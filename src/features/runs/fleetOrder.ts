@@ -6,7 +6,7 @@
  * que pide algo y queda enterrada abajo es un agente parado que nadie ve— y así se puede
  * probar sin montar nada.
  */
-import type { PendingApproval, Task, TaskStatus } from "./types";
+import type { PendingApproval, Run, Task, TaskStatus } from "./types";
 
 /** Los tres estados que la consola distingue, y el orden en que se muestran. */
 export type FleetGroup = "needsYou" | "running" | "idle";
@@ -28,6 +28,9 @@ export function groupOf(task: Task, blocked?: ReadonlySet<string>): FleetGroup {
       return "running";
     case "ready":
       // Creada pero todavía sin proceso: para quien mira es lo mismo que arrancando.
+      return "running";
+    case "pending":
+      // En cola de un plan: no terminó, va a arrancar sola. Es trabajo en curso del run.
       return "running";
     default:
       return "idle";
@@ -85,8 +88,14 @@ export function filterFleet(
   });
 }
 
-/** Un estado terminal ya no cambia solo: no hace falta seguir refrescando su reloj. */
+/** Un estado terminal ya no cambia solo: no hace falta seguir refrescando su reloj. Una
+ *  tarea en cola sí: va a arrancar sola cuando le toque. */
 export function isLive(status: TaskStatus): boolean {
+  return status === "pending" || status === "ready" || status === "running";
+}
+
+/** Tiene un proceso corriendo (o a punto): es lo que ocupa una cuenta y edita archivos. */
+export function isActive(status: TaskStatus): boolean {
   return status === "ready" || status === "running";
 }
 
@@ -108,7 +117,9 @@ export function fleetSummary(tasks: Task[], approvals: PendingApproval[]): Fleet
   const ids = new Set(tasks.map((t) => t.id));
   const blocked = new Set(approvals.filter((a) => ids.has(a.taskId)).map((a) => a.taskId));
   return {
-    running: tasks.filter((t) => isLive(t.status) && !blocked.has(t.id)).length,
+    // Solo lo que tiene proceso: "3 en segundo plano" con dos esperando turno prometería
+    // más trabajo del que hay.
+    running: tasks.filter((t) => isActive(t.status) && !blocked.has(t.id)).length,
     needsYou: blocked.size,
     spentUsd: tasks.reduce((sum, t) => sum + (t.costUsd ?? 0), 0),
   };
@@ -122,5 +133,55 @@ export function fleetSummary(tasks: Task[], approvals: PendingApproval[]): Fleet
  * worktree no cuentan, justamente porque no tocan la carpeta.
  */
 export function liveInFolder(tasks: Task[], cwd: string): number {
-  return tasks.filter((t) => isLive(t.status) && !t.worktreePath && t.cwd === cwd).length;
+  return tasks.filter((t) => isActive(t.status) && !t.worktreePath && t.cwd === cwd).length;
+}
+
+// ── Runs orquestados ─────────────────────────────────────────────
+
+export interface RunSummary {
+  run: Run;
+  /** El agente que reparte. `null` = el plan lo declaró una tab. */
+  lead: Task | null;
+  /** Las tareas del plan, sin el lead. */
+  total: number;
+  done: number;
+  /** Fallidas, salteadas o paradas: lo que no se va a cumplir. */
+  broken: number;
+  /** Corriendo o en cola. */
+  active: number;
+}
+
+/**
+ * Los runs que son un plan (tienen lead o tareas de un plan), con su avance. Una tarea
+ * suelta también es un run por dentro, pero mostrarla como tal sería ruido: ya es su tarjeta.
+ * Primero los que siguen andando, después el más nuevo.
+ */
+export function orchestratedRuns(runs: Run[], tasks: Task[]): RunSummary[] {
+  return runs
+    .map((run) => {
+      const mine = tasks.filter((t) => t.runId === run.id);
+      const lead = mine.find((t) => t.role === "lead") ?? null;
+      const plan = mine.filter((t) => t.role === "worker");
+      return {
+        run,
+        lead,
+        total: plan.length,
+        done: plan.filter((t) => t.status === "done").length,
+        broken: plan.filter((t) => ["failed", "skipped", "cancelled"].includes(t.status)).length,
+        active: plan.filter((t) => isLive(t.status)).length,
+      };
+    })
+    .filter((s) => s.lead !== null || s.total > 0)
+    .sort((a, b) => {
+      const live = Number(b.run.status === "running") - Number(a.run.status === "running");
+      return live !== 0 ? live : b.run.createdAt - a.run.createdAt;
+    });
+}
+
+/** Las dependencias de una tarea que todavía no terminaron bien, por su key. */
+export function waitingOn(task: Task, tasks: Task[]): string[] {
+  return task.dependsOn
+    .map((id) => tasks.find((t) => t.id === id))
+    .filter((dep): dep is Task => !!dep && dep.status !== "done")
+    .map((dep) => dep.planKey ?? dep.title);
 }

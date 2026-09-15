@@ -107,9 +107,24 @@ fn events_path_for(run_id: &str, task_id: &str) -> Result<PathBuf, String> {
     Ok(dir.join(format!("{task_id}.jsonl")))
 }
 
+/// Lo que un lanzamiento lleva además de la tarea, según el papel que cumple en su run.
+#[derive(Default)]
+pub struct LaunchExtras {
+    /// El prompt a mandar, si no es el de la fila (un worker recibe el suyo más el contexto
+    /// del run, que se arma al despacharlo y no se guarda).
+    pub prompt: Option<String>,
+    pub system_prompt: Option<String>,
+    pub allowed_tools: Vec<String>,
+}
+
 /// Arranca la tarea en segundo plano. Vuelve en cuanto el proceso quedó lanzado; lo que
 /// pase después llega por eventos.
-pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
+pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), String> {
+    // Se llama también desde afuera del runtime async: el hilo de una conexión del IPC (un
+    // agente que despacha su plan) o un comando síncrono. Lanzar el proceso y la tarea que
+    // lo espera necesita estar adentro de tokio.
+    let runtime = tauri::async_runtime::handle();
+    let _inside = runtime.inner().enter();
     let Some(adapter) = adapter_for(&task.agent_id) else {
         return Err(format!("todavía no se sabe correr '{}' sin terminal", task.agent_id));
     };
@@ -136,8 +151,16 @@ pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
     };
 
     let mcp_config = write_mcp_config(&task.id);
-    let ctx = LaunchCtx { session_id: &session_id, account_env, mcp_config: mcp_config.clone() };
-    let launch = adapter.launch(&task.prompt, task.model.as_deref(), task.budget_usd, &ctx);
+    let ctx = LaunchCtx {
+        session_id: &session_id,
+        account_env,
+        mcp_config: mcp_config.clone(),
+        system_prompt: extras.system_prompt,
+        allowed_tools: extras.allowed_tools,
+        json_schema: task.result_schema.clone(),
+    };
+    let prompt = extras.prompt.unwrap_or_else(|| task.prompt.clone());
+    let launch = adapter.launch(&prompt, task.model.as_deref(), task.budget_usd, &ctx);
 
     let mut command = tokio::process::Command::new(&launch.program);
     command
@@ -235,6 +258,8 @@ pub fn start(app: &AppHandle, task: Task) -> Result<(), String> {
         }
         emit_event(&app, &task_id, AgentEvent::Finished { outcome });
         emit_changed(&app, &task_id);
+        // Lo que dependía de esta tarea puede arrancar (o no va a poder nunca).
+        super::scheduler::on_task_finished(&app, &task_id);
     });
 
     Ok(())
@@ -265,10 +290,11 @@ fn stop(app: &AppHandle, task_id: &str, new_status: &str) -> Result<(), String> 
         .ok_or_else(|| "la base no está disponible".to_string())?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     // `ready` también: una tarea que se está lanzando todavía no llegó a `running`, y
-    // pararla en ese instante no puede quedar sin efecto.
+    // pararla en ese instante no puede quedar sin efecto. Y `pending`: parar una que espera
+    // turno es sacarla de la cola.
     conn.execute(
         "UPDATE tasks SET status = ?1, ended_at = ?2
-         WHERE id = ?3 AND status IN ('ready', 'running')",
+         WHERE id = ?3 AND status IN ('pending', 'ready', 'running')",
         rusqlite::params![new_status, crate::util::now_ts(), task_id],
     )
     .map_err(|e| e.to_string())?;
@@ -279,6 +305,11 @@ fn stop(app: &AppHandle, task_id: &str, new_status: &str) -> Result<(), String> 
         group.kill_all();
     }
     emit_changed(app, task_id);
+    // Una tarea parada libera su lugar y deja sin cumplir lo que dependía de ella.
+    let run_id = db.lock().ok().and_then(|c| store::run_of_task(&c, task_id).ok().flatten()).map(|r| r.id);
+    if let Some(run_id) = run_id {
+        super::scheduler::tick(app, &run_id);
+    }
     Ok(())
 }
 

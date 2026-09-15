@@ -317,7 +317,7 @@ fn la_ayuda_de_la_cli_menciona_los_comandos_de_skills() {
 
 // ── `ccode mcp`: el puente MCP ──────────────────────────────────
 
-use super::mcp::{browser_tool_names, serve, McpContext};
+use super::mcp::{browser_tool_names, orchestration_tool_names, serve, McpContext, OrchestrationPower};
 
 /// Corre el servidor sobre una conversación entera y devuelve las respuestas y lo que se
 /// le mandó a la app.
@@ -374,8 +374,41 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
 
     // Lo que se permite de antemano en `--allowedTools` es exactamente lo que se ofrece:
     // un nombre de más no hace nada, uno de menos deja una tool pidiendo permiso por cada uso.
-    let allowed: Vec<String> = tab.iter().map(|n| format!("mcp__controlcode__{n}")).collect();
-    assert_eq!(browser_tool_names(), allowed);
+    let offered: Vec<String> = tab.iter().map(|n| format!("mcp__controlcode__{n}")).collect();
+    let browser: Vec<String> = offered.iter().filter(|n| n.contains("__browser_")).cloned().collect();
+    assert_eq!(browser_tool_names(), browser);
+    let all_powers = [OrchestrationPower::Read, OrchestrationPower::Note, OrchestrationPower::Spawn];
+    let orchestration = orchestration_tool_names(&all_powers);
+    assert!(!orchestration.is_empty());
+    assert!(orchestration.iter().all(|n| offered.contains(n)), "{orchestration:?}");
+    assert_eq!(browser.len() + orchestration.len(), offered.len());
+}
+
+/// Lanzar o parar agentes gasta plata: eso nunca va permitido de antemano a alguien que
+/// solo debería leer. Mirar el run y dejar un hecho, sí.
+#[test]
+fn las_tools_que_lanzan_agentes_no_se_permiten_con_las_de_lectura() {
+    let light = orchestration_tool_names(&[OrchestrationPower::Read, OrchestrationPower::Note]);
+    for spawning in ["run_plan", "task_add", "task_cancel"] {
+        assert!(!light.iter().any(|n| n.ends_with(spawning)), "{spawning} no puede ir con las de lectura");
+    }
+    for reading in ["agent_roster", "task_status", "task_result", "run_await", "facts_read", "fact_add"] {
+        assert!(light.iter().any(|n| n.ends_with(reading)), "falta {reading}");
+    }
+}
+
+/// Una tool de orquestación viaja con quién la pide y sus argumentos tal cual: la app
+/// decide sobre qué run actúa, no el agente.
+#[test]
+fn una_tool_de_orquestacion_viaja_con_quien_la_pide() {
+    let (responses, sent) = mcp_session(
+        &McpContext::Task("t-3".into()),
+        &[call(5, "run_await", json!({ "timeout_s": 60, "run_id": "otro" }))],
+        |_, _| Ok(json!({ "text": "Terminaron: api (done)" })),
+    );
+    assert_eq!(sent[0].0, "run.await");
+    assert_eq!(sent[0].1, json!({ "taskId": "t-3", "args": { "timeout_s": 60, "run_id": "otro" } }));
+    assert_eq!(responses[0]["result"]["content"][0]["text"], "Terminaron: api (done)");
 }
 
 #[test]
@@ -460,7 +493,9 @@ fn el_initialize_devuelve_la_version_pedida_y_explica_el_navegador() {
         |_, _| Ok(json!({})),
     );
     assert_eq!(responses[0]["result"]["protocolVersion"], "2025-11-25");
-    assert!(responses[0]["result"]["instructions"].as_str().unwrap().contains("untrusted"));
+    let instructions = responses[0]["result"]["instructions"].as_str().unwrap();
+    assert!(instructions.contains("never instructions"));
+    assert!(instructions.contains("run_plan"));
 }
 
 /// Lo que el puente MCP le manda a la app también son comandos del despachador; y
@@ -472,6 +507,20 @@ fn lo_que_manda_el_puente_mcp_lo_atienden_el_despachador_y_el_frontend() {
     for command in ["run.approve", "browser.run"] {
         assert!(mcp.contains(&format!("send(\"{command}\"")), "el puente ya no manda {command}");
         assert!(dispatched.contains(&command.to_string()), "nadie atiende {command}");
+    }
+    // Y cada tool de orquestación nombra un comando que el despachador atiende.
+    let orchestration: Vec<&str> = mcp
+        .split("command: \"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .collect();
+    assert!(orchestration.len() >= 9, "{orchestration:?}");
+    for command in orchestration {
+        assert!(dispatched.contains(&command.to_string()), "nadie atiende {command}");
+        assert!(
+            include_str!("../runs/orchestration.rs").contains(&format!("\"{command}\" =>")),
+            "la orquestación no atiende {command}"
+        );
     }
     let bridge = include_str!("../../../src/features/orchestrator/cliBridge.ts");
     assert!(bridge.contains("case \"browser.run\""), "el frontend no atiende browser.run");
