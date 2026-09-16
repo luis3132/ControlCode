@@ -376,6 +376,8 @@
   "explorer.noTab": "Sin agente abierto, no hay carpeta que mostrar.",
   "explorer.noChanges": "El árbol de trabajo está limpio.",
   "status.agents": "{{n}} agentes",
+  "tabs.restart": "Reiniciar el agente (retoma la conversación)",
+  "tabs.restartFresh": "Reiniciar el agente (empieza de cero)",
   "tabs.close": "Cerrar agente",
   "skills.scope.workspaceAction": "Skills de este workspace…",
   "skills.scope.tabAction": "Skills de este agente…",

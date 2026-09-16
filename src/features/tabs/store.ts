@@ -35,6 +35,7 @@ interface TabsState {
    *  de otras carpetas no se mueven. */
   arrangeTabs: (ids: string[]) => void;
   setPtyId: (tabId: string, ptyId: number) => void;
+  restartAgent: (tabId: string) => void;
   setSessionId: (tabId: string, sessionId: string) => void;
   updateTab: (tabId: string, patch: Partial<Tab>) => void;
   setDetectedAgents: (agents: AgentInfo[]) => void;
@@ -116,6 +117,24 @@ export const useTabsStore = create<TabsState>((set) => ({
   setPtyId: (tabId, ptyId) =>
     set((state) => ({
       tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, ptyId } : t)),
+    })),
+
+  /**
+   * Relanza el agente de una tab sin cerrarla.
+   *
+   * No mata el proceso desde acá: se limpia el `ptyId` y se sube el nonce, y la terminal se
+   * remonta. Desmontarla ES cerrar el proceso (ver la limpieza de `Terminal.tsx`), y la que
+   * monta en su lugar arranca con `--resume`, así que la conversación sigue donde estaba.
+   *
+   * Sirve para lo que un proceso ya lanzado no puede cambiar: los MCP que se le enchufan al
+   * arrancar. Una tab abierta desde antes de una actualización se pasa a lo nuevo así, en
+   * vez de tener que cerrarla y perder la conversación.
+   */
+  restartAgent: (tabId) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === tabId ? { ...t, ptyId: null, restartNonce: (t.restartNonce ?? 0) + 1 } : t
+      ),
     })),
 
   setSessionId: (tabId, sessionId) =>

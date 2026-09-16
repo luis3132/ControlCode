@@ -49,6 +49,9 @@ export function TerminalPanel() {
             onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
           >
             <Terminal
+              // El nonce en la key: reiniciar el agente desmonta esta terminal (lo que mata
+              // su proceso) y monta otra, que relanza con `--resume`.
+              key={`${tab.id}:${tab.restartNonce ?? 0}`}
               tabId={tab.id}
               command={buildResumeCommand(tab.agentId, tab.command, tab.sessionId)}
               cwd={tab.cwd}

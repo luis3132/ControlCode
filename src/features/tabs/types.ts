@@ -22,6 +22,10 @@ export interface Tab {
   agentLabel: string;
   command: string;
   ptyId: number | null;
+  /** Sube de uno cada vez que se pide reiniciar el agente. Remonta la terminal, que mata el
+   *  proceso viejo y lanza uno nuevo —con `--resume`, así sigue la misma conversación—.
+   *  No se persiste: es de esta corrida. */
+  restartNonce?: number;
   sessionId?: string;
   scrollback?: string;
   /** Entrada de `session_history` de la que salió esta tab (reabierta desde Sesiones).
