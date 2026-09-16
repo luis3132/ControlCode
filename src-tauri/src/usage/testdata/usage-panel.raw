@@ -1,0 +1,78 @@
+7[r8[?25h[?25l[?2004h[?2031h[?1004h[>0q[?u[c[>4m[<u[?1004l[?2031l[?2004l[?2004h[?2031h[?1004h]0;✳ Claude Code[38;2;215;119;87m ▐[48;2;0;0;0m▛███▛█[12G[39m[49m[1mClaude[19GCode[24G[22m[38;2;153;153;153mv2.1.273[39m
+[38;2;215;119;87m▝▜[48;2;0;0;0m█████[49m█▀[12G[38;2;153;153;153mOpus[17G5[19G(1M[23Gcontext)[32Gwith[37Gxhigh[43Geffort[50G·[52GClaude[59GMax[39m
+[38;2;215;119;87m [3G▝▝[6G▝▝[12G[38;2;153;153;153m~/.controlcode/usage-probe[39m
+
+
+[38;2;136;136;136m────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+❯ [2mTry[7G"how[12Gdoes[17G<filepath>[28Gwork?"[22m
+[38;2;136;136;136m────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+[3G[38;2;255;193;7m⚠[5GTranscript[16Gsaving[23Gis[26Goff[30G—[32Ginherited[42GCLAUDE_CODE_CHILD_SESSION[68Gmarker[38;2;153;153;153m ·[77Grestart[85Gwith[90GCLAUDE_C…[39m
+[3G[38;2;255;193;7m⏵⏵[6Gauto[11Gmode[16Gon[38;2;153;153;153m (shift+tab[30Gto[33Gcycle)[82G◉[84Gxhigh[90G·[92G/effort[39m
+[2C[4A[?25h[>0q[?u[c[?25l[2D[4B[2C[4A[K
+
+
+
+[2C[4A[?25h[?25l[2D[4B[5A[48;2;55;55;55m[38;2;80;80;80m❯ [38;2;255;255;255m/usage[39m                                                                                            [1B[49m[K[1B[38;2;177;185;249m────────────────────────────────────────────────────────────────────────────────────────────────────[2C[1B[1mSettings[22m[39m  Status   Config  [48;2;177;185;249m[38;2;0;0;0m[1m Usage [22m[39m[49m  Stats[K[2C[1B[K
+[3G[1mSession[22m
+
+[3G[38;2;153;153;153mTotal[9Gcost:[26G$0.0000[39m
+[3G[38;2;153;153;153mTotal[9Gduration[18G(API):[26G0s[39m
+[3G[38;2;153;153;153mTotal[9Gduration[18G(wall):[26G2s[39m
+[3G[38;2;153;153;153mTotal[9Gcode[14Gchanges:[26G0[28Glines[34Gadded,[41G0[43Glines[49Gremoved[39m
+[3G[38;2;153;153;153mUsage:[26G0[28Ginput,[35G0[37Goutput,[45G0[47Gcache[53Gread,[59G0[61Gcache[67Gwrite[39m
+
+[3G[1mCurrent[11Gsession[22m
+[3G[48;2;80;83;112m[38;2;177;185;249m██████▌                                           [54G[39m[49m13%[58Gused
+[3G[38;2;153;153;153mResets[10G6pm[14G(America/Bogota)[39m
+
+[3G[1mCurrent[11Gweek[16G(all[21Gmodels)[22m
+[3G[48;2;80;83;112m[38;2;177;185;249m██████████████████                                [54G[39m[49m36%[58Gused
+[3G[38;2;153;153;153mResets[10GSep[14G20,[18G11am[23G(America/Bogota)[39m
+[3G[38;2;215;119;87m+50%[8Gweekly[15Glimits[22Gpromo[28Gended[34G·[36Gnow[40G+25%[45Gpermanently[57G·[59Gclau.de/cc-25-weekly[39m
+
+[3G[1mWhat's[10Gcontributing[23Gto[26Gyour[31Glimits[38Gusage?[22m
+[3G[38;2;153;153;153mApproximate,[16Gbased[22Gon[25Glocal[31Gsessions[40Gon[43Gthis[48Gmachine[56G—[58Gdoes[63Gnot[67Ginclude[75Gother[81Gdevices[89Gor[39m
+[3G[38;2;153;153;153mclaude.ai[39m
+
+[3G[38;2;153;153;153mScanning[12Glocal[18Gsessions…[39m
+
+[3G[38;2;153;153;153mRefreshing…[39m
+
+[3G[38;2;153;153;153mEsc[7Gto[10Gcancel[39m
+
+
+
+[30C[31A[30D[31B[8C[20A[48;2;80;83;112m[38;2;177;185;249m█[55G[39m[49m4[18C[5B[38;2;153;153;153m0:59am (America/Bogota)[2C[3B[39m[1mCurrent week (Fable)[22m[K[2C[1B[48;2;80;83;112m[38;2;177;185;249m█                                                 [39m[49m 2% used[K[2C[1B[38;2;153;153;153mResets Sep 20, 10:59am (America/Bogota)[2C[2B[39m[1mWhat's contributing to your limits usage?[2C[1B[22m[38;2;153;153;153mApproximate, based on local sessions on this machine — does not include other devices or [2C[1Bclaude.ai[39m[K[2C[2B[38;2;153;153;153mScanning local sessions…[2C[2B[39m[1mUsage credits[2C[1B[22m[38;2;153;153;153mUsage credits are off · /usage-credits to turn them on[39m
+
+[3G[38;2;153;153;153mEsc[7Gto[10Gcancel[39m
+[30C[33A[30D[33B[2C[6A[38;2;153;153;153mLast 24h[12G· these are independent characteristics of your usage, not a breakdown[2C[2B[39m96% of your usage[21Gwas[25Gat[28G>150k[34Gcontext[2C[1B [38;2;153;153;153mLonger sessions are more exp[33Gnsive even when cached. /compact mid-task, /clear [3C[1Bwhen switching to new tasks.[2C[1B[39m[K
+[3G56%[7Gof[10Gyour[15Gusage[21Gcame[26Gfrom[31Gsubagent-heavy[46Gsessions
+[4G[38;2;153;153;153mEach[9Gsubagent[18Gruns[23Gits[27Gown[31Grequests.[41GBe[44Gdeliberate[55Gabout[61Gspawning[70Gthem[75G—[77Gand[39m
+[4G[38;2;153;153;153mconsider[13Gconfiguring[25Ga[27Gcheaper[35Gmodel[41Gfor[45Gsimpler[53Gsubagents.[39m
+
+[3G27%[7Gof[10Gyour[15Gusage[21Gcame[26Gfrom[31Gsubagents[41Gunder[47G"general-purpose"
+[4G[38;2;153;153;153mIf[7Gthis[12Gruns[17Gfrequently,[29Gconsider[38Gconfiguring[50Gits[54Gsubagents[64Gwith[69Ga[71Gcheaper[39m
+[4G[38;2;153;153;153mmodel[10Gor[13Gtightening[24Gtheir[30Gprompts.[39m
+
+[3G12%[7Gof[10Gyour[15Gusage[21Gcame[26Gfrom[31Gthe[35GMCP[39Gserver[46G"claude-in-chrome"
+[4G[38;2;153;153;153mMCP[8Gtool[13Gresults[21Gstay[26Gin[29Gcontext[37Gfor[41Gthe[45Grest[50Gof[53Gthe[57Gsession.[66G/compact[75Gto[78Gflush[39m
+[4G[38;2;153;153;153mthem,[10Gor[13Gdisable[21Gservers[29Gyou[33Gdon't[39Gneed.[39m
+
+[3GSkills[27G[38;2;153;153;153m%[29Gof[32Gusage[39m
+[3G[38;2;153;153;153m/design[35G1%[39m
+
+[3GSubagents[27G[38;2;153;153;153m%[29Gof[32Gusage[39m
+[3G[38;2;153;153;153mgeneral-purpose[34G27%[39m
+[3G[38;2;153;153;153mfork[35G8%[39m
+
+[3GMCP[7Gservers[27G[38;2;153;153;153m%[29Gof[32Gusage[39m
+[3G[38;2;153;153;153mclaude-in-chrome[34G12%[39m
+[3G[38;2;153;153;153mcontrolcode[35G6%[39m
+
+[3G[38;2;153;153;153md[5Gto[8Gday[12G·[14Gw[16Gto[19Gweek[39m
+
+[3G[1mUsage[9Gcredits[22m
+[3G[38;2;153;153;153mUsage[9Gcredits[17Gare[21Goff[25G·[27G/usage-credits[42Gto[45Gturn[50Gthem[55Gon[39m
+
+[3G[38;2;153;153;153mEsc[7Gto[10Gcancel[39m
+[30C[44A

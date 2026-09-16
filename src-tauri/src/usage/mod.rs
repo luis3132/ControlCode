@@ -12,6 +12,7 @@
 mod claude;
 mod live;
 mod parse;
+mod screen;
 mod trust;
 mod types;
 #[cfg(test)]

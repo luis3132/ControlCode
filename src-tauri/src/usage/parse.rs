@@ -1,76 +1,41 @@
-//! Sacar los dos porcentajes del panel de `/usage`.
+//! Sacar las barras del panel de `/usage`.
 //!
-//! ## Por qué no se parsea por líneas
+//! El flujo crudo de la TUI no se puede leer de corrido: las columnas se arman moviendo el
+//! cursor y el panel se repinta varias veces mientras carga (ver `screen.rs`). Así que
+//! primero se reconstruye la pantalla y recién después se lee, renglón por renglón, que es
+//! como se ve:
 //!
-//! La TUI separa sus filas con `\r`, no con `\n` — repinta moviendo el cursor al principio
-//! del renglón. Para cualquier función que parta en `\n`, el panel entero es UNA línea, y
-//! ahí se rompió el primer intento.
+//! ```text
+//!   Current week (all models)
+//!   ██████████████████                                 36% used
+//!   Resets Sep 20, 10:59am (America/Bogota)
+//! ```
 //!
-//! Así que no se mira la estructura: se busca el rótulo en el texto plano y se toma el
-//! primer porcentaje que venga después. Las columnas, las barras de bloques y el
-//! alineado dejan de importar, que es justo lo que hace falta cuando el formato lo decide
-//! otro programa.
+//! Se busca el rótulo y su número en los renglones de abajo, sin mirar columnas ni anchos:
+//! el formato lo decide otro programa y cambia entre versiones.
 
 use super::live::{LiveUsage, Meter, ModelMeter};
+use super::screen::render;
 
-/// Hasta dónde se busca el porcentaje después de su rótulo. Suficiente para cruzar la
-/// barra y su relleno, corto como para no robarle el número a la sección siguiente.
-const REACH: usize = 320;
+/// Cuántos renglones después del rótulo se busca su porcentaje. La barra va en el
+/// siguiente; con tres alcanza si algún día se le mete una línea en el medio, y es poco
+/// como para no llegar a la barra siguiente.
+const BAR_WITHIN: usize = 3;
 
-/// Los códigos de escape que mete una TUI, y los bloques con los que dibuja las barras.
-pub(super) fn strip_ansi(raw: &str) -> String {
-    let bytes = raw.as_bytes();
-    let mut out = String::with_capacity(raw.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != 0x1b {
-            out.push(bytes[i] as char);
-            i += 1;
-            continue;
-        }
-        i += 1;
-        match bytes.get(i) {
-            // CSI: termina en la primera letra.
-            Some(b'[') => {
-                i += 1;
-                while i < bytes.len() && !bytes[i].is_ascii_alphabetic() {
-                    i += 1;
-                }
-                i += 1;
-            }
-            // OSC: termina en BEL o en ST.
-            Some(b']') => {
-                while i < bytes.len() && bytes[i] != 0x07 {
-                    if bytes[i] == 0x1b && bytes.get(i + 1) == Some(&b'\\') {
-                        i += 1;
-                        break;
-                    }
-                    i += 1;
-                }
-                i += 1;
-            }
-            // Secuencias de dos caracteres (guardar cursor, juegos de caracteres…).
-            Some(_) => i += 2,
-            None => break,
-        }
-    }
-    out.chars()
-        .filter(|c| !matches!(c, '█' | '▌' | '▊' | '▋' | '▍' | '▎' | '▏' | '▔' | '\u{0f}'))
-        .collect()
-}
+/// Cuántos renglones después del porcentaje se busca su reinicio.
+const RESETS_WITHIN: usize = 2;
 
-/// El primer `NN% used` dentro del tramo. Devuelve el valor y dónde terminó.
+/// El `NN% used` de un renglón.
 ///
-/// Se exige la palabra `used` justo después: el panel trae otros porcentajes sueltos —el
-/// aviso de promoción dice `+50% weekly limits promo` y cae entre la barra semanal y la
-/// siguiente— y sin esa condición uno de esos se leería como el consumo.
-fn percent_in(segment: &str) -> Option<(u8, usize)> {
+/// Se exige la palabra `used`: el panel trae otros porcentajes —el aviso de promoción dice
+/// `+50% weekly limits promo`, y el desglose de abajo, `27% of your usage`— y sin esa
+/// condición cualquiera de esos se leería como consumo.
+fn percent_used(line: &str) -> Option<u8> {
     let mut from = 0;
-    while let Some(rel) = segment[from..].find('%') {
+    while let Some(rel) = line[from..].find('%') {
         let at = from + rel;
-        let after = segment[at + 1..].trim_start();
-        if after.starts_with("used") {
-            let digits: String = segment[..at]
+        if line[at + 1..].trim_start().starts_with("used") {
+            let digits: String = line[..at]
                 .chars()
                 .rev()
                 .take_while(char::is_ascii_digit)
@@ -79,7 +44,7 @@ fn percent_in(segment: &str) -> Option<(u8, usize)> {
                 .rev()
                 .collect();
             if let Some(value) = digits.parse::<u8>().ok().filter(|v| *v <= 100) {
-                return Some((value, at));
+                return Some(value);
             }
         }
         from = at + 1;
@@ -87,80 +52,63 @@ fn percent_in(segment: &str) -> Option<(u8, usize)> {
     None
 }
 
-/// El `Resets …` que sigue al porcentaje, hasta el fin de su renglón (que acá es `\r`).
-fn resets_in(segment: &str) -> Option<String> {
-    let at = segment.find("Resets")?;
-    let rest = &segment[at + "Resets".len()..];
-    let end = rest.find(['\r', '\n']).unwrap_or(rest.len());
-    let text = rest[..end].trim();
+/// El `Resets …` de un renglón, sin la palabra.
+fn resets_in(line: &str) -> Option<String> {
+    let at = line.find("Resets")?;
+    let text = line[at + "Resets".len()..].trim();
     (!text.is_empty()).then(|| text.to_string())
 }
 
-/// La barra que corresponde a un rótulo.
-///
-/// Se busca la ÚLTIMA aparición del rótulo: la TUI repinta el panel varias veces mientras
-/// lo abre, y la pintada final es la única completa.
-fn meter_after(text: &str, marker: &str) -> Option<Meter> {
-    let at = text.rfind(marker)? + marker.len();
-    let end = (at + REACH).min(text.len());
-    // `REACH` puede caer en medio de un carácter multibyte.
-    let end = (at..=end).rev().find(|i| text.is_char_boundary(*i))?;
-    let segment = &text[at..end];
+/// La barra de un rótulo: su porcentaje y, si lo dice, cuándo se reinicia.
+fn meter_at(lines: &[&str], label: usize) -> Option<Meter> {
+    let last = (label + BAR_WITHIN).min(lines.len() - 1);
+    // Desde el rótulo mismo: en una terminal angosta el número le queda al lado.
+    let (at, percent) = (label..=last).find_map(|i| percent_used(lines[i]).map(|p| (i, p)))?;
 
-    let (percent, offset) = percent_in(segment)?;
-    Some(Meter { percent, resets: resets_in(&segment[offset..]) })
+    let resets_last = (at + RESETS_WITHIN).min(lines.len() - 1);
+    let resets = (at..=resets_last).find_map(|i| resets_in(lines[i]));
+    Some(Meter { percent, resets })
 }
 
-/// El modelo de un rótulo `Current week (Fable)`. `all models` no es un modelo.
-fn model_of(text: &str, at: usize) -> Option<String> {
-    let rest = &text[at..];
-    let open = rest.find('(')?;
-    let close = rest[open..].find(')')? + open;
-    // Un paréntesis que aparece mucho después no es el de este rótulo.
-    if open > 20 {
-        return None;
-    }
-    let inside = rest[open + 1..close].trim();
-    (!inside.is_empty() && !inside.eq_ignore_ascii_case("all models"))
-        .then(|| inside.to_string())
+/// El modelo de un rótulo `Current week (Fable)`. `all models` es la semana entera, no un
+/// modelo; `Current week` sin paréntesis, tampoco.
+fn model_of(label: &str) -> Option<String> {
+    let open = label.find('(')?;
+    let close = label[open..].find(')')? + open;
+    let inside = label[open + 1..close].trim();
+    (!inside.is_empty() && !inside.eq_ignore_ascii_case("all models")).then(|| inside.to_string())
 }
 
-/// Las semanas por modelo, cuando el plan las mide aparte.
+/// Lee el panel: la ventana en curso, la semana y las semanas por modelo.
 ///
-/// Se recorren todas las apariciones y gana la última de cada modelo: la TUI repinta el
-/// panel mientras lo abre, y la pintada final es la única completa.
-fn week_models(text: &str) -> Vec<ModelMeter> {
-    let mut found: Vec<ModelMeter> = Vec::new();
+/// De cada rótulo gana la ÚLTIMA aparición: lo que quedó arriba de la pantalla son pintadas
+/// anteriores, y la última es la única completa.
+pub(super) fn parse_usage_screen(raw: &str) -> LiveUsage {
+    let screen = render(raw);
+    let lines: Vec<&str> = screen.lines().map(str::trim).collect();
 
-    for (at, _) in text.match_indices("Current week") {
-        let Some(model) = model_of(text, at) else { continue };
-        let after = at + "Current week".len();
-        let end = (after + REACH).min(text.len());
-        let Some(end) = (after..=end).rev().find(|i| text.is_char_boundary(*i)) else { continue };
-        let Some((percent, offset)) = percent_in(&text[after..end]) else { continue };
+    let mut session = None;
+    let mut week = None;
+    let mut models: Vec<ModelMeter> = Vec::new();
 
-        let meter = Meter { percent, resets: resets_in(&text[after + offset..end]) };
-        match found.iter_mut().find(|m| m.model == model) {
-            Some(existing) => existing.meter = meter,
-            None => found.push(ModelMeter { model, meter }),
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with("Current session") {
+            if let Some(meter) = meter_at(&lines, i) {
+                session = Some(meter);
+            }
+        } else if line.starts_with("Current week") {
+            let Some(meter) = meter_at(&lines, i) else { continue };
+            match model_of(line) {
+                None => week = Some(meter),
+                Some(model) => match models.iter_mut().find(|m| m.model == model) {
+                    Some(existing) => existing.meter = meter,
+                    None => models.push(ModelMeter { model, meter }),
+                },
+            }
         }
     }
-    found
-}
 
-/// Lee el panel: la ventana en curso, la semana, y las semanas por modelo.
-pub(super) fn parse_usage_screen(raw: &str) -> LiveUsage {
-    let clean = strip_ansi(raw);
-
-    let session = meter_after(&clean, "Current session");
-    // El rótulo completo primero: sin él, `Current week` a secas también pega con las
-    // secciones por modelo, y la de un modelo suelto no es el consumo de la semana.
-    let week = meter_after(&clean, "Current week (all models)")
-        .or_else(|| meter_after(&clean, "Current week"));
-
-    let models = week_models(&clean);
-
-    let available = session.is_some() || week.is_some();
+    let available = session.is_some() || week.is_some() || !models.is_empty();
     LiveUsage {
         available,
         session,
