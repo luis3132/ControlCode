@@ -364,6 +364,11 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         }
         // Los topes del backend suman ~40s (15 para que aparezca el PTY + 25 de arranque).
         "tab.create" if has_init_prompt(args) => Duration::from_secs(75),
+        // `pick` espera a una persona; el resto son segundos.
+        "browser.run" if args.pointer("/request/op").and_then(Value::as_str) == Some("pick") => {
+            let asked = args.pointer("/request/timeout_s").and_then(Value::as_u64).unwrap_or(120).clamp(10, 600);
+            Duration::from_secs(asked + 60)
+        }
         "browser.run" => Duration::from_secs(controlcode_lib::ipc::mcp::BROWSER_TIMEOUT_SECS + 15),
         // Esperar a que terminen workers: lo que pidió el agente, más margen.
         "run.await" => {

@@ -31,9 +31,19 @@ pub(super) fn browser_run(app: &AppHandle, args: &Value) -> Result<Value, String
         "browser.run",
         &json!({ "cwd": cwd, "request": request }),
         window.as_deref(),
-        Duration::from_secs(BROWSER_TIMEOUT_SECS),
+        Duration::from_secs(browser_timeout(&request)),
     )?;
     unwrap_frontend_result(raw)
+}
+
+/// Cuánto puede tardar este pedido. Casi todos son de segundos; `pick` espera a que una
+/// persona señale algo en la página, así que vale lo que el agente haya pedido esperar.
+fn browser_timeout(request: &Value) -> u64 {
+    if request.get("op").and_then(Value::as_str) != Some("pick") {
+        return BROWSER_TIMEOUT_SECS;
+    }
+    let asked = request.get("timeout_s").and_then(Value::as_u64).unwrap_or(120).clamp(10, 600);
+    asked + 30
 }
 
 /// La carpeta del PROYECTO de una tarea, no su cwd: una tarea aislada corre en un worktree,

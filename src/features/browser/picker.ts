@@ -9,22 +9,17 @@
  * Se empaqueta como script suelto, así que lo que importa viaja adentro: nada de acá puede
  * depender de la app.
  */
-import { describeElement, selectorOf } from "./page/dom";
-import type { AppMessage, PageMessage, PickedComponent, PickedElement } from "./protocol";
+import { componentOf, describeElement, selectorOf } from "./page/dom";
+import type { AppMessage, PageMessage, PickedElement } from "./protocol";
 
 declare global {
   interface Window {
     __controlcodePicker?: boolean;
+    /** Lo último que marcó la persona, para que el runtime lo describa sin depender de que
+     *  su selector lo vuelva a encontrar. */
+    __controlcodeLastPick?: Element;
   }
 }
-
-/** Lo mínimo de un fiber de React que hace falta para subir hasta el componente. */
-interface Fiber {
-  type: unknown;
-  return: Fiber | null;
-}
-
-type Named = { displayName?: string; name?: string; __name?: string; render?: Named };
 
 (() => {
   // Fuera de un iframe (alguien abrió la URL del proxy en su navegador) no hay app con
@@ -95,37 +90,6 @@ type Named = { displayName?: string; name?: string; __name?: string; render?: Na
 
   const isOurs = (el: Element | null) => !!el?.hasAttribute(MARK);
 
-  const nameOf = (type: unknown): string | undefined => {
-    if (!type || (typeof type !== "function" && typeof type !== "object")) return undefined;
-    const t = type as Named;
-    return t.displayName || t.name || t.render?.displayName || t.render?.name;
-  };
-
-  /** El componente que dibujó el elemento, si la página corre en modo desarrollo: para un
-   *  agente, "LoginForm" dice más que una cadena de divs. */
-  function componentOf(el: Element): PickedComponent | null {
-    for (let node: Element | null = el; node; node = node.parentElement) {
-      const bag = node as unknown as Record<string, unknown>;
-      const fiberKey = Object.keys(bag).find(
-        (k) => k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$")
-      );
-      if (fiberKey) {
-        for (let fiber = bag[fiberKey] as Fiber | null; fiber; fiber = fiber.return) {
-          const name = nameOf(fiber.type);
-          // Con mayúscula: las etiquetas de host (`div`) también tienen `type`, como string.
-          if (name && /^[A-Z]/.test(name)) return { framework: "React", name };
-        }
-        return null;
-      }
-      const vue = bag.__vueParentComponent as { type?: Named } | undefined;
-      const vueName = vue?.type && (vue.type.name || vue.type.__name);
-      if (vueName) return { framework: "Vue", name: vueName };
-      const svelte = bag.__svelte_meta as { loc?: { file: string; line: number } } | undefined;
-      if (svelte?.loc) return { framework: "Svelte", name: `${svelte.loc.file}:${svelte.loc.line + 1}` };
-    }
-    return null;
-  }
-
   const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}…` : s);
 
   function snapshot(el: Element): PickedElement {
@@ -181,6 +145,7 @@ type Named = { displayName?: string; name?: string; __name?: string; render?: Na
     if (!el || isOurs(el)) return;
     // Con Shift se sigue eligiendo: es la forma de juntar varios antes de mandarlos.
     const keepPicking = e.shiftKey;
+    window.__controlcodeLastPick = el;
     post({ type: "pick:selected", payload: { element: snapshot(el), keepPicking } });
     if (!keepPicking) setActive(false);
   }, true);

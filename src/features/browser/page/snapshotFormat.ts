@@ -92,7 +92,8 @@ export type TargetSpec =
 
 export function parseTarget(target: string): TargetSpec {
   const t = target.trim();
-  if (/^e\d+$/.test(t)) return { kind: "ref", ref: t };
+  // `e12` sale de un snapshot; `u3`, de algo que el usuario marcó en el navegador.
+  if (/^[eu]\d+$/.test(t)) return { kind: "ref", ref: t };
   const text = /^text[=:](.+)$/s.exec(t);
   if (text) return { kind: "text", text: text[1].trim().replace(/^["'](.*)["']$/s, "$1") };
   return { kind: "css", selector: t };

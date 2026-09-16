@@ -911,5 +911,11 @@
   "fleet.runs.kind.finding": "finding",
   "fleet.runs.kind.file": "file",
   "fleet.runs.kind.constraint": "constraint",
-  "fleet.runs.kind.note": "note"
+  "fleet.runs.kind.note": "note",
+  "browser.pick.agentAsking": "An agent is asking you to mark an element · click to point at it · Esc to cancel",
+  "browser.message.pointer_one": "I marked {{count}} element in {{url}}.",
+  "browser.message.pointer_other": "I marked {{count}} elements in {{url}}.",
+  "browser.message.pointerCaptures_one": "I also left {{count}} annotated screenshot.",
+  "browser.message.pointerCaptures_other": "I also left {{count}} annotated screenshots.",
+  "browser.message.pointerRead": "Read it with the browser_marked tool: it gives you the component and file that renders it, where it sits, its styles and a ref to act on it."
 }

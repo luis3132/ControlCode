@@ -21,7 +21,7 @@
 import type {
   AppMessage, ConsoleEntry, ConsoleLevel, DebugBatch, PageCommand, PageMessage, PageNetworkEntry, StorageArea,
 } from "../protocol";
-import { describeElement, selectorOf } from "./dom";
+import { componentChain, describeElement, selectorOf } from "./dom";
 import {
   errorKindOf, headerList, headerValue, parseRawHeaders, readResponseBody, requestBodyPreview, MAX_PAGE_BODY,
 } from "./netCapture";
@@ -33,6 +33,8 @@ import {
 declare global {
   interface Window {
     __controlcodePage?: boolean;
+    /** Lo último que marcó la persona; lo deja el selector (`picker.ts`). */
+    __controlcodeLastPick?: Element;
   }
 }
 
@@ -378,6 +380,12 @@ declare global {
    *  apunte a otra cosa sería peor que un ref que no existe. */
   let refs = new Map<string, Element>();
 
+  /** Los refs de lo que marcó el usuario (`u1`, `u2`). Estos NO se borran con el snapshot
+   *  siguiente: el agente los recibe cuando la persona señala algo y tiene que poder
+   *  usarlos aunque mientras tanto haya vuelto a leer la página. */
+  const marked = new Map<string, Element>();
+  let markedSeq = 1;
+
   const INTERACTIVE_ROLES = new Set([
     "link", "button", "textbox", "searchbox", "checkbox", "radio", "combobox", "listbox", "slider",
     "spinbutton", "switch", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "treeitem",
@@ -608,9 +616,17 @@ declare global {
   }
 
   function resolve(target: string): Element {
+    // Lo último que la persona marcó con el selector: se resuelve por identidad y no por
+    // su selector, que podría no volver a encontrarlo.
+    if (target === "pick") {
+      const picked = window.__controlcodeLastPick;
+      if (!picked) throw new Error("La persona no marcó nada todavía.");
+      if (!picked.isConnected) throw new Error("Lo que marcó la persona ya no está en la página.");
+      return picked;
+    }
     const spec = parseTarget(target);
     if (spec.kind === "ref") {
-      const el = refs.get(spec.ref);
+      const el = refs.get(spec.ref) ?? marked.get(spec.ref);
       if (!el) throw new Error(`No hay ningún elemento ${spec.ref}: tomá un snapshot nuevo (los refs cambian con cada uno).`);
       if (!el.isConnected) throw new Error(`${spec.ref} ya no está en la página (cambió desde el último snapshot): tomá uno nuevo.`);
       return el;
@@ -1121,6 +1137,85 @@ declare global {
     };
   }
 
+  /** Todo lo que se puede saber de un elemento sin adivinar: qué es, dónde está en la
+   *  página, qué componente lo dibujó y con qué estilos se pinta.
+   *
+   *  Es lo que recibe un agente cuando la persona le señala algo en el navegador: sin esto
+   *  tendría un selector y nada más, y la mitad de las preguntas ("¿de qué componente es?",
+   *  "¿por qué se ve así?") volverían al usuario. */
+  function describe(target: string): unknown {
+    const el = resolve(target);
+    const role = roleOf(el) ?? "generic";
+    const style = getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    const root = document.documentElement;
+
+    let ref = [...refs.entries(), ...marked.entries()].find(([, node]) => node === el)?.[0];
+    if (!ref) {
+      ref = `u${markedSeq++}`;
+      marked.set(ref, el);
+    }
+
+    const attributes: Record<string, string> = {};
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.name.startsWith("data-controlcode")) continue;
+      // Las clases y el estilo en línea ya viajan aparte; el resto (aria, data, name,
+      // href, type…) es justo lo que identifica al elemento en el código.
+      if (attr.name === "class" || attr.name === "style") continue;
+      attributes[attr.name] = clip(attr.value, 200);
+    }
+
+    const ancestors: string[] = [];
+    for (let node = el.parentElement; node && ancestors.length < 5 && node !== root; node = node.parentElement) {
+      ancestors.push(describeElement(node));
+    }
+
+    // El centro del elemento, para saber si algo lo tapa: un botón que no responde suele
+    // tener un overlay encima, y eso no se ve en el HTML.
+    const hit = rect.width > 0 && rect.height > 0
+      ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+      : null;
+    const covered = hit && hit !== el && !el.contains(hit) && !hit.contains(el) ? describeElement(hit) : null;
+
+    return {
+      ref,
+      role,
+      name: nameOf(el, role),
+      tag: el.tagName.toLowerCase(),
+      selector: selectorOf(el),
+      states: statesOf(el, role),
+      value: valueOf(el),
+      text: normalizeName(textOf(el), 300),
+      components: componentChain(el),
+      ancestors,
+      attributes,
+      classes: Array.from(el.classList).slice(0, 12),
+      box: {
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        visible: isVisible(el),
+        covered,
+      },
+      viewport: { width: root.clientWidth, height: window.innerHeight },
+      styles: {
+        display: style.display,
+        position: style.position,
+        color: style.color,
+        background: style.backgroundColor,
+        font: `${style.fontSize} ${style.fontWeight} ${style.fontFamily.split(",")[0]}`,
+        padding: style.padding,
+        margin: style.margin,
+        border: style.border,
+        zIndex: style.zIndex,
+        overflow: style.overflow,
+      },
+      html: clip(el.outerHTML, 1500),
+      url: location.href,
+    };
+  }
+
   function execute(command: PageCommand): Promise<unknown> | unknown {
     switch (command.op) {
       case "snapshot": return snapshot(!!command.all);
@@ -1136,6 +1231,7 @@ declare global {
       case "storage": return storage(command);
       case "cookies": return cookies(command);
       case "performance": return performanceReport();
+      case "describe": return describe(command.target);
     }
   }
 

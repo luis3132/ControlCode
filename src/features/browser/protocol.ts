@@ -14,8 +14,9 @@ export type AppSource = "controlcode";
 
 export interface PickedComponent {
   framework: "React" | "Vue" | "Svelte";
-  /** Nombre del componente, o `archivo:línea` en Svelte. */
   name: string;
+  /** `src/components/Login.tsx:42`, cuando el framework lo deja ver en desarrollo. */
+  source?: string;
 }
 
 /** Un elemento marcado, con lo que un agente necesita para encontrarlo en el código. */
@@ -82,7 +83,10 @@ export type PageCommand =
   | { op: "cookies"; action: "list" }
   | { op: "cookies"; action: "set"; name: string; value: string; path?: string; maxAge?: number }
   | { op: "cookies"; action: "delete"; name: string; path?: string }
-  | { op: "performance" };
+  | { op: "performance" }
+  /** Todo lo que se sabe de un elemento: rol, nombre, componente que lo dibujó, dónde está
+   *  y con qué estilos. Le asigna un ref (`u1`) que sobrevive a los snapshots. */
+  | { op: "describe"; target: string };
 
 export type PageOp = PageCommand["op"];
 

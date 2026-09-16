@@ -17,6 +17,7 @@ import { registerBrowserHost } from "./agentBridge";
 import { AnnotationBar, AnnotationCanvas, renderAnnotated, useAnnotationSession } from "./annotate/Annotator";
 import { canvasToPng, freezePage, thumbnail, type FrozenPage } from "./annotate/capture";
 import { composePickMessage, toTargetUrl, type AnnotatedCapture } from "./composeMessage";
+import { composePointer } from "./markedView";
 import { DebugPanel, MIN_PANEL, type DebugTab } from "./debug/DebugPanel";
 import { appendBatch, currentCounts, EMPTY_LOG, startDocument } from "./debugLog";
 import { useDebugStore } from "./debugStore";
@@ -111,6 +112,12 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   /** Cada documento que cargó con el runtime, y si ya llegó a DOMContentLoaded. */
   const doc = useRef<{ id: string | null; count: number; ready: boolean }>({ id: null, count: 0, ready: false });
   const loadWaiters = useRef(new Set<() => void>());
+  /** Lo señalado, para que un agente lo lea sin esperar a un render. */
+  const marksRef = useRef<{ picks: PickedElement[]; captures: PendingCapture[]; note: string }>({ picks: [], captures: [], note: "" });
+  /** Quién espera a que la persona marque algo, cuando lo pidió un agente. */
+  const pickWaiter = useRef<((element: PickedElement | null) => void) | null>(null);
+  /** Un agente está esperando que señales algo: lo dice la barra. */
+  const [agentAsking, setAgentAsking] = useState(false);
 
   const channel = useMemo(() => new PageChannel(() => (
     targetRef.current ? { window: iframe.current?.contentWindow ?? null, origin: targetRef.current.proxyOrigin } : null
@@ -215,7 +222,35 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       };
       loadWaiters.current.add(wake);
     }),
+    marks: () => {
+      const { picks, captures, note } = marksRef.current;
+      return { picks, captures: captures.map((c) => ({ path: c.path, url: c.url })), note };
+    },
+    requestPick: (timeoutMs) => new Promise((resolve) => {
+      // Un solo pedido a la vez: el anterior se da por cancelado en vez de quedar colgado.
+      pickWaiter.current?.(null);
+      const finish = (element: PickedElement | null) => {
+        clearTimeout(timer);
+        if (pickWaiter.current !== finish) return;
+        pickWaiter.current = null;
+        setAgentAsking(false);
+        setPicking(false);
+        postRef.current("pick:off");
+        resolve(element);
+      };
+      const timer = setTimeout(() => finish(null), timeoutMs);
+      pickWaiter.current = finish;
+      setAgentAsking(true);
+      setPicking(true);
+      postRef.current("pick:on");
+    }),
   }), [channel, reload, setViewport, view.cwd, view.id]);
+
+  // El espejo de lo señalado. En un efecto y no en el render: es para leerlo desde afuera
+  // de React, cuando llega el pedido de un agente.
+  useEffect(() => {
+    marksRef.current = { picks, captures, note };
+  }, [picks, captures, note]);
 
   useEffect(() => {
     if (view.url) go(view.url);
@@ -262,11 +297,16 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         useDebugStore.getState().apply(view.id, (log) => appendBatch(log, batch));
       } else if (msg.type === "pick:selected") {
         const el = msg.payload.element;
+        if (pickWaiter.current) {
+          pickWaiter.current(el);
+          return;
+        }
         setPicks((prev) => [...prev.filter((p) => !(p.selector === el.selector && p.url === el.url)), el]);
         setPicking(msg.payload.keepPicking);
         setComposerOpen(true);
         setSent(null);
       } else if (msg.type === "pick:cancel") {
+        pickWaiter.current?.(null);
         setPicking(false);
       }
     };
@@ -281,6 +321,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       if (e.key !== "Escape") return;
       e.preventDefault();
       e.stopPropagation();
+      pickWaiter.current?.(null);
       setPicking(false);
       postToPage("pick:off");
     };
@@ -359,22 +400,38 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const send = () => {
     const agent = agents.find((a) => a.id === agentId);
     if (!agent || !target || (attachments === 0 && !note.trim())) return;
-    const text = composePickMessage(
-      picks,
-      note,
-      (url) => toTargetUrl(url, target.proxyOrigin, target.targetOrigin),
-      {
-        header: (url) => t("browser.message.header", { url }),
-        page: t("browser.message.page"),
-        selector: t("browser.message.selector"),
-        component: t("browser.message.component"),
-        attributes: t("browser.message.attributes"),
-        html: "HTML",
-        note: t("browser.message.note"),
-        captures: t("browser.message.captures"),
-      },
-      captures
-    );
+    const display = (url: string) => toTargetUrl(url, target.proxyOrigin, target.targetOrigin);
+    // Un agente con el MCP de Control Code no necesita el volcado: se le dice qué hay y lo
+    // lee con `browser_marked`, que se lo describe como está AHORA —si algo cambió o quedó
+    // tapado desde que se marcó, se entera— y le da un ref para tocarlo.
+    const text = agent.agentId === "claude-code"
+      ? composePointer(
+        { picks: picks.length, captures: captures.length },
+        display(picks[0]?.url ?? pageUrl.current ?? ""),
+        note,
+        {
+          marked: (n, url) => t("browser.message.pointer", { count: n, url }),
+          captures: (n) => t("browser.message.pointerCaptures", { count: n }),
+          read: t("browser.message.pointerRead"),
+          note: t("browser.message.note"),
+        }
+      )
+      : composePickMessage(
+        picks,
+        note,
+        display,
+        {
+          header: (url) => t("browser.message.header", { url }),
+          page: t("browser.message.page"),
+          selector: t("browser.message.selector"),
+          component: t("browser.message.component"),
+          attributes: t("browser.message.attributes"),
+          html: "HTML",
+          note: t("browser.message.note"),
+          captures: t("browser.message.captures"),
+        },
+        captures
+      );
     if (!pasteIntoTab(agent.id, text, true)) {
       setError(t("browser.agentNotReady"));
       return;
@@ -536,9 +593,9 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       )}
 
       {picking && (
-        <div className="shrink-0 px-3 py-1 text-[11px] text-center
-          bg-blue-500 text-white dark:bg-blue-600">
-          {t("browser.pick.hint")}
+        <div className={`shrink-0 px-3 py-1 text-[11px] text-center text-white
+          ${agentAsking ? "bg-violet-600 dark:bg-violet-700" : "bg-blue-500 dark:bg-blue-600"}`}>
+          {agentAsking ? t("browser.pick.agentAsking") : t("browser.pick.hint")}
         </div>
       )}
 

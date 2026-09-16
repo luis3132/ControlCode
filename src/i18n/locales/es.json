@@ -911,5 +911,11 @@
   "fleet.runs.kind.finding": "hallazgo",
   "fleet.runs.kind.file": "archivo",
   "fleet.runs.kind.constraint": "restricción",
-  "fleet.runs.kind.note": "nota"
+  "fleet.runs.kind.note": "nota",
+  "browser.pick.agentAsking": "Un agente te está pidiendo que marques un elemento · click para señalarlo · Esc para cancelar",
+  "browser.message.pointer_one": "Marqué {{count}} elemento en {{url}}.",
+  "browser.message.pointer_other": "Marqué {{count}} elementos en {{url}}.",
+  "browser.message.pointerCaptures_one": "Además dejé {{count}} captura anotada.",
+  "browser.message.pointerCaptures_other": "Además dejé {{count}} capturas anotadas.",
+  "browser.message.pointerRead": "Leelo con la herramienta browser_marked: te da el componente y el archivo que lo dibuja, dónde está, sus estilos y un ref para tocarlo."
 }

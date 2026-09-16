@@ -64,7 +64,9 @@ impl McpContext {
 
 /// Lo que se le explica al modelo al conectarse. Corto: lo lee en cada sesión.
 const INSTRUCTIONS: &str = "Control Code tools for this project.\n\
-Browser: a real page the user can see, loaded through a local proxy. Typical loop: browser_navigate to the dev \
+Browser: a real page the user can see, loaded through a local proxy. The user can point at elements in it and \
+annotate screenshots: browser_marked reads what they marked, browser_pick asks them to point at something. \
+Typical loop: browser_navigate to the dev \
 server URL, browser_snapshot to read the page and get element refs, act with browser_click/browser_type/\
 browser_press using those refs, then check browser_console and browser_network for errors. Use browser_resize \
 to test responsive layouts. There are no screenshots: read the page through snapshots.\n\
@@ -94,6 +96,25 @@ const BROWSER_TOOLS: &[BrowserTool] = &[
 Returns the final URL plus console errors and failed requests during the load.",
         properties: || json!({ "url": { "type": "string", "description": "e.g. http://localhost:5173/login" } }),
         required: &["url"],
+    },
+    BrowserTool {
+        name: "browser_pick",
+        op: "pick",
+        description: "Ask the user to point at something on the page: turns on Control Code's element picker and waits \
+until they click an element. Use it when you need to know WHICH element they mean (\"the button that doesn't work\"). \
+Returns what it is, the component and source file that rendered it, where it sits, its computed styles and a ref you \
+can act on.",
+        properties: || json!({ "timeout_s": { "type": "number", "description": "How long to wait (10-600). Default 120." } }),
+        required: &[],
+    },
+    BrowserTool {
+        name: "browser_marked",
+        op: "marked",
+        description: "What the user already marked in the browser and hasn't sent yet: the elements they picked (each \
+described as it is right now, with component, source file, box, styles and a ref), the screenshots they annotated (as \
+file paths you can open) and their note. Read it when they say \"esto\", \"este botón\" or paste a pointer to it.",
+        properties: || json!({}),
+        required: &[],
     },
     BrowserTool {
         name: "browser_snapshot",

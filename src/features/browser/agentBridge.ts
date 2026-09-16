@@ -20,8 +20,10 @@ import {
 import { debugLogOf, refreshProxyLog } from "./debugStore";
 import { previewCookies, previewRequest } from "./ipc";
 import { detailForAgent, detailFromPage, detailFromProxy } from "./networkDetail";
+import type { AnnotatedCapture } from "./composeMessage";
+import { formatMarked, type DescribedElement, type MarkedEntry } from "./markedView";
 import type { PageChannel } from "./pageChannel";
-import type { PageCommand, StorageArea } from "./protocol";
+import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
 
 export interface BrowserHost {
@@ -43,6 +45,10 @@ export interface BrowserHost {
   loadCount: () => number;
   /** Espera a que cargue un documento posterior a `after`. `false` si venció el tope. */
   waitForLoad: (after: number, timeoutMs: number) => Promise<boolean>;
+  /** Lo que la persona dejó señalado y todavía no mandó a nadie. */
+  marks: () => { picks: PickedElement[]; captures: AnnotatedCapture[]; note: string };
+  /** Prende el selector y espera a que la persona marque algo. `null` = canceló o venció. */
+  requestPick: (timeoutMs: number) => Promise<PickedElement | null>;
 }
 
 export type BrowserRequest = { op: string } & Record<string, unknown>;
@@ -207,6 +213,37 @@ async function inPage(host: BrowserHost, command: PageCommand, withEffects: bool
   return inServerTerms(host, asText(result)) + (withEffects ? await sideEffects(host, firstId, startedAt) : "");
 }
 
+/**
+ * Lo señalado, descrito como está AHORA en la página.
+ *
+ * Se vuelve a describir en vez de mandar lo que se guardó al marcarlo: entre que la
+ * persona lo marcó y el agente lo lee pudo cambiar de estado, taparse o desaparecer, y eso
+ * es justamente lo que el agente necesita saber.
+ */
+async function marksText(
+  host: BrowserHost,
+  picks: PickedElement[],
+  captures: AnnotatedCapture[],
+  note: string,
+  /** Con qué apuntarle al runtime. `pick` = lo que la persona acaba de marcar, que se
+   *  resuelve por identidad; el resto se busca por su selector. */
+  pointer?: string
+): Promise<string> {
+  const entries: MarkedEntry[] = [];
+  for (const pick of picks) {
+    try {
+      const described = await host.channel.run({ op: "describe", target: pointer ?? pick.selector }, 12_000) as DescribedElement;
+      entries.push({ live: true, element: described });
+    } catch {
+      entries.push({ live: false, element: pick });
+    }
+  }
+  const proxy = host.proxyOrigin();
+  const target = host.targetOrigin();
+  const display = (url: string) => (proxy && target && url.startsWith(proxy) ? target + url.slice(proxy.length) : url);
+  return inServerTerms(host, formatMarked(entries, captures, note, display));
+}
+
 async function execute(host: BrowserHost, request: BrowserRequest, opened: boolean): Promise<string> {
   const op = request.op;
   switch (op) {
@@ -304,6 +341,23 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
       if (action === "remove") return inPage(host, { op: "storage", action: "remove", area: storageArea(), key: required(request, "key") }, true);
       if (action === "clear") return inPage(host, { op: "storage", action: "clear", area: storageArea() }, true);
       throw new Error("action es list, set, remove o clear.");
+    }
+    case "pick": {
+      const seconds = Math.min(Math.max(num(request, "timeout_s") ?? 120, 10), 600);
+      const picked = await host.requestPick(seconds * 1000);
+      if (!picked) {
+        throw new Error("El usuario no marcó nada: canceló con Escape, o pasaron los segundos de espera.");
+      }
+      return marksText(host, [picked], [], "", "pick");
+    }
+    case "marked": {
+      const { picks, captures, note } = host.marks();
+      if (picks.length === 0 && captures.length === 0 && !note.trim()) {
+        throw new Error(
+          "El usuario todavía no marcó nada en el navegador. Pedíselo con browser_pick, o esperá a que use el botón Marcar."
+        );
+      }
+      return marksText(host, picks, captures, note);
     }
     case "snapshot": return inPage(host, { op: "snapshot", all: bool(request, "full") }, false);
     case "layout": return inPage(host, { op: "layout" }, false);
