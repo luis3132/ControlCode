@@ -88,6 +88,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const [sent, setSent] = useState<{ tabId: string; title: string } | null>(null);
   const [servers, setServers] = useState<string[] | null>(null);
   const [viewport, setViewportState] = useState<Viewport | null>(view.viewport ?? null);
+  const [touch, setTouchState] = useState(view.touch ?? false);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugTab, setDebugTab] = useState<DebugTab>("console");
   const [debugHeight, setDebugHeight] = useState(savedPanelHeight);
@@ -109,6 +110,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const targetRef = useRef<PreviewTarget | null>(null);
   const shownUrl = useRef(view.url);
   const viewportRef = useRef(viewport);
+  const touchRef = useRef(touch);
   /** Cada documento que cargó con el runtime, y si ya llegó a DOMContentLoaded. */
   const doc = useRef<{ id: string | null; count: number; ready: boolean }>({ id: null, count: 0, ready: false });
   const loadWaiters = useRef(new Set<() => void>());
@@ -151,6 +153,13 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     setViewportState(next);
     updateView(view.id, { viewport: next });
   }, [updateView, view.id]);
+
+  const setTouch = useCallback(async (next: boolean) => {
+    touchRef.current = next;
+    setTouchState(next);
+    updateView(view.id, { touch: next });
+    return channel.run({ op: "touch", on: next }, 8000);
+  }, [channel, updateView, view.id]);
 
   /** `null` si cargó; el motivo si no. */
   const go = useCallback(async (input: string): Promise<string | null> => {
@@ -200,6 +209,8 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     history: (action) => (action === "reload" ? reload() : postRef.current(action === "back" ? "history:back" : "history:forward")),
     setViewport,
     viewport: () => viewportRef.current,
+    setTouch,
+    touch: () => touchRef.current,
     proxyOrigin: () => targetRef.current?.proxyOrigin ?? null,
     targetOrigin: () => targetRef.current?.targetOrigin ?? null,
     currentUrl: () => shownUrl.current,
@@ -304,6 +315,9 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         useDebugStore.getState().apply(view.id, (log) => startDocument(log, msg.payload.doc, url, Date.now()));
         // Con esto la página aprende a quién mandarle lo que capturó durante la carga.
         (e.source as Window).postMessage({ source: "controlcode", type: "connect" } satisfies AppMessage, target.proxyOrigin);
+        // Y el táctil se vuelve a poner: las hojas de estilo de la página nueva están sin
+        // tocar, así que sin esto la emulación se apagaría sola al navegar.
+        if (touchRef.current) channel.run({ op: "touch", on: true }, 8000).catch(() => undefined);
       } else if (msg.type === "page:reply") {
         channel.reply(msg.payload);
       } else if (msg.type === "debug:batch") {
@@ -534,7 +548,13 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const tabTools = (
     <>
       <ToolButton label={viewport ? t("browser.viewport.exit") : t("browser.viewport.enter")} active={!!viewport}
-        onClick={() => setViewport(viewport ? null : (presetById("phone") ?? null))}>
+        onClick={() => {
+          const next = viewport ? null : (presetById("phone") ?? null);
+          setViewport(next);
+          // Un teléfono es táctil. Entrar en modo teléfono con hover sería probar algo que
+          // no existe; se apaga con el botón de al lado cuando se quiere comparar.
+          setTouch(next !== null).catch(console.error);
+        }}>
         <DevicesIcon className="w-4 h-4" />
       </ToolButton>
       <ToolButton label={t("browser.debug.toggle")} active={debugOpen} onClick={() => setDebugOpen((v) => !v)}>
@@ -609,7 +629,13 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       {viewport && (
         // Congelada, la página no cambia de tamaño: la barra queda a la vista pero quieta.
         <div inert={frozen ? true : undefined} className={`shrink-0 ${frozen ? "opacity-50" : ""}`}>
-          <DeviceBar viewport={viewport} onChange={setViewport} onClose={() => setViewport(null)} />
+          <DeviceBar
+            viewport={viewport}
+            touch={touch}
+            onChange={setViewport}
+            onTouch={(on) => { setTouch(on).catch(console.error); }}
+            onClose={() => { setViewport(null); setTouch(false).catch(console.error); }}
+          />
         </div>
       )}
 

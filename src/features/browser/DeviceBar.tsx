@@ -40,9 +40,12 @@ function SideInput({ value, label, onCommit }: { value: number; label: string; o
 }
 
 /** La barra del modo responsive: tamaño exacto, presets, orientación y breakpoints. */
-export function DeviceBar({ viewport, onChange, onClose }: {
+export function DeviceBar({ viewport, touch, onChange, onTouch, onClose }: {
   viewport: Viewport;
+  /** Está emulando una pantalla táctil. */
+  touch: boolean;
   onChange: (viewport: Viewport) => void;
+  onTouch: (on: boolean) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -83,6 +86,18 @@ export function DeviceBar({ viewport, onChange, onClose }: {
           className="cc-t flex items-center justify-center w-7 h-7 rounded-md shrink-0
             text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10">
           <RotateIcon className="w-4 h-4" />
+        </button>
+      </Tooltip>
+
+      {/* El táctil aparte del tamaño: lo más útil es prenderlo y apagarlo SIN mover el
+          ancho, que es como se ve qué se rompe por el dedo y no por el espacio. */}
+      <Tooltip content={t(touch ? "browser.viewport.touchOff" : "browser.viewport.touchOn")} placement="bottom">
+        <button onClick={() => onTouch(!touch)} aria-pressed={touch}
+          className={`cc-t h-6 px-2 rounded-md shrink-0 text-[10.5px] border
+            ${touch
+              ? "bg-blue-600 border-blue-600 text-white"
+              : "border-gray-200 dark:border-white/10 text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/8"}`}>
+          {t("browser.viewport.touch")}
         </button>
       </Tooltip>
 

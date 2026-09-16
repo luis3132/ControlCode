@@ -254,6 +254,7 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
         let can_delegate = task.depth < plan::MAX_DEPTH;
         use crate::ipc::mcp::{orchestration_tool_name, orchestration_tool_names, OrchestrationPower::*};
         let mut allowed = orchestration_tool_names(&[Read, Note]);
+        allowed.push(orchestration_tool_name(crate::ipc::mcp::ASK_TOOL));
         if can_delegate {
             allowed.push(orchestration_tool_name("task_add"));
         }
@@ -491,6 +492,148 @@ pub fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<Discarded
 #[tauri::command]
 pub fn run_cancel_task(app: AppHandle, task_id: String) -> Result<(), String> {
     supervisor::cancel(&app, &task_id)
+}
+
+// ── Pasarle una tarea a otro agente ─────────────────────────────
+
+/// Lo que el agente anterior alcanzó a hacer: los pasos que quedaron en su registro de
+/// eventos y los commits que dejó en su rama.
+///
+/// El registro se lee ACÁ y no al relanzar porque el lanzamiento lo pisa: cada intento
+/// escribe su `.jsonl` desde cero.
+fn what_it_did(task: &Task) -> (Vec<String>, Vec<String>) {
+    let mut did = Vec::new();
+    if let Some(path) = &task.events_path
+        && let Some(adapter) = agents::adapter_for(&task.agent_id)
+        && let Ok(raw) = std::fs::read_to_string(path)
+    {
+        for line in raw.lines() {
+            for event in adapter.parse_line(line) {
+                match event {
+                    types::AgentEvent::Tool { label, .. } => did.push(label),
+                    types::AgentEvent::Text { text } => did.extend(activity::text_line(&text)),
+                    _ => {}
+                }
+            }
+        }
+    }
+    let commits = match (&task.worktree_path, task.started_at) {
+        (Some(root), Some(since)) if !task.worktree_removed => {
+            worktrees::commits_since(std::path::Path::new(root), since, 15)
+        }
+        _ => Vec::new(),
+    };
+    (did, commits)
+}
+
+/// Le pasa una tarea a otro agente, con lo que el anterior ya hizo.
+///
+/// No es un reintento: el reintento repite con el MISMO agente porque falló. Esto cambia
+/// quién la corre —se quedó sin cupo, no está dando resultado, el usuario quiere otro
+/// modelo— y por eso lo que vale es que el que entra no empiece de cero: hereda la carpeta,
+/// la rama y el relato de lo que se hizo hasta acá.
+pub async fn reroute(
+    app: &AppHandle,
+    task_id: &str,
+    request: routing::RouteRequest,
+    reason: &str,
+) -> Result<(Task, routing::Assignment), String> {
+    let db = db_of(app)?;
+    let assignment = assign(&db, request).await?;
+    let out = reroute_to(app, task_id, assignment, reason)?;
+    scheduler::tick(app, &out.0.run_id);
+    Ok(out)
+}
+
+/// Lo mismo con la asignación ya resuelta, para quien ya tiene el roster en la mano (la
+/// orquestación, que atiende en un hilo sincrónico).
+pub fn reroute_to(
+    app: &AppHandle,
+    task_id: &str,
+    assignment: routing::Assignment,
+    reason: &str,
+) -> Result<(Task, routing::Assignment), String> {
+    let db = db_of(app)?;
+    let task = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::task_by_id(&conn, task_id)?.ok_or_else(|| "la tarea ya no existe".to_string())?
+    };
+    if task.role.as_deref() == Some(types::role::LEAD) {
+        return Err("el lead no se pasa a otro agente: es quien reparte".into());
+    }
+
+    // Se para ANTES de leer el registro: mientras el proceso vive sigue escribiendo, y el
+    // relato del traspaso tiene que ser de algo que ya terminó de pasar.
+    if matches!(task.status.as_str(), types::status::PENDING | types::status::READY | types::status::RUNNING) {
+        supervisor::hand_off(app, task_id)?;
+    }
+
+    let (did, commits) = what_it_did(&task);
+    let from = match &task.model {
+        Some(model) => format!("{} · {model}", task.agent_id),
+        None => task.agent_id.clone(),
+    };
+    let last = task.error.as_deref().or(task.result.as_deref());
+    let note = context::handoff_note(&context::Handoff {
+        from: &from,
+        reason,
+        did: &did,
+        commits: &commits,
+        last,
+    });
+
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let moved = store::reroute_task(
+            &conn,
+            task_id,
+            &assignment.agent_id,
+            assignment.model.as_deref(),
+            assignment.account_id.as_deref(),
+            assignment.routed_by.as_str(),
+            (!assignment.notes.is_empty()).then(|| assignment.notes.join("; ")).as_deref(),
+            &note,
+        )?;
+        if !moved {
+            return Err("la tarea no está en un estado en el que se pueda pasar a otro agente".into());
+        }
+    }
+    supervisor::notify_changed(app, task_id);
+    // No se tiquea acá: el scheduler llama a esto con su propio lock tomado, y volver a
+    // entrar lo trabaría. Tiquean los de afuera.
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let updated = store::task_by_id(&conn, task_id)?.ok_or_else(|| "la tarea ya no existe".to_string())?;
+    Ok((updated, assignment))
+}
+
+/// Pasarla a otro agente desde la consola. Sin `agent`/`model`, elige la app.
+#[tauri::command]
+pub async fn run_reroute_task(
+    app: AppHandle,
+    task_id: String,
+    agent_id: Option<String>,
+    model: Option<String>,
+    account_id: Option<String>,
+    reason: Option<String>,
+) -> Result<Task, String> {
+    let complexity = {
+        let db = db_of(&app)?;
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::task_by_id(&conn, &task_id)?
+            .and_then(|t| t.complexity)
+            .and_then(|c| routing::Complexity::parse(&c))
+    };
+    let request = routing::RouteRequest {
+        agent_id,
+        model: model.filter(|m| !m.trim().is_empty()),
+        complexity,
+        account: match account_id {
+            Some(id) => routing::AccountChoice::Fixed(Some(id)),
+            None => routing::AccountChoice::Auto,
+        },
+    };
+    let reason = reason.unwrap_or_else(|| "lo pidió el usuario desde la consola".into());
+    reroute(&app, &task_id, request, &reason).await.map(|(task, _)| task)
 }
 
 /// Deja la tarea lista para seguirla en una terminal y devuelve la fila con lo necesario

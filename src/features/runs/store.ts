@@ -30,6 +30,7 @@ interface RunsState {
   cancelTask: (taskId: string) => Promise<void>;
   /** Para la tarea si hace falta y devuelve la fila con lo necesario para reabrirla. */
   handOffTask: (taskId: string) => Promise<Task>;
+  rerouteTask: (taskId: string) => Promise<Task>;
   discardWorktree: (taskId: string) => Promise<ipc.DiscardedWorktree>;
   /** Un evento en vivo del backend. */
   applyEvent: (payload: TaskEventPayload) => void;
@@ -99,6 +100,12 @@ export const useRunsStore = create<RunsState>((set) => ({
 
   handOffTask: async (taskId) => {
     const task = await ipc.handOffTask(taskId);
+    set((s) => ({ tasks: s.tasks.map((t) => (t.id === task.id ? task : t)) }));
+    return task;
+  },
+
+  rerouteTask: async (taskId) => {
+    const task = await ipc.rerouteTask(taskId);
     set((s) => ({ tasks: s.tasks.map((t) => (t.id === task.id ? task : t)) }));
     return task;
   },

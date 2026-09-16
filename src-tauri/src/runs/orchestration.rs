@@ -108,6 +108,7 @@ pub fn handle(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
             }))
         }
         "run.cancelTask" => cancel_task(app, &db, payload).map(text),
+        "run.rerouteTask" => reroute_task(app, &db, payload).map(text),
         other => Err(format!("la orquestación no atiende '{other}'")),
     }
 }
@@ -501,6 +502,54 @@ fn add_fact(app: &AppHandle, db: &DbConnection, payload: &Value) -> Result<Strin
     scheduler::bump(&run_id);
     let _ = tauri::Emitter::emit(app, FACTS_CHANGED, &run_id);
     Ok("Hecho guardado: las tareas que arranquen desde ahora lo reciben en su contexto.".into())
+}
+
+/// Pasarle una tarea a otro agente sin perder lo que el anterior ya hizo.
+///
+/// Es lo que deja al lead reaccionar a una cuenta sin cupo o a un worker que no avanza:
+/// la tarea vuelve a la cola con otro agente, en la MISMA rama y con el relato de lo que se
+/// hizo hasta acá (ver `runs::reroute_to`).
+fn reroute_task(app: &AppHandle, db: &DbConnection, payload: &Value) -> Result<String, String> {
+    let args = args(payload);
+    let (task, request) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let caller = caller(&conn, payload)?;
+        let run = run_for(&conn, &caller, args)?;
+        let key = arg_str(args, "task").ok_or("falta 'task' (key o id)")?;
+        let task = store::task_in_run(&conn, &run.id, key)?.ok_or_else(|| format!("el run no tiene ninguna tarea '{key}'"))?;
+        if caller.task.as_ref().is_some_and(|c| c.id == task.id) {
+            return Err("una tarea no se pasa a sí misma a otro agente".into());
+        }
+        let agent = arg_str(args, "agent").map(str::to_string);
+        let model = arg_str(args, "model").map(str::to_string).filter(|m| !m.trim().is_empty());
+        let complexity = arg_str(args, "complexity")
+            .and_then(Complexity::parse)
+            .or_else(|| task.complexity.as_deref().and_then(Complexity::parse))
+            // Sin complejidad ni modelo no hay tramo del que elegir: standard es el default
+            // del plan, y es el mismo que usa `run_plan`.
+            .or((agent.is_none() && model.is_none()).then_some(Complexity::Standard));
+        let request = RouteRequest { agent_id: agent, model, complexity, account: AccountChoice::Auto };
+        (task, request)
+    };
+
+    let roster = roster::snapshot(db, false)?;
+    let tiers = routing::load_tiers(db);
+    let assignment = routing::route(&roster, &tiers, &request, crate::util::now_ts())?;
+    let reason = arg_str(args, "reason").unwrap_or("lo pidió el lead").to_string();
+
+    let before = (task.agent_id.clone(), task.model.clone());
+    let (task, assignment) = super::reroute_to(app, &task.id, assignment, &reason)?;
+    scheduler::tick(app, &task.run_id);
+    let now = format!("{}{}", assignment.agent_id, assignment.model.map(|m| format!(" · {m}")).unwrap_or_default());
+    let changed = if (task.agent_id.clone(), task.model.clone()) == before {
+        " (es el mismo de antes: no había otra opción disponible)"
+    } else {
+        ""
+    };
+    Ok(format!(
+        "'{}' vuelve a la cola con {now}{changed}. Arranca en la misma rama, con lo que dejó el anterior.",
+        key_of(&task)
+    ))
 }
 
 fn cancel_task(app: &AppHandle, db: &DbConnection, payload: &Value) -> Result<String, String> {

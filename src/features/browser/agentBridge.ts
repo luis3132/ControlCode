@@ -37,6 +37,9 @@ export interface BrowserHost {
   history: (action: "back" | "forward" | "reload") => void;
   /** `null` = ocupar todo el espacio (sin emular un tamaño). */
   setViewport: (viewport: Viewport | null) => void;
+  /** Emular una pantalla táctil: media queries de hover/puntero y eventos de dedo. */
+  setTouch: (on: boolean) => Promise<unknown>;
+  touch: () => boolean;
   viewport: () => Viewport | null;
   proxyOrigin: () => string | null;
   /** El origen del servidor de verdad (`http://localhost:5173`). */
@@ -326,6 +329,21 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
       return loaded || url !== before ? `Ahora en ${url}` : `Sigue en ${url} (no había a dónde ir, o la página no cambió).`;
     }
     case "resize": {
+      // El táctil se decide antes de medir: prenderlo cambia qué reglas aplican, y un
+      // layout medido con las de escritorio no sería el del teléfono.
+      let touch = host.touch();
+      if (request.touch !== undefined) {
+        touch = bool(request, "touch");
+      } else if (bool(request, "reset")) {
+        touch = false;
+      } else {
+        // Elegir "phone" y que siga habiendo hover sería emular medio teléfono. Se puede
+        // apagar con `touch: false`, que es lo que sirve para comparar las dos.
+        const preset = str(request, "preset");
+        const kind = preset ? presetById(preset)?.kind : undefined;
+        if (kind) touch = kind === "phone" || kind === "tablet";
+      }
+
       if (bool(request, "reset")) {
         host.setViewport(null);
       } else {
@@ -339,9 +357,15 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
         if (width === undefined) throw new Error("Pasá width (y height), un preset, o reset.");
         host.setViewport(clampViewport({ width, height }));
       }
+
+      let touchNote = "";
+      if (touch !== host.touch()) {
+        const applied = await host.setTouch(touch) as { note?: string } | null;
+        touchNote = applied?.note ? `\n${applied.note}` : "";
+      }
       // Que la página reciba el `resize` y reacomode antes de medirla.
       await sleep(400);
-      return inPage(host, { op: "layout" }, false);
+      return await inPage(host, { op: "layout" }, false) + touchNote;
     }
     case "console": {
       const level = str(request, "level");

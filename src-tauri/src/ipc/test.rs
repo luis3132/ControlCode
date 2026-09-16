@@ -381,7 +381,9 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let orchestration = orchestration_tool_names(&all_powers);
     assert!(!orchestration.is_empty());
     assert!(orchestration.iter().all(|n| offered.contains(n)), "{orchestration:?}");
-    assert_eq!(browser.len() + orchestration.len(), offered.len());
+    // Preguntarle algo al usuario va para los dos lados y no es ni navegador ni orquestación.
+    assert!(tab.contains(&super::mcp::ASK_TOOL.to_string()));
+    assert_eq!(browser.len() + orchestration.len() + 1, offered.len());
 }
 
 /// Lanzar o parar agentes gasta plata: eso nunca va permitido de antemano a alguien que
@@ -389,7 +391,7 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
 #[test]
 fn las_tools_que_lanzan_agentes_no_se_permiten_con_las_de_lectura() {
     let light = orchestration_tool_names(&[OrchestrationPower::Read, OrchestrationPower::Note]);
-    for spawning in ["run_plan", "task_add", "task_cancel"] {
+    for spawning in ["run_plan", "task_add", "task_cancel", "task_reroute"] {
         assert!(!light.iter().any(|n| n.ends_with(spawning)), "{spawning} no puede ir con las de lectura");
     }
     for reading in ["agent_roster", "task_status", "task_result", "run_await", "facts_read", "fact_add"] {
@@ -434,6 +436,39 @@ fn una_tool_del_navegador_viaja_como_browser_run_con_su_carpeta() {
         sent[0].1,
         json!({ "cwd": "/home/u/proyecto", "request": { "op": "type", "target": "e3", "text": "ana@x.com", "submit": true } })
     );
+}
+
+/// Cada tab y cada tarea escribe su `--mcp-config`, y al cerrarse no lo limpian. Sin este
+/// barrido `~/.controlcode/mcp` crece para siempre con archivos que no apunta nadie.
+#[test]
+fn el_barrido_borra_los_configs_de_tabs_y_tareas_que_ya_no_estan() {
+    let conn = crate::database::test_db();
+    conn.execute_batch(
+        "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+         INSERT INTO windows (id, label, workspace_id, is_open, last_active) VALUES ('w1', 'main', 'ws', 1, 0);
+         INSERT INTO tabs (id, window_id, agent_id, agent_label, command, cwd, opened_at, created_at, last_active)
+            VALUES ('viva', 'w1', 'claude-code', 'Claude Code', 'claude', '/tmp/uno', 0, 0, 0);
+         INSERT INTO runs (id, workspace_id, objective, cwd, created_at) VALUES ('r1', 'ws', 'x', '/tmp', 0);
+         INSERT INTO tasks (id, run_id, title, prompt, agent_id, cwd, created_at)
+            VALUES ('tarea-viva', 'r1', 't', 'p', 'claude-code', '/tmp', 0);",
+    )
+    .unwrap();
+
+    let dir = std::env::temp_dir().join(format!("cc-mcp-sweep-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in ["tab-viva.json", "tab-cerrada.json", "tarea-viva.json", "tarea-borrada.json"] {
+        std::fs::write(dir.join(name), "{}").unwrap();
+    }
+
+    assert_eq!(super::mcp::sweep_configs_in(&dir, &conn), 2);
+    let mut quedaron: Vec<String> =
+        std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    quedaron.sort();
+    assert_eq!(quedaron, vec!["tab-viva.json", "tarea-viva.json"]);
+
+    // Y es idempotente: correrlo de nuevo no borra lo que sí está vivo.
+    assert_eq!(super::mcp::sweep_configs_in(&dir, &conn), 0);
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// La tab que lanzó el servidor viaja en cada pedido: es con lo que la app le da a ESE

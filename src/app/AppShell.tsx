@@ -25,6 +25,7 @@ import { ResizeHandles } from "@/app/ResizeHandles";
 import { useGlobalShortcuts } from "@/app/useGlobalShortcuts";
 import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
 import { AppExitListener } from "@/app/AppExitListener";
+import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
 import { useFleetEvents } from "@/features/runs/useFleetEvents";
@@ -196,6 +197,9 @@ export function AppShell() {
 
       <ResizeHandles />
       <AppExitListener />
+      {/* Encima de todo y fuera de las rutas: lo pregunta un agente que está esperando, y
+          no puede depender de en qué pantalla esté parado el usuario. */}
+      <AskDialog />
 
       {/* Fila 0: encabezado del lateral (controles de ventana + nombre) y, a partir de
           donde ese lateral termina, las tabs de agente. Nada más — lo que antes vivía a

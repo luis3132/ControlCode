@@ -21,7 +21,7 @@ const TASK_COLUMNS: &str = "id, run_id, title, prompt, agent_id, account_id, mod
                             tokens_in, tokens_out, events_path, started_at, ended_at, created_at, \
                             worktree_path, branch, worktree_removed, complexity, routed_by, \
                             route_note, role, plan_key, parent_id, depth, isolate, result_schema, \
-                            last_error";
+                            last_error, handoff";
 
 fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
     Ok(Run {
@@ -74,6 +74,7 @@ fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         isolate: row.get::<_, i64>(31)? != 0,
         result_schema: row.get(32)?,
         last_error: row.get(33)?,
+        handoff: row.get(34)?,
         // Lo llena `with_deps`: vive en otra tabla.
         depends_on: Vec::new(),
     })
@@ -393,6 +394,39 @@ pub fn requeue_for_retry(conn: &Connection, task_id: &str, error: &str) -> Resul
                               ended_at = NULL, session_id = NULL
              WHERE id = ?3 AND status = ?4",
             rusqlite::params![status::PENDING, error, task_id, status::FAILED],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(n > 0)
+}
+
+/// Le pasa la tarea a otro agente: nueva asignación, el traspaso escrito, y de vuelta a la
+/// cola con los intentos en cero.
+///
+/// `attempt` se reinicia a propósito: el agente nuevo merece sus propios reintentos, y los
+/// que gastó el anterior eran con otro modelo. `last_error` se limpia porque lo que había
+/// que contar del intento anterior ya está, mejor contado, adentro del traspaso.
+#[allow(clippy::too_many_arguments)]
+pub fn reroute_task(
+    conn: &Connection,
+    task_id: &str,
+    agent_id: &str,
+    model: Option<&str>,
+    account_id: Option<&str>,
+    routed_by: &str,
+    route_note: Option<&str>,
+    handoff: &str,
+) -> Result<bool, String> {
+    let n = conn
+        .execute(
+            "UPDATE tasks SET agent_id = ?1, model = ?2, account_id = ?3, routed_by = ?4, route_note = ?5,
+                              handoff = ?6, status = ?7, attempt = 0, session_id = NULL,
+                              result = NULL, error = NULL, last_error = NULL,
+                              started_at = NULL, ended_at = NULL
+             WHERE id = ?8 AND status NOT IN (?9, ?10)",
+            rusqlite::params![
+                agent_id, model, account_id, routed_by, route_note, handoff, status::PENDING, task_id,
+                status::RUNNING, status::READY
+            ],
         )
         .map_err(|e| e.to_string())?;
     Ok(n > 0)

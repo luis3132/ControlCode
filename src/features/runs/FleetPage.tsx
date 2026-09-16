@@ -41,6 +41,7 @@ export function FleetPage() {
   const approvals = useRunsStore((s) => s.approvals);
   const decideApproval = useRunsStore((s) => s.decideApproval);
   const handOffTask = useRunsStore((s) => s.handOffTask);
+  const rerouteTask = useRunsStore((s) => s.rerouteTask);
   const discardWorktree = useRunsStore((s) => s.discardWorktree);
 
   const [group, setGroup] = useState<FleetGroup | null>(null);
@@ -262,6 +263,7 @@ export function FleetPage() {
                 onShowResult={() => setDetail(task.id)}
                 onOpenPane={() => openInTerminal(task)}
                 onDiscardWorktree={() => discard(task)}
+                onReroute={() => rerouteTask(task.id).catch(console.error)}
               />
             ))}
 

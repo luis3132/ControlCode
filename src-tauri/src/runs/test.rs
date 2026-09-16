@@ -1753,6 +1753,7 @@ fn nodo(id: &str, estado: &str, deps: &[&str]) -> Task {
         isolate: false,
         result_schema: None,
         last_error: None,
+        handoff: None,
         depends_on: deps.iter().map(|d| d.to_string()).collect(),
         started_at: None,
         ended_at: None,

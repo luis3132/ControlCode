@@ -8,6 +8,7 @@ import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { runBrowserRequest, type BrowserRequest } from "@/features/browser/agentBridge";
 import type { ViewOwner } from "@/features/tabs/viewTabs";
 import { useRunsStore } from "@/features/runs/store";
+import { useAskStore } from "@/features/ask/askStore";
 import { respondToCli } from "./ipc";
 
 /**
@@ -153,12 +154,57 @@ async function handleBrowser(args: Record<string, unknown>): Promise<unknown> {
   return { text: await runBrowserRequest(cwd, request, ownerOf(args)) };
 }
 
+/**
+ * Un agente preguntándole algo a la persona. Se resuelve cuando contesta (o cuando cierra
+ * la tarjeta, que también es una respuesta) — del otro lado el agente está esperando.
+ */
+async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
+  const question = str(args, "question");
+  if (!question) throw new Error("Falta la pregunta");
+  const options = Array.isArray(args.options) ? args.options.filter((o): o is string => typeof o === "string") : [];
+  const timeoutMs = (typeof args.timeout_s === "number" ? args.timeout_s : 1800) * 1000;
+  const owner = ownerOf(args);
+
+  const answer = await new Promise<string | null>((resolve) => {
+    const id = crypto.randomUUID();
+    let done = false;
+    const once = (value: string | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    // Vence también de este lado: si nadie la mira, la tarjeta se va sola en vez de
+    // quedarse para siempre ofreciendo contestar algo que ya no espera nadie.
+    const timer = setTimeout(() => {
+      useAskStore.getState().answer(id, null);
+      once(null);
+    }, timeoutMs);
+    useAskStore.getState().add({
+      id,
+      question,
+      options,
+      placeholder: str(args, "placeholder"),
+      from: owner?.label ?? str(args, "cwd") ?? "un agente",
+      fromId: owner?.id ?? str(args, "cwd") ?? "?",
+      expiresAt: Date.now() + timeoutMs,
+      resolve: once,
+    });
+  });
+
+  if (answer === null) {
+    throw new Error("El usuario no contestó: seguí con lo que puedas decidir solo, o dejalo anotado en tu resultado.");
+  }
+  return { text: answer };
+}
+
 async function handle(command: string, args: Record<string, unknown>): Promise<unknown> {
   switch (command) {
     case "tab.create": return handleCreateTab(args);
     case "tab.close": return handleCloseTab(args);
     case "tab.ptyId": return handlePtyId(args);
     case "browser.run": return handleBrowser(args);
+    case "user.ask": return handleAsk(args);
     default: throw new Error(`El frontend no sabe atender '${command}'`);
   }
 }

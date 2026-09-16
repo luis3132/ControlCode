@@ -2,6 +2,7 @@
 
 mod agents;
 mod app;
+mod ask;
 mod browser;
 mod dispatch;
 mod shared;

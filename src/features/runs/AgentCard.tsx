@@ -57,7 +57,7 @@ const BADGE: Record<TaskStatus, string> = {
  * que "qué archivo tocó" viene como dato: las líneas son ya la forma corta (`Bash(cargo
  * test)`), no un recorte de su salida. Quien quiera el detalle abre la tarea como pane.
  */
-export function AgentCard({ task, activity, waiting = [], approval, focused, onCancel, onOpenPane, onShowResult, onDecide, onDiscardWorktree }: {
+export function AgentCard({ task, activity, waiting = [], approval, focused, onCancel, onOpenPane, onShowResult, onDecide, onDiscardWorktree, onReroute }: {
   task: Task;
   activity: string[];
   /** Las dependencias que todavía no terminaron, por su key. */
@@ -70,6 +70,7 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
   onOpenPane: () => void;
   onShowResult: () => void;
   onDiscardWorktree: () => void;
+  onReroute: () => void;
   onDecide: (allow: boolean, remember: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -205,6 +206,15 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
           task.result && (
             <button onClick={onShowResult} className={ACTION}>{t("fleet.card.result")}</button>
           )
+        )}
+        {/* Pasarla a otro agente: la para, la devuelve a la cola con otro modelo y le cuenta
+            al que entra lo que hizo el anterior. Conserva la rama, así que es seguir, no
+            volver a empezar. No se ofrece con la tarea cerrada: ahí lo que hay es un
+            resultado para revisar, y "pasársela a otro" sería relanzarla a escondidas. */}
+        {live && (
+          <Tooltip content={t("fleet.card.rerouteHint")} placement="top">
+            <button onClick={onReroute} className={ACTION}>{t("fleet.card.reroute")}</button>
+          </Tooltip>
         )}
         {/* Solo con la tarea terminada, nunca sola: al terminar, el resultado ESTÁ en el
             worktree, y descartarlo ahí sería borrar lo que el usuario todavía no revisó. */}

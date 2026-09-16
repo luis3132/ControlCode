@@ -133,6 +133,20 @@ pub fn create_from(base: &Path, project_cwd: &Path, title: &str, start: &str) ->
     Ok(Worktree { root, task_cwd, branch })
 }
 
+/// Los commits que dejó una tarea, del más viejo al más nuevo.
+///
+/// Se filtran por fecha y no por rama: la rama de la tarea arranca del proyecto, así que
+/// `log` a secas traería también los commits de antes. `since` es cuándo arrancó la tarea,
+/// que es exactamente lo que separa "lo que hizo" de "lo que ya estaba".
+pub fn commits_since(root: &Path, since: i64, max: usize) -> Vec<String> {
+    let since = format!("@{since}");
+    let max = max.to_string();
+    let Ok(out) = git(root, &["log", "--since", &since, "--pretty=%h %s", "-n", &max], GIT_FAST) else {
+        return Vec::new();
+    };
+    out.lines().rev().map(str::to_string).filter(|l| !l.is_empty()).collect()
+}
+
 /// Los symlinks de skills que la app puso en una carpeta: los que apuntan al directorio
 /// global de skills. Un symlink del usuario, o una carpeta real, no cuenta.
 pub fn managed_links(links_dir: &Path, skills_dir: &Path) -> Vec<PathBuf> {

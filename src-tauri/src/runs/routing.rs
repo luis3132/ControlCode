@@ -36,6 +36,16 @@ pub enum Complexity {
 }
 
 impl Complexity {
+    /// De cómo quedó escrita en la fila. `None` si la tarea se lanzó nombrando el modelo.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "trivial" => Some(Complexity::Trivial),
+            "standard" => Some(Complexity::Standard),
+            "hard" => Some(Complexity::Hard),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Complexity::Trivial => "trivial",

@@ -27,6 +27,7 @@ import {
   errorKindOf, headerList, headerValue, parseRawHeaders, readResponseBody, requestBodyPreview, MAX_PAGE_BODY,
 } from "./netCapture";
 import { callerOf, clip, displayPath, formatConsoleArgs, formatValue, toTransferable } from "./serialize";
+import { isTouch, setTouch } from "./touch";
 import {
   displayHref, formatSnapshot, normalizeName, parseKeyCombo, parseTarget, type SnapshotNode,
 } from "./snapshotFormat";
@@ -747,9 +748,28 @@ declare global {
       clientX: x, clientY: y, button: 0, buttons: type.endsWith("down") ? 1 : 0, view: window,
     };
     const event = type.startsWith("pointer") && typeof PointerEvent === "function"
-      ? new PointerEvent(type, { ...init, pointerId: 1, pointerType: "mouse", isPrimary: true })
+      ? new PointerEvent(type, { ...init, pointerId: 1, pointerType: isTouch() ? "touch" : "mouse", isPrimary: true })
       : new MouseEvent(type.replace("pointer", "mouse"), init);
     return el.dispatchEvent(event);
+  }
+
+  /** Un evento táctil de verdad, para lo que escucha `touchstart` y no `pointerdown`. Si
+   *  el motor no sabe construirlos, los de puntero (con `pointerType: "touch"`) ya llevan
+   *  la misma información. */
+  function touch(el: Element, type: string, x: number, y: number): void {
+    if (typeof Touch !== "function" || typeof TouchEvent !== "function") return;
+    try {
+      const point = new Touch({ identifier: 1, target: el, clientX: x, clientY: y, pageX: x, pageY: y });
+      // En `touchend` ya no hay dedos apoyados: `touches` va vacío y el que se levantó va
+      // en `changedTouches`. Una galería que mira `touches.length` depende de eso.
+      const down = type !== "touchend" ? [point] : [];
+      el.dispatchEvent(new TouchEvent(type, {
+        bubbles: true, cancelable: true, composed: true, view: window,
+        touches: down, targetTouches: down, changedTouches: [point],
+      }));
+    } catch {
+      /* sin soporte de táctil: quedan los de puntero */
+    }
   }
 
   /** Dónde tocar el elemento, trayéndolo a la vista. Falla si otra cosa lo tapa: eso es un
@@ -785,8 +805,13 @@ declare global {
     cursor.click();
     const { x, y, target } = aim(el);
     const before = location.href;
-    for (const type of ["pointerover", "pointerenter", "pointermove", "pointerdown"]) mouse(target, type, x, y);
+    // Un dedo no pasa por encima antes de apretar: va directo. Es la diferencia que rompe
+    // un menú que solo se abre con `:hover`, y por eso se emula en vez de simplificarse.
+    const approach = isTouch() ? ["pointerdown"] : ["pointerover", "pointerenter", "pointermove", "pointerdown"];
+    if (isTouch()) touch(target, "touchstart", x, y);
+    for (const type of approach) mouse(target, type, x, y);
     if (typeof (target as HTMLElement).focus === "function") (target as HTMLElement).focus({ preventScroll: true });
+    if (isTouch()) touch(target, "touchend", x, y);
     mouse(target, "pointerup", x, y);
     // `click()` y no un MouseEvent a mano: dispara lo que hace el navegador con un click de
     // verdad (seguir el link, marcar el checkbox, enviar el form).
@@ -949,6 +974,16 @@ declare global {
   async function hover(el: Element): Promise<unknown> {
     await cursor.toElement(el, "hover");
     const { x, y, target } = aim(el);
+    // En una pantalla táctil no hay hover: el dedo está o no está. Simularlo igual daría
+    // un menú abierto que en el teléfono no se abre nunca, que es justo el bug que se
+    // estaba buscando.
+    if (isTouch()) {
+      return {
+        hovered: describeElement(el),
+        note: "No se hizo nada: estás emulando una pantalla táctil y ahí no hay hover. Si esto solo se abre pasando "
+          + "por encima, en un teléfono no se abre. Probá tocarlo con browser_click, o apagá el táctil con browser_resize.",
+      };
+    }
     for (const t of ["pointerover", "pointerenter", "pointermove"]) mouse(target, t, x, y);
     mouse(target, "mouseover", x, y);
     mouse(target, "mouseenter", x, y);
@@ -1358,6 +1393,18 @@ declare global {
   function execute(command: PageCommand): Promise<unknown> | unknown {
     switch (command.op) {
       case "snapshot": return snapshot(!!command.all);
+      case "touch": {
+        const { rules } = setTouch(command.on);
+        return {
+          touch: command.on,
+          mediaQueries: rules,
+          note: command.on
+            ? (rules > 0
+              ? `La página distingue el táctil: ${rules} media query(s) de hover/puntero ahora contestan como un teléfono.`
+              : "La página no mira hover ni puntero en su CSS: lo táctil solo cambia los eventos que recibe.")
+            : "Vuelve a comportarse como con mouse.",
+        };
+      }
       case "click": return click(resolve(command.target));
       case "hover": return hover(resolve(command.target));
       case "type": return type(resolve(command.target), command.text, !!command.clear, !!command.submit);

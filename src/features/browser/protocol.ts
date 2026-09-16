@@ -83,6 +83,8 @@ export type PageCommand =
   /** Qué contestar a los diálogos nativos de ahora en más, y qué apareció hasta ahora. */
   | { op: "dialogs"; accept?: boolean; text?: string }
   | { op: "eval"; code: string }
+  /** Emular (o dejar de emular) una pantalla táctil: `(hover)`, `(pointer)` y los eventos. */
+  | { op: "touch"; on: boolean }
   | { op: "layout" }
   | { op: "storage"; action: "list" }
   | { op: "storage"; action: "set"; area: StorageArea; key: string; value: string }

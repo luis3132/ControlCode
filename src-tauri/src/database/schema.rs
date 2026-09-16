@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 16;
+const SCHEMA_VERSION: i32 = 17;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -507,6 +507,12 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     // planificar pero el worktree se crea al despachar: crearlo antes dejaría carpetas de
     // tareas que quizá nunca corran. `last_error` es el motivo del intento anterior, que se
     // le cuenta al reintento en vez de repetirle el mismo pedido.
+    // `handoff` es lo que dejó el agente ANTERIOR cuando una tarea se pasa a otro: qué
+    // hizo, qué commiteó y en qué quedó. Sin esto, cambiar de agente a mitad es empezar
+    // de cero, que es justo lo que no se quiere cuando la primera ya avanzó.
+    if !has_column(conn, "tasks", "handoff") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN handoff TEXT", [])?;
+    }
     if !has_column(conn, "tasks", "role") {
         conn.execute("ALTER TABLE tasks ADD COLUMN role TEXT", [])?;
         conn.execute("ALTER TABLE tasks ADD COLUMN plan_key TEXT", [])?;
