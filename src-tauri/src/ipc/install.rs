@@ -36,20 +36,43 @@ pub struct CliInstallStatus {
     pub method: &'static str,
 }
 
-/// El binario `ccode` que acompaña a este ejecutable. Sale del mismo crate, así que en
-/// desarrollo (`target/debug/`) y en un bundle queda siempre al lado de la app.
+/// El binario `ccode` que acompaña a este ejecutable.
+///
+/// No se busca en el PATH a propósito: la ruta que sale de acá se escribe dentro de los
+/// `--mcp-config`, y tiene que apuntar al binario de ESTA versión de la app, no a una copia
+/// vieja que quedó instalada. Por eso también es lo que hace que el MCP funcione sin que
+/// nadie haya apretado "instalar la CLI": el botón es para poder tipear `ccode`, no un
+/// requisito del navegador ni de la orquestación.
 pub(crate) fn source_binary() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
+    source_binary_in(exe.parent()?)
+}
 
+/// Dónde puede estar `ccode` relativo al ejecutable, según cómo esté empaquetada la app.
+///
+/// Se recibe el directorio para poder probar cada empaquetado sin estar corriendo en él.
+/// Los recursos NO quedan sueltos en el directorio de recursos: el mapeo de
+/// `tauri.conf.json` es `"binaries": "binaries/"`, así que conservan esa subcarpeta —
+/// mirar solo la raíz encontraba el binario únicamente en `.deb`/`.rpm`, que lo copian
+/// aparte a `/usr/bin`, y dejaba a Windows, macOS y AppImage sin MCP y sin poder instalar
+/// la CLI.
+pub(crate) fn source_binary_in(dir: &Path) -> Option<PathBuf> {
     let candidates = [
+        // `.deb`/`.rpm` (lo copian a `/usr/bin`, al lado de la app) y `cargo build`.
         dir.join(CLI_FILE),
-        // macOS: `externalBin` deja los sidecars junto al ejecutable dentro de
-        // `Contents/MacOS/`, pero `resources` los pone en `Contents/Resources/`.
+        // Windows: los recursos van al lado del `.exe`.
+        dir.join("binaries").join(CLI_FILE),
+        // macOS: el ejecutable está en `Contents/MacOS/`, los recursos en `Contents/Resources/`.
+        dir.join("../Resources").join("binaries").join(CLI_FILE),
         dir.join("../Resources").join(CLI_FILE),
+        // Linux sin el mapeo del paquete (AppImage): `usr/bin/` → `usr/lib/<app>/`.
+        dir.join("../lib").join(PRODUCT).join("binaries").join(CLI_FILE),
     ];
     candidates.into_iter().find(|p| p.is_file())
 }
+
+/// El `productName` de `tauri.conf.json`: es el nombre de la carpeta de recursos en Linux.
+const PRODUCT: &str = "controlcode";
 
 /// Directorio donde se instala. Se elige uno del usuario a propósito: `/usr/local/bin`
 /// pediría sudo en macOS moderno, y un botón de la UI no debería tener que escalar

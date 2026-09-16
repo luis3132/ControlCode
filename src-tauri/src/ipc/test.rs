@@ -438,6 +438,45 @@ fn una_tool_del_navegador_viaja_como_browser_run_con_su_carpeta() {
     );
 }
 
+/// El `--mcp-config` de cada agente lleva la ruta de `ccode` sacada de al lado de la app.
+/// Si no se encuentra, la tab arranca SIN navegador y sin orquestación, en silencio, y el
+/// botón de instalar la CLI falla — así que tiene que encontrarse en los cinco
+/// empaquetados, no solo en el que usa quien lo programó.
+#[test]
+fn se_encuentra_ccode_en_todos_los_empaquetados() {
+    let cli = if cfg!(windows) { "ccode.exe" } else { "ccode" };
+    let base = std::env::temp_dir().join(format!("cc-pack-{}", uuid::Uuid::new_v4()));
+
+    // Dónde queda el binario en cada uno, y desde qué carpeta corre el ejecutable.
+    let layouts: [(&str, &str, &str); 5] = [
+        ("deb/rpm", "usr/bin", "usr/bin"),
+        ("cargo build", "target/debug", "target/debug"),
+        ("windows", "app/binaries", "app"),
+        ("macos", "App.app/Contents/Resources/binaries", "App.app/Contents/MacOS"),
+        ("appimage", "usr/lib/controlcode/binaries", "usr/bin"),
+    ];
+
+    for (name, where_bin, where_exe) in layouts {
+        let root = base.join(name.replace('/', "-"));
+        let bin = root.join(where_bin);
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(root.join(where_exe)).unwrap();
+        std::fs::write(bin.join(cli), b"#!/bin/sh\n").unwrap();
+
+        let found = super::install::source_binary_in(&root.join(where_exe));
+        let found = found.unwrap_or_else(|| panic!("no se encontró ccode empaquetado como {name}"));
+        assert_eq!(found.canonicalize().unwrap(), bin.join(cli).canonicalize().unwrap(), "{name}");
+    }
+
+    // Y sin binario no se inventa una ruta: es lo que hace que la app lo diga en vez de
+    // escribir un `--mcp-config` que apunta a la nada.
+    let vacio = base.join("vacio");
+    std::fs::create_dir_all(&vacio).unwrap();
+    assert!(super::install::source_binary_in(&vacio).is_none());
+
+    std::fs::remove_dir_all(&base).ok();
+}
+
 /// Cada tab y cada tarea escribe su `--mcp-config`, y al cerrarse no lo limpian. Sin este
 /// barrido `~/.controlcode/mcp` crece para siempre con archivos que no apunta nadie.
 #[test]
