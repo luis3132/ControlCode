@@ -166,6 +166,12 @@ pub fn tick(app: &AppHandle, run_id: &str) {
         (to_launch, skipped)
     };
 
+    // Antes de lanzarlas: la cuenta que se les asignó al planificar puede haberse quedado
+    // sin ventana desde entonces. Cambiar de manos ahí cuesta nada; dejarla arrancar cuesta
+    // un intento que se sabe que va a fallar.
+    let (to_launch, out_of_quota): (Vec<Task>, Vec<Task>) =
+        to_launch.into_iter().partition(|t| !out_of_quota(&db, t));
+
     for id in &skipped {
         super::supervisor::notify_changed(app, id);
     }
@@ -180,9 +186,56 @@ pub fn tick(app: &AppHandle, run_id: &str) {
     }
     bump(run_id);
     drop(_one);
-    if again {
+
+    // Afuera del lock a propósito: pasar una tarea a otro agente la para y vuelve a mirar
+    // el run, y las dos cosas entran por acá.
+    let mut moved = false;
+    for task in out_of_quota {
+        match hand_to_another(app, &db, &task) {
+            Ok(()) => moved = true,
+            Err(e) => {
+                eprintln!("[runs] no se pudo pasar '{}' a otra cuenta: {e}", task.title);
+                // Se la deja arrancar igual. Que falle diciendo que no hay cupo es mejor
+                // que dejarla trabada esperando uno que quizá no vuelva hoy — y evita el
+                // ida y vuelta de devolverla a la cola para volver a encontrarla igual.
+                again |= !super::launch_planned(app, &db, task);
+            }
+        }
+    }
+    if again || moved {
         tick(app, run_id);
     }
+}
+
+/// La cuenta con la que iba a correr esta tarea ya gastó su ventana.
+fn out_of_quota(db: &DbConnection, task: &Task) -> bool {
+    let Ok(conn) = db.lock() else { return false };
+    let key = super::quota::account_key(&task.agent_id, task.account_id.as_deref());
+    super::quota::load(&conn, &key).is_some_and(|q| q.exhausted_at(crate::util::now_ts()))
+}
+
+/// La pasa a otra cuenta o a otro agente. El ruteo automático ya descarta las cuentas sin
+/// cupo, así que alcanza con volver a rutearla; si no hay ninguna disponible, falla y se
+/// la deja intentar igual.
+fn hand_to_another(app: &AppHandle, db: &DbConnection, task: &Task) -> Result<(), String> {
+    let request = super::routing::RouteRequest {
+        agent_id: (task.complexity.is_none()).then(|| task.agent_id.clone()),
+        model: task.complexity.is_none().then(|| task.model.clone()).flatten(),
+        complexity: task.complexity.as_deref().and_then(super::routing::Complexity::parse),
+        account: super::routing::AccountChoice::Auto,
+    };
+    let roster = super::roster::snapshot(db, false)?;
+    let tiers = super::routing::load_tiers(db);
+    let assignment = super::routing::route(&roster, &tiers, &request, crate::util::now_ts())?;
+    if (assignment.agent_id.as_str(), assignment.account_id.as_deref()) == (task.agent_id.as_str(), task.account_id.as_deref())
+    {
+        return Err("no hay otra cuenta con cupo".into());
+    }
+    let reason = format!(
+        "la cuenta con la que iba a correr ({}) se quedó sin ventana de 5 h",
+        task.account_id.as_deref().unwrap_or("la del sistema")
+    );
+    super::reroute_to(app, &task.id, assignment, &reason).map(|_| ())
 }
 
 /// Una tarea de un run terminó: reintentarla si corresponde, y ver qué más arranca.

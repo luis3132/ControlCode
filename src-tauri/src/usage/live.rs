@@ -30,6 +30,13 @@ const TIMEOUT: Duration = Duration::from_secs(25);
 /// el `/usage` se escribe mientras todavía está montando la pantalla, y se pierde.
 const SETTLE: Duration = Duration::from_millis(2500);
 
+/// Cuánto tiene que estar quieta la salida para dar el panel por terminado.
+///
+/// El panel NO llega de una: primero pinta la ventana y la semana, y un momento después
+/// repinta con la semana por modelo (mientras tanto dice «Refreshing…»). Cortar en la
+/// primera pintada —que es lo que se hacía— dejaba afuera esa barra.
+const QUIET: Duration = Duration::from_millis(700);
+
 
 /// Lo último que respondió cada cuenta, en memoria. Vive en el backend y no en la ventana:
 /// así dos ventanas abiertas comparten la misma respuesta en vez de preguntar cada una por
@@ -39,8 +46,12 @@ static CACHE: LazyLock<Mutex<HashMap<String, LiveUsage>>> =
 
 /// Dónde se guarda, para que al abrir la app el panel muestre lo último sabido en vez de
 /// una barra vacía mientras se levanta la TUI.
+///
+/// La `v2` no es decorativa: lo guardado por la versión anterior se leyó con el parseo que
+/// confundía la semana con la barra de un modelo. Cambiar la clave lo deja atrás en vez de
+/// mostrar ese número hasta que se refresque.
 fn stored_key(account_key: &str) -> String {
-    format!("usage.live.{account_key}")
+    format!("usage.live.v2.{account_key}")
 }
 
 
@@ -90,9 +101,16 @@ impl LiveUsage {
 }
 
 /// Abre `claude` en una PTY, le manda `/usage` y devuelve lo que dibujó.
-fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Result<String, String> {
+///
+/// No es privada para poder probarla contra la TUI instalada (ver `contra_la_tui_de_verdad`).
+pub(super) fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Result<String, String> {
     let pty = native_pty_system()
-        .openpty(PtySize { rows: 45, cols: 100, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize {
+            rows: super::screen::ROWS as u16,
+            cols: super::screen::COLS as u16,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .map_err(|e| e.to_string())?;
 
     let mut cmd = CommandBuilder::new(command);
@@ -127,10 +145,12 @@ fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Result<String,
     let start = Instant::now();
     let mut raw = Vec::new();
     let mut sent = false;
+    let mut last_data = Instant::now();
 
     let result = loop {
         if let Ok(chunk) = rx.recv_timeout(Duration::from_millis(200)) {
             raw.extend_from_slice(&chunk);
+            last_data = Instant::now();
         }
         let text = String::from_utf8_lossy(&raw);
 
@@ -146,15 +166,21 @@ fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Result<String,
             sent = true;
         }
 
-        // Se corta apenas el panel está completo, no al vencer el tiempo: son segundos de
-        // diferencia y esto corre con el usuario esperando.
-        // Con la semana dibujada ya está todo lo que interesa: el panel pinta primero la
-        // ventana en curso y después la semana.
-        if sent && text.contains("Current week") && text.contains("Resets") {
+        // El rótulo se busca sin espacios: la TUI arma las columnas moviendo el cursor, así
+        // que en el flujo crudo «Current session» puede venir todo junto (ver `screen.rs`).
+        let panel = sent && text.contains("Current");
+
+        // Se corta cuando el panel ya tiene todo, y si no, cuando deja de escribir: son
+        // segundos de diferencia y esto corre con el usuario esperando.
+        if panel && (complete(&text) || last_data.elapsed() >= QUIET) {
             break Ok(text.into_owned());
         }
         if start.elapsed() > TIMEOUT {
-            break if sent {
+            // Con el panel dibujado se devuelve igual: que el desglose de abajo tarde
+            // demasiado no es motivo para tirar los porcentajes que ya están.
+            break if panel {
+                Ok(text.into_owned())
+            } else if sent {
                 Err("La TUI no mostró el panel de consumo a tiempo".to_string())
             } else {
                 Err("La TUI no llegó a arrancar".to_string())
@@ -165,6 +191,23 @@ fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Result<String,
     let _ = child.kill();
     let _ = child.wait();
     result
+}
+
+/// ¿Ya está todo lo que interesa?
+///
+/// Las tres barras dibujadas y sin «Refreshing…», que es lo que la TUI muestra mientras le
+/// falta una. Con eso se corta al toque; un plan que no mida modelos aparte nunca cumple
+/// esto y termina cortando por silencio, que es lo mismo unos cientos de milisegundos
+/// después.
+fn complete(text: &str) -> bool {
+    let screen = super::screen::render(text);
+    let lines: Vec<&str> = screen.lines().map(str::trim).collect();
+    let has = |label: &str| lines.iter().any(|l| l.starts_with(label));
+    let per_model = lines
+        .iter()
+        .any(|l| l.starts_with("Current week (") && !l.contains("(all models)"));
+
+    has("Current session") && has("Current week (all models)") && per_model && !screen.contains("Refreshing")
 }
 
 /// El consumo del plan de una cuenta, preguntado en vivo.

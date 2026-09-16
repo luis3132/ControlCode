@@ -1,10 +1,13 @@
 /**
  * El tamaño de pantalla con el que se prueba la página.
  *
- * Solo ancho y alto, y a propósito: es lo que deciden las media queries, que es lo que
- * rompe un layout. Lo que un iframe NO puede fingir —el user agent, la densidad de
- * píxeles, el táctil— no se promete, porque un "iPhone" que no se comporta como uno
- * haría creer que algo anda en el teléfono cuando solo anda a 390 px.
+ * Ancho y alto. Lo táctil —que también rompe layouts, y peor: menús que no se abren— va
+ * aparte, en `page/touch.ts`, porque no es un tamaño: es cómo contesta la página a
+ * `(hover)` y `(pointer)` y qué eventos recibe. Los presets de teléfono y tablet lo
+ * prenden, y se puede apagar para comparar el mismo ancho con mouse y sin él.
+ *
+ * Lo que sigue sin fingirse es el user agent y la densidad de píxeles: una página que
+ * decide por `navigator.userAgent` va a creer que está en una laptop.
  */
 
 export interface Viewport {

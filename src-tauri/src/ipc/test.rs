@@ -362,7 +362,7 @@ fn call(id: u64, name: &str, arguments: serde_json::Value) -> serde_json::Value 
 #[test]
 fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
-    let (tab, _) = mcp_session(&McpContext::Cwd("/p".into()), std::slice::from_ref(&list), |_, _| Ok(json!({})));
+    let (tab, _) = mcp_session(&McpContext::Cwd { cwd: "/p".into(), tab: None }, std::slice::from_ref(&list), |_, _| Ok(json!({})));
     let (task, _) = mcp_session(&McpContext::Task("t1".into()), &[list], |_, _| Ok(json!({})));
 
     let tab = tool_names(&tab[0]);
@@ -381,7 +381,9 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let orchestration = orchestration_tool_names(&all_powers);
     assert!(!orchestration.is_empty());
     assert!(orchestration.iter().all(|n| offered.contains(n)), "{orchestration:?}");
-    assert_eq!(browser.len() + orchestration.len(), offered.len());
+    // Preguntarle algo al usuario va para los dos lados y no es ni navegador ni orquestación.
+    assert!(tab.contains(&super::mcp::ASK_TOOL.to_string()));
+    assert_eq!(browser.len() + orchestration.len() + 1, offered.len());
 }
 
 /// Lanzar o parar agentes gasta plata: eso nunca va permitido de antemano a alguien que
@@ -389,7 +391,7 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
 #[test]
 fn las_tools_que_lanzan_agentes_no_se_permiten_con_las_de_lectura() {
     let light = orchestration_tool_names(&[OrchestrationPower::Read, OrchestrationPower::Note]);
-    for spawning in ["run_plan", "task_add", "task_cancel"] {
+    for spawning in ["run_plan", "task_add", "task_cancel", "task_reroute"] {
         assert!(!light.iter().any(|n| n.ends_with(spawning)), "{spawning} no puede ir con las de lectura");
     }
     for reading in ["agent_roster", "task_status", "task_result", "run_await", "facts_read", "fact_add"] {
@@ -414,7 +416,7 @@ fn una_tool_de_orquestacion_viaja_con_quien_la_pide() {
 #[test]
 fn una_tool_del_navegador_viaja_como_browser_run_con_su_carpeta() {
     let (responses, sent) = mcp_session(
-        &McpContext::Cwd("/home/u/proyecto".into()),
+        &McpContext::Cwd { cwd: "/home/u/proyecto".into(), tab: None },
         &[
             json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
             call(7, "browser_type", json!({ "target": "e3", "text": "ana@x.com", "submit": true })),
@@ -436,6 +438,90 @@ fn una_tool_del_navegador_viaja_como_browser_run_con_su_carpeta() {
     );
 }
 
+/// El `--mcp-config` de cada agente lleva la ruta de `ccode` sacada de al lado de la app.
+/// Si no se encuentra, la tab arranca SIN navegador y sin orquestación, en silencio, y el
+/// botón de instalar la CLI falla — así que tiene que encontrarse en los cinco
+/// empaquetados, no solo en el que usa quien lo programó.
+#[test]
+fn se_encuentra_ccode_en_todos_los_empaquetados() {
+    let cli = if cfg!(windows) { "ccode.exe" } else { "ccode" };
+    let base = std::env::temp_dir().join(format!("cc-pack-{}", uuid::Uuid::new_v4()));
+
+    // Dónde queda el binario en cada uno, y desde qué carpeta corre el ejecutable.
+    let layouts: [(&str, &str, &str); 5] = [
+        ("deb/rpm", "usr/bin", "usr/bin"),
+        ("cargo build", "target/debug", "target/debug"),
+        ("windows", "app/binaries", "app"),
+        ("macos", "App.app/Contents/Resources/binaries", "App.app/Contents/MacOS"),
+        ("appimage", "usr/lib/controlcode/binaries", "usr/bin"),
+    ];
+
+    for (name, where_bin, where_exe) in layouts {
+        let root = base.join(name.replace('/', "-"));
+        let bin = root.join(where_bin);
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(root.join(where_exe)).unwrap();
+        std::fs::write(bin.join(cli), b"#!/bin/sh\n").unwrap();
+
+        let found = super::install::source_binary_in(&root.join(where_exe));
+        let found = found.unwrap_or_else(|| panic!("no se encontró ccode empaquetado como {name}"));
+        assert_eq!(found.canonicalize().unwrap(), bin.join(cli).canonicalize().unwrap(), "{name}");
+    }
+
+    // Y sin binario no se inventa una ruta: es lo que hace que la app lo diga en vez de
+    // escribir un `--mcp-config` que apunta a la nada.
+    let vacio = base.join("vacio");
+    std::fs::create_dir_all(&vacio).unwrap();
+    assert!(super::install::source_binary_in(&vacio).is_none());
+
+    std::fs::remove_dir_all(&base).ok();
+}
+
+/// Cada tab y cada tarea escribe su `--mcp-config`, y al cerrarse no lo limpian. Sin este
+/// barrido `~/.controlcode/mcp` crece para siempre con archivos que no apunta nadie.
+#[test]
+fn el_barrido_borra_los_configs_de_tabs_y_tareas_que_ya_no_estan() {
+    let conn = crate::database::test_db();
+    conn.execute_batch(
+        "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+         INSERT INTO windows (id, label, workspace_id, is_open, last_active) VALUES ('w1', 'main', 'ws', 1, 0);
+         INSERT INTO tabs (id, window_id, agent_id, agent_label, command, cwd, opened_at, created_at, last_active)
+            VALUES ('viva', 'w1', 'claude-code', 'Claude Code', 'claude', '/tmp/uno', 0, 0, 0);
+         INSERT INTO runs (id, workspace_id, objective, cwd, created_at) VALUES ('r1', 'ws', 'x', '/tmp', 0);
+         INSERT INTO tasks (id, run_id, title, prompt, agent_id, cwd, created_at)
+            VALUES ('tarea-viva', 'r1', 't', 'p', 'claude-code', '/tmp', 0);",
+    )
+    .unwrap();
+
+    let dir = std::env::temp_dir().join(format!("cc-mcp-sweep-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in ["tab-viva.json", "tab-cerrada.json", "tarea-viva.json", "tarea-borrada.json"] {
+        std::fs::write(dir.join(name), "{}").unwrap();
+    }
+
+    assert_eq!(super::mcp::sweep_configs_in(&dir, &conn), 2);
+    let mut quedaron: Vec<String> =
+        std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    quedaron.sort();
+    assert_eq!(quedaron, vec!["tab-viva.json", "tarea-viva.json"]);
+
+    // Y es idempotente: correrlo de nuevo no borra lo que sí está vivo.
+    assert_eq!(super::mcp::sweep_configs_in(&dir, &conn), 0);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// La tab que lanzó el servidor viaja en cada pedido: es con lo que la app le da a ESE
+/// agente su propio navegador, en vez de que todos escriban en la página del usuario.
+#[test]
+fn el_pedido_dice_de_que_tab_viene() {
+    let (_, sent) = mcp_session(
+        &McpContext::Cwd { cwd: "/p".into(), tab: Some("tab-7".into()) },
+        &[call(1, "browser_snapshot", json!({}))],
+        |_, _| Ok(json!({ "text": "page: …" })),
+    );
+    assert_eq!(sent[0].1, json!({ "cwd": "/p", "tabId": "tab-7", "request": { "op": "snapshot" } }));
+}
+
 /// Desde una tarea, el navegador se pide por la tarea: la app sabe de qué proyecto es,
 /// aunque la tarea corra en un worktree con otra carpeta.
 #[test]
@@ -453,7 +539,7 @@ fn desde_una_tarea_el_navegador_se_pide_por_la_tarea() {
 #[test]
 fn un_error_del_navegador_llega_al_agente_como_resultado_con_error() {
     let (responses, _) = mcp_session(
-        &McpContext::Cwd("/p".into()),
+        &McpContext::Cwd { cwd: "/p".into(), tab: None },
         &[call(2, "browser_click", json!({ "target": "e12" }))],
         |_, _| Err("No hay ningún elemento e12: tomá un snapshot nuevo".into()),
     );
@@ -465,7 +551,7 @@ fn un_error_del_navegador_llega_al_agente_como_resultado_con_error() {
 #[test]
 fn desde_una_tab_no_se_puede_llamar_al_broker() {
     let (responses, sent) = mcp_session(
-        &McpContext::Cwd("/p".into()),
+        &McpContext::Cwd { cwd: "/p".into(), tab: None },
         &[call(3, "approve_tool_use", json!({ "tool_name": "Bash", "input": {} }))],
         |_, _| Ok(json!({ "allow": true })),
     );
@@ -488,7 +574,7 @@ fn el_broker_deniega_si_la_app_no_contesta() {
 #[test]
 fn el_initialize_devuelve_la_version_pedida_y_explica_el_navegador() {
     let (responses, _) = mcp_session(
-        &McpContext::Cwd("/p".into()),
+        &McpContext::Cwd { cwd: "/p".into(), tab: None },
         &[json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "protocolVersion": "2025-11-25" } })],
         |_, _| Ok(json!({})),
     );

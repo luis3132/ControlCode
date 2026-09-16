@@ -397,8 +397,11 @@ export function Terminal({
         }
 
         // Claude Code arranca con el navegador de la app como MCP: así puede abrir, leer y
-        // probar la página del proyecto en la tab de navegador que el usuario ve.
-        const launch = agentId === "claude-code" ? await withBrowserMcp(command, resolvedCwd) : command;
+        // probar la página del proyecto en su propia tab de navegador. El id de ESTA tab
+        // viaja adentro del config: es con lo que la app sabe de qué agente viene cada
+        // pedido, y por lo tanto de qué color pintar su navegador.
+        const launch =
+          agentId === "claude-code" && tabId ? await withBrowserMcp(command, resolvedCwd, tabId) : command;
         if (cancelled) return;
 
         const ptyId = await ptyCreate({

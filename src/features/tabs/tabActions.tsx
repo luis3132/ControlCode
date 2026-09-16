@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { create } from "zustand";
-import { BoxIcon, Button, CloseIcon } from "neogestify-ui-components";
+import { BoxIcon, Button, CloseIcon, IconReset } from "neogestify-ui-components";
 
 import { SplitDownIcon, SplitRightIcon } from "@/app/icons";
 import { refreshSessionTitle } from "@/features/sessions/sessionTitle";
@@ -74,6 +74,7 @@ export function TabDialogs() {
   const activeTab = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId));
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const views = useViewTabsStore((s) => s.views);
+  const restartAgent = useTabsStore((s) => s.restartAgent);
   const close = (patch: Partial<TabActionsState>) => useTabActions.setState(patch);
 
   const menuItems = () => {
@@ -93,6 +94,15 @@ export function TabDialogs() {
         label: t("skills.scope.tabAction"),
         icon: <BoxIcon className="w-4 h-4" />,
         onSelect: () => close({ skillTarget: { scope: "tab", workspaceId, tabId: tab.id, agentId: tab.agentId, label: tab.title } }),
+      },
+      // Reiniciar es lo único que cambia los MCP con los que corre un agente: se le
+      // enchufan al arrancar y un proceso vivo no los puede tomar. Con sesión conocida
+      // retoma la conversación; sin ella empieza una nueva, y el texto lo dice.
+      {
+        key: "restart",
+        label: tab.sessionId ? t("tabs.restart") : t("tabs.restartFresh"),
+        icon: <IconReset className="w-4 h-4" />,
+        onSelect: () => restartAgent(tab.id),
       },
       ...split,
       { key: "close", label: t("tabs.close"), icon: <CloseIcon className="w-4 h-4" />, danger: true, onSelect: () => requestCloseItem(menu.key) },

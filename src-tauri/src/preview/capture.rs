@@ -156,3 +156,58 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 }
+
+// ── Archivos que un agente le da a la página ─────────────────────
+
+/// Lo que pesa como mucho un archivo que se sube a un formulario desde el MCP. Más que
+/// esto no es un adjunto de prueba: es algo que hay que mirar de otra forma.
+const MAX_UPLOAD_BYTES: u64 = 10 * 1024 * 1024;
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadFile {
+    pub name: String,
+    pub mime: String,
+    /// Los bytes en base64: es lo único que cruza un `postMessage` igual en los tres motores.
+    pub data: String,
+}
+
+fn mime_for(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "pdf" => "application/pdf",
+        "json" => "application/json",
+        "csv" => "text/csv",
+        "txt" | "md" => "text/plain",
+        "zip" => "application/zip",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Un archivo del disco, listo para que la página lo ponga en un `<input type=file>`.
+#[tauri::command]
+pub fn preview_read_upload(path: String) -> Result<UploadFile, String> {
+    use base64::Engine;
+    let file = Path::new(&path);
+    let meta = fs::metadata(file).map_err(|e| format!("no se pudo leer {path}: {e}"))?;
+    if meta.is_dir() {
+        return Err(format!("{path} es una carpeta"));
+    }
+    if meta.len() > MAX_UPLOAD_BYTES {
+        return Err(format!(
+            "{path} pesa {} MB; el máximo para subir a un formulario es {} MB",
+            meta.len() / (1024 * 1024),
+            MAX_UPLOAD_BYTES / (1024 * 1024)
+        ));
+    }
+    let bytes = fs::read(file).map_err(|e| format!("no se pudo leer {path}: {e}"))?;
+    Ok(UploadFile {
+        name: file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "archivo".into()),
+        mime: mime_for(file).to_string(),
+        data: base64::engine::general_purpose::STANDARD.encode(bytes),
+    })
+}

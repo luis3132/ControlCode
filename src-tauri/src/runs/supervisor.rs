@@ -92,8 +92,8 @@ pub fn notify_changed(app: &AppHandle, task_id: &str) {
 ///
 /// Si no hay `ccode` —una build de desarrollo sin el binario al lado— se corre sin broker
 /// en vez de fallar: el agente igual sirve, solo que sin poder pedir permiso.
-fn write_mcp_config(task_id: &str) -> Option<PathBuf> {
-    crate::ipc::mcp::write_config(task_id, &["mcp", "--task", task_id])
+fn write_mcp_config(app: &AppHandle, task_id: &str) -> Option<PathBuf> {
+    crate::ipc::mcp::write_config(app, task_id, &["mcp", "--task", task_id])
 }
 
 /// Dónde va el NDJSON crudo de una tarea.
@@ -150,7 +150,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         None => Default::default(),
     };
 
-    let mcp_config = write_mcp_config(&task.id);
+    let mcp_config = write_mcp_config(app, &task.id);
     let ctx = LaunchCtx {
         session_id: &session_id,
         account_env,

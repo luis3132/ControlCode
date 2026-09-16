@@ -13,6 +13,7 @@
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager};
 
 #[cfg(windows)]
 const CLI_FILE: &str = "ccode.exe";
@@ -36,20 +37,54 @@ pub struct CliInstallStatus {
     pub method: &'static str,
 }
 
-/// El binario `ccode` que acompaña a este ejecutable. Sale del mismo crate, así que en
-/// desarrollo (`target/debug/`) y en un bundle queda siempre al lado de la app.
-pub(crate) fn source_binary() -> Option<PathBuf> {
+/// El binario `ccode` que acompaña a este ejecutable.
+///
+/// No se busca en el PATH a propósito: la ruta que sale de acá se escribe dentro de los
+/// `--mcp-config`, y tiene que apuntar al binario de ESTA versión de la app, no a una copia
+/// vieja que quedó instalada. Por eso también es lo que hace que el MCP funcione sin que
+/// nadie haya apretado "instalar la CLI": el botón es para poder tipear `ccode`, no un
+/// requisito del navegador ni de la orquestación.
+pub(crate) fn source_binary(app: &AppHandle) -> Option<PathBuf> {
+    // Primero lo que dice Tauri: el directorio de recursos lo calcula él para cada
+    // plataforma, así que es la respuesta correcta y no una deducción sobre dónde los
+    // habrá dejado el bundler.
+    if let Ok(resources) = app.path().resource_dir() {
+        for candidate in [resources.join("binaries").join(CLI_FILE), resources.join(CLI_FILE)] {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
     let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
+    source_binary_in(exe.parent()?)
+}
 
+/// El respaldo: dónde puede estar `ccode` relativo al ejecutable.
+///
+/// Hace falta además del directorio de recursos porque `.deb`/`.rpm` copian el binario a
+/// `/usr/bin` —al lado de la app, FUERA de los recursos— y porque en desarrollo no hay
+/// bundle ninguno. Se recibe el directorio para poder probar cada empaquetado sin estar
+/// corriendo en él.
+///
+/// Los recursos NO quedan sueltos en su raíz: el mapeo de `tauri.conf.json` es
+/// `"binaries": "binaries/"`, así que conservan esa subcarpeta.
+pub(crate) fn source_binary_in(dir: &Path) -> Option<PathBuf> {
     let candidates = [
+        // `.deb`/`.rpm` (lo copian a `/usr/bin`, al lado de la app) y `cargo build`.
         dir.join(CLI_FILE),
-        // macOS: `externalBin` deja los sidecars junto al ejecutable dentro de
-        // `Contents/MacOS/`, pero `resources` los pone en `Contents/Resources/`.
+        // Windows: los recursos van al lado del `.exe`.
+        dir.join("binaries").join(CLI_FILE),
+        // macOS: el ejecutable está en `Contents/MacOS/`, los recursos en `Contents/Resources/`.
+        dir.join("../Resources").join("binaries").join(CLI_FILE),
         dir.join("../Resources").join(CLI_FILE),
+        // Linux sin el mapeo del paquete (AppImage): `usr/bin/` → `usr/lib/<app>/`.
+        dir.join("../lib").join(PRODUCT).join("binaries").join(CLI_FILE),
     ];
     candidates.into_iter().find(|p| p.is_file())
 }
+
+/// El `productName` de `tauri.conf.json`: es el nombre de la carpeta de recursos en Linux.
+const PRODUCT: &str = "controlcode";
 
 /// Directorio donde se instala. Se elige uno del usuario a propósito: `/usr/local/bin`
 /// pediría sudo en macOS moderno, y un botón de la UI no debería tener que escalar
@@ -95,10 +130,10 @@ pub(super) fn is_installed(target: &Path, source: Option<&PathBuf>) -> bool {
 }
 
 #[tauri::command]
-pub fn cli_install_status() -> Result<CliInstallStatus, String> {
+pub fn cli_install_status(app: AppHandle) -> Result<CliInstallStatus, String> {
     let dir = target_dir().ok_or("No se pudo determinar el directorio del usuario")?;
     let target = dir.join(CLI_FILE);
-    let source = source_binary();
+    let source = source_binary(&app);
 
     Ok(CliInstallStatus {
         installed: is_installed(&target, source.as_ref()),
@@ -111,8 +146,8 @@ pub fn cli_install_status() -> Result<CliInstallStatus, String> {
 }
 
 #[tauri::command]
-pub fn install_cli() -> Result<CliInstallStatus, String> {
-    let source = source_binary().ok_or_else(|| {
+pub fn install_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
+    let source = source_binary(&app).ok_or_else(|| {
         format!(
             "No se encontró el binario '{CLI_FILE}' junto a la app. \
              Si estás corriendo en desarrollo, compilalo con: cargo build --bin ccode"
@@ -147,11 +182,11 @@ pub fn install_cli() -> Result<CliInstallStatus, String> {
             .map_err(|e| format!("No se pudo crear el symlink en {}: {e}", target.display()))?;
     }
 
-    cli_install_status()
+    cli_install_status(app)
 }
 
 #[tauri::command]
-pub fn uninstall_cli() -> Result<CliInstallStatus, String> {
+pub fn uninstall_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
     let dir = target_dir().ok_or("No se pudo determinar el directorio del usuario")?;
     let target = dir.join(CLI_FILE);
 
@@ -162,7 +197,7 @@ pub fn uninstall_cli() -> Result<CliInstallStatus, String> {
     }
     // El directorio no se toca al desinstalar, ni se saca del PATH: puede tener otras
     // cosas del usuario, y sacarlo del PATH sería mucho más invasivo que lo que se pidió.
-    cli_install_status()
+    cli_install_status(app)
 }
 
 /// Agrega `dir` al PATH del usuario en Windows.

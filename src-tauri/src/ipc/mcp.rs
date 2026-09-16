@@ -48,8 +48,9 @@ pub const BROWSER_TIMEOUT_SECS: u64 = 60;
 pub enum McpContext {
     /// Una tarea headless de la flota.
     Task(String),
-    /// Una tab interactiva, en esta carpeta.
-    Cwd(String),
+    /// Una tab interactiva, en esta carpeta. `tab` es cuál, cuando la terminal lo supo al
+    /// lanzarla: es lo que deja que cada agente tenga SU navegador, pintado de su color.
+    Cwd { cwd: String, tab: Option<String> },
 }
 
 impl McpContext {
@@ -57,14 +58,19 @@ impl McpContext {
     fn scope(&self) -> Value {
         match self {
             McpContext::Task(id) => json!({ "taskId": id }),
-            McpContext::Cwd(cwd) => json!({ "cwd": cwd }),
+            // Sin `tabId` cuando no se sabe cuál es, y no `null`: la app distingue "esta
+            // tab" de "el navegador que haya", y un null los confundiría.
+            McpContext::Cwd { cwd, tab: None } => json!({ "cwd": cwd }),
+            McpContext::Cwd { cwd, tab: Some(tab) } => json!({ "cwd": cwd, "tabId": tab }),
         }
     }
 }
 
 /// Lo que se le explica al modelo al conectarse. Corto: lo lee en cada sesión.
 const INSTRUCTIONS: &str = "Control Code tools for this project.\n\
-Browser: a real page the user can see, loaded through a local proxy. Typical loop: browser_navigate to the dev \
+Browser: a real page the user can see, loaded through a local proxy. The user can point at elements in it and \
+annotate screenshots: browser_marked reads what they marked, browser_pick asks them to point at something. \
+Typical loop: browser_navigate to the dev \
 server URL, browser_snapshot to read the page and get element refs, act with browser_click/browser_type/\
 browser_press using those refs, then check browser_console and browser_network for errors. Use browser_resize \
 to test responsive layouts. There are no screenshots: read the page through snapshots.\n\
@@ -94,6 +100,25 @@ const BROWSER_TOOLS: &[BrowserTool] = &[
 Returns the final URL plus console errors and failed requests during the load.",
         properties: || json!({ "url": { "type": "string", "description": "e.g. http://localhost:5173/login" } }),
         required: &["url"],
+    },
+    BrowserTool {
+        name: "browser_pick",
+        op: "pick",
+        description: "Ask the user to point at something on the page: turns on Control Code's element picker and waits \
+until they click an element. Use it when you need to know WHICH element they mean (\"the button that doesn't work\"). \
+Returns what it is, the component and source file that rendered it, where it sits, its computed styles and a ref you \
+can act on.",
+        properties: || json!({ "timeout_s": { "type": "number", "description": "How long to wait (10-600). Default 120." } }),
+        required: &[],
+    },
+    BrowserTool {
+        name: "browser_marked",
+        op: "marked",
+        description: "What the user already marked in the browser and hasn't sent yet: the elements they picked (each \
+described as it is right now, with component, source file, box, styles and a ref), the screenshots they annotated (as \
+file paths you can open) and their note. Read it when they say \"esto\", \"este botón\" or paste a pointer to it.",
+        properties: || json!({}),
+        required: &[],
     },
     BrowserTool {
         name: "browser_snapshot",
@@ -144,6 +169,76 @@ Returns what changed plus console errors and failed requests caused by the click
         required: &["target", "value"],
     },
     BrowserTool {
+        name: "browser_describe",
+        op: "describe",
+        description: "Everything about one element: role and name, selector, the component and source file that \
+rendered it, the chain of components around it, where it sits in the DOM, its box, whether something covers it, \
+computed styles, attributes and HTML. Use it when a snapshot line is not enough to know what you are looking at.",
+        properties: || json!({ "target": { "type": "string", "description": TARGET } }),
+        required: &["target"],
+    },
+    BrowserTool {
+        name: "browser_screenshot",
+        op: "screenshot",
+        description: "Photograph the page as the user sees it and save it to disk; returns the file path for you to \
+open with your file tools. It is a real capture from the engine (canvas, video and fonts included), not a redraw. It \
+brings the browser tab to the front, so the user sees what you are looking at.",
+        properties: || json!({}),
+        required: &[],
+    },
+    BrowserTool {
+        name: "browser_drag",
+        op: "drag",
+        description: "Drag one element onto another (pointer events plus HTML drag events, so sortable lists and \
+drop zones both react).",
+        properties: || json!({
+            "from": { "type": "string", "description": TARGET },
+            "to": { "type": "string", "description": TARGET },
+        }),
+        required: &["from", "to"],
+    },
+    BrowserTool {
+        name: "browser_upload",
+        op: "upload",
+        description: "Put a file from disk into an <input type=file>, as if the user had chosen it. Up to 10 MB.",
+        properties: || json!({
+            "target": { "type": "string", "description": TARGET },
+            "path": { "type": "string", "description": "Absolute path of the file to attach." },
+        }),
+        required: &["target", "path"],
+    },
+    BrowserTool {
+        name: "browser_mock",
+        op: "mock",
+        description: "Make the project's server answer something else for a URL, without touching its code: force a \
+500, an empty list, a slow response. It is how you test what the page does when things go wrong. Rules apply to \
+requests going through Control Code's proxy (the project's own server), newest rule first, and show up in \
+browser_network marked as mocked.",
+        properties: || json!({
+            "action": { "type": "string", "enum": ["add", "list", "clear"], "description": "Default: add." },
+            "url": { "type": "string", "description": "Part of the URL, `*` as wildcard: /api/login, */users?*" },
+            "method": { "type": "string", "description": "GET, POST… Default: any." },
+            "status": { "type": "number", "description": "Default 200." },
+            "body": { "type": "string", "description": "What to answer. A body starting with { or [ is sent as JSON." },
+            "content_type": { "type": "string" },
+            "delay_ms": { "type": "number", "description": "Answer this slowly, to test spinners and timeouts." },
+            "times": { "type": "number", "description": "Use the rule only this many times (e.g. fail once, then work)." },
+            "id": { "type": "string", "description": "With action=clear: the rule to remove. Without it, all of them." },
+        }),
+        required: &[],
+    },
+    BrowserTool {
+        name: "browser_dialogs",
+        op: "dialogs",
+        description: "Native dialogs (alert, confirm, prompt) are answered automatically — inside an iframe they \
+would freeze the whole app — and recorded. This reads what appeared and sets what to answer from now on.",
+        properties: || json!({
+            "action": { "type": "string", "enum": ["accept", "dismiss"], "description": "What to answer confirm/prompt. Default: accept." },
+            "prompt_text": { "type": "string", "description": "What to type into a prompt." },
+        }),
+        required: &[],
+    },
+    BrowserTool {
         name: "browser_hover",
         op: "hover",
         description: "Move the mouse over an element (fires mouse events; CSS :hover cannot be simulated).",
@@ -164,11 +259,13 @@ Returns what changed plus console errors and failed requests caused by the click
     BrowserTool {
         name: "browser_wait",
         op: "wait",
-        description: "Wait until some text or a CSS selector is visible (or gone). Max 15 s.",
+        description: "Wait until some text or a CSS selector is visible (or gone), or until the page stops making \
+requests. Max 15 s.",
         properties: || json!({
             "text": { "type": "string" },
             "selector": { "type": "string" },
             "gone": { "type": "boolean" },
+            "idle": { "type": "boolean", "description": "Wait for the network to go quiet (no request in flight for 400 ms)." },
             "timeout_ms": { "type": "number" },
         }),
         required: &[],
@@ -186,12 +283,16 @@ Returns what changed plus console errors and failed requests caused by the click
         description: "Set the viewport size to test responsive layouts, then report the layout: horizontal overflow \
 and the elements causing it, tap targets under 24px, text under 12px. Presets: phone-small (360×640), \
 phone (390×844), phone-large (430×932), tablet (768×1024), tablet-large (1024×1366), laptop (1280×800), \
-desktop (1440×900), desktop-large (1920×1080). Only width/height are emulated, not the user agent or touch.",
+desktop (1440×900), desktop-large (1920×1080). Phone and tablet presets also emulate a TOUCH SCREEN: \
+`(hover: none)` and `(pointer: coarse)` answer as on a phone, matchMedia agrees, and clicks send touch events \
+without hovering first — which is how you catch a menu that only opens on :hover. Set `touch` explicitly to \
+compare the same size with and without it. The user agent is not emulated.",
         properties: || json!({
             "width": { "type": "number" },
             "height": { "type": "number" },
             "preset": { "type": "string" },
-            "reset": { "type": "boolean", "description": "Go back to filling the whole tab." },
+            "touch": { "type": "boolean", "description": "Force touch emulation on or off, instead of letting the preset decide." },
+            "reset": { "type": "boolean", "description": "Go back to filling the whole tab, with a mouse." },
         }),
         required: &[],
     },
@@ -414,6 +515,21 @@ they need, a constraint. Tasks that start later receive the run's facts in their
         required: &[],
     },
     OrchestrationTool {
+        name: "task_reroute",
+        command: "run.rerouteTask",
+        power: OrchestrationPower::Spawn,
+        description: "Hand a task to a different agent or model and put it back in the queue. It keeps its worktree and branch, and the new agent gets what the previous one did (its steps, its commits, where it left off) so it continues instead of starting over. Use it when an account runs out of quota, when a worker is not making progress, or when a task turned out to need a stronger model. Without agent/model, Control Code picks.",
+        properties: || json!({
+            "task": { "type": "string", "description": "The task's key or id." },
+            "agent": { "type": "string", "description": "Only when it must go to a specific agent (see agent_roster)." },
+            "model": { "type": "string", "description": "Only with agent." },
+            "complexity": { "type": "string", "enum": ["trivial", "standard", "hard"], "description": "Let Control Code pick from this tier instead." },
+            "reason": { "type": "string", "description": "Why it changed hands. The new agent reads it." },
+            "run_id": { "type": "string", "description": RUN_ID },
+        }),
+        required: &["task"],
+    },
+    OrchestrationTool {
         name: "task_cancel",
         command: "run.cancelTask",
         power: OrchestrationPower::Spawn,
@@ -506,6 +622,8 @@ where
                     ok(id, browser(context, tool, args, &mut send))
                 } else if let Some(tool) = ORCHESTRATION_TOOLS.iter().find(|t| t.name == name) {
                     ok(id, orchestrate(context, tool, args, &mut send))
+                } else if name == ASK_TOOL {
+                    ok(id, ask(context, args, &mut send))
                 } else {
                     ok(id, tool_error(&format!("'{name}' no es una herramienta de este servidor")))
                 }
@@ -540,7 +658,33 @@ fn tools_for(context: &McpContext) -> Vec<Value> {
     };
     tools.extend(BROWSER_TOOLS.iter().map(|t| schema(t.name, t.description, (t.properties)(), t.required)));
     tools.extend(ORCHESTRATION_TOOLS.iter().map(|t| schema(t.name, t.description, (t.properties)(), t.required)));
+    tools.push(ask_schema());
     tools
+}
+
+/// `ask_user`: la única tool que va para los dos lados —una tab y una tarea de la flota—
+/// porque la pregunta es la misma: hay algo que solo sabe la persona.
+pub const ASK_TOOL: &str = "ask_user";
+
+fn ask_schema() -> Value {
+    json!({
+        "name": ASK_TOOL,
+        "description": "Ask the user a question and wait for their answer. Use it when the answer cannot be found in the code or the page and guessing would waste the work: which of two designs they want, which account to test with, whether to keep or drop something. With `options` the user gets one button per option and you get the one they picked; without them they type a free answer. Keep it to one question at a time, and only when you are actually blocked — every question stops the person.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": { "type": "string", "description": "One clear question, in the user's language." },
+                "options": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Up to 6 answers to choose from. Leave it out for a free-text answer.",
+                },
+                "placeholder": { "type": "string", "description": "Hint inside the text box, when there are no options." },
+                "timeout_s": { "type": "number", "description": "Seconds to wait (30-1800). Default 1800." },
+            },
+            "required": ["question"],
+        },
+    })
 }
 
 fn approve_schema() -> Value {
@@ -556,6 +700,28 @@ fn approve_schema() -> Value {
             "required": ["tool_name", "input"],
         },
     })
+}
+
+/// Le pasa la pregunta a la app y devuelve lo que contestó la persona.
+fn ask<F>(context: &McpContext, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let mut payload = context.scope();
+    if let Some(object) = payload.as_object_mut()
+        && let Some(args) = arguments.as_object()
+    {
+        for (key, value) in args {
+            object.insert(key.clone(), value.clone());
+        }
+    }
+    match send("user.ask", payload) {
+        Ok(data) => {
+            let text = data.get("text").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| data.to_string());
+            json!({ "content": [{ "type": "text", "text": text }] })
+        }
+        Err(e) => tool_error(&e),
+    }
 }
 
 /// Pregunta a la app y arma el bloque que el agente espera.
@@ -636,8 +802,8 @@ fn tool_error(message: &str) -> Value {
 ///
 /// `None` si no hay `ccode` al lado de la app (una build de desarrollo sin el binario): el
 /// agente arranca igual, solo que sin estas herramientas.
-pub fn write_config(name: &str, args: &[&str]) -> Option<std::path::PathBuf> {
-    let ccode = crate::ipc::install::source_binary()?;
+pub fn write_config(app: &tauri::AppHandle, name: &str, args: &[&str]) -> Option<std::path::PathBuf> {
+    let ccode = crate::ipc::install::source_binary(app)?;
     let dir = dirs::home_dir()?.join(".controlcode").join("mcp");
     std::fs::create_dir_all(&dir).ok()?;
     let path = dir.join(format!("{name}.json"));
@@ -657,16 +823,41 @@ pub fn write_config(name: &str, args: &[&str]) -> Option<std::path::PathBuf> {
     Some(path)
 }
 
-/// Un nombre de archivo estable por carpeta. FNV-1a y no `DefaultHasher`: ese cambia entre
-/// versiones de Rust, y la misma carpeta tiene que caer siempre en el mismo archivo para
-/// no ir dejando uno nuevo por actualización.
-fn folder_key(cwd: &str) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in cwd.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
+/// Borra los `--mcp-config` que quedaron de tabs y tareas que ya no existen.
+///
+/// Cada tab y cada tarea escribe el suyo, y una tab cerrada o una tarea borrada no lo
+/// limpian: sin esto la carpeta crece para siempre con archivos que no apunta nadie.
+/// Devuelve cuántos borró. Best-effort: no poder leer la carpeta no es un error de arranque.
+pub fn sweep_configs(db: &crate::database::DbConnection) -> usize {
+    let Some(dir) = dirs::home_dir().map(|h| h.join(".controlcode").join("mcp")) else {
+        return 0;
+    };
+    let Ok(conn) = db.lock() else { return 0 };
+    sweep_configs_in(&dir, &conn)
+}
+
+/// El barrido sobre una carpeta concreta, para poder probarlo sin tocar el `HOME` real.
+pub(crate) fn sweep_configs_in(dir: &std::path::Path, conn: &rusqlite::Connection) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+    let alive = |table: &str, id: &str| -> bool {
+        conn.query_row(&format!("SELECT 1 FROM {table} WHERE id = ?1"), [id], |_| Ok(())).is_ok()
+    };
+
+    let mut gone = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(stem) = name.strip_suffix(".json") else { continue };
+        // La carpeta la escribe solo la app: un archivo sin tab ni tarea viva no lo apunta
+        // nadie. Los de una tarea llevan su id pelado, que es como los escribe el supervisor.
+        let keep = match stem.strip_prefix("tab-") {
+            Some(tab_id) => !tab_id.is_empty() && alive("tabs", tab_id),
+            None => alive("tasks", stem),
+        };
+        if !keep && std::fs::remove_file(entry.path()).is_ok() {
+            gone += 1;
+        }
     }
-    format!("{hash:016x}")
+    gone
 }
 
 /// Lo que una tab de Claude Code agrega a su comando para tener el navegador: el
@@ -682,12 +873,27 @@ pub struct TabMcp {
     pub allowed_tools: Vec<String>,
 }
 
+/// El archivo de config de una tab: `tab-<id>.json`. El id va en el nombre, no hasheado,
+/// para que `sweep_configs` pueda saber de qué tab es y para poder leerlo a mano cuando algo
+/// falla. Los ids son UUID, pero se filtra igual: un nombre de archivo no se construye con
+/// algo que vino de afuera sin mirarlo.
+fn tab_config_name(tab_id: &str) -> String {
+    let safe: String = tab_id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(64).collect();
+    format!("tab-{safe}")
+}
+
 #[tauri::command]
-pub fn tab_browser_mcp(cwd: String) -> Option<TabMcp> {
-    let path = write_config(&format!("tab-{}", folder_key(&cwd)), &["mcp", "--cwd", &cwd])?;
+pub fn tab_browser_mcp(app: tauri::AppHandle, cwd: String, tab_id: String) -> Option<TabMcp> {
+    // Un archivo por tab y no por carpeta: adentro va el id con el que la app sabe de qué
+    // agente viene cada pedido. La misma tab reescribe SIEMPRE el mismo archivo —los ids
+    // sobreviven al cierre de la app—, así que no se van acumulando.
+    let path = write_config(&app, &tab_config_name(&tab_id), &["mcp", "--cwd", &cwd, "--tab", &tab_id])?;
     let mut allowed_tools = browser_tool_names();
     // Mirar un run y dejar un hecho no gasta nada. Lanzar o parar agentes sí: eso lo sigue
     // aprobando la persona en su terminal, cada vez.
     allowed_tools.extend(orchestration_tool_names(&[OrchestrationPower::Read, OrchestrationPower::Note]));
+    // Preguntar tampoco: lo único que hace es mostrar una tarjeta que la persona puede
+    // cerrar. Pedir permiso para preguntar sería interrumpirla dos veces por lo mismo.
+    allowed_tools.push(orchestration_tool_name(ASK_TOOL));
     Some(TabMcp { config_path: path.to_string_lossy().into_owned(), allowed_tools })
 }

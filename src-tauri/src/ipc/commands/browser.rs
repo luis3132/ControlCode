@@ -24,16 +24,50 @@ pub(super) fn browser_run(app: &AppHandle, args: &Value) -> Result<Value, String
         Some(cwd) => cwd.to_string(),
         None => project_of_task(app, &arg_str(args, "taskId")?)?,
     };
-    let window = window_with_folder(app, &cwd)?;
+    // Quién pregunta: la tab de Claude Code que lanzó este servidor, o la tarea de la
+    // flota. Es lo que le deja al frontend darle a cada agente SU navegador en vez de que
+    // todos se peleen por la misma página.
+    let owner = args.get("tabId").and_then(Value::as_str).map(|id| json!({ "kind": "tab", "id": id })).or_else(
+        || args.get("taskId").and_then(Value::as_str).map(|id| json!({ "kind": "task", "id": id })),
+    );
+    let window = match args.get("tabId").and_then(Value::as_str) {
+        Some(tab) => window_with_tab(app, tab)?.map_or_else(|| window_with_folder(app, &cwd), |w| Ok(Some(w)))?,
+        None => window_with_folder(app, &cwd)?,
+    };
 
     let raw = ask_frontend_within(
         app,
         "browser.run",
-        &json!({ "cwd": cwd, "request": request }),
+        &json!({ "cwd": cwd, "request": request, "owner": owner }),
         window.as_deref(),
-        Duration::from_secs(BROWSER_TIMEOUT_SECS),
+        Duration::from_secs(browser_timeout(&request)),
     )?;
     unwrap_frontend_result(raw)
+}
+
+/// La ventana donde vive esa tab. Es más preciso que buscar por carpeta: dos ventanas
+/// pueden tener la misma carpeta abierta, y el navegador del agente está en la suya.
+fn window_with_tab(app: &AppHandle, tab_id: &str) -> Result<Option<String>, String> {
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    Ok(conn
+        .query_row(
+            "SELECT w.label FROM tabs t JOIN windows w ON w.id = t.window_id
+             WHERE t.id = ?1 AND w.is_open = 1",
+            [tab_id],
+            |row| row.get::<_, String>(0),
+        )
+        .ok())
+}
+
+/// Cuánto puede tardar este pedido. Casi todos son de segundos; `pick` espera a que una
+/// persona señale algo en la página, así que vale lo que el agente haya pedido esperar.
+fn browser_timeout(request: &Value) -> u64 {
+    if request.get("op").and_then(Value::as_str) != Some("pick") {
+        return BROWSER_TIMEOUT_SECS;
+    }
+    let asked = request.get("timeout_s").and_then(Value::as_u64).unwrap_or(120).clamp(10, 600);
+    asked + 30
 }
 
 /// La carpeta del PROYECTO de una tarea, no su cwd: una tarea aislada corre en un worktree,

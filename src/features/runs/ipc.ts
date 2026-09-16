@@ -97,6 +97,14 @@ export const cancelTask = (taskId: string) => invoke<void>("run_cancel_task", { 
  */
 export const handOffTask = (taskId: string) => invoke<Task>("run_hand_off_task", { taskId });
 
+/**
+ * Le pasa la tarea a otro agente y la devuelve a la cola. Mantiene su worktree y su rama, y
+ * el que entra recibe lo que hizo el anterior: sigue desde ahí en vez de empezar de cero.
+ * Sin `agentId`/`model`, elige la app —y el ruteo automático saltea las cuentas sin cupo.
+ */
+export const rerouteTask = (taskId: string, opts: { agentId?: string; model?: string; reason?: string } = {}) =>
+  invoke<Task>("run_reroute_task", { taskId, ...opts });
+
 export interface DiscardedWorktree {
   branch: string;
   /** La rama quedó porque tiene commits que no están en ningún otro lado. */

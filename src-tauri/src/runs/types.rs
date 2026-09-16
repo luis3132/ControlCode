@@ -66,6 +66,9 @@ pub struct Task {
     pub result_schema: Option<String>,
     /// Por qué falló el intento anterior; se le cuenta al reintento.
     pub last_error: Option<String>,
+    /// Lo que dejó el agente anterior cuando la tarea se pasó a otro: qué hizo, qué
+    /// commiteó y en qué quedó. `None` = nunca cambió de manos.
+    pub handoff: Option<String>,
     /// Las tareas que tienen que terminar bien antes de que esta arranque.
     pub depends_on: Vec<String>,
     pub started_at: Option<i64>,

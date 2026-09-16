@@ -38,6 +38,7 @@ use super::log::{
     clip, Begin, CookieReport, ErrorKind, Finish, Head, Header, HeaderNote, NetPage, ProxyLog, RequestDetail,
     COOKIE_CLEAR_PATH, MAX_RESPONSE_BODY,
 };
+use super::mocks::{Mock, Mocks};
 use super::rewrite::{
     inject_picker, is_hop_by_hop, is_local_host, parse_response_head, rewrite_location, rewrite_origin_value,
     skip_request_header, skip_response_header, strip_cookie_domain, PICKER_PATH,
@@ -58,6 +59,7 @@ struct Proxy {
     /// `http://localhost:41234`: el origen que tiene la página.
     origin: String,
     log: Arc<ProxyLog>,
+    mocks: Arc<Mocks>,
 }
 
 /// Origen de destino → el proxy que lo atiende. Viven lo que vive la app: abrir otra vez
@@ -75,6 +77,7 @@ struct Ctx {
     proxy_origin: String,
     client: reqwest::Client,
     log: Arc<ProxyLog>,
+    mocks: Arc<Mocks>,
 }
 
 #[derive(Debug, Serialize)]
@@ -110,6 +113,9 @@ fn error_page(status: u16, target: &str, detail: &str) -> Response<Body> {
         .expect("respuesta de error válida")
 }
 
+/// Lo que marca una respuesta que salió de una regla y no del servidor.
+const MOCK_HEADER: &str = "x-controlcode-mock";
+
 fn is_websocket(req: &Request<Incoming>) -> bool {
     req.headers()
         .get("upgrade")
@@ -137,10 +143,86 @@ async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Response<Body> {
     }
     let started = Instant::now();
     if is_websocket(&req) {
-        websocket(req, &ctx, started).await
-    } else {
-        forward(req, &ctx, started).await
+        return websocket(req, &ctx, started).await;
     }
+    // Una regla del agente contesta en lugar del servidor: es la única forma de probar a
+    // mano un 500, una lista vacía o una respuesta lenta sin tocar el código del proyecto.
+    let path = req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/").to_string();
+    if let Some(canned) = ctx.mocks.canned(req.method().as_str(), &path) {
+        return serve_mock(req, &ctx, started, canned).await;
+    }
+    forward(req, &ctx, started).await
+}
+
+/// Contesta desde una regla, y lo anota como cualquier otro pedido para que se vea en el
+/// panel de red —con la cabecera que dice que fue simulado.
+async fn serve_mock(
+    req: Request<Incoming>,
+    ctx: &Ctx,
+    started: Instant,
+    canned: super::mocks::Canned,
+) -> Response<Body> {
+    let path = req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/").to_string();
+    let url = format!("{}{}", ctx.target_origin, path);
+    let method = req.method().as_str().to_string();
+    let cookie_header = req.headers().get(COOKIE).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let request_type = req.headers().get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let (_, shown) = upstream_request_headers(&req, ctx);
+    let body = req.into_body().collect().await.map(|c| c.to_bytes()).unwrap_or_default();
+
+    let seq = ctx.log.begin(
+        Begin {
+            method: &method,
+            url,
+            cookie_header: cookie_header.as_deref(),
+            request_headers: shown,
+            request_body: &body,
+            request_content_type: request_type,
+            websocket: false,
+        },
+        now_ms(),
+    );
+
+    if canned.delay_ms > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(canned.delay_ms.min(30_000))).await;
+    }
+
+    let payload = canned.body.into_bytes();
+    ctx.log.head(
+        seq,
+        Head {
+            status: canned.status,
+            headers: vec![
+                Header::new(CONTENT_TYPE.as_str(), canned.content_type.clone()),
+                Header::new(MOCK_HEADER, "1"),
+            ],
+            http_version: None,
+            remote_address: None,
+            set_cookies: Vec::new(),
+            content_type: Some(canned.content_type.clone()),
+            content_length: Some(payload.len() as u64),
+            ttfb_ms: elapsed_ms(started),
+        },
+        now_ms(),
+    );
+    ctx.log.finish(
+        seq,
+        Finish {
+            body_size: payload.len() as u64,
+            truncated: false,
+            encoding: None,
+            duration_ms: elapsed_ms(started),
+            error: None,
+            body: payload.iter().copied().take(MAX_RESPONSE_BODY).collect(),
+        },
+    );
+
+    Response::builder()
+        .status(canned.status)
+        .header(CONTENT_TYPE, canned.content_type)
+        .header(MOCK_HEADER, "1")
+        .body(full(payload))
+        .unwrap_or_else(|_| error_page(500, &ctx.target_origin, "la regla simulada no es una respuesta válida"))
 }
 
 fn elapsed_ms(started: Instant) -> u64 {
@@ -735,7 +817,9 @@ async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
         .map_err(|e| e.to_string())?;
 
     let log = Arc::new(ProxyLog::default());
+    let mocks = Arc::new(Mocks::default());
     let ctx = Arc::new(Ctx {
+        mocks: mocks.clone(),
         log: log.clone(),
         is_http: url.scheme() == "http",
         proxy_origin: proxy_origin.clone(),
@@ -768,7 +852,7 @@ async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
         });
     }
 
-    Ok(Proxy { port: local_port, origin: proxy_origin, log })
+    Ok(Proxy { port: local_port, origin: proxy_origin, log, mocks })
 }
 
 /// Resuelve qué poner en el iframe para mostrar `url`, levantando su proxy si hace falta.
@@ -827,6 +911,39 @@ async fn log_for(proxy_origin: &str) -> Result<Arc<ProxyLog>, String> {
         .find(|p| p.port == port)
         .map(|p| p.log.clone())
         .ok_or_else(|| format!("No hay ningún proxy en el puerto {port}"))
+}
+
+/// Las reglas simuladas del proxy que sirve `proxy_origin`.
+async fn mocks_for(proxy_origin: &str) -> Result<Arc<Mocks>, String> {
+    let port: u16 = proxy_origin
+        .rsplit(':')
+        .next()
+        .and_then(|p| p.trim_end_matches('/').parse().ok())
+        .ok_or_else(|| format!("'{proxy_origin}' no es el origen de un proxy"))?;
+    PROXIES
+        .lock()
+        .await
+        .values()
+        .find(|p| p.port == port)
+        .map(|p| p.mocks.clone())
+        .ok_or_else(|| format!("No hay ningún proxy en el puerto {port}"))
+}
+
+/// Hace que el servidor conteste otra cosa para una URL (ver `preview::mocks`).
+#[tauri::command]
+pub async fn preview_add_mock(proxy_origin: String, mock: Mock) -> Result<Mock, String> {
+    mocks_for(&proxy_origin).await?.add(mock)
+}
+
+#[tauri::command]
+pub async fn preview_list_mocks(proxy_origin: String) -> Result<Vec<Mock>, String> {
+    Ok(mocks_for(&proxy_origin).await?.list())
+}
+
+/// Borra una regla, o todas si no se nombra ninguna.
+#[tauri::command]
+pub async fn preview_clear_mocks(proxy_origin: String, id: Option<String>) -> Result<usize, String> {
+    Ok(mocks_for(&proxy_origin).await?.clear(id.as_deref()))
 }
 
 /// Los pedidos que pasaron por el proxy después de `since`.

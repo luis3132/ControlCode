@@ -14,6 +14,7 @@ use tauri::AppHandle;
 
 use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
+use super::ask::user_ask;
 use super::browser::browser_run;
 use super::shared::bridge_call;
 use super::runs::{run_approve, run_orchestrate};
@@ -54,6 +55,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         // navegador de las tabs del proyecto.
         "run.approve" => run_approve(app, args),
         "browser.run" => browser_run(app, args),
+        "user.ask" => user_ask(app, args),
         "run.roster" => run_orchestrate(app, "run.roster", args),
         "run.plan" => run_orchestrate(app, "run.plan", args),
         "run.addTask" => run_orchestrate(app, "run.addTask", args),
@@ -63,6 +65,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "run.addFact" => run_orchestrate(app, "run.addFact", args),
         "run.facts" => run_orchestrate(app, "run.facts", args),
         "run.cancelTask" => run_orchestrate(app, "run.cancelTask", args),
+        "run.rerouteTask" => run_orchestrate(app, "run.rerouteTask", args),
         "app.status" => app_status(app),
         other => Err(format!("Comando desconocido: {other}")),
     };

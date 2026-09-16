@@ -161,6 +161,12 @@ describe("parseTarget", () => {
     expect(parseTarget("#login > button")).toEqual({ kind: "css", selector: "#login > button" });
   });
 
+  /// Los refs de lo que marcó el usuario (`u3`) valen igual que los del snapshot: son la
+  /// forma en que un agente toca justo lo que le señalaron.
+  it("un ref del usuario también es un ref", () => {
+    expect(parseTarget("u3")).toEqual({ kind: "ref", ref: "u3" });
+  });
+
   /// `e12` es un ref, pero `.e12` o `e12x` son selectores: confundirlos haría fallar con
   /// "tomá un snapshot" a quien pasó un selector perfectamente válido.
   it("solo e + número es un ref", () => {

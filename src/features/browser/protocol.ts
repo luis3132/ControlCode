@@ -14,8 +14,9 @@ export type AppSource = "controlcode";
 
 export interface PickedComponent {
   framework: "React" | "Vue" | "Svelte";
-  /** Nombre del componente, o `archivo:línea` en Svelte. */
   name: string;
+  /** `src/components/Login.tsx:42`, cuando el framework lo deja ver en desarrollo. */
+  source?: string;
 }
 
 /** Un elemento marcado, con lo que un agente necesita para encontrarlo en el código. */
@@ -46,7 +47,9 @@ export type PageMessage =
 /** Lo que la app le pide a la página por su cuenta (el selector, la historia). */
 export type SimpleAppMessage = {
   source: AppSource;
-  type: "pick:on" | "pick:off" | "history:back" | "history:forward" | "hello" | "connect";
+  type: "pick:on" | "pick:off" | "history:back" | "history:forward" | "hello" | "connect"
+  /** La tab del navegador pasó a estar (o dejó de estar) a la vista. */
+  | "view:shown" | "view:hidden";
 };
 
 export type AppMessage =
@@ -72,8 +75,16 @@ export type PageCommand =
   | { op: "press"; key: string; target?: string }
   | { op: "select"; target: string; value: string }
   | { op: "scroll"; target?: string; dy?: number; to?: "top" | "bottom" }
-  | { op: "wait"; text?: string; selector?: string; gone?: boolean; timeoutMs?: number }
+  | { op: "wait"; text?: string; selector?: string; gone?: boolean; idle?: boolean; timeoutMs?: number }
+  | { op: "drag"; from: string; to: string }
+  /** Pone un archivo en un `<input type=file>`. Los bytes van en base64: es lo único que
+   *  cruza un `postMessage` sin depender de qué motor lo serialice. */
+  | { op: "upload"; target: string; name: string; mime: string; data: string }
+  /** Qué contestar a los diálogos nativos de ahora en más, y qué apareció hasta ahora. */
+  | { op: "dialogs"; accept?: boolean; text?: string }
   | { op: "eval"; code: string }
+  /** Emular (o dejar de emular) una pantalla táctil: `(hover)`, `(pointer)` y los eventos. */
+  | { op: "touch"; on: boolean }
   | { op: "layout" }
   | { op: "storage"; action: "list" }
   | { op: "storage"; action: "set"; area: StorageArea; key: string; value: string }
@@ -82,7 +93,10 @@ export type PageCommand =
   | { op: "cookies"; action: "list" }
   | { op: "cookies"; action: "set"; name: string; value: string; path?: string; maxAge?: number }
   | { op: "cookies"; action: "delete"; name: string; path?: string }
-  | { op: "performance" };
+  | { op: "performance" }
+  /** Todo lo que se sabe de un elemento: rol, nombre, componente que lo dibujó, dónde está
+   *  y con qué estilos. Le asigna un ref (`u1`) que sobrevive a los snapshots. */
+  | { op: "describe"; target: string };
 
 export type PageOp = PageCommand["op"];
 
@@ -115,9 +129,10 @@ export interface ConsoleEntry {
   /**
    * `console`: lo que la página logueó. `exception`/`rejection`: un error que nadie atrapó.
    * `resource`: un `<script>`, `<img>` o `<link>` que no cargó. `input`/`result`: lo que
-   * alguien evaluó desde el panel y lo que devolvió.
+   * alguien evaluó desde el panel y lo que devolvió. `dialog`: un `alert`, `confirm` o
+   * `prompt` que la página abrió y el runtime contestó por ella.
    */
-  kind: "console" | "exception" | "rejection" | "resource" | "input" | "result";
+  kind: "console" | "exception" | "rejection" | "resource" | "input" | "result" | "dialog";
   text: string;
   /** `archivo:línea:columna`, si se sabe. */
   source?: string;

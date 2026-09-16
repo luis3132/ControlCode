@@ -85,6 +85,10 @@ pub fn run() {
             crate::preview::preview_detect_servers,
             crate::preview::preview_capture,
             crate::preview::preview_save_capture,
+            crate::preview::preview_read_upload,
+            crate::preview::preview_add_mock,
+            crate::preview::preview_list_mocks,
+            crate::preview::preview_clear_mocks,
             // Renderizado del WebView (texto nítido en Linux)
             crate::app::rendering_info,
             // Detección de agentes
@@ -95,6 +99,7 @@ pub fn run() {
             crate::runs::run_list_runs,
             crate::runs::run_start_task,
             crate::runs::run_cancel_task,
+            crate::runs::run_reroute_task,
             crate::runs::run_hand_off_task,
             crate::runs::run_discard_worktree,
             crate::runs::run_pending_approvals,
@@ -222,6 +227,8 @@ pub fn run() {
             // Y sus pedidos de permiso: el agente que esperaba murió con la app, así que
             // no los va a contestar nadie.
             let _ = crate::runs::sweep_orphan_approvals(&db);
+            // Los `--mcp-config` de tabs cerradas y tareas borradas: nadie los apunta ya.
+            crate::ipc::mcp::sweep_configs(&db);
 
             let active_id = crate::database::db_get_last_active_workspace_id(&db)?;
             let windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;
