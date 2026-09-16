@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
+import { agentPaint } from "@/features/browser/agentPaint";
 import { activateItem, useLayoutStore } from "@/features/tabs/layout/layoutStore";
 import { isAgentKey, keyId } from "@/features/tabs/layout/layoutTree";
 import { beginTabDrag } from "@/features/tabs/layout/tabDrag";
@@ -44,6 +45,14 @@ export function GroupTabStrip({ items, active, groupFocused, draggable }: {
   const labels = useMemo(() => viewLabels(workspaceViews), [workspaceViews]);
   const viewsById = useMemo(() => new Map(mine.map((v) => [v.id, v])), [mine]);
 
+  // Qué agentes de esta ventana están manejando un navegador. Se mira sobre TODAS las
+  // vistas y no solo sobre las de este grupo: el agente y su navegador se pueden arrastrar
+  // a grupos distintos, y ahí el color es lo único que los sigue atando.
+  const driving = useMemo(
+    () => new Set(views.flatMap((v) => (v.kind === "browser" && v.owner ? [v.owner.id] : []))),
+    [views]
+  );
+
   // La activa siempre a la vista: abrir un archivo en una tira llena lo dejaba escondido al
   // final, y no había forma de saber que se había abierto.
   useEffect(() => {
@@ -80,6 +89,8 @@ export function GroupTabStrip({ items, active, groupFocused, draggable }: {
               tabKey={key}
               className={faded}
               tab={tab}
+              paint={driving.has(tab.id) ? agentPaint(tab.id) : null}
+              paintHint={driving.has(tab.id) ? t("browser.driving") : undefined}
               isActive={key === active}
               groupFocused={groupFocused}
               onActivate={() => activate(key)}
@@ -104,6 +115,12 @@ export function GroupTabStrip({ items, active, groupFocused, draggable }: {
               className={faded}
               view={view}
               hint={labels.get(view.id)?.hint ?? null}
+              paint={view.kind === "browser" && view.owner ? agentPaint(view.owner.id) : null}
+              paintHint={
+                view.kind === "browser" && view.owner
+                  ? t("browser.ownedBy", { agent: view.owner.label })
+                  : undefined
+              }
               isActive={key === active}
               groupFocused={groupFocused}
               onActivate={() => activate(key)}

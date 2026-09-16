@@ -6,6 +6,8 @@ import { useAgentsStore } from "@/features/agents/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { runBrowserRequest, type BrowserRequest } from "@/features/browser/agentBridge";
+import type { ViewOwner } from "@/features/tabs/viewTabs";
+import { useRunsStore } from "@/features/runs/store";
 import { respondToCli } from "./ipc";
 
 /**
@@ -123,13 +125,32 @@ function handlePtyId(args: Record<string, unknown>): unknown {
   return { ptyId: tab.ptyId };
 }
 
+/**
+ * Quién hace el pedido, con el nombre que la interfaz ya le da: la tab del agente o la
+ * tarjeta de la flota. El backend manda el id; el nombre vive acá, que es donde está.
+ *
+ * Sin dueño (un `ccode mcp` viejo, sin `--tab`) el agente comparte el navegador del
+ * usuario, como hasta ahora: es peor, pero sigue andando.
+ */
+function ownerOf(args: Record<string, unknown>): ViewOwner | null {
+  const owner = args.owner as { kind?: unknown; id?: unknown } | null | undefined;
+  if (!owner || typeof owner.id !== "string") return null;
+  if (owner.kind === "task") {
+    const task = useRunsStore.getState().tasks.find((t) => t.id === owner.id);
+    return { kind: "task", id: owner.id, label: task?.title ?? owner.id };
+  }
+  const tab = useTabsStore.getState().tabs.find((t) => t.id === owner.id);
+  if (!tab) return null;
+  return { kind: "tab", id: owner.id, label: tab.title };
+}
+
 /** Un agente usando el navegador de su proyecto, desde el MCP (`ccode mcp`). */
 async function handleBrowser(args: Record<string, unknown>): Promise<unknown> {
   const cwd = str(args, "cwd");
   if (!cwd) throw new Error("Falta la carpeta del proyecto");
   const request = args.request as BrowserRequest | undefined;
   if (!request || typeof request.op !== "string") throw new Error("Falta qué hacer en el navegador");
-  return { text: await runBrowserRequest(cwd, request) };
+  return { text: await runBrowserRequest(cwd, request, ownerOf(args)) };
 }
 
 async function handle(command: string, args: Record<string, unknown>): Promise<unknown> {

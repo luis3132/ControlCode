@@ -12,7 +12,7 @@
  * página necesita ver sin tener que preguntarlo aparte.
  */
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import { comparablePath, type BrowserView } from "@/features/tabs/viewTabs";
+import { comparablePath, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
 
 import {
   consoleForAgent, isFailed, mergeCookies, networkForAgent, requestRows, type CookieRow,
@@ -60,6 +60,9 @@ export type BrowserRequest = { op: string } & Record<string, unknown>;
 const hosts = new Map<string, BrowserHost>();
 /** El último navegador que usó un agente, por carpeta: si hay dos abiertos, sigue en el mismo. */
 const lastUsed = new Map<string, string>();
+/** En qué página lo dejó. Si el usuario cierra la tab del agente, es con lo que vuelve a
+ *  abrirla donde estaba en vez de contestarle "no tenés ningún navegador". */
+const lastUrl = new Map<string, string>();
 const hostWaiters = new Set<() => void>();
 
 export function registerBrowserHost(host: BrowserHost): () => void {
@@ -95,27 +98,60 @@ function waitForHost(viewId: string, timeoutMs: number): Promise<BrowserHost> {
 const sameFolder = (a: string, b: string) =>
   comparablePath(a).replace(/\/+$/, "") === comparablePath(b).replace(/\/+$/, "");
 
-/** El navegador que atiende a esta carpeta, abriéndolo si hace falta y se puede. */
-async function hostFor(cwd: string, request: BrowserRequest): Promise<{ host: BrowserHost; opened: boolean }> {
+/**
+ * El navegador de este agente, abriéndole uno propio si todavía no tiene.
+ *
+ * Cada agente trabaja en SU tab y no en la que el usuario está mirando: dos agentes sobre
+ * el mismo proyecto se pisarían la página, y el usuario perdería lo que tenía abierto cada
+ * vez que uno navegara. La tab del agente se pinta de su color (ver `agentPaint`), igual
+ * que la suya, para que se vea de quién es sin abrirla.
+ */
+async function hostFor(
+  cwd: string,
+  request: BrowserRequest,
+  owner: ViewOwner | null
+): Promise<{ host: BrowserHost; opened: boolean }> {
   const store = useViewTabsStore.getState();
-  const browsers = store.views.filter((v): v is BrowserView => v.kind === "browser" && sameFolder(v.cwd, cwd));
+  const inFolder = store.views.filter((v): v is BrowserView => v.kind === "browser" && sameFolder(v.cwd, cwd));
+  // `pick` y `marked` no son sobre la página del agente sino sobre la ATENCIÓN del usuario:
+  // lo que marcó lo marcó en la tab que estaba mirando, que es la suya. Mandarlos a la del
+  // agente devolvería siempre "no marcaste nada".
+  const ofUser = request.op === "pick" || request.op === "marked";
+  // Sin saber quién pide (un agente viejo, sin el dato), se sigue usando el de siempre.
+  const browsers = owner && !ofUser ? inFolder.filter((v) => v.owner?.id === owner.id) : inFolder;
+  const slot = `${owner && !ofUser ? owner.id : "user"}\u0000${comparablePath(cwd)}`;
 
   if (browsers.length === 0) {
-    const url = typeof request.url === "string" ? request.url : "";
-    if (request.op !== "navigate" || !url) {
-      throw new Error(`No hay ningún navegador abierto para ${cwd}. Usá browser_navigate con la URL del proyecto para abrir uno.`);
+    // La tab del agente es suya y no se cierra sola; pero el usuario puede cerrarla, y
+    // entonces se vuelve a abrir donde estaba. Su trabajo no se pierde por eso.
+    const asked = typeof request.url === "string" ? request.url : "";
+    const url = request.op === "navigate" ? asked : lastUrl.get(slot) ?? "";
+    if (!url) {
+      throw new Error(
+        owner && !ofUser
+          ? "Todavía no tenés un navegador abierto en este proyecto. Abrí uno con browser_navigate y la URL del proyecto."
+          : `No hay ningún navegador abierto para ${cwd}. Usá browser_navigate con la URL del proyecto para abrir uno.`
+      );
     }
     // Sin robarle el foco a quien está escribiendo en la terminal: la tab aparece en la
     // barra y el agente la usa igual.
-    const id = store.openBrowser(cwd, url, { activate: false });
-    lastUsed.set(comparablePath(cwd), id);
-    return { host: await waitForHost(id, 10_000), opened: true };
+    const id = store.openBrowser(cwd, url, { activate: false, owner: owner ?? undefined });
+    lastUsed.set(slot, id);
+    lastUrl.set(slot, url);
+    // `opened` solo si el pedido ERA navegar: si se reabrió para otra cosa, la página
+    // todavía tiene que cargar y `runBrowserRequest` la espera.
+    return { host: await waitForHost(id, 10_000), opened: request.op === "navigate" };
   }
 
   const active = browsers.find((v) => v.id === store.activeViewId);
-  const remembered = browsers.find((v) => v.id === lastUsed.get(comparablePath(cwd)));
-  const view = active ?? remembered ?? browsers[browsers.length - 1];
-  lastUsed.set(comparablePath(cwd), view.id);
+  const remembered = browsers.find((v) => v.id === lastUsed.get(slot));
+  // Para el agente manda LO SUYO, no lo que el usuario tenga activo: si el usuario abre su
+  // propia tab del proyecto, el agente no debería empezar a escribir ahí.
+  const view = (owner && !ofUser ? remembered ?? active : active ?? remembered) ?? browsers[browsers.length - 1];
+  lastUsed.set(slot, view.id);
+  // Lo que tenga cargado AHORA, haya navegado el agente o el usuario: los dos usan esta
+  // página, y al reabrirla tiene que volver a la última.
+  if (view.url) lastUrl.set(slot, view.url);
   // Una tab restaurada que nadie miró todavía no está montada: no tiene página.
   store.keepMounted(view.id);
   return { host: await waitForHost(view.id, 10_000), opened: false };
@@ -456,9 +492,13 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
   }
 }
 
-/** Atiende un pedido de un agente sobre el navegador del proyecto `cwd`. */
-export async function runBrowserRequest(cwd: string, request: BrowserRequest): Promise<string> {
-  const { host, opened } = await hostFor(cwd, request);
+/** Atiende un pedido de un agente sobre su navegador del proyecto `cwd`. */
+export async function runBrowserRequest(
+  cwd: string,
+  request: BrowserRequest,
+  owner: ViewOwner | null = null
+): Promise<string> {
+  const { host, opened } = await hostFor(cwd, request, owner);
   // Una tab que se acaba de montar (restaurada, nunca mirada) todavía está cargando su
   // página: leerla ya diría "no hay página" cuando en un segundo la hay.
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {

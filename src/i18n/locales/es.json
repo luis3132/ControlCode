@@ -633,6 +633,8 @@
   "browser.forward": "Adelante",
   "browser.reload": "Recargar",
   "browser.openExternal": "Abrir en el navegador del sistema",
+  "browser.ownedBy": "Este navegador lo está manejando {{agent}}",
+  "browser.driving": "Está manejando un navegador de este proyecto",
   "browser.pick.start": "Marcar elementos de la página",
   "browser.pick.stop": "Dejar de marcar",
   "browser.pick.hint": "Click en un elemento para marcarlo · Shift+click para marcar varios · Esc para salir",

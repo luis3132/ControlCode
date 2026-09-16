@@ -25,9 +25,9 @@ export function appendBrowserMcp(command: string, mcp: TabMcp): string {
  * Lo mismo, pidiéndole a la app el config de esta carpeta. Si no se puede (una build sin
  * `ccode`), la tab arranca como siempre: el navegador es un agregado, no una condición.
  */
-export async function withBrowserMcp(command: string, cwd: string): Promise<string> {
+export async function withBrowserMcp(command: string, cwd: string, tabId: string): Promise<string> {
   try {
-    const mcp = await invoke<TabMcp | null>("tab_browser_mcp", { cwd });
+    const mcp = await invoke<TabMcp | null>("tab_browser_mcp", { cwd, tabId });
     return mcp ? appendBrowserMcp(command, mcp) : command;
   } catch {
     return command;

@@ -633,6 +633,8 @@
   "browser.forward": "Forward",
   "browser.reload": "Reload",
   "browser.openExternal": "Open in the system browser",
+  "browser.ownedBy": "{{agent}} is driving this browser",
+  "browser.driving": "Driving a browser in this project",
   "browser.pick.start": "Pick elements on the page",
   "browser.pick.stop": "Stop picking",
   "browser.pick.hint": "Click an element to pick it · Shift+click to pick several · Esc to exit",

@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { DocumentIcon } from "neogestify-ui-components";
 
 import { BranchIcon, GlobeIcon } from "@/app/icons";
+import type { AgentPaint } from "@/features/browser/agentPaint";
 
 import type { ViewTab } from "./viewTabs";
 
@@ -15,9 +16,14 @@ const ICON = { file: DocumentIcon, diff: BranchIcon, browser: GlobeIcon } as con
  * lo que deja distinguir de un vistazo "esto es un agente" de "esto es algo que abrí".
  */
 export function ViewTabItem({
-  view, tabKey, className = "", hint, isActive, groupFocused = true, onActivate, onClose, onPointerDown, onContextMenu,
+  view, tabKey, className = "", hint, paint = null, paintHint, isActive, groupFocused = true,
+  onActivate, onClose, onPointerDown, onContextMenu,
 }: {
   view: ViewTab;
+  /** El color del agente que maneja esta vista. Ausente = la abrió el usuario. */
+  paint?: AgentPaint | null;
+  /** Qué dice el tooltip cuando está pintada: quién la maneja. */
+  paintHint?: string;
   /** La clave de la tab en los grupos: el arrastre la busca por ahí. */
   tabKey: string;
   className?: string;
@@ -43,18 +49,22 @@ export function ViewTabItem({
       onClick={onActivate}
       // Click del medio cierra, como en cualquier navegador o editor.
       onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(); } }}
-      title={view.kind === "browser" ? view.url || title : view.kind === "file" ? view.path : `${view.root}/${view.path}`}
+      title={paintHint ?? (view.kind === "browser" ? view.url || title : view.kind === "file" ? view.path : `${view.root}/${view.path}`)}
       className={`group relative flex items-center gap-2 h-10 pl-3 pr-1.5 shrink-0
         max-w-52 min-w-24 rounded-t-[9px] cursor-pointer select-none transition-colors duration-150 ${className}
+        ${paint && !isActive ? paint.tint : ""}
         ${isActive
           ? "bg-gray-50 dark:bg-[#0d1117] text-gray-900 dark:text-white"
           : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-white/5 hover:text-gray-800 dark:hover:text-gray-200"}`}
     >
+      {/* La barrita del agente: en el borde de adentro, donde no compite con la línea de
+          "tab activa" de abajo. Es lo único que hay que mirar para saber de quién es. */}
+      {paint && <span className={`absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-r ${paint.strip}`} />}
       {isActive && (
         <span className={`absolute bottom-0 left-0 right-0 h-[2px] ${groupFocused ? "bg-blue-500" : "bg-gray-300 dark:bg-white/20"}`} />
       )}
 
-      <Icon className={`w-3.5 h-3.5 shrink-0 opacity-70 ${view.kind === "diff" ? "text-amber-500" : ""}`} />
+      <Icon className={`w-3.5 h-3.5 shrink-0 opacity-70 ${paint ? paint.ink : view.kind === "diff" ? "text-amber-500" : ""}`} />
       <span className="flex-1 min-w-0 truncate text-xs italic">
         {title}
         {hint && <span className="not-italic text-[10px] text-gray-400 dark:text-white/30"> · {hint}</span>}

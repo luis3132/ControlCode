@@ -39,9 +39,20 @@ export interface DiffView extends ViewBase {
   staged: boolean;
 }
 
+/** El agente que abrió un navegador y lo está manejando. */
+export interface ViewOwner {
+  /** Una tab de agente de esta ventana, o una tarea de la flota. */
+  kind: "tab" | "task";
+  id: string;
+  /** Cómo llamarlo en la interfaz. */
+  label: string;
+}
+
 export interface BrowserView extends ViewBase {
   kind: "browser";
   url: string;
+  /** Quién lo abrió, si lo abrió un agente. Ausente = lo abrió el usuario. */
+  owner?: ViewOwner;
   /** El tamaño de pantalla con que se está probando. Ausente = ocupa toda la tab. Se
    *  persiste: volver a la tab es seguir probando en el mismo tamaño. */
   viewport?: { width: number; height: number } | null;

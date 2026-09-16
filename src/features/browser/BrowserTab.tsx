@@ -251,6 +251,9 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       };
       const timer = setTimeout(() => finish(null), timeoutMs);
       pickWaiter.current = finish;
+      // Al frente: se le está pidiendo algo a la persona, y en una tab que no está a la
+      // vista el pedido se vencería sin que nadie lo hubiera visto nunca.
+      useViewTabsStore.getState().activateView(view.id);
       setAgentAsking(true);
       setPicking(true);
       postRef.current("pick:on");

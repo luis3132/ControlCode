@@ -480,9 +480,15 @@ fn run_mcp(args: &[String]) -> ExitCode {
     use controlcode_lib::ipc::mcp::McpContext;
     let context = match args {
         [flag, value, ..] if flag == "--task" => McpContext::Task(value.clone()),
-        [flag, value, ..] if flag == "--cwd" => McpContext::Cwd(value.clone()),
+        [flag, value, rest @ ..] if flag == "--cwd" => McpContext::Cwd {
+            cwd: value.clone(),
+            tab: match rest {
+                [tab_flag, tab, ..] if tab_flag == "--tab" => Some(tab.clone()),
+                _ => None,
+            },
+        },
         _ => {
-            eprintln!("Uso: ccode mcp --task <id-de-tarea> | --cwd <carpeta>");
+            eprintln!("Uso: ccode mcp --task <id-de-tarea> | --cwd <carpeta> [--tab <id-de-tab>]");
             return ExitCode::from(EXIT_USAGE);
         }
     };

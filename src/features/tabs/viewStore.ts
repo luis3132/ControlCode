@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { useTabsStore } from "@/features/tabs/store";
 import {
   baseName, findExisting, nextActiveAfterClose, toPersisted,
-  type BrowserView, type DiffView, type FileView, type ViewTab,
+  type BrowserView, type DiffView, type FileView, type ViewOwner, type ViewTab,
 } from "@/features/tabs/viewTabs";
 import { isMarkdownPath, prefersMarkdownPreview } from "@/features/editor/markdown";
 
@@ -17,8 +17,9 @@ interface ViewTabsState {
 
   openFile: (cwd: string, path: string, reveal?: { line: number; column: number }) => void;
   openDiff: (cwd: string, root: string, path: string, staged: boolean) => void;
-  /** Devuelve el id de la tab. `activate: false` la abre sin sacar al usuario de lo que mira. */
-  openBrowser: (cwd: string, url?: string, opts?: { activate?: boolean }) => string;
+  /** Devuelve el id de la tab. `activate: false` la abre sin sacar al usuario de lo que mira;
+   *  `owner` la marca como manejada por un agente. */
+  openBrowser: (cwd: string, url?: string, opts?: { activate?: boolean; owner?: ViewOwner }) => string;
   keepMounted: (id: string) => void;
   activateView: (id: string) => void;
   /** Volver a la terminal. */
@@ -64,7 +65,7 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
   },
 
   openBrowser: (cwd, url = "", opts) => {
-    const view: BrowserView = { kind: "browser", cwd, url, id: crypto.randomUUID(), title: "" };
+    const view: BrowserView = { kind: "browser", cwd, url, id: crypto.randomUUID(), title: "", owner: opts?.owner };
     const activate = opts?.activate ?? true;
     set((s) => ({
       views: [...s.views, view],

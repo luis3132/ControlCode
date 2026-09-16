@@ -48,8 +48,9 @@ pub const BROWSER_TIMEOUT_SECS: u64 = 60;
 pub enum McpContext {
     /// Una tarea headless de la flota.
     Task(String),
-    /// Una tab interactiva, en esta carpeta.
-    Cwd(String),
+    /// Una tab interactiva, en esta carpeta. `tab` es cuál, cuando la terminal lo supo al
+    /// lanzarla: es lo que deja que cada agente tenga SU navegador, pintado de su color.
+    Cwd { cwd: String, tab: Option<String> },
 }
 
 impl McpContext {
@@ -57,7 +58,10 @@ impl McpContext {
     fn scope(&self) -> Value {
         match self {
             McpContext::Task(id) => json!({ "taskId": id }),
-            McpContext::Cwd(cwd) => json!({ "cwd": cwd }),
+            // Sin `tabId` cuando no se sabe cuál es, y no `null`: la app distingue "esta
+            // tab" de "el navegador que haya", y un null los confundiría.
+            McpContext::Cwd { cwd, tab: None } => json!({ "cwd": cwd }),
+            McpContext::Cwd { cwd, tab: Some(tab) } => json!({ "cwd": cwd, "tabId": tab }),
         }
     }
 }
@@ -776,8 +780,13 @@ pub struct TabMcp {
 }
 
 #[tauri::command]
-pub fn tab_browser_mcp(cwd: String) -> Option<TabMcp> {
-    let path = write_config(&format!("tab-{}", folder_key(&cwd)), &["mcp", "--cwd", &cwd])?;
+pub fn tab_browser_mcp(cwd: String, tab_id: String) -> Option<TabMcp> {
+    // Un archivo por tab y no por carpeta: adentro va el id con el que la app sabe de qué
+    // agente viene cada pedido.
+    let path = write_config(
+        &format!("tab-{}", folder_key(&format!("{cwd}\x01{tab_id}"))),
+        &["mcp", "--cwd", &cwd, "--tab", &tab_id],
+    )?;
     let mut allowed_tools = browser_tool_names();
     // Mirar un run y dejar un hecho no gasta nada. Lanzar o parar agentes sí: eso lo sigue
     // aprobando la persona en su terminal, cada vez.

@@ -362,7 +362,7 @@ fn call(id: u64, name: &str, arguments: serde_json::Value) -> serde_json::Value 
 #[test]
 fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
-    let (tab, _) = mcp_session(&McpContext::Cwd("/p".into()), std::slice::from_ref(&list), |_, _| Ok(json!({})));
+    let (tab, _) = mcp_session(&McpContext::Cwd { cwd: "/p".into(), tab: None }, std::slice::from_ref(&list), |_, _| Ok(json!({})));
     let (task, _) = mcp_session(&McpContext::Task("t1".into()), &[list], |_, _| Ok(json!({})));
 
     let tab = tool_names(&tab[0]);
@@ -414,7 +414,7 @@ fn una_tool_de_orquestacion_viaja_con_quien_la_pide() {
 #[test]
 fn una_tool_del_navegador_viaja_como_browser_run_con_su_carpeta() {
     let (responses, sent) = mcp_session(
-        &McpContext::Cwd("/home/u/proyecto".into()),
+        &McpContext::Cwd { cwd: "/home/u/proyecto".into(), tab: None },
         &[
             json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
             call(7, "browser_type", json!({ "target": "e3", "text": "ana@x.com", "submit": true })),
@@ -436,6 +436,18 @@ fn una_tool_del_navegador_viaja_como_browser_run_con_su_carpeta() {
     );
 }
 
+/// La tab que lanzó el servidor viaja en cada pedido: es con lo que la app le da a ESE
+/// agente su propio navegador, en vez de que todos escriban en la página del usuario.
+#[test]
+fn el_pedido_dice_de_que_tab_viene() {
+    let (_, sent) = mcp_session(
+        &McpContext::Cwd { cwd: "/p".into(), tab: Some("tab-7".into()) },
+        &[call(1, "browser_snapshot", json!({}))],
+        |_, _| Ok(json!({ "text": "page: …" })),
+    );
+    assert_eq!(sent[0].1, json!({ "cwd": "/p", "tabId": "tab-7", "request": { "op": "snapshot" } }));
+}
+
 /// Desde una tarea, el navegador se pide por la tarea: la app sabe de qué proyecto es,
 /// aunque la tarea corra en un worktree con otra carpeta.
 #[test]
@@ -453,7 +465,7 @@ fn desde_una_tarea_el_navegador_se_pide_por_la_tarea() {
 #[test]
 fn un_error_del_navegador_llega_al_agente_como_resultado_con_error() {
     let (responses, _) = mcp_session(
-        &McpContext::Cwd("/p".into()),
+        &McpContext::Cwd { cwd: "/p".into(), tab: None },
         &[call(2, "browser_click", json!({ "target": "e12" }))],
         |_, _| Err("No hay ningún elemento e12: tomá un snapshot nuevo".into()),
     );
@@ -465,7 +477,7 @@ fn un_error_del_navegador_llega_al_agente_como_resultado_con_error() {
 #[test]
 fn desde_una_tab_no_se_puede_llamar_al_broker() {
     let (responses, sent) = mcp_session(
-        &McpContext::Cwd("/p".into()),
+        &McpContext::Cwd { cwd: "/p".into(), tab: None },
         &[call(3, "approve_tool_use", json!({ "tool_name": "Bash", "input": {} }))],
         |_, _| Ok(json!({ "allow": true })),
     );
@@ -488,7 +500,7 @@ fn el_broker_deniega_si_la_app_no_contesta() {
 #[test]
 fn el_initialize_devuelve_la_version_pedida_y_explica_el_navegador() {
     let (responses, _) = mcp_session(
-        &McpContext::Cwd("/p".into()),
+        &McpContext::Cwd { cwd: "/p".into(), tab: None },
         &[json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "protocolVersion": "2025-11-25" } })],
         |_, _| Ok(json!({})),
     );
