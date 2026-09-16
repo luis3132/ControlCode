@@ -802,8 +802,8 @@ fn tool_error(message: &str) -> Value {
 ///
 /// `None` si no hay `ccode` al lado de la app (una build de desarrollo sin el binario): el
 /// agente arranca igual, solo que sin estas herramientas.
-pub fn write_config(name: &str, args: &[&str]) -> Option<std::path::PathBuf> {
-    let ccode = crate::ipc::install::source_binary()?;
+pub fn write_config(app: &tauri::AppHandle, name: &str, args: &[&str]) -> Option<std::path::PathBuf> {
+    let ccode = crate::ipc::install::source_binary(app)?;
     let dir = dirs::home_dir()?.join(".controlcode").join("mcp");
     std::fs::create_dir_all(&dir).ok()?;
     let path = dir.join(format!("{name}.json"));
@@ -883,11 +883,11 @@ fn tab_config_name(tab_id: &str) -> String {
 }
 
 #[tauri::command]
-pub fn tab_browser_mcp(cwd: String, tab_id: String) -> Option<TabMcp> {
+pub fn tab_browser_mcp(app: tauri::AppHandle, cwd: String, tab_id: String) -> Option<TabMcp> {
     // Un archivo por tab y no por carpeta: adentro va el id con el que la app sabe de qué
     // agente viene cada pedido. La misma tab reescribe SIEMPRE el mismo archivo —los ids
     // sobreviven al cierre de la app—, así que no se van acumulando.
-    let path = write_config(&tab_config_name(&tab_id), &["mcp", "--cwd", &cwd, "--tab", &tab_id])?;
+    let path = write_config(&app, &tab_config_name(&tab_id), &["mcp", "--cwd", &cwd, "--tab", &tab_id])?;
     let mut allowed_tools = browser_tool_names();
     // Mirar un run y dejar un hecho no gasta nada. Lanzar o parar agentes sí: eso lo sigue
     // aprobando la persona en su terminal, cada vez.
