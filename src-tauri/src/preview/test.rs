@@ -567,3 +567,99 @@ async fn un_servidor_abierto_como_localhost_se_ve_desde_localhost() {
     let again = preview_resolve(format!("http://localhost:{port}/otra"), String::new()).await.unwrap();
     assert_eq!(again.proxy_origin, target.proxy_origin);
 }
+
+// ── Respuestas simuladas ─────────────────────────────────────────
+
+use super::mocks::{matches, Mock, Mocks};
+
+fn regla(url: &str) -> Mock {
+    Mock {
+        id: String::new(),
+        method: None,
+        url: url.into(),
+        status: 500,
+        body: String::new(),
+        content_type: None,
+        delay_ms: 0,
+        times: None,
+        hits: 0,
+    }
+}
+
+#[test]
+fn el_patron_de_una_regla_entiende_comodines() {
+    assert!(matches("/api/login", "/api/login?next=/"));
+    assert!(matches("*/users*", "/api/v2/users?page=1"));
+    assert!(matches("/api/*/users", "/api/v2/users"));
+    assert!(!matches("/api/*/users", "/api/v2/users/3"), "sin * final, tiene que cerrar");
+    assert!(!matches("/api/login", "/api/logout"));
+    assert!(!matches("", "/lo que sea"));
+    // Sin comodín adelante, el patrón tiene que estar en alguna parte de la URL.
+    assert!(matches("users", "/api/users"));
+}
+
+/// Gana la más nueva: se agrega una regla para cambiar lo que hacía la anterior, no para
+/// quedar atrás de ella.
+#[test]
+fn la_regla_mas_nueva_gana_y_el_metodo_filtra() {
+    let mocks = Mocks::default();
+    mocks.add(Mock { status: 200, ..regla("/api/*") }).unwrap();
+    mocks.add(Mock { status: 503, method: Some("post".into()), ..regla("/api/login") }).unwrap();
+
+    assert_eq!(mocks.canned("POST", "/api/login").unwrap().status, 503);
+    assert_eq!(mocks.canned("GET", "/api/login").unwrap().status, 200, "el método no coincide: cae a la otra");
+    assert!(mocks.canned("GET", "/inicio").is_none());
+}
+
+/// "Que falle una sola vez" es lo que hace falta para probar un reintento.
+#[test]
+fn una_regla_con_tope_deja_de_valer_despues_de_usarse() {
+    let mocks = Mocks::default();
+    mocks.add(Mock { times: Some(1), ..regla("/api/x") }).unwrap();
+    assert!(mocks.canned("GET", "/api/x").is_some());
+    assert!(mocks.canned("GET", "/api/x").is_none());
+    assert_eq!(mocks.list()[0].hits, 1);
+}
+
+#[test]
+fn el_cuerpo_decide_el_tipo_y_una_regla_invalida_se_rechaza() {
+    let mocks = Mocks::default();
+    mocks.add(Mock { body: "{\"error\":\"no\"}".into(), ..regla("/api/y") }).unwrap();
+    assert!(mocks.canned("GET", "/api/y").unwrap().content_type.starts_with("application/json"));
+
+    assert!(mocks.add(regla(" ")).unwrap_err().contains("URL"));
+    assert!(mocks.add(Mock { status: 42, ..regla("/z") }).unwrap_err().contains("código"));
+    assert_eq!(mocks.clear(None), 1);
+    assert!(mocks.list().is_empty());
+}
+
+/// De punta a punta: la regla contesta en lugar del servidor, y el panel de red lo ve como
+/// un pedido más —marcado como simulado— y no como si el servidor hubiera contestado eso.
+#[tokio::test(flavor = "multi_thread")]
+async fn una_regla_contesta_en_lugar_del_servidor_y_queda_anotada() {
+    let port = fake_dev_server().await;
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
+
+    super::proxy::preview_add_mock(
+        target.proxy_origin.clone(),
+        Mock { status: 503, body: "{\"error\":\"caído\"}".into(), ..regla("/app.js") },
+    )
+    .await
+    .unwrap();
+
+    let resp = client().get(format!("{}/app.js", target.proxy_origin)).send().await.unwrap();
+    assert_eq!(resp.status(), 503);
+    assert_eq!(resp.headers().get("x-controlcode-mock").unwrap(), "1");
+    assert_eq!(resp.text().await.unwrap(), "{\"error\":\"caído\"}");
+
+    let page = preview_network(target.proxy_origin.clone(), before).await.unwrap();
+    let entry = page.entries.last().expect("queda anotado");
+    assert_eq!(entry.status, Some(503));
+    assert!(entry.url.ends_with("/app.js"));
+
+    // Borrada la regla, el servidor vuelve a contestar lo suyo.
+    super::proxy::preview_clear_mocks(target.proxy_origin.clone(), None).await.unwrap();
+    let real = client().get(format!("{}/app.js", target.proxy_origin)).send().await.unwrap();
+    assert_eq!(real.text().await.unwrap(), "console.log(1)");
+}

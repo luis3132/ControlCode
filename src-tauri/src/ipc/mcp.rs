@@ -165,6 +165,76 @@ Returns what changed plus console errors and failed requests caused by the click
         required: &["target", "value"],
     },
     BrowserTool {
+        name: "browser_describe",
+        op: "describe",
+        description: "Everything about one element: role and name, selector, the component and source file that \
+rendered it, the chain of components around it, where it sits in the DOM, its box, whether something covers it, \
+computed styles, attributes and HTML. Use it when a snapshot line is not enough to know what you are looking at.",
+        properties: || json!({ "target": { "type": "string", "description": TARGET } }),
+        required: &["target"],
+    },
+    BrowserTool {
+        name: "browser_screenshot",
+        op: "screenshot",
+        description: "Photograph the page as the user sees it and save it to disk; returns the file path for you to \
+open with your file tools. It is a real capture from the engine (canvas, video and fonts included), not a redraw. It \
+brings the browser tab to the front, so the user sees what you are looking at.",
+        properties: || json!({}),
+        required: &[],
+    },
+    BrowserTool {
+        name: "browser_drag",
+        op: "drag",
+        description: "Drag one element onto another (pointer events plus HTML drag events, so sortable lists and \
+drop zones both react).",
+        properties: || json!({
+            "from": { "type": "string", "description": TARGET },
+            "to": { "type": "string", "description": TARGET },
+        }),
+        required: &["from", "to"],
+    },
+    BrowserTool {
+        name: "browser_upload",
+        op: "upload",
+        description: "Put a file from disk into an <input type=file>, as if the user had chosen it. Up to 10 MB.",
+        properties: || json!({
+            "target": { "type": "string", "description": TARGET },
+            "path": { "type": "string", "description": "Absolute path of the file to attach." },
+        }),
+        required: &["target", "path"],
+    },
+    BrowserTool {
+        name: "browser_mock",
+        op: "mock",
+        description: "Make the project's server answer something else for a URL, without touching its code: force a \
+500, an empty list, a slow response. It is how you test what the page does when things go wrong. Rules apply to \
+requests going through Control Code's proxy (the project's own server), newest rule first, and show up in \
+browser_network marked as mocked.",
+        properties: || json!({
+            "action": { "type": "string", "enum": ["add", "list", "clear"], "description": "Default: add." },
+            "url": { "type": "string", "description": "Part of the URL, `*` as wildcard: /api/login, */users?*" },
+            "method": { "type": "string", "description": "GET, POST… Default: any." },
+            "status": { "type": "number", "description": "Default 200." },
+            "body": { "type": "string", "description": "What to answer. A body starting with { or [ is sent as JSON." },
+            "content_type": { "type": "string" },
+            "delay_ms": { "type": "number", "description": "Answer this slowly, to test spinners and timeouts." },
+            "times": { "type": "number", "description": "Use the rule only this many times (e.g. fail once, then work)." },
+            "id": { "type": "string", "description": "With action=clear: the rule to remove. Without it, all of them." },
+        }),
+        required: &[],
+    },
+    BrowserTool {
+        name: "browser_dialogs",
+        op: "dialogs",
+        description: "Native dialogs (alert, confirm, prompt) are answered automatically — inside an iframe they \
+would freeze the whole app — and recorded. This reads what appeared and sets what to answer from now on.",
+        properties: || json!({
+            "action": { "type": "string", "enum": ["accept", "dismiss"], "description": "What to answer confirm/prompt. Default: accept." },
+            "prompt_text": { "type": "string", "description": "What to type into a prompt." },
+        }),
+        required: &[],
+    },
+    BrowserTool {
         name: "browser_hover",
         op: "hover",
         description: "Move the mouse over an element (fires mouse events; CSS :hover cannot be simulated).",
@@ -185,11 +255,13 @@ Returns what changed plus console errors and failed requests caused by the click
     BrowserTool {
         name: "browser_wait",
         op: "wait",
-        description: "Wait until some text or a CSS selector is visible (or gone). Max 15 s.",
+        description: "Wait until some text or a CSS selector is visible (or gone), or until the page stops making \
+requests. Max 15 s.",
         properties: || json!({
             "text": { "type": "string" },
             "selector": { "type": "string" },
             "gone": { "type": "boolean" },
+            "idle": { "type": "boolean", "description": "Wait for the network to go quiet (no request in flight for 400 ms)." },
             "timeout_ms": { "type": "number" },
         }),
         required: &[],

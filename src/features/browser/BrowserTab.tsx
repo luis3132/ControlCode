@@ -226,6 +226,17 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       const { picks, captures, note } = marksRef.current;
       return { picks, captures: captures.map((c) => ({ path: c.path, url: c.url })), note };
     },
+    screenshot: async () => {
+      const page = iframe.current;
+      const frame = column.current;
+      if (!page || !frame) throw new Error("La página todavía no está cargada.");
+      // La foto es del webview: si la tab no está a la vista, saldría lo que esté encima.
+      // Se la trae al frente antes de disparar, que además es lo que hace que el usuario
+      // vea lo mismo que el agente.
+      useViewTabsStore.getState().activateView(view.id);
+      const frozen = await freezePage(page, frame);
+      return previewSaveCapture(await canvasToPng(frozen.canvas));
+    },
     requestPick: (timeoutMs) => new Promise((resolve) => {
       // Un solo pedido a la vez: el anterior se da por cancelado en vez de quedar colgado.
       pickWaiter.current?.(null);
@@ -313,6 +324,13 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [channel, target, updateView, view.id]);
+
+  // La página necesita saber si alguien la está mirando: con la tab en segundo plano, el
+  // puntero del agente no se anima (nadie lo vería) y cada acción sale más rápido.
+  useEffect(() => {
+    if (!target) return;
+    postToPage(active ? "view:shown" : "view:hidden");
+  }, [active, target, postToPage]);
 
   // Esc también cancela con el foco afuera de la página (en la barra, por ejemplo).
   useEffect(() => {

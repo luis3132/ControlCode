@@ -26,6 +26,38 @@ export async function previewCapture(): Promise<ArrayBuffer> {
 /** Guarda una captura en la carpeta temporal y devuelve su ruta. Va cruda, no como JSON. */
 export const previewSaveCapture = (png: Uint8Array) => invoke<string>("preview_save_capture", png);
 
+/** Un archivo del disco, listo para ponerlo en un `<input type=file>` de la página. */
+export interface UploadFile {
+  name: string;
+  mime: string;
+  /** base64 */
+  data: string;
+}
+
+export const previewReadUpload = (path: string) => invoke<UploadFile>("preview_read_upload", { path });
+
+/** Una respuesta simulada del servidor del proyecto (ver `src-tauri/src/preview/mocks.rs`). */
+export interface Mock {
+  id: string;
+  method: string | null;
+  /** Parte de la URL, con `*` como comodín. */
+  url: string;
+  status: number;
+  body: string;
+  contentType: string | null;
+  delayMs: number;
+  times: number | null;
+  hits: number;
+}
+
+export const previewAddMock = (proxyOrigin: string, mock: Partial<Mock> & { url: string }) =>
+  invoke<Mock>("preview_add_mock", { proxyOrigin, mock });
+
+export const previewListMocks = (proxyOrigin: string) => invoke<Mock[]>("preview_list_mocks", { proxyOrigin });
+
+export const previewClearMocks = (proxyOrigin: string, id?: string) =>
+  invoke<number>("preview_clear_mocks", { proxyOrigin, id: id ?? null });
+
 /** Un pedido que pasó por el proxy (ver `src-tauri/src/preview/log.rs`). */
 export interface ProxyRequest {
   seq: number;

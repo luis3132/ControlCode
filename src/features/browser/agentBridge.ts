@@ -18,10 +18,12 @@ import {
   consoleForAgent, isFailed, mergeCookies, networkForAgent, requestRows, type CookieRow,
 } from "./debugLog";
 import { debugLogOf, refreshProxyLog } from "./debugStore";
-import { previewCookies, previewRequest } from "./ipc";
+import {
+  previewAddMock, previewClearMocks, previewCookies, previewListMocks, previewReadUpload, previewRequest, type Mock,
+} from "./ipc";
 import { detailForAgent, detailFromPage, detailFromProxy } from "./networkDetail";
 import type { AnnotatedCapture } from "./composeMessage";
-import { formatMarked, type DescribedElement, type MarkedEntry } from "./markedView";
+import { formatElement, formatMarked, type DescribedElement, type MarkedEntry } from "./markedView";
 import type { PageChannel } from "./pageChannel";
 import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
@@ -49,6 +51,8 @@ export interface BrowserHost {
   marks: () => { picks: PickedElement[]; captures: AnnotatedCapture[]; note: string };
   /** Prende el selector y espera a que la persona marque algo. `null` = canceló o venció. */
   requestPick: (timeoutMs: number) => Promise<PickedElement | null>;
+  /** Una foto de la página como se ve ahora, guardada en disco. Devuelve la ruta. */
+  screenshot: () => Promise<string>;
 }
 
 export type BrowserRequest = { op: string } & Record<string, unknown>;
@@ -244,6 +248,19 @@ async function marksText(
   return inServerTerms(host, formatMarked(entries, captures, note, display));
 }
 
+/** Las reglas simuladas, para que el agente sepa qué está fingiendo la página. */
+function mocksText(mocks: Mock[]): string {
+  if (mocks.length === 0) return "No hay ninguna respuesta simulada: el servidor del proyecto contesta todo.";
+  const lines = mocks.map((m) => {
+    const parts = [`${m.method ?? "cualquier método"} ${m.url} → ${m.status}`];
+    if (m.delayMs > 0) parts.push(`${m.delayMs} ms de demora`);
+    if (m.times !== null) parts.push(`${m.hits}/${m.times} usos`);
+    else if (m.hits > 0) parts.push(`${m.hits} uso(s)`);
+    return `- ${parts.join(" · ")}  [id=${m.id.slice(0, 8)}]`;
+  });
+  return `Respuestas simuladas activas:\n${lines.join("\n")}`;
+}
+
 async function execute(host: BrowserHost, request: BrowserRequest, opened: boolean): Promise<string> {
   const op = request.op;
   switch (op) {
@@ -359,6 +376,58 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
       }
       return marksText(host, picks, captures, note);
     }
+    case "mock": {
+      const origin = host.proxyOrigin();
+      if (!origin) throw new Error("Todavía no hay ninguna página cargada, así que no hay servidor al que simularle respuestas.");
+      const action = str(request, "action") ?? "add";
+      if (action === "clear") {
+        const gone = await previewClearMocks(origin, str(request, "id"));
+        return gone > 0 ? `Borradas ${gone} regla(s).` : "No había reglas que borrar.";
+      }
+      if (action === "add") {
+        await previewAddMock(origin, {
+          url: required(request, "url"),
+          method: str(request, "method")?.toUpperCase() ?? null,
+          status: num(request, "status") ?? 200,
+          body: str(request, "body") ?? "",
+          contentType: str(request, "content_type") ?? null,
+          delayMs: num(request, "delay_ms") ?? 0,
+          times: num(request, "times") ?? null,
+        });
+      } else if (action !== "list") {
+        throw new Error("action es add, list o clear.");
+      }
+      return mocksText(await previewListMocks(origin));
+    }
+    case "describe": {
+      // Con el mismo formato que lo que marca la persona: un modelo lee mejor seis líneas
+      // rotuladas que el JSON entero con sus llaves.
+      const described = await host.channel.run(
+        { op: "describe", target: required(request, "target") }, 12_000
+      ) as DescribedElement;
+      return inServerTerms(host, formatElement({ live: true, element: described }, 1, (url) => url));
+    }
+    case "screenshot": {
+      const path = await host.screenshot();
+      return `La página quedó fotografiada en:\n${path}\n\nAbrila con tus herramientas de archivos. Es lo que se ve ahora en la tab, no el documento entero.`;
+    }
+    case "drag":
+      return inPage(host, { op: "drag", from: required(request, "from"), to: required(request, "to") }, true);
+    case "upload": {
+      const file = await previewReadUpload(required(request, "path"));
+      return inPage(host, {
+        op: "upload", target: required(request, "target"), name: file.name, mime: file.mime, data: file.data,
+      }, true);
+    }
+    case "dialogs": {
+      const action = str(request, "action");
+      if (action && action !== "accept" && action !== "dismiss") throw new Error("action es accept o dismiss.");
+      return inPage(host, {
+        op: "dialogs",
+        accept: action ? action === "accept" : undefined,
+        text: str(request, "prompt_text"),
+      }, false);
+    }
     case "snapshot": return inPage(host, { op: "snapshot", all: bool(request, "full") }, false);
     case "layout": return inPage(host, { op: "layout" }, false);
     case "performance": return inPage(host, { op: "performance" }, false);
@@ -379,7 +448,7 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
     case "wait":
       return inPage(host, {
         op: "wait", text: str(request, "text"), selector: str(request, "selector"),
-        gone: bool(request, "gone"), timeoutMs: num(request, "timeout_ms"),
+        gone: bool(request, "gone"), idle: bool(request, "idle"), timeoutMs: num(request, "timeout_ms"),
       }, false);
     case "eval": return inPage(host, { op: "eval", code: required(request, "code") }, true);
     default:

@@ -21,6 +21,7 @@
 import type {
   AppMessage, ConsoleEntry, ConsoleLevel, DebugBatch, PageCommand, PageMessage, PageNetworkEntry, StorageArea,
 } from "../protocol";
+import { createCursor } from "./cursor";
 import { componentChain, describeElement, selectorOf } from "./dom";
 import {
   errorKindOf, headerList, headerValue, parseRawHeaders, readResponseBody, requestBodyPreview, MAX_PAGE_BODY,
@@ -186,6 +187,9 @@ declare global {
       return url;
     }
   };
+  /** Pedidos sin terminar, de cualquier origen: es lo que mira `wait { idle }`. */
+  let inFlight = 0;
+
   const sizeFrom = (header: string | null): number | null => {
     const n = header ? Number.parseInt(header, 10) : Number.NaN;
     return Number.isFinite(n) ? n : null;
@@ -201,7 +205,8 @@ declare global {
       } catch {
         /* un input raro: fetch decide */
       }
-      const result = nativeFetch(input, init);
+      inFlight += 1;
+      const result = nativeFetch(input, init).finally(() => { inFlight = Math.max(0, inFlight - 1); });
       if (!url || !isForeign(url)) return result;
       const at = Date.now();
       const started = performance.now();
@@ -267,6 +272,8 @@ declare global {
     if (info && isForeign(info.url)) {
       const at = Date.now();
       const started = performance.now();
+      inFlight += 1;
+      this.addEventListener("loadend", () => { inFlight = Math.max(0, inFlight - 1); });
       let ttfbMs: number | null = null;
       let ended: "abort" | "timeout" | null = null;
       this.addEventListener("readystatechange", () => {
@@ -372,9 +379,64 @@ declare global {
     })) vitals.longTasks = vitals.longTasks ?? { count: 0, totalMs: 0 };
   }
 
+  // Los diálogos nativos (`alert`, `confirm`, `prompt`) frenan el motor hasta que alguien
+  // contesta, y adentro de un iframe eso deja esperando a la app entera. Mientras maneja un
+  // agente se contestan solos —si no, su acción quedaría colgada hasta que pase una
+  // persona— y quedan anotados. Cuando la página la usa el usuario, el diálogo sale como
+  // siempre: contestarle por él podría borrarle algo sin preguntar.
+  const dialogs: { type: string; message: string; answer: string; at: number }[] = [];
+  const dialogPolicy = { accept: true, text: "" };
+  const nativeAlert = window.alert.bind(window);
+  const nativeConfirm = window.confirm.bind(window);
+  const nativePrompt = window.prompt.bind(window);
+  /** Hay una orden de un agente en curso. */
+  let driving = false;
+
+  function recordDialog(type: string, message: string, answer: string): void {
+    const entry = { type, message: clip(message, 1000), answer, at: Date.now() };
+    dialogs.push(entry);
+    if (dialogs.length > 50) dialogs.shift();
+    pushConsole({
+      at: entry.at, level: "info", kind: "dialog",
+      text: `${type}(${entry.message}) → ${answer}`,
+    });
+  }
+
+  window.alert = (message?: unknown) => {
+    if (!driving) {
+      recordDialog("alert", String(message ?? ""), "lo contestó el usuario");
+      nativeAlert(message as string);
+      return;
+    }
+    recordDialog("alert", String(message ?? ""), "aceptado por el agente");
+  };
+  window.confirm = (message?: string) => {
+    if (!driving) {
+      const answer = nativeConfirm(message);
+      recordDialog("confirm", String(message ?? ""), answer ? "aceptado por el usuario" : "cancelado por el usuario");
+      return answer;
+    }
+    recordDialog("confirm", String(message ?? ""), dialogPolicy.accept ? "aceptado por el agente" : "cancelado por el agente");
+    return dialogPolicy.accept;
+  };
+  window.prompt = (message?: string, fallback?: string) => {
+    if (!driving) {
+      const answer = nativePrompt(message, fallback);
+      recordDialog("prompt", String(message ?? ""), answer === null ? "cancelado por el usuario" : `"${answer}" (el usuario)`);
+      return answer;
+    }
+    const answer = dialogPolicy.accept ? (dialogPolicy.text || fallback || "") : null;
+    recordDialog("prompt", String(message ?? ""), answer === null ? "cancelado por el agente" : `"${answer}" (el agente)`);
+    return answer;
+  };
+
   window.addEventListener("pagehide", flush);
 
   // ── Órdenes ───────────────────────────────────────────────────
+
+  /** El puntero que muestra lo que está haciendo el agente. */
+  const cursor = createCursor();
+  const clipLabel = (text: string) => (text.length > 24 ? `${text.slice(0, 24)}…` : text);
 
   /** Los refs del último snapshot. Se reemplazan enteros con cada uno: un ref viejo que
    *  apunte a otra cosa sería peor que un ref que no existe. */
@@ -719,6 +781,8 @@ declare global {
 
   async function click(el: Element): Promise<unknown> {
     if ((el as HTMLButtonElement).disabled) throw new Error(`${describeElement(el)} está deshabilitado.`);
+    await cursor.toElement(el, "click");
+    cursor.click();
     const { x, y, target } = aim(el);
     const before = location.href;
     for (const type of ["pointerover", "pointerenter", "pointermove", "pointerdown"]) mouse(target, type, x, y);
@@ -771,6 +835,7 @@ declare global {
 
   async function type(el: Element, text: string, clear: boolean, submit: boolean): Promise<unknown> {
     if ((el as HTMLInputElement).disabled) throw new Error(`${describeElement(el)} está deshabilitado.`);
+    await cursor.toElement(el, `type "${clipLabel(text)}"`);
     (el as HTMLElement).focus?.({ preventScroll: false });
     if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
       const field = el as HTMLInputElement | HTMLTextAreaElement;
@@ -814,6 +879,8 @@ declare global {
   async function press(key: string, targetEl?: Element): Promise<unknown> {
     const combo = parseKeyCombo(key);
     const el = targetEl ?? document.activeElement ?? document.body;
+    if (el instanceof Element && el !== document.body) await cursor.toElement(el, `key ${key}`);
+    else cursor.say(`key ${key}`);
     if (targetEl) (targetEl as HTMLElement).focus?.({ preventScroll: false });
     const code = /^[a-z]$/i.test(combo.key) ? `Key${combo.key.toUpperCase()}`
       : /^\d$/.test(combo.key) ? `Digit${combo.key}` : combo.key === " " ? "Space" : combo.key;
@@ -860,6 +927,7 @@ declare global {
   }
 
   async function select(el: Element, value: string): Promise<unknown> {
+    await cursor.toElement(el, `select "${clipLabel(value)}"`);
     if (el.tagName !== "SELECT") {
       throw new Error(`${describeElement(el)} no es un <select>. Si es un menú propio, abrilo con click y elegí la opción con click.`);
     }
@@ -879,6 +947,7 @@ declare global {
   }
 
   async function hover(el: Element): Promise<unknown> {
+    await cursor.toElement(el, "hover");
     const { x, y, target } = aim(el);
     for (const t of ["pointerover", "pointerenter", "pointermove"]) mouse(target, t, x, y);
     mouse(target, "mouseover", x, y);
@@ -887,10 +956,67 @@ declare global {
     return { hovered: describeElement(el), note: "Dispara los eventos del mouse; el :hover de CSS no se puede simular desde la página." };
   }
 
+  /** Arrastrar y soltar: los eventos de puntero para lo que escucha el mouse, y los de
+   *  arrastre de HTML para lo que usa `draggable`. Sin los dos, la mitad de las listas
+   *  ordenables no se enteran. */
+  async function drag(fromTarget: string, toTarget: string): Promise<unknown> {
+    const from = resolve(fromTarget);
+    const to = resolve(toTarget);
+    await cursor.toElement(from, "drag");
+    const start = aim(from);
+    const end = aim(to);
+
+    mouse(start.target, "pointerover", start.x, start.y);
+    mouse(start.target, "pointerdown", start.x, start.y);
+    const transfer = typeof DataTransfer === "function" ? new DataTransfer() : null;
+    const dragEvent = (el: Element, type: string, x: number, y: number) => {
+      const event = transfer && typeof DragEvent === "function"
+        ? new DragEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: transfer })
+        : new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y });
+      el.dispatchEvent(event);
+    };
+    dragEvent(start.target, "dragstart", start.x, start.y);
+
+    // Unos pasos intermedios: una lista ordenable decide dónde cae mirando por dónde pasó.
+    for (let step = 1; step <= 4; step++) {
+      const x = start.x + ((end.x - start.x) * step) / 4;
+      const y = start.y + ((end.y - start.y) * step) / 4;
+      await cursor.toElement(step === 4 ? to : from, "drag");
+      mouse(end.target, "pointermove", x, y);
+      dragEvent(end.target, "dragover", x, y);
+    }
+    dragEvent(end.target, "drop", end.x, end.y);
+    mouse(end.target, "pointerup", end.x, end.y);
+    dragEvent(start.target, "dragend", end.x, end.y);
+    cursor.click();
+    await settle();
+    return { dragged: describeElement(from), onto: describeElement(to) };
+  }
+
+  /** Pone un archivo en un `<input type=file>` como si lo hubiera elegido una persona. */
+  async function upload(target: string, name: string, mime: string, data: string): Promise<unknown> {
+    const el = resolve(target);
+    const input = el as HTMLInputElement;
+    if (input.tagName !== "INPUT" || input.type !== "file") {
+      throw new Error(`${describeElement(el)} no es un <input type="file">.`);
+    }
+    if (typeof DataTransfer !== "function") throw new Error("Este motor no deja poner archivos desde afuera.");
+    await cursor.toElement(el, `upload ${clipLabel(name)}`);
+    const blob = await (await fetch(`data:${mime || "application/octet-stream"};base64,${data}`)).blob();
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([blob], name, { type: mime || blob.type }));
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle(800);
+    return { uploaded: name, bytes: blob.size, input: describeElement(el) };
+  }
+
   async function scroll(command: Extract<PageCommand, { op: "scroll" }>): Promise<unknown> {
     const root = document.documentElement;
     if (command.target) {
       const el = resolve(command.target);
+      await cursor.toElement(el, "scroll");
       if (command.dy) el.scrollBy(0, command.dy);
       else el.scrollIntoView({ block: "center" });
     } else if (command.to === "top") {
@@ -905,11 +1031,23 @@ declare global {
   }
 
   function wait(command: Extract<PageCommand, { op: "wait" }>): Promise<unknown> {
-    const { text, selector, gone } = command;
-    if (!text && !selector) return Promise.reject(new Error("Pasá text o selector."));
+    const { text, selector, gone, idle } = command;
+    if (!text && !selector && !idle) return Promise.reject(new Error("Pasá text, selector o idle."));
     const timeout = Math.min(Math.max(command.timeoutMs ?? 5000, 0), 15_000);
     const started = Date.now();
+    // "En reposo" no es "cero pedidos ahora": una página que encadena llamadas tiene
+    // huecos de milisegundos entre una y la siguiente. Hace falta que se sostenga.
+    let quietSince: number | null = null;
+    const isIdle = (): boolean => {
+      if (inFlight > 0) {
+        quietSince = null;
+        return false;
+      }
+      quietSince = quietSince ?? Date.now();
+      return Date.now() - quietSince >= 400;
+    };
     const present = (): boolean => {
+      if (idle && !text && !selector) return isIdle();
       if (selector) {
         try {
           return Array.from(document.querySelectorAll(selector)).some(isVisible);
@@ -928,9 +1066,10 @@ declare global {
           fail(e);
           return;
         }
-        if (ok) done({ waitedMs: Date.now() - started });
+        if (ok && idle && (text || selector) && !isIdle()) ok = false;
+        if (ok) done({ waitedMs: Date.now() - started, inFlight });
         else if (Date.now() - started >= timeout) {
-          const what = selector ? `el selector "${selector}"` : `el texto "${text}"`;
+          const what = selector ? `el selector "${selector}"` : text ? `el texto "${text}"` : `la red en reposo (${inFlight} pedido(s) sin terminar)`;
           fail(new Error(`${gone ? "Sigue estando" : "No apareció"} ${what} después de ${timeout} ms.`));
         } else setTimer(tick, 100);
       };
@@ -1232,11 +1371,24 @@ declare global {
       case "cookies": return cookies(command);
       case "performance": return performanceReport();
       case "describe": return describe(command.target);
+      case "drag": return drag(command.from, command.to);
+      case "upload": return upload(command.target, command.name, command.mime, command.data);
+      case "dialogs": {
+        if (command.accept !== undefined) dialogPolicy.accept = command.accept;
+        if (command.text !== undefined) dialogPolicy.text = command.text;
+        return {
+          policy: { accept: dialogPolicy.accept, promptText: dialogPolicy.text },
+          seen: dialogs.slice(-20),
+        };
+      }
     }
   }
 
   async function run(id: string, command: PageCommand): Promise<void> {
     let payload: { id: string; ok: true; result: unknown } | { id: string; ok: false; error: string };
+    // Mientras dura la orden, los diálogos de la página los contesta el runtime: si no, la
+    // acción del agente quedaría esperando a una persona que quizá no está mirando.
+    driving = true;
     try {
       payload = { id, ok: true, result: await execute(command) };
     } catch (e) {
@@ -1245,6 +1397,7 @@ declare global {
     if (!post({ type: "page:reply", payload })) {
       post({ type: "page:reply", payload: { id, ok: false, error: "El resultado no se puede transferir a la app." } });
     }
+    driving = false;
     // Lo que la acción haya logueado viaja enseguida: la app lo junta con la respuesta.
     flush();
   }
@@ -1253,6 +1406,12 @@ declare global {
     if (e.source !== window.parent || e.data?.source !== "controlcode") return;
     parentOrigin = e.origin;
     const message = e.data;
+    // Mientras nadie mira la tab, el puntero no se anima: serían 300 ms por acción
+    // dibujando algo que no se ve.
+    if (message.type === "view:shown" || message.type === "view:hidden") {
+      cursor.setWatched(message.type === "view:shown");
+      return;
+    }
     if (message.type === "connect" || message.type === "hello") flush();
     else if (message.type === "page:run") void run(message.id, message.command);
   });

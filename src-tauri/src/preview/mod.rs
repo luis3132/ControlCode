@@ -13,6 +13,7 @@
 
 mod capture;
 mod log;
+mod mocks;
 mod proxy;
 mod rewrite;
 mod snapshot;
