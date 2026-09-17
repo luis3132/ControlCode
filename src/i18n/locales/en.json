@@ -658,6 +658,8 @@
   "browser.note": "What should the agent do? (Ctrl+Enter to send)",
   "browser.noAgents": "There are no agents open in this workspace.",
   "browser.send": "Send to agent",
+  "browser.sendTo": "Send it to",
+  "browser.sendTarget": "This is who gets what you marked",
   "browser.sent": "Sent to {{agent}}",
   "browser.goToAgent": "View",
   "browser.agentNotReady": "That agent's terminal isn't ready yet.",

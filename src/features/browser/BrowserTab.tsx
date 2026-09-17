@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, Select, TrashIcon } from "neogestify-ui-components";
+import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, TrashIcon } from "neogestify-ui-components";
 
 import {
   BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
@@ -15,6 +15,8 @@ import pickerScript from "./picker.ts?script";
 import runtimeScript from "./page/runtime.ts?script";
 import { registerBrowserHost } from "./agentBridge";
 import { newMarkId, rememberMarks } from "./markStore";
+import { highlightAgent } from "./agentHighlight";
+import { AgentPicker } from "./AgentPicker";
 import { AnnotationBar, AnnotationCanvas, renderAnnotated, useAnnotationSession } from "./annotate/Annotator";
 import { canvasToPng, freezePage, thumbnail, type FrozenPage } from "./annotate/capture";
 import { composePickMessage, toTargetUrl, type AnnotatedCapture } from "./composeMessage";
@@ -77,7 +79,12 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const activateTab = useTabsStore((s) => s.activateTab);
-  const agents = useMemo(() => tabs.filter((tab) => tab.cwd === view.cwd), [tabs, view.cwd]);
+  // Solo agentes: a una terminal `bash` no se le manda lo que marcaste — no lo lee nadie,
+  // se pegaría como texto en un prompt de shell.
+  const agents = useMemo(
+    () => tabs.filter((tab) => tab.cwd === view.cwd && tab.agentId !== "bash"),
+    [tabs, view.cwd]
+  );
 
   const [address, setAddress] = useState(view.url);
   const [target, setTarget] = useState<PreviewTarget | null>(null);
@@ -368,6 +375,14 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     window.addEventListener("keydown", onKey, { capture: true });
     return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [picking, active, postToPage]);
+
+  // Con el panel abierto, la tab del agente elegido se prende de su color: es cómo se sabe
+  // a cuál de tres «Claude Code» le va a llegar esto.
+  useEffect(() => {
+    if (!composerOpen || !agentId) return;
+    highlightAgent(agentId);
+    return () => highlightAgent(null);
+  }, [composerOpen, agentId]);
 
   // Si el agente elegido se cerró, se propone el que esté activo.
   useEffect(() => {
@@ -810,13 +825,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
                   <p className="flex-1 text-[11px] text-gray-400 dark:text-white/30">{t("browser.noAgents")}</p>
                 ) : (
                   <div className={compact ? "flex-1 min-w-0" : undefined}>
-                    <Select
-                      value={agentId ?? ""}
-                      onChange={(e) => setAgentId(e.target.value)}
-                      options={agents.map((a) => ({ value: a.id, label: a.title }))}
-                      size="sm"
-                      variant="outline"
-                    />
+                    <AgentPicker agents={agents} value={agentId} onChange={setAgentId} compact={compact} />
                   </div>
                 )}
                 <Button size="sm" variant="primary" fullWidth={!compact}

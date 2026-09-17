@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
+import { useAgentHighlight } from "@/features/browser/agentHighlight";
 import { agentPaint } from "@/features/browser/agentPaint";
 import { activateItem, useLayoutStore } from "@/features/tabs/layout/layoutStore";
 import { isAgentKey, keyId } from "@/features/tabs/layout/layoutTree";
@@ -33,6 +34,9 @@ export function GroupTabStrip({ items, active, groupFocused, draggable }: {
   const renameTab = useTabsStore((s) => s.renameTab);
   const views = useViewTabsStore((s) => s.views);
   const dragging = useLayoutStore((s) => s.drag?.key ?? null);
+  // El agente al que se le va a mandar lo marcado en un navegador: se prende con su
+  // color mientras se lo elige, que es lo único que distingue tres «Claude Code».
+  const highlighted = useAgentHighlight((s) => s.id);
 
   const byId = useMemo(() => new Map(tabs.map((tab) => [tab.id, tab])), [tabs]);
   const mine = useMemo(() => {
@@ -89,8 +93,12 @@ export function GroupTabStrip({ items, active, groupFocused, draggable }: {
               tabKey={key}
               className={faded}
               tab={tab}
-              paint={driving.has(tab.id) ? agentPaint(tab.id) : null}
-              paintHint={driving.has(tab.id) ? t("browser.driving") : undefined}
+              paint={driving.has(tab.id) || highlighted === tab.id ? agentPaint(tab.id) : null}
+              paintHint={
+                highlighted === tab.id
+                  ? t("browser.sendTarget")
+                  : driving.has(tab.id) ? t("browser.driving") : undefined
+              }
               isActive={key === active}
               groupFocused={groupFocused}
               onActivate={() => activate(key)}
