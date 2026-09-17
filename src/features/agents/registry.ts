@@ -31,6 +31,10 @@ export interface AgentRegistryEntry {
   resume: string | null;
   supportsAccounts: boolean;
   sessions: string;
+  /** Cómo recibe esta TUI el servidor MCP de la app. Espejo de `McpStyle` en
+   *  `registry.rs`: `claudeFlags` por flags, `opencodeConfig` por su config, `none` = no
+   *  se le enchufa (arranca igual, sin navegador ni orquestación). */
+  mcp: "claudeFlags" | "opencodeConfig" | "none";
 }
 
 let REGISTRY: AgentRegistryEntry[] = [];

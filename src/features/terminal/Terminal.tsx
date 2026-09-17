@@ -25,7 +25,7 @@ import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { accountEnv as accountEnvFor } from "@/features/accounts/ipc";
 import { resolvePrelaunch } from "@/features/prelaunch/ipc";
 import { reconcileTabSkills } from "@/features/skills/ipc";
-import { withBrowserMcp } from "@/features/browser/tabMcp";
+import { hasBrowserMcp, withBrowserMcp } from "@/features/browser/tabMcp";
 import { homeDir } from "@/shared/ipc/window";
 import { ptyAttach, ptyCreate, ptyKill, ptyResize, ptyWrite } from "./ipc";
 import { createFitter } from "./fit";
@@ -396,16 +396,23 @@ export function Terminal({
           }
         }
 
-        // Claude Code arranca con el navegador de la app como MCP: así puede abrir, leer y
-        // probar la página del proyecto en su propia tab de navegador. El id de ESTA tab
-        // viaja adentro del config: es con lo que la app sabe de qué agente viene cada
-        // pedido, y por lo tanto de qué color pintar su navegador.
-        const launch =
-          agentId === "claude-code" && tabId ? await withBrowserMcp(command, resolvedCwd, tabId) : command;
+        // La tab arranca con el navegador de la app como MCP: así el agente puede abrir,
+        // leer y probar la página del proyecto en su propia tab de navegador. El id de
+        // ESTA tab viaja adentro del lanzamiento: es con lo que la app sabe de qué agente
+        // viene cada pedido, y por lo tanto de qué color pintar su navegador.
+        //
+        // Cada TUI lo recibe a su manera y eso lo decide el catálogo, no un `if` con un id
+        // adentro: mientras estuvo escrito acá, OpenCode arrancaba sin las tools y sin
+        // decir por qué. `withBrowserMcp` devuelve el comando y las variables porque
+        // OpenCode no tiene flag — el servidor va en su config, que se le pasa por entorno.
+        const browser =
+          agentId && tabId && hasBrowserMcp(agentId)
+            ? await withBrowserMcp(command, resolvedCwd, tabId, agentId)
+            : { command, env: {} };
         if (cancelled) return;
 
         const ptyId = await ptyCreate({
-          command: launch,
+          command: browser.command,
           cwd: resolvedCwd,
           cols: term.cols,
           rows: term.rows,
@@ -417,6 +424,7 @@ export function Terminal({
             agentId
               ? useAgentsStore.getState().customAgents.find((a) => a.id === agentId)?.env
               : undefined,
+            browser.env,
             accountEnv,
             env
           ),

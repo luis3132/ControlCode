@@ -478,24 +478,45 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
 /// rompe al cliente.
 fn run_mcp(args: &[String]) -> ExitCode {
     use controlcode_lib::ipc::mcp::McpContext;
-    let context = match args {
-        [flag, value, ..] if flag == "--task" => McpContext::Task(value.clone()),
-        [flag, value, rest @ ..] if flag == "--cwd" => McpContext::Cwd {
-            cwd: value.clone(),
-            tab: match rest {
-                [tab_flag, tab, ..] if tab_flag == "--tab" => Some(tab.clone()),
-                _ => None,
-            },
-        },
-        _ => {
-            eprintln!("Uso: ccode mcp --task <id-de-tarea> | --cwd <carpeta> [--tab <id-de-tab>]");
+
+    // Por nombre y no por posición: OpenCode escribe el comando entero en un arreglo de su
+    // config, y no hay razón para que el orden en que lo escriba alguien a mano tenga que
+    // coincidir con el que escribe la app.
+    let mut flags: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        match flag.as_str() {
+            name @ ("--task" | "--cwd" | "--tab" | "--prefix") => {
+                let Some(value) = rest.next() else {
+                    eprintln!("Falta el valor de {name}");
+                    return ExitCode::from(EXIT_USAGE);
+                };
+                flags.insert(name, value.clone());
+            }
+            other => {
+                eprintln!("Argumento inesperado para 'ccode mcp': {other}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        }
+    }
+
+    let context = match (flags.remove("--task"), flags.remove("--cwd")) {
+        (Some(task), _) => McpContext::Task(task),
+        (None, Some(cwd)) => McpContext::Cwd { cwd, tab: flags.remove("--tab") },
+        (None, None) => {
+            eprintln!(
+                "Uso: ccode mcp --task <id-de-tarea> | --cwd <carpeta> [--tab <id-de-tab>] [--prefix <prefijo>]"
+            );
             return ExitCode::from(EXIT_USAGE);
         }
     };
+    // Lo que esta TUI le antepone al nombre de cada tool. Vacío = no antepone nada.
+    let prefix = flags.remove("--prefix").unwrap_or_default();
 
     let stdin = std::io::stdin();
     let result = controlcode_lib::ipc::mcp::serve(
         &context,
+        &prefix,
         stdin.lock(),
         std::io::stdout(),
         |command, payload| {

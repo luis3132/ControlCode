@@ -21,6 +21,7 @@ import { AnnotationBar, AnnotationCanvas, renderAnnotated, useAnnotationSession 
 import { canvasToPng, freezePage, thumbnail, type FrozenPage } from "./annotate/capture";
 import { composePickMessage, toTargetUrl, type AnnotatedCapture } from "./composeMessage";
 import { composePointer } from "./markedView";
+import { browserToolPrefix, hasBrowserMcp } from "./tabMcp";
 import { DebugPanel, MIN_PANEL, type DebugTab } from "./debug/DebugPanel";
 import { appendBatch, currentCounts, EMPTY_LOG, startDocument } from "./debugLog";
 import { useDebugStore } from "./debugStore";
@@ -463,14 +464,16 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     const batchId = newMarkId("m");
     // Un agente con el MCP de Control Code no necesita el volcado: se le dice qué hay y lo
     // lee con `browser_marked`, que se lo describe como está AHORA —si algo cambió o quedó
-    // tapado desde que se marcó, se entera— y le da un ref para tocarlo.
-    const text = agent.agentId === "claude-code"
+    // tapado desde que se marcó, se entera— y le da un ref para tocarlo. Al que no lo
+    // tiene se le manda todo servido, que es lo único que le puede llegar.
+    const text = hasBrowserMcp(agent.agentId)
       ? composePointer(
         { picks: picks.length, captures: captures.length },
         display(picks[0]?.url ?? pageUrl.current ?? ""),
         note,
         captures.map((c) => c.path),
-        batchId
+        batchId,
+        browserToolPrefix(agent.agentId)
       )
       : composePickMessage(picks, note, display, captures.map(bare));
     if (!pasteIntoTab(agent.id, text, true)) {

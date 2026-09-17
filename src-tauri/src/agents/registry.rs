@@ -58,6 +58,30 @@ pub struct ProfileDef {
     pub label_path: &'static [&'static str],
 }
 
+/// Cómo recibe una TUI el servidor MCP que le enchufa la app (el navegador y la
+/// orquestación de Control Code).
+///
+/// Verificado contra cada CLI, no asumido: el formato no se parece entre ellas, y darle a
+/// una el de la otra no falla al arrancar — arranca sin las tools, que es exactamente el
+/// síntoma que hubo con OpenCode.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum McpStyle {
+    /// `--mcp-config <archivo>` con `{"mcpServers": {…}}`, más `--allowedTools` para no
+    /// tener que aprobar cada click. Las tools le llegan como
+    /// `mcp__controlcode__browser_click`. (Claude Code.)
+    ClaudeFlags,
+    /// No tiene flag: el servidor va en su config, bajo `"mcp"`
+    /// (opencode.ai/docs/mcp-servers). La app se la pasa por `OPENCODE_CONFIG_CONTENT`,
+    /// que se **fusiona** con la del usuario en vez de reemplazarla —verificado con
+    /// `opencode debug config`: sobreviven su modelo, sus proveedores y sus otros MCP—, y
+    /// las tools le llegan con el nombre del servidor de prefijo:
+    /// `controlcode_browser_click`. (OpenCode.)
+    OpencodeConfig,
+    /// Todavía no se verificó cómo enchufárselo. La tab arranca igual, sin las tools.
+    None,
+}
+
 /// Un modelo que la TUI resuelve sola a partir de un alias.
 #[derive(Clone, Copy, Debug)]
 pub struct ModelAlias {
@@ -119,6 +143,8 @@ pub struct AgentDef {
     pub resume: Option<&'static str>,
     pub sessions: SessionSource,
     pub models: ModelSource,
+    /// Cómo se le enchufa el servidor MCP de la app.
+    pub mcp: McpStyle,
 }
 
 pub const AGENTS: &[AgentDef] = &[
@@ -142,6 +168,7 @@ pub const AGENTS: &[AgentDef] = &[
         resume: Some("--resume {session}"),
         sessions: SessionSource::ClaudeProjects,
         models: ModelSource::Aliases(CLAUDE_MODELS),
+        mcp: McpStyle::ClaudeFlags,
     },
     AgentDef {
         id: "gemini-cli",
@@ -153,6 +180,7 @@ pub const AGENTS: &[AgentDef] = &[
         resume: Some("--resume {session}"),
         sessions: SessionSource::GeminiTmp,
         models: ModelSource::Unknown,
+        mcp: McpStyle::None,
     },
     AgentDef {
         id: "codex",
@@ -170,6 +198,7 @@ pub const AGENTS: &[AgentDef] = &[
         resume: Some("resume {session}"),
         sessions: SessionSource::CodexRollouts,
         models: ModelSource::Unknown,
+        mcp: McpStyle::None,
     },
     AgentDef {
         id: "opencode",
@@ -191,6 +220,7 @@ pub const AGENTS: &[AgentDef] = &[
         resume: Some("--session {session}"),
         sessions: SessionSource::ProcessQuery,
         models: ModelSource::OpencodeModels,
+        mcp: McpStyle::OpencodeConfig,
     },
     AgentDef {
         // Moonshot AI — repo en transición de nombre kimi-cli → kimi-code, el binario real
@@ -204,6 +234,7 @@ pub const AGENTS: &[AgentDef] = &[
         resume: Some("--session {session}"),
         sessions: SessionSource::KimiSessions,
         models: ModelSource::Unknown,
+        mcp: McpStyle::None,
     },
     AgentDef {
         // No es una TUI de agente: es la salida de emergencia a una terminal pelada. Está
@@ -218,6 +249,7 @@ pub const AGENTS: &[AgentDef] = &[
         resume: None,
         sessions: SessionSource::None,
         models: ModelSource::Unknown,
+        mcp: McpStyle::None,
     },
 ];
 
@@ -255,6 +287,10 @@ pub struct AgentRegistryEntry {
     pub resume: Option<String>,
     pub supports_accounts: bool,
     pub sessions: SessionSource,
+    /// Cómo se le enchufa el servidor MCP. El frontend lo usa para dos cosas: decidir si
+    /// la tab arranca con el navegador, y saber con qué nombre tiene que mandar al agente
+    /// a usar una tool (OpenCode las prefija con el nombre del servidor).
+    pub mcp: McpStyle,
 }
 
 /// El catálogo estático de TUIs de fábrica. Sin I/O: responde en el acto.
@@ -270,6 +306,7 @@ pub fn agent_registry() -> Vec<AgentRegistryEntry> {
             resume: a.resume.map(str::to_string),
             supports_accounts: a.profile.is_some(),
             sessions: a.sessions,
+            mcp: a.mcp,
         })
         .collect()
 }

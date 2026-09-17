@@ -99,7 +99,10 @@ export function formatMarked(
   entries: MarkedEntry[],
   captures: AnnotatedCapture[],
   note: string,
-  toDisplayUrl: (url: string) => string
+  toDisplayUrl: (url: string) => string,
+  /** Lo que ESTA TUI le antepone al nombre de cada tool (OpenCode: `controlcode_`). Las
+   *  tools que se nombran acá tiene que poder llamarlas con el nombre que lee. */
+  prefix = ""
 ): string {
   const out: string[] = [];
   if (entries.length > 0) {
@@ -108,7 +111,11 @@ export function formatMarked(
     entries.forEach((entry, i) => {
       out.push(formatElement(entry, i + 1, toDisplayUrl), "");
     });
-    out.push("Act on them by their ref (browser_click u1, browser_type u2 …); refs the user marked stay valid until the page reloads.", "");
+    out.push(
+      `Act on them by their ref (${prefix}browser_click u1, ${prefix}browser_type u2 …); refs the user marked`
+      + " stay valid until the page reloads.",
+      ""
+    );
   }
   if (captures.length > 0) {
     out.push("Screenshots the user annotated (open the files with your file tools):", "");
@@ -135,7 +142,10 @@ export function composePointer(
   capturePaths: string[] = [],
   /** Cuál de los lotes es este. Con dos agentes marcando cosas, es lo que le dice a cada
    *  uno cuál le toca. */
-  batchId?: string
+  batchId?: string,
+  /** Lo que ESTA TUI le antepone al nombre de cada tool. Sin esto, a un agente de OpenCode
+   *  se le dice que use `browser_marked` y lo que tiene se llama `controlcode_browser_marked`. */
+  prefix = ""
 ): string {
   const parts: string[] = [];
   if (counts.picks > 0) {
@@ -149,10 +159,10 @@ export function composePointer(
   if (parts.length === 0) parts.push(`About ${url}:`);
   parts.push(
     batchId
-      ? `Read it with browser_marked id=${batchId} — that id is yours and returns exactly this: the component and`
-        + " source file that rendered each element, where it sits, its styles and a ref you can act on."
-      : "Read it with browser_marked: it gives you the component and source file that rendered each one, where it"
-        + " sits, its styles and a ref you can act on."
+      ? `Read it with ${prefix}browser_marked id=${batchId} — that id is yours and returns exactly this: the`
+        + " component and source file that rendered each element, where it sits, its styles and a ref you can act on."
+      : `Read it with ${prefix}browser_marked: it gives you the component and source file that rendered each one,`
+        + " where it sits, its styles and a ref you can act on."
   );
 
   const lines = [parts.join(" ")];
