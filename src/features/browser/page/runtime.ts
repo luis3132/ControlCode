@@ -27,7 +27,7 @@ import {
   errorKindOf, headerList, headerValue, parseRawHeaders, readResponseBody, requestBodyPreview, MAX_PAGE_BODY,
 } from "./netCapture";
 import { callerOf, clip, displayPath, formatConsoleArgs, formatValue, toTransferable } from "./serialize";
-import { isTouch, setTouch } from "./touch";
+import { isTouch, sendTouch, setTouch } from "./touch";
 import {
   displayHref, formatSnapshot, normalizeName, parseKeyCombo, parseTarget, type SnapshotNode,
 } from "./snapshotFormat";
@@ -753,25 +753,6 @@ declare global {
     return el.dispatchEvent(event);
   }
 
-  /** Un evento táctil de verdad, para lo que escucha `touchstart` y no `pointerdown`. Si
-   *  el motor no sabe construirlos, los de puntero (con `pointerType: "touch"`) ya llevan
-   *  la misma información. */
-  function touch(el: Element, type: string, x: number, y: number): void {
-    if (typeof Touch !== "function" || typeof TouchEvent !== "function") return;
-    try {
-      const point = new Touch({ identifier: 1, target: el, clientX: x, clientY: y, pageX: x, pageY: y });
-      // En `touchend` ya no hay dedos apoyados: `touches` va vacío y el que se levantó va
-      // en `changedTouches`. Una galería que mira `touches.length` depende de eso.
-      const down = type !== "touchend" ? [point] : [];
-      el.dispatchEvent(new TouchEvent(type, {
-        bubbles: true, cancelable: true, composed: true, view: window,
-        touches: down, targetTouches: down, changedTouches: [point],
-      }));
-    } catch {
-      /* sin soporte de táctil: quedan los de puntero */
-    }
-  }
-
   /** Dónde tocar el elemento, trayéndolo a la vista. Falla si otra cosa lo tapa: eso es un
    *  bug de la página (un overlay que quedó abierto), y un click que lo atraviesa lo
    *  escondería. */
@@ -808,10 +789,10 @@ declare global {
     // Un dedo no pasa por encima antes de apretar: va directo. Es la diferencia que rompe
     // un menú que solo se abre con `:hover`, y por eso se emula en vez de simplificarse.
     const approach = isTouch() ? ["pointerdown"] : ["pointerover", "pointerenter", "pointermove", "pointerdown"];
-    if (isTouch()) touch(target, "touchstart", x, y);
+    if (isTouch()) sendTouch(target, "touchstart", x, y);
     for (const type of approach) mouse(target, type, x, y);
     if (typeof (target as HTMLElement).focus === "function") (target as HTMLElement).focus({ preventScroll: true });
-    if (isTouch()) touch(target, "touchend", x, y);
+    if (isTouch()) sendTouch(target, "touchend", x, y);
     mouse(target, "pointerup", x, y);
     // `click()` y no un MouseEvent a mano: dispara lo que hace el navegador con un click de
     // verdad (seguir el link, marcar el checkbox, enviar el form).
