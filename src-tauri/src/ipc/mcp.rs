@@ -114,10 +114,17 @@ can act on.",
     BrowserTool {
         name: "browser_marked",
         op: "marked",
-        description: "What the user already marked in the browser and hasn't sent yet: the elements they picked (each \
-described as it is right now, with component, source file, box, styles and a ref), the screenshots they annotated (as \
-file paths you can open) and their note. Read it when they say \"esto\", \"este botón\" or paste a pointer to it.",
-        properties: || json!({}),
+        description: "What the user marked for you in the browser: the elements they picked (each described as \
+it is right now, with component, source file, box, styles and a ref), the screenshots they annotated (as file paths \
+you can open) and their note. Read it as soon as they say they marked something. You get the batch addressed to YOU \
+— with several agents on the same project each one reads its own — and reading it consumes that batch, so keep what \
+you need. If they have something marked but not sent yet, you get that instead.",
+        properties: || json!({
+            "id": {
+                "type": "string",
+                "description": "The id the user's message gave you (m-… for the batch, s-… for one of its screenshots). Pass it and you get exactly that one, or an error saying it is not yours. Without it you get the newest batch addressed to you.",
+            },
+        }),
         required: &[],
     },
     BrowserTool {
@@ -180,9 +187,10 @@ computed styles, attributes and HTML. Use it when a snapshot line is not enough 
     BrowserTool {
         name: "browser_screenshot",
         op: "screenshot",
-        description: "Photograph the page as the user sees it and save it to disk; returns the file path for you to \
-open with your file tools. It is a real capture from the engine (canvas, video and fonts included), not a redraw. It \
-brings the browser tab to the front, so the user sees what you are looking at.",
+        description: "Photograph the page as the user sees it and save it to disk; returns an id (s-…), the page URL \
+and the file path for you to open with your file tools. Both the id and your name are in the file name, so several \
+agents shooting the same page never mix up their images. It is a real capture from the engine (canvas, video and fonts included), not a redraw. It brings \
+the browser tab to the front, so the user sees what you are looking at.",
         properties: || json!({}),
         required: &[],
     },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { composePointer, formatMarked, type DescribedElement, type MarkedEntry } from "../markedView";
+import { batchHeader, composePointer, formatMarked, type DescribedElement, type MarkedEntry } from "../markedView";
 import type { PickedElement } from "../protocol";
 
 function described(patch: Partial<DescribedElement> = {}): DescribedElement {
@@ -72,8 +72,10 @@ describe("formatMarked", () => {
   /// Una captura es lo único que deja "ver" la página: va la ruta sola, para abrirla con
   /// las herramientas de archivos.
   it("las capturas van como archivo que el agente puede abrir", () => {
-    const text = formatMarked([], [{ path: "/home/u/.controlcode/captures/a.png", url: "http://127.0.0.1:40111/perfil" }], "", display);
+    const text = formatMarked([], [{ id: "s-aaaa1111", path: "/home/u/.controlcode/captures/a.png", url: "http://127.0.0.1:40111/perfil" }], "", display);
     expect(text).toContain("Screenshots the user annotated");
+    // Con su id: es lo que el agente puede pasarle a browser_marked sin equivocarse.
+    expect(text).toContain("[s-aaaa1111]");
     expect(text).toContain("/home/u/.controlcode/captures/a.png");
     expect(text).toContain("http://localhost:5173/perfil");
   });
@@ -81,17 +83,55 @@ describe("formatMarked", () => {
 
 describe("composePointer", () => {
   /// Al agente que tiene el MCP se le pega un aviso corto, no el volcado: lo que necesita
-  /// lo pide, y lo que no, no le gasta contexto.
-  it("es un aviso corto con la nota del usuario", () => {
-    const text = composePointer({ picks: 2, captures: 1 }, "http://localhost:5173/perfil", "no anda", {
-      marked: (n, url) => `Marqué ${n} elementos en ${url}.`,
-      captures: (n) => `Además dejé ${n} captura(s).`,
-      read: "Leelo con browser_marked.",
-      note: "Nota",
-    });
-    expect(text).toBe("Marqué 2 elementos en http://localhost:5173/perfil. Además dejé 1 captura(s). Leelo con browser_marked.\n\nNota: no anda");
-    expect(composePointer({ picks: 1, captures: 0 }, "u", "", {
-      marked: () => "uno", captures: () => "no va", read: "leé", note: "Nota",
-    })).toBe("uno leé");
+  /// lo pide, y lo que no, no le gasta contexto. En inglés: es un prompt, no interfaz.
+  it("es un aviso corto, en inglés, con el lote que le toca y la nota tal cual", () => {
+    const text = composePointer({ picks: 2, captures: 1 }, "http://localhost:5173/perfil", "no anda", [], "m-3f9a71c4");
+    expect(text.split("\n")).toEqual([
+      "I marked 2 elements for you in http://localhost:5173/perfil."
+      + " I left 1 annotated screenshot of that page."
+      + " Read it with browser_marked id=m-3f9a71c4 — that id is yours and returns exactly this: the component and"
+      + " source file that rendered each element, where it sits, its styles and a ref you can act on.",
+      "",
+      "Note from the user: no anda",
+    ]);
+  });
+
+  it("sin lote no promete un lote, y un solo elemento va en singular", () => {
+    const text = composePointer({ picks: 1, captures: 0 }, "http://localhost:5173/", "");
+    expect(text).toContain("I marked 1 element for you");
+    expect(text).toContain("Read it with browser_marked:");
+    expect(text).not.toContain("batch");
+  });
+
+  it("la ruta de cada captura va sola en su renglón", () => {
+    // La imagen ya está en disco: es un hecho que no cambia, así que va en el aviso y no
+    // solo en la tool. Sola en su renglón, que es como una TUI la reconoce y la adjunta.
+    const text = composePointer(
+      { picks: 0, captures: 2 },
+      "http://localhost:5173/",
+      "mirá esto",
+      ["/tmp/controlcode/capturas/a.png", "/tmp/controlcode/capturas/b.png"],
+      "m-0b12e4aa"
+    );
+    const lines = text.split("\n");
+    // Sin elementos marcados, esta frase es la única que dice de qué página es la captura.
+    expect(lines[0]).toContain("I left 2 annotated screenshots of http://localhost:5173/.");
+    expect(lines.slice(1)).toEqual([
+      "",
+      "/tmp/controlcode/capturas/a.png",
+      "/tmp/controlcode/capturas/b.png",
+      "",
+      "Note from the user: mirá esto",
+    ]);
+  });
+});
+
+describe("batchHeader", () => {
+  it("dice de quién es el lote, hace cuánto llegó y que es la última vez que se sirve", () => {
+    const text = batchHeader({ id: "m-2b2b2b2b", at: 1000 }, 1000 + 45_000);
+    expect(text).toContain("m-2b2b2b2b");
+    expect(text).toContain("45s ago");
+    expect(text).toContain("last time it is served");
+    expect(batchHeader({ id: "m-2b2b2b2b", at: 0 }, 300_000)).toContain("5 min ago");
   });
 });
