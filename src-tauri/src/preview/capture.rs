@@ -58,23 +58,44 @@ pub async fn preview_capture<R: Runtime>(webview: Webview<R>) -> Result<Response
 /// en git, y cualquier agente de la máquina puede leer la temporal.
 #[tauri::command]
 pub fn preview_save_capture(request: Request<'_>) -> Result<String, String> {
+    // De quién es la foto. Va por cabecera porque el cuerpo es el PNG crudo, y termina en
+    // el NOMBRE del archivo: con dos agentes sacando fotos de la misma página, que la ruta
+    // diga de quién es evita que uno abra la del otro.
+    let tag = request.headers().get(TAG_HEADER).and_then(|v| v.to_str().ok()).map(slug);
     let path = match request.body() {
-        InvokeBody::Raw(png) => save_capture(&capture_dir(), png, SystemTime::now())?,
+        InvokeBody::Raw(png) => save_capture(&capture_dir(), png, tag.as_deref(), SystemTime::now())?,
         // Si el webview no deja usar el protocolo del IPC, Tauri cae a `postMessage` y los
         // bytes llegan como una lista de números.
         InvokeBody::Json(value) => {
             let png: Vec<u8> = serde_json::from_value(value.clone()).map_err(|_| "la captura tiene que llegar como bytes".to_string())?;
-            save_capture(&capture_dir(), &png, SystemTime::now())?
+            save_capture(&capture_dir(), &png, tag.as_deref(), SystemTime::now())?
         }
     };
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// La cabecera con la que viaja de quién es la captura.
+const TAG_HEADER: &str = "x-controlcode-tag";
+
+/// Lo que puede ir en un nombre de archivo, y nada más: lo manda el frontend, pero termina
+/// en una ruta del disco y no se confía en él.
+fn slug(raw: &str) -> String {
+    let mut limpio = String::new();
+    for c in raw.chars() {
+        if c.is_ascii_alphanumeric() {
+            limpio.push(c.to_ascii_lowercase());
+        } else if !limpio.ends_with('-') {
+            limpio.push('-');
+        }
+    }
+    limpio.trim_matches('-').chars().take(24).collect()
 }
 
 fn capture_dir() -> PathBuf {
     std::env::temp_dir().join("controlcode").join("capturas")
 }
 
-fn save_capture(dir: &Path, png: &[u8], now: SystemTime) -> Result<PathBuf, String> {
+fn save_capture(dir: &Path, png: &[u8], tag: Option<&str>, now: SystemTime) -> Result<PathBuf, String> {
     if !png.starts_with(PNG_SIGNATURE) {
         return Err("la captura no es un PNG".into());
     }
@@ -85,7 +106,8 @@ fn save_capture(dir: &Path, png: &[u8], now: SystemTime) -> Result<PathBuf, Stri
     prune(dir, now);
     let secs = now.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let id = uuid::Uuid::new_v4().simple().to_string();
-    let path = dir.join(format!("captura-{secs}-{}.png", &id[..8]));
+    let de_quien = tag.filter(|t| !t.is_empty()).map(|t| format!("{t}-")).unwrap_or_default();
+    let path = dir.join(format!("captura-{de_quien}{secs}-{}.png", &id[..8]));
     fs::write(&path, png).map_err(|e| format!("no se pudo guardar la captura: {e}"))?;
     Ok(path)
 }
@@ -126,7 +148,7 @@ mod tests {
     fn guarda_un_png_y_devuelve_donde() {
         let dir = dir("guarda");
         let png = [PNG_SIGNATURE, b"resto"].concat();
-        let path = save_capture(&dir, &png, SystemTime::now()).unwrap();
+        let path = save_capture(&dir, &png, None, SystemTime::now()).unwrap();
         assert_eq!(fs::read(&path).unwrap(), png);
         assert!(path.file_name().unwrap().to_string_lossy().starts_with("captura-"));
         fs::remove_dir_all(dir).unwrap();
@@ -135,8 +157,28 @@ mod tests {
     #[test]
     fn no_guarda_lo_que_no_es_un_png() {
         let dir = dir("rechaza");
-        assert!(save_capture(&dir, b"<html>", SystemTime::now()).is_err());
+        assert!(save_capture(&dir, b"<html>", None, SystemTime::now()).is_err());
         assert!(!dir.exists());
+    }
+
+    #[test]
+    fn el_nombre_dice_de_quien_es_la_captura() {
+        // Dos agentes sacando fotos de la misma página: que la ruta lo diga es lo que evita
+        // que uno abra la del otro.
+        let dir = dir("de-quien");
+        let path = save_capture(&dir, PNG_SIGNATURE, Some("claude-2"), SystemTime::now()).unwrap();
+        let nombre = path.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(nombre.starts_with("captura-claude-2-"), "{nombre}");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn el_nombre_que_manda_el_frontend_no_puede_salirse_de_la_carpeta() {
+        // Llega de la interfaz y termina en una ruta: lo que no es letra o número, se cambia.
+        assert_eq!(slug("../../etc/passwd"), "etc-passwd");
+        assert_eq!(slug("Claude Code — demo"), "claude-code-demo");
+        assert_eq!(slug(&"x".repeat(50)).len(), 24);
+        assert_eq!(slug("///"), "");
     }
 
     #[test]
@@ -149,7 +191,7 @@ mod tests {
         fs::write(&ajeno, "no es mío").unwrap();
         // "Ahora" es dentro de dos días: las dos quedan viejas, pero solo se borra la captura.
         let later = SystemTime::now() + Duration::from_secs(2 * 24 * 60 * 60);
-        let nueva = save_capture(&dir, PNG_SIGNATURE, later).unwrap();
+        let nueva = save_capture(&dir, PNG_SIGNATURE, None, later).unwrap();
         assert!(!vieja.exists());
         assert!(ajeno.exists());
         assert!(nueva.exists());

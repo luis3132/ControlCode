@@ -23,7 +23,10 @@ import {
 } from "./ipc";
 import { detailForAgent, detailFromPage, detailFromProxy } from "./networkDetail";
 import type { AnnotatedCapture } from "./composeMessage";
-import { formatElement, formatMarked, type DescribedElement, type MarkedEntry } from "./markedView";
+import {
+  batchHeader, formatElement, formatMarked, type DescribedElement, type MarkedEntry,
+} from "./markedView";
+import { batchById, batchesFor, consumeMarks, newMarkId, pendingCount, type SentBatch } from "./markStore";
 import type { PageChannel } from "./pageChannel";
 import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
@@ -51,11 +54,21 @@ export interface BrowserHost {
   /** Espera a que cargue un documento posterior a `after`. `false` si venció el tope. */
   waitForLoad: (after: number, timeoutMs: number) => Promise<boolean>;
   /** Lo que la persona dejó señalado y todavía no mandó a nadie. */
-  marks: () => { picks: PickedElement[]; captures: AnnotatedCapture[]; note: string };
+  /** Lo que la persona tiene señalado en el panel de ESTA tab, sin mandar todavía. Lo que
+   *  ya mandó vive en `markStore`, buscable por su id. */
+  marks: () => Marks | null;
   /** Prende el selector y espera a que la persona marque algo. `null` = canceló o venció. */
   requestPick: (timeoutMs: number) => Promise<PickedElement | null>;
-  /** Una foto de la página como se ve ahora, guardada en disco. Devuelve la ruta. */
-  screenshot: () => Promise<string>;
+  /** Una foto de la página como se ve ahora, guardada en disco. Devuelve la ruta. `tag`
+   *  dice de quién es: va en el nombre del archivo. */
+  screenshot: (tag?: string) => Promise<string>;
+}
+
+/** Elementos, capturas y nota: lo que la persona señaló de una vez. */
+export interface Marks {
+  picks: PickedElement[];
+  captures: AnnotatedCapture[];
+  note: string;
 }
 
 export type BrowserRequest = { op: string } & Record<string, unknown>;
@@ -67,6 +80,11 @@ const lastUsed = new Map<string, string>();
  *  abrirla donde estaba en vez de contestarle "no tenés ningún navegador". */
 const lastUrl = new Map<string, string>();
 const hostWaiters = new Set<() => void>();
+
+/** ¿Esa tab tiene algo señalado (pendiente o recién mandado)? */
+function hasMarks(host: BrowserHost | undefined): boolean {
+  return host?.marks() != null;
+}
 
 export function registerBrowserHost(host: BrowserHost): () => void {
   hosts.set(host.viewId, host);
@@ -88,7 +106,7 @@ function waitForHost(viewId: string, timeoutMs: number): Promise<BrowserHost> {
     };
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error("La tab del navegador no terminó de montarse."));
+      reject(new Error("The browser tab did not finish mounting."));
     }, timeoutMs);
     const cleanup = () => {
       clearTimeout(timer);
@@ -132,8 +150,8 @@ async function hostFor(
     if (!url) {
       throw new Error(
         owner && !ofUser
-          ? "Todavía no tenés un navegador abierto en este proyecto. Abrí uno con browser_navigate y la URL del proyecto."
-          : `No hay ningún navegador abierto para ${cwd}. Usá browser_navigate con la URL del proyecto para abrir uno.`
+          ? "You do not have a browser open in this project yet. Open one with browser_navigate and the project URL."
+          : `There is no browser open for ${cwd}. Use browser_navigate with the project URL to open one.`
       );
     }
     // Sin robarle el foco a quien está escribiendo en la terminal: la tab aparece en la
@@ -148,9 +166,12 @@ async function hostFor(
 
   const active = browsers.find((v) => v.id === store.activeViewId);
   const remembered = browsers.find((v) => v.id === lastUsed.get(slot));
+  // Lo que marcó la persona está en UNA de sus tabs, que no tiene por qué ser la que dejó
+  // activa: con dos abiertas, buscar en la de adelante devolvía "no marcaste nada".
+  const withMarks = ofUser ? browsers.find((v) => hasMarks(hosts.get(v.id))) : undefined;
   // Para el agente manda LO SUYO, no lo que el usuario tenga activo: si el usuario abre su
   // propia tab del proyecto, el agente no debería empezar a escribir ahí.
-  const view = (owner && !ofUser ? remembered ?? active : active ?? remembered) ?? browsers[browsers.length - 1];
+  const view = (owner && !ofUser ? remembered ?? active : withMarks ?? active ?? remembered) ?? browsers[browsers.length - 1];
   lastUsed.set(slot, view.id);
   // Lo que tenga cargado AHORA, haya navegado el agente o el usuario: los dos usan esta
   // página, y al reabrirla tiene que volver a la última.
@@ -209,8 +230,8 @@ function cookieTable(rows: CookieRow[]): string {
       c.secure ? "Secure" : null,
       c.sameSite ? `SameSite=${c.sameSite}` : null,
       c.path ? `Path=${c.path}` : null,
-      c.expiresAt ? `vence ${new Date(c.expiresAt * 1000).toISOString()}` : "de sesión",
-      c.sent ? "se manda al servidor" : "NO se mandó en el último pedido",
+      c.expiresAt ? `expires ${new Date(c.expiresAt * 1000).toISOString()}` : "session cookie",
+      c.sent ? "sent to the server" : "NOT sent in the last request",
       c.visibleToPage ? null : "invisible para JS",
     ].filter(Boolean).join(" · ");
     const value = c.value.length > 120 ? `${c.value.slice(0, 120)}…` : c.value;
@@ -287,11 +308,18 @@ async function marksText(
   return inServerTerms(host, formatMarked(entries, captures, note, display));
 }
 
+/** Un envío del usuario, descrito en la tab donde lo marcó (si sigue abierta). */
+async function markedBatchText(fallback: BrowserHost, batch: SentBatch): Promise<string> {
+  const host = hosts.get(batch.viewId) ?? fallback;
+  const text = await marksText(host, batch.picks, batch.captures, batch.note);
+  return `${batchHeader(batch, Date.now())}\n\n${text}`;
+}
+
 /** Las reglas simuladas, para que el agente sepa qué está fingiendo la página. */
 function mocksText(mocks: Mock[]): string {
   if (mocks.length === 0) return "No hay ninguna respuesta simulada: el servidor del proyecto contesta todo.";
   const lines = mocks.map((m) => {
-    const parts = [`${m.method ?? "cualquier método"} ${m.url} → ${m.status}`];
+    const parts = [`${m.method ?? "any method"} ${m.url} → ${m.status}`];
     if (m.delayMs > 0) parts.push(`${m.delayMs} ms de demora`);
     if (m.times !== null) parts.push(`${m.hits}/${m.times} usos`);
     else if (m.hits > 0) parts.push(`${m.hits} uso(s)`);
@@ -300,7 +328,13 @@ function mocksText(mocks: Mock[]): string {
   return `Respuestas simuladas activas:\n${lines.join("\n")}`;
 }
 
-async function execute(host: BrowserHost, request: BrowserRequest, opened: boolean): Promise<string> {
+async function execute(
+  host: BrowserHost,
+  request: BrowserRequest,
+  opened: boolean,
+  /** Quién pregunta: cada agente lee los lotes que le mandaron a él. */
+  owner: ViewOwner | null
+): Promise<string> {
   const op = request.op;
   switch (op) {
     case "navigate": {
@@ -313,8 +347,8 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
       if (!opened) await host.navigate(url);
       const loaded = await host.waitForLoad(mark, 20_000);
       const head = loaded
-        ? `Cargó ${host.currentUrl()}`
-        : `La página no avisó que cargó en 20 s (${host.currentUrl()}). Puede seguir cargando, o no pasar por el proxy de Control Code.`;
+        ? `Loaded ${host.currentUrl()}`
+        : `The page did not report finishing the load within 20 s (${host.currentUrl()}). It may still be loading, or it may not be going through the Control Code proxy.`;
       return head + await sideEffects(host, firstId, startedAt);
     }
     case "history": {
@@ -354,7 +388,7 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
         }
         const width = num(request, "width") ?? fromPreset?.width;
         const height = num(request, "height") ?? fromPreset?.height ?? host.viewport()?.height ?? 900;
-        if (width === undefined) throw new Error("Pasá width (y height), un preset, o reset.");
+        if (width === undefined) throw new Error("Pass width (and height), a preset, or reset.");
         host.setViewport(clampViewport({ width, height }));
       }
 
@@ -423,26 +457,50 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
       const seconds = Math.min(Math.max(num(request, "timeout_s") ?? 120, 10), 600);
       const picked = await host.requestPick(seconds * 1000);
       if (!picked) {
-        throw new Error("El usuario no marcó nada: canceló con Escape, o pasaron los segundos de espera.");
+        throw new Error("The user marked nothing: they cancelled with Escape, or the wait timed out.");
       }
       return marksText(host, [picked], [], "", "pick");
     }
     case "marked": {
-      const { picks, captures, note } = host.marks();
-      if (picks.length === 0 && captures.length === 0 && !note.trim()) {
+      // Por id, que es lo que lleva el aviso: no hay forma de leer lo que le marcaron a
+      // otro, ni de confundir dos envíos. Sin id, el último que le hayan mandado a quien
+      // pregunta.
+      const asking = owner?.id ?? null;
+      const wanted = str(request, "id");
+      const batch = wanted ? batchById(wanted) : batchesFor(asking ?? "")[0];
+
+      if (batch) {
+        if (asking && batch.agentId !== asking) {
+          throw new Error(`${batch.id} is not yours: the user sent it to another agent. Ask them to send you yours.`);
+        }
+        const text = await markedBatchText(host, batch);
+        consumeMarks(batch.id);
+        return text;
+      }
+      if (wanted) {
         throw new Error(
-          "El usuario todavía no marcó nada en el navegador. Pedíselo con browser_pick, o esperá a que use el botón Marcar."
+          `There is nothing under ${wanted}. Either you already read it —each one is served once— or the user has not sent it yet.`
         );
       }
-      return marksText(host, picks, captures, note);
+      const pending = host.marks();
+      if (pending) {
+        const text = await marksText(host, pending.picks, pending.captures, pending.note);
+        return `The user has this marked right now (still in their panel, not sent to anyone yet):\n\n${text}`;
+      }
+      const others = pendingCount();
+      throw new Error(
+        others > 0
+          ? `Nothing is addressed to you: the ${others} batch(es) waiting were sent to another agent. Ask the user to send you theirs, or use browser_pick.`
+          : "The user has not marked anything in the browser yet. Ask them for it with browser_pick, or wait until they use the Mark button."
+      );
     }
     case "mock": {
       const origin = host.proxyOrigin();
-      if (!origin) throw new Error("Todavía no hay ninguna página cargada, así que no hay servidor al que simularle respuestas.");
+      if (!origin) throw new Error("No page is loaded yet, so there is no server whose responses could be faked.");
       const action = str(request, "action") ?? "add";
       if (action === "clear") {
         const gone = await previewClearMocks(origin, str(request, "id"));
-        return gone > 0 ? `Borradas ${gone} regla(s).` : "No había reglas que borrar.";
+        return gone > 0 ? `Removed ${gone} rule(s).` : "There were no rules to remove.";
       }
       if (action === "add") {
         await previewAddMock(origin, {
@@ -455,7 +513,7 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
           times: num(request, "times") ?? null,
         });
       } else if (action !== "list") {
-        throw new Error("action es add, list o clear.");
+        throw new Error("action is add, list or clear.");
       }
       return mocksText(await previewListMocks(origin));
     }
@@ -468,8 +526,14 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
       return inServerTerms(host, formatElement({ live: true, element: described }, 1, (url) => url));
     }
     case "screenshot": {
-      const path = await host.screenshot();
-      return `La página quedó fotografiada en:\n${path}\n\nAbrila con tus herramientas de archivos. Es lo que se ve ahora en la tab, no el documento entero.`;
+      // Con id y con el nombre de quien la pidió: dos agentes fotografiando la misma página
+      // dejan dos archivos que se distinguen por la ruta, sin mirar adentro.
+      const id = newMarkId("s");
+      const who = owner ? `${owner.label}-${id}` : id;
+      const path = await host.screenshot(who);
+      const forWhom = owner ? ` for you (${owner.label})` : "";
+      return `Screenshot ${id} of ${host.currentUrl()}${forWhom} saved to:\n${path}\n\n`
+        + "Open it with your file tools. It is what the tab shows right now, not the whole document.";
     }
     case "drag":
       return inPage(host, { op: "drag", from: required(request, "from"), to: required(request, "to") }, true);
@@ -481,7 +545,7 @@ async function execute(host: BrowserHost, request: BrowserRequest, opened: boole
     }
     case "dialogs": {
       const action = str(request, "action");
-      if (action && action !== "accept" && action !== "dismiss") throw new Error("action es accept o dismiss.");
+      if (action && action !== "accept" && action !== "dismiss") throw new Error("action is accept or dismiss.");
       return inPage(host, {
         op: "dialogs",
         accept: action ? action === "accept" : undefined,
@@ -526,7 +590,7 @@ export async function runBrowserRequest(
   // Una tab que se acaba de montar (restaurada, nunca mirada) todavía está cargando su
   // página: leerla ya diría "no hay página" cuando en un segundo la hay.
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
-    throw new Error("El navegador de este proyecto no tiene ninguna página cargada. Usá browser_navigate con la URL del proyecto.");
+    throw new Error("The browser for this project has no page loaded. Use browser_navigate with the project URL.");
   }
-  return execute(host, request, opened);
+  return execute(host, request, opened, owner);
 }

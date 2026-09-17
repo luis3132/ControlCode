@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, Select, TrashIcon } from "neogestify-ui-components";
+import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, TrashIcon } from "neogestify-ui-components";
 
 import {
   BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
@@ -14,6 +14,9 @@ import { pasteIntoTab } from "@/features/terminal/terminalRegistry";
 import pickerScript from "./picker.ts?script";
 import runtimeScript from "./page/runtime.ts?script";
 import { registerBrowserHost } from "./agentBridge";
+import { newMarkId, rememberMarks } from "./markStore";
+import { highlightAgent } from "./agentHighlight";
+import { AgentPicker } from "./AgentPicker";
 import { AnnotationBar, AnnotationCanvas, renderAnnotated, useAnnotationSession } from "./annotate/Annotator";
 import { canvasToPng, freezePage, thumbnail, type FrozenPage } from "./annotate/capture";
 import { composePickMessage, toTargetUrl, type AnnotatedCapture } from "./composeMessage";
@@ -53,9 +56,11 @@ function savedPanelHeight(): number {
 
 /** Una captura anotada que espera en el mensaje. */
 interface PendingCapture extends AnnotatedCapture {
-  id: string;
   thumb: string;
 }
+
+/** La captura como le sirve al agente: id, ruta y página, sin lo que es de la interfaz. */
+const bare = (c: PendingCapture): AnnotatedCapture => ({ id: c.id, path: c.path, url: c.url });
 
 /**
  * Un navegador en una tab, para probar el proyecto al lado del agente que lo construye.
@@ -74,7 +79,12 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const activateTab = useTabsStore((s) => s.activateTab);
-  const agents = useMemo(() => tabs.filter((tab) => tab.cwd === view.cwd), [tabs, view.cwd]);
+  // Solo agentes: a una terminal `bash` no se le manda lo que marcaste — no lo lee nadie,
+  // se pegaría como texto en un prompt de shell.
+  const agents = useMemo(
+    () => tabs.filter((tab) => tab.cwd === view.cwd && tab.agentId !== "bash"),
+    [tabs, view.cwd]
+  );
 
   const [address, setAddress] = useState(view.url);
   const [target, setTarget] = useState<PreviewTarget | null>(null);
@@ -116,6 +126,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const loadWaiters = useRef(new Set<() => void>());
   /** Lo señalado, para que un agente lo lea sin esperar a un render. */
   const marksRef = useRef<{ picks: PickedElement[]; captures: PendingCapture[]; note: string }>({ picks: [], captures: [], note: "" });
+
   /** Quién espera a que la persona marque algo, cuando lo pidió un agente. */
   const pickWaiter = useRef<((element: PickedElement | null) => void) | null>(null);
   /** Un agente está esperando que señales algo: lo dice la barra. */
@@ -235,9 +246,10 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     }),
     marks: () => {
       const { picks, captures, note } = marksRef.current;
-      return { picks, captures: captures.map((c) => ({ path: c.path, url: c.url })), note };
+      const hay = picks.length > 0 || captures.length > 0 || note.trim() !== "";
+      return hay ? { picks, captures: captures.map(bare), note } : null;
     },
-    screenshot: async () => {
+    screenshot: async (tag) => {
       const page = iframe.current;
       const frame = column.current;
       if (!page || !frame) throw new Error("La página todavía no está cargada.");
@@ -246,7 +258,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       // vea lo mismo que el agente.
       useViewTabsStore.getState().activateView(view.id);
       const frozen = await freezePage(page, frame);
-      return previewSaveCapture(await canvasToPng(frozen.canvas));
+      return previewSaveCapture(await canvasToPng(frozen.canvas), tag);
     },
     requestPick: (timeoutMs) => new Promise((resolve) => {
       // Un solo pedido a la vez: el anterior se da por cancelado en vez de quedar colgado.
@@ -364,6 +376,14 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [picking, active, postToPage]);
 
+  // Con el panel abierto, la tab del agente elegido se prende de su color: es cómo se sabe
+  // a cuál de tres «Claude Code» le va a llegar esto.
+  useEffect(() => {
+    if (!composerOpen || !agentId) return;
+    highlightAgent(agentId);
+    return () => highlightAgent(null);
+  }, [composerOpen, agentId]);
+
   // Si el agente elegido se cerró, se propone el que esté activo.
   useEffect(() => {
     if (!agents.some((a) => a.id === agentId)) setAgentId(agents[0]?.id ?? null);
@@ -418,8 +438,11 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     setSavingCapture(true);
     try {
       const annotated = renderAnnotated(frozen.canvas, historyRef.current.present);
-      const path = await previewSaveCapture(await canvasToPng(annotated));
-      setCaptures((prev) => [...prev, { id: crypto.randomUUID(), path, url: frozen.url, thumb: thumbnail(annotated) }]);
+      // El id va en el nombre del archivo: en la carpeta conviven las capturas del usuario
+      // con las que sacan los agentes, y la ruta sola alcanza para saber cuál es cuál.
+      const id = newMarkId("s");
+      const path = await previewSaveCapture(await canvasToPng(annotated), `usuario-${id}`);
+      setCaptures((prev) => [...prev, { id, path, url: frozen.url, thumb: thumbnail(annotated) }]);
       stopAnnotating();
       setComposerOpen(true);
       setSent(null);
@@ -436,6 +459,8 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     const agent = agents.find((a) => a.id === agentId);
     if (!agent || !target || (attachments === 0 && !note.trim())) return;
     const display = (url: string) => toTargetUrl(url, target.proxyOrigin, target.targetOrigin);
+    // Único: va en el aviso que recibe el agente y es con lo que lo busca después.
+    const batchId = newMarkId("m");
     // Un agente con el MCP de Control Code no necesita el volcado: se le dice qué hay y lo
     // lee con `browser_marked`, que se lo describe como está AHORA —si algo cambió o quedó
     // tapado desde que se marcó, se entera— y le da un ref para tocarlo.
@@ -444,41 +469,33 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         { picks: picks.length, captures: captures.length },
         display(picks[0]?.url ?? pageUrl.current ?? ""),
         note,
-        {
-          marked: (n, url) => t("browser.message.pointer", { count: n, url }),
-          captures: (n) => t("browser.message.pointerCaptures", { count: n }),
-          read: t("browser.message.pointerRead"),
-          note: t("browser.message.note"),
-        }
+        captures.map((c) => c.path),
+        batchId
       )
-      : composePickMessage(
-        picks,
-        note,
-        display,
-        {
-          header: (url) => t("browser.message.header", { url }),
-          page: t("browser.message.page"),
-          selector: t("browser.message.selector"),
-          component: t("browser.message.component"),
-          attributes: t("browser.message.attributes"),
-          html: "HTML",
-          note: t("browser.message.note"),
-          captures: t("browser.message.captures"),
-        },
-        captures
-      );
+      : composePickMessage(picks, note, display, captures.map(bare));
     if (!pasteIntoTab(agent.id, text, true)) {
       setError(t("browser.agentNotReady"));
       return;
     }
     setSent({ tabId: agent.id, title: agent.title });
+    rememberMarks({
+      id: batchId, agentId: agent.id, viewId: view.id, at: Date.now(),
+      picks, captures: captures.map(bare), note,
+    });
     setPicks([]);
     setCaptures([]);
     setNote("");
   };
 
+  // `pointer-events-none` en la franja y el aviso por encima: si no, el aviso ocupa todo el
+  // ancho y se come los clicks de la parte de arriba de la página, que queda muerta hasta
+  // que se navegue. Y se puede cerrar, que es lo que uno intenta hacer primero.
   const shownError = error && (
-    <div className="absolute inset-x-0 top-0 z-40 p-3"><Alert variant="danger">{error}</Alert></div>
+    <div className="absolute inset-x-0 top-0 z-40 p-3 pointer-events-none">
+      <Alert variant="danger" className="pointer-events-auto" onClose={() => setError(null)} closeLabel={t("btn.close")}>
+        {error}
+      </Alert>
+    </div>
   );
 
   const navButtons = (
@@ -815,13 +832,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
                   <p className="flex-1 text-[11px] text-gray-400 dark:text-white/30">{t("browser.noAgents")}</p>
                 ) : (
                   <div className={compact ? "flex-1 min-w-0" : undefined}>
-                    <Select
-                      value={agentId ?? ""}
-                      onChange={(e) => setAgentId(e.target.value)}
-                      options={agents.map((a) => ({ value: a.id, label: a.title }))}
-                      size="sm"
-                      variant="outline"
-                    />
+                    <AgentPicker agents={agents} value={agentId} onChange={setAgentId} compact={compact} />
                   </div>
                 )}
                 <Button size="sm" variant="primary" fullWidth={!compact}

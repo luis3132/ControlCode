@@ -5,6 +5,11 @@
  * `SaveButton` en `src/components/SaveButton.tsx:24`, mide 120×36, está tapado por un
  * overlay y podés tocarlo con el ref `u1`". Puro: se prueba en Node, y lo usan tanto el
  * MCP como el texto que se pega en una terminal.
+ *
+ * Todo lo que sale de acá va EN INGLÉS, aunque la app esté en español: es un prompt, no
+ * interfaz. El idioma de la app lo eligió el usuario para él; el modelo lee mejor —y
+ * cualquier modelo, no solo el que hable español— si lo que le llega está siempre igual.
+ * Lo único que va tal cual lo escribió la persona es su nota.
  */
 import type { AnnotatedCapture } from "./composeMessage";
 import type { PickedElement } from "./protocol";
@@ -108,7 +113,7 @@ export function formatMarked(
   if (captures.length > 0) {
     out.push("Screenshots the user annotated (open the files with your file tools):", "");
     captures.forEach((capture, i) => {
-      out.push(`${i + 1}. ${toDisplayUrl(capture.url)}`, `   ${capture.path}`, "");
+      out.push(`${i + 1}. [${capture.id}] ${toDisplayUrl(capture.url)}`, `   ${capture.path}`, "");
     });
   }
   if (note.trim()) out.push(`Note from the user: ${note.trim()}`);
@@ -117,18 +122,49 @@ export function formatMarked(
 
 /**
  * El texto corto que se pega en la terminal de un agente que SÍ tiene el MCP: en vez de
- * volcarle el HTML y los atributos de cada elemento, se le dice qué hay y con qué
- * herramienta leerlo. Lo que necesite, lo pide; lo que no, no le gasta contexto.
+ * volcarle el HTML y los atributos de cada elemento, se le dice qué hay, con qué
+ * herramienta leerlo y cuál de los lotes es el suyo. Lo que necesite, lo pide; lo que no,
+ * no le gasta contexto.
  */
 export function composePointer(
   counts: { picks: number; captures: number },
   url: string,
   note: string,
-  labels: { marked: (n: number, url: string) => string; captures: (n: number) => string; read: string; note: string }
+  /** Las capturas que dejó, ya guardadas. Van en el aviso y no solo en la tool: una imagen
+   *  en disco es un hecho que no cambia, y así el agente la puede abrir de una. */
+  capturePaths: string[] = [],
+  /** Cuál de los lotes es este. Con dos agentes marcando cosas, es lo que le dice a cada
+   *  uno cuál le toca. */
+  batchId?: string
 ): string {
-  const parts = [labels.marked(counts.picks, url)];
-  if (counts.captures > 0) parts.push(labels.captures(counts.captures));
-  parts.push(labels.read);
-  const text = parts.join(" ");
-  return note.trim() ? `${text}\n\n${labels.note}: ${note.trim()}` : text;
+  const parts: string[] = [];
+  if (counts.picks > 0) {
+    parts.push(`I marked ${counts.picks} element${counts.picks === 1 ? "" : "s"} for you in ${url}.`);
+  }
+  if (counts.captures > 0) {
+    // Con elementos, la URL ya se dijo; sin ellos, esta frase es la única que la lleva.
+    const where = counts.picks > 0 ? "that page" : url;
+    parts.push(`I left ${counts.captures} annotated screenshot${counts.captures === 1 ? "" : "s"} of ${where}.`);
+  }
+  if (parts.length === 0) parts.push(`About ${url}:`);
+  parts.push(
+    batchId
+      ? `Read it with browser_marked id=${batchId} — that id is yours and returns exactly this: the component and`
+        + " source file that rendered each element, where it sits, its styles and a ref you can act on."
+      : "Read it with browser_marked: it gives you the component and source file that rendered each one, where it"
+        + " sits, its styles and a ref you can act on."
+  );
+
+  const lines = [parts.join(" ")];
+  // Cada ruta sola en su renglón: así una TUI que reconoce imágenes la adjunta.
+  if (capturePaths.length > 0) lines.push("", ...capturePaths);
+  if (note.trim()) lines.push("", `Note from the user: ${note.trim()}`);
+  return lines.join("\n");
+}
+
+/** El encabezado de un envío ya mandado, para que el agente sepa qué está leyendo. */
+export function batchHeader(batch: { id: string; at: number }, now: number): string {
+  const secs = Math.max(0, Math.round((now - batch.at) / 1000));
+  const ago = secs < 90 ? `${secs}s ago` : `${Math.round(secs / 60)} min ago`;
+  return `${batch.id} — what the user sent you ${ago}. It is no longer in their panel, and this is the last time it is served:`;
 }

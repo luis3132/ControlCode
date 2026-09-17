@@ -24,7 +24,10 @@ export async function previewCapture(): Promise<ArrayBuffer> {
 }
 
 /** Guarda una captura en la carpeta temporal y devuelve su ruta. Va cruda, no como JSON. */
-export const previewSaveCapture = (png: Uint8Array) => invoke<string>("preview_save_capture", png);
+export const previewSaveCapture = (png: Uint8Array, tag?: string) =>
+  // `tag` va por cabecera y no en el cuerpo: el cuerpo es el PNG crudo. Termina en el
+  // nombre del archivo, para que se vea de quién es la foto sin abrirla.
+  invoke<string>("preview_save_capture", png, tag ? { headers: { "x-controlcode-tag": tag } } : undefined);
 
 /** Un archivo del disco, listo para ponerlo en un `<input type=file>` de la página. */
 export interface UploadFile {

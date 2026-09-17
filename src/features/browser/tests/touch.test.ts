@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { coarseMedia, mentionsPointer } from "../page/touch";
+import { coarseMedia, mentionsHover, mentionsPointer, withoutHover } from "../page/touch";
 
 describe("coarseMedia", () => {
   /// Es lo que decide si emular un teléfono es real o solo angosto: `(hover: hover)` es la
@@ -45,5 +45,28 @@ describe("coarseMedia", () => {
     expect(mentionsPointer("(any-pointer: fine)")).toBe(true);
     expect(mentionsPointer("(min-width: 600px)")).toBe(false);
     expect(mentionsPointer("screen")).toBe(false);
+  });
+});
+
+describe("withoutHover", () => {
+  // La mitad que faltaba: casi nadie escribe `@media (hover: hover)`, pero todo el mundo
+  // escribe `.menu:hover .submenu`. Mientras esas reglas siguieran aplicando, el táctil se
+  // sentía como que no hacía nada: el menú se abría igual al pasar el mouse.
+  it("una regla que depende del mouse encima deja de aplicar", () => {
+    expect(mentionsHover(".menu:hover .submenu")).toBe(true);
+    expect(mentionsHover(".menu.hover")).toBe(false);
+    expect(withoutHover(".menu:hover .submenu")).toBe(".menu.cc-touch-no-hover .submenu");
+  });
+
+  it("pesa lo mismo que antes y no toca lo que solo se parece", () => {
+    // Una clase y una pseudo-clase tienen la misma especificidad: la regla sigue pisando a
+    // las mismas que pisaba, así que apagar el táctil devuelve la página tal cual estaba.
+    expect(withoutHover("a:hover, button:hover").split(", ").every((s) => s.includes(".cc-touch-no-hover"))).toBe(true);
+    expect(withoutHover(".hover-card")).toBe(".hover-card");
+    expect(withoutHover("[data-hover]")).toBe("[data-hover]");
+  });
+
+  it("`:not(:hover)`, que en un táctil siempre es cierto, sigue aplicando", () => {
+    expect(withoutHover("li:not(:hover)")).toBe("li:not(.cc-touch-no-hover)");
   });
 });
