@@ -487,8 +487,15 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     setNote("");
   };
 
+  // `pointer-events-none` en la franja y el aviso por encima: si no, el aviso ocupa todo el
+  // ancho y se come los clicks de la parte de arriba de la página, que queda muerta hasta
+  // que se navegue. Y se puede cerrar, que es lo que uno intenta hacer primero.
   const shownError = error && (
-    <div className="absolute inset-x-0 top-0 z-40 p-3"><Alert variant="danger">{error}</Alert></div>
+    <div className="absolute inset-x-0 top-0 z-40 p-3 pointer-events-none">
+      <Alert variant="danger" className="pointer-events-auto" onClose={() => setError(null)} closeLabel={t("btn.close")}>
+        {error}
+      </Alert>
+    </div>
   );
 
   const navButtons = (
