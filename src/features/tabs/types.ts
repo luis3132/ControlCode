@@ -10,6 +10,8 @@ export interface AgentInfo {
   command: string;
   available: boolean;
   version?: string;
+  /** Dónde se encontró el binario. Ausente = no está (o es una custom, que no se detecta). */
+  path?: string | null;
   isCustom?: boolean;
 }
 

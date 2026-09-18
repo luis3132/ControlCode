@@ -10,6 +10,7 @@ import { useAgentsStore } from "@/features/agents/store";
 import type { CustomAgent } from "@/features/agents/types";
 import { useSkillsStore } from "@/features/skills/store";
 import { CustomAgentForm } from "@/features/agents/CustomAgentForm";
+import { DetectedAgents } from "@/features/agents/DetectedAgents";
 import { CliInstallSection } from "@/features/settings/CliInstallSection";
 import { GraphifySection } from "@/features/graphify/GraphifySection";
 import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection";
@@ -178,6 +179,12 @@ export function SettingsPage() {
 
         {section === "tuis" && (
           <SettingsSection title={t("settings.tuis")} description={t("settings.tuis.desc")}>
+            <DetectedAgents />
+
+            <span className="mt-2 text-[11px] font-semibold uppercase tracking-wide
+              text-gray-400 dark:text-white/30">
+              {t("settings.tuis.custom")}
+            </span>
             {customAgents.length === 0 ? (
               <p className="text-[11.5px] text-gray-400 dark:text-white/30">
                 {t("settings.tuis.empty")}
