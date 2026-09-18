@@ -10,7 +10,6 @@
 //! un archivo por cuenta, y es justo lo que cambia entre dos tareas lanzadas seguidas.
 
 use std::collections::{HashMap, HashSet};
-use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -256,7 +255,7 @@ fn probe() -> Probed {
 
 /// La salida de un comando, o `None` si no está, falla o tarda demasiado.
 fn run(program: &str, args: &[&str]) -> Option<String> {
-    let out = crate::util::output_with_timeout(Command::new(program).args(args), PROBE_TIMEOUT).ok()?;
+    let out = crate::util::output_with_timeout(crate::util::program(program).args(args), PROBE_TIMEOUT).ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 

@@ -143,7 +143,7 @@ pub(super) fn extract_transcript(path: &Path) -> Vec<Turn> {
 /// partes de tipo `text`: el resto son pasos internos (`step-start`, `reasoning`, `tool`,
 /// `patch`) que no forman parte de la conversación que el usuario quiere exportar.
 pub(super) fn opencode_transcript(session_id: &str, profile: Option<&str>) -> Vec<Turn> {
-    let mut command = std::process::Command::new("opencode");
+    let mut command = crate::util::program("opencode");
     command.args(["export", session_id]).stdin(std::process::Stdio::null());
     // Misma variable con la que se lanzó la tab (ver `accounts`): la sesión de una cuenta
     // alternativa no existe para la instalación del sistema.

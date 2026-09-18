@@ -595,7 +595,7 @@ pub(super) struct OpencodeSession {
 const OPENCODE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub(super) fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<OpencodeSession> {
-    let mut command = std::process::Command::new("opencode");
+    let mut command = crate::util::program("opencode");
     command
         .args(["session", "list", "--format", "json", "-n", "50"])
         .current_dir(cwd)

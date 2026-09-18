@@ -162,7 +162,12 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let prompt = extras.prompt.unwrap_or_else(|| task.prompt.clone());
     let launch = adapter.launch(&prompt, task.model.as_deref(), task.budget_usd, &ctx);
 
-    let mut command = tokio::process::Command::new(&launch.program);
+    // Con la ruta completa: en Windows, un `claude.cmd` instalado con npm no se ejecuta por
+    // su nombre a secas (ver `util::path_env::find_program`).
+    let program = crate::util::find_program(&launch.program)
+        .map(std::path::PathBuf::into_os_string)
+        .unwrap_or_else(|| launch.program.clone().into());
+    let mut command = tokio::process::Command::new(program);
     command
         .args(&launch.args)
         .current_dir(&task.cwd)

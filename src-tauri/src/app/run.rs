@@ -11,6 +11,10 @@ pub fn run() {
     // Antes de construir Tauri, porque WebKitGTK decide cómo componer al inicializarse; y
     // antes del hilo de señales, porque toca el entorno del proceso (ver `configure`).
     super::rendering::configure(&db_conn);
+    // El PATH real del usuario, no el del escritorio: sin esto, en Ubuntu (y en macOS desde
+    // el Dock) no se encontraban las TUIs instaladas en el home. Mismo requisito que el de
+    // arriba: toca el entorno, así que va antes del primer hilo (ver `util::path_env`).
+    crate::util::path_env::configure();
     super::signals::cleanup_on_signals();
 
     tauri::Builder::default()
@@ -94,6 +98,7 @@ pub fn run() {
             // Detección de agentes
             crate::agents::agent_registry,
             crate::agents::detect_agents,
+            crate::agents::agent_search_path,
             // Agentes headless (consola de flota)
             crate::runs::run_list_tasks,
             crate::runs::run_list_runs,
