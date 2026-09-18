@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AddIcon, EmptyState, Kbd, NetworkIcon, SearchIcon, ShieldIcon, Tooltip } from "neogestify-ui-components";
+import { AddIcon, Button, EmptyState, Kbd, NetworkIcon, SearchIcon, ShieldIcon, Tooltip } from "neogestify-ui-components";
 
 import { detectAgents } from "@/features/agents/ipc";
 
@@ -239,11 +239,20 @@ export function FleetPage() {
       {/* ══ la grilla ═══════════════════════════════════════════════ */}
       <div className="flex-1 min-h-0 cc-scroll p-3">
         {tasks.length === 0 ? (
+          /* Con la flota vacía este era el único contenido de la página, y el botón para
+             lanzar vivía en la grilla de al lado — que solo se dibuja cuando YA hay
+             tarjetas. Es decir: quien nunca lanzó una tarea no tenía desde dónde lanzar
+             la primera, y la mitad de la app quedaba sin puerta de entrada. */
           <EmptyState
             className="py-16"
             icon={<NetworkIcon className="w-8 h-8" />}
             title={t("fleet.empty.title")}
             description={t("fleet.empty.desc")}
+            action={
+              <Button variant="primary" size="sm" disabled={!cwd} onClick={() => setNewOpen(true)}>
+                {t("fleet.new.card")}
+              </Button>
+            }
           />
         ) : (
           <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
