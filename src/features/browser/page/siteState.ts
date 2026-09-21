@@ -342,10 +342,12 @@ export function installStorageSync(natives: Natives): void {
  * Una barra visible y que se puede agarrar, en la página y en sus contenedores.
  *
  * Con barras overlay (GNOME, macOS) la página no mostraba ninguna: una raya de dos píxeles
- * que aparecía solo al pasar el mouse por el borde. En WebKitGTK solo la sintaxis
- * `::-webkit-scrollbar` la vuelve fija; `scrollbar-width` sola sigue dibujando la overlay.
- * Va antes que cualquier CSS de la página, así que la página que estiliza o esconde sus
- * barras (con `::-webkit-scrollbar` o con `scrollbar-width: none`) sigue mandando.
+ * que aparecía solo al pasar el mouse por el borde. En Linux la app ya apaga las overlay
+ * del motor entero (`src-tauri/src/app/rendering.rs`), que es lo que cubre a las páginas
+ * con `scrollbar-width` propio; esto queda para una página sin estilos en un motor con
+ * overlay (macOS). Va antes que cualquier CSS de la página, así que la que estiliza o
+ * esconde sus barras (con `::-webkit-scrollbar` o con `scrollbar-width: none`) sigue
+ * mandando.
  */
 export const SCROLLBAR_CSS = [
   "::-webkit-scrollbar{width:12px;height:12px}",

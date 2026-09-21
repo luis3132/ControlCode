@@ -225,6 +225,9 @@ pub async fn pty_create(
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    for var in crate::app::app_only_env() {
+        cmd.env_remove(var);
+    }
     for (k, v) in env.unwrap_or_default() {
         cmd.env(k, v);
     }

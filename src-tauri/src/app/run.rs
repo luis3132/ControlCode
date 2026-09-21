@@ -11,6 +11,7 @@ pub fn run() {
     // Antes de construir Tauri, porque WebKitGTK decide cómo componer al inicializarse; y
     // antes del hilo de señales, porque toca el entorno del proceso (ver `configure`).
     super::rendering::configure(&db_conn);
+    super::rendering::configure_scrollbars();
     // El PATH real del usuario, no el del escritorio: sin esto, en Ubuntu (y en macOS desde
     // el Dock) no se encontraban las TUIs instaladas en el home. Mismo requisito que el de
     // arriba: toca el entorno, así que va antes del primer hilo (ver `util::path_env`).
