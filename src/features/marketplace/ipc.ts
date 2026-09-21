@@ -59,3 +59,33 @@ export const previewRegistryLocation = (sourceType: RegistrySourceType, location
  */
 export const marketplaceSkillReadme = (registryId: string, skillId: string) =>
   invoke<string>("marketplace_skill_readme", { registryId, skillId });
+
+// ── Diagnóstico de skills.sh (Configuración → skills.sh) ────────────────────
+
+/** Ver `marketplace/skillssh_check.rs`. Van en este orden: cada uno supone el anterior. */
+export type SkillsShStep = "node" | "npx" | "cli" | "search";
+
+export interface SkillsShStepResult {
+  step: SkillsShStep;
+  /** `warn` = anda, pero algo no está como debería (un Node más viejo que el que pide la CLI). */
+  state: "ok" | "warn" | "fail";
+  path: string | null;
+  version: string | null;
+  /** Lo que dijo el programa cuando algo salió mal. */
+  output: string | null;
+  /** Búsqueda: cuántas skills trajo. */
+  results: number | null;
+}
+
+export interface NodeInstall {
+  minNode: string;
+  install: string | null;
+  otherInstalls: string[];
+  docsUrl: string;
+}
+
+/** Un paso. El de Node vuelve a leer el PATH del shell: lo instalado con la app abierta cuenta. */
+export const skillsshCheckStep = (step: SkillsShStep) =>
+  invoke<SkillsShStepResult>("skillssh_check_step", { step });
+
+export const skillsshNodeInstall = () => invoke<NodeInstall>("skillssh_node_install");

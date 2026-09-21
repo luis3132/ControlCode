@@ -13,6 +13,7 @@ import { CustomAgentForm } from "@/features/agents/CustomAgentForm";
 import { DetectedAgents } from "@/features/agents/DetectedAgents";
 import { CliInstallSection } from "@/features/settings/CliInstallSection";
 import { GraphifySection } from "@/features/graphify/GraphifySection";
+import { SkillsShSection } from "@/features/marketplace/SkillsShSection";
 import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection";
 import { RoutingSection } from "@/features/runs/RoutingSection";
 import { PrelaunchSection } from "@/features/prelaunch/PrelaunchSection";
@@ -46,7 +47,7 @@ function AgentCapabilities({ agent }: { agent: CustomAgent }) {
 }
 
 type SectionId =
-  | "appearance" | "shortcuts" | "terminal" | "skillsDir"
+  | "appearance" | "shortcuts" | "terminal" | "skillsDir" | "skillssh"
   | "tuis" | "prelaunch" | "cli" | "graphify" | "orchestrator" | "routing";
 
 /**
@@ -85,6 +86,7 @@ export function SettingsPage() {
       { id: "shortcuts", label: t("settings.shortcuts") },
       { id: "terminal", label: t("settings.terminal") },
       { id: "skillsDir", label: t("settings.skillsDir") },
+      { id: "skillssh", label: t("settings.skillssh") },
       { id: "tuis", label: t("settings.tuis") },
       { id: "prelaunch", label: t("settings.prelaunch") },
       { id: "cli", label: t("settings.cli") },
@@ -257,6 +259,7 @@ export function SettingsPage() {
           </SettingsSection>
         )}
 
+        {section === "skillssh" && <SkillsShSection />}
         {section === "prelaunch" && <PrelaunchSection />}
         {section === "cli" && <CliInstallSection />}
         {section === "graphify" && <GraphifySection />}

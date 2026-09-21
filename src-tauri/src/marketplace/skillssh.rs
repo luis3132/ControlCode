@@ -17,8 +17,10 @@
 //! pipeline de instalación que usa cualquier otra fuente. Así una skill de skills.sh queda
 //! indistinguible del resto: misma copia global, mismos symlinks, mismo desinstalador.
 //!
-//! Requiere Node instalado. Cuando no está, el error lo dice con todas las letras en vez
-//! de dejar un "no se encontró el programa" del sistema operativo — ver [`ensure_npx`].
+//! Requiere Node 22.20 o más nuevo. Cuando no está, o es viejo, el error lo dice con todas
+//! las letras en vez de dejar un "no se encontró el programa" del sistema operativo — ver
+//! [`ensure_npx`] y `skillssh_check`, que es también la sección de Configuración que lo
+//! valida paso a paso.
 
 use rusqlite::params;
 use std::path::{Path, PathBuf};
@@ -32,12 +34,9 @@ use crate::util::now_ts;
 
 use super::types::MarketplaceSkillEntry;
 
-/// Cuánto puede tardar `npx skills add` clonando el repo de origen antes de rendirse.
-/// La CLI clona el repo entero para sacar una sola skill, así que un repo grande con una
-/// conexión lenta necesita bastante más que un fetch normal.
-/// Plazos de cada llamada a la CLI. `add` clona el repo de origen entero, así que es la
-/// que puede tardar de verdad; `--version` tendría que ser inmediata.
-const NPX_VERSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Plazos de cada llamada a la CLI. `add` clona el repo de origen entero para sacar una
+/// sola skill, así que un repo grande con una conexión lenta necesita bastante más que un
+/// fetch normal.
 const FIND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const ADD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
@@ -91,19 +90,10 @@ pub fn add_target(id: &str) -> Option<String> {
 
 // ── Ejecución de la CLI ──────────────────────────────────────────
 
-/// `npx` no es un ejecutable en Windows sino un `.cmd`, y `CreateProcess` (lo que usa
-/// `Command` por debajo) no sabe correr scripts de shell: hay que pasar por `cmd`.
+/// `npx` por su ruta completa y con el PATH donde se lo encontró (ver
+/// `skillssh_check::tool`). En Windows es `npx.cmd`, que `Command` ejecuta directo.
 fn npx_command() -> Command {
-    #[cfg(windows)]
-    {
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/C", "npx"]);
-        cmd
-    }
-    #[cfg(not(windows))]
-    {
-        Command::new("npx")
-    }
+    super::skillssh_check::tool("npx").0
 }
 
 /// Variables comunes a toda invocación de la CLI.
@@ -112,7 +102,7 @@ fn npx_command() -> Command {
 /// entrada es una terminal, y al lanzarla desde una app de escritorio esa heurística puede
 /// dejarla esperando una respuesta que nunca va a llegar. Con `CI` puesto se comporta
 /// siempre de forma no interactiva, que es la única que sirve acá.
-fn with_env(cmd: &mut Command) {
+pub(super) fn with_env(cmd: &mut Command) {
     cmd.env("CI", "1");
     cmd.env("SKILLS_CLONE_TIMEOUT_MS", CLONE_TIMEOUT_MS);
     // Sin esto la CLI puede pintar de colores incluso redirigida, y el parser tendría que
@@ -124,32 +114,29 @@ fn with_env(cmd: &mut Command) {
     cmd.env("npm_config_yes", "true");
 }
 
-/// Verifica que se pueda ejecutar `npx` antes de intentar nada más.
+/// Verifica que skills.sh pueda andar en esta máquina antes de intentar nada más.
 ///
-/// Es la diferencia entre "Node.js no está instalado" y un críptico "No such file or
-/// directory (os error 2)" saliendo del sistema operativo. Se llama al refrescar el
-/// repositorio, así el problema se ve en la pantalla de repositorios y no recién cuando
-/// alguien busca algo.
+/// Es la diferencia entre "necesitás Node 22.20 y tenés el 18" y un críptico "No such file
+/// or directory (os error 2)" saliendo del sistema operativo —o un error de sintaxis de la
+/// CLI corriendo en un Node que no le sirve—. Se llama al refrescar el repositorio, así el
+/// problema se ve en la pantalla de repositorios y no recién cuando alguien busca algo.
 pub fn ensure_npx() -> Result<(), String> {
-    let mut cmd = npx_command();
-    with_env(&mut cmd);
-    match crate::util::output_with_timeout(cmd.arg("--version"), NPX_VERSION_TIMEOUT) {
-        Ok(out) if out.status.success() => Ok(()),
-        // `npx` existe pero devolvió error: raro, pero es un entorno de Node roto, no uno
-        // ausente — conviene decir cuál de las dos cosas es.
-        Ok(out) => Err(format!(
-            "`npx` está instalado pero falló al ejecutarse ({}). {}",
-            out.status,
-            String::from_utf8_lossy(&out.stderr).trim()
-        )),
-        Err(_) => Err(NPX_MISSING.to_string()),
+    super::skillssh_check::requirement_error()
+}
+
+/// Cuando la CLI falla, la causa más común no está en lo que imprime: con un Node viejo
+/// revienta con un `SyntaxError` sobre `node:util` (probado con el Node 18 de Ubuntu 24.04),
+/// que no dice nada de versiones. Si es eso, se dice eso; si no, va el error tal cual.
+fn explain(failure: String) -> String {
+    match super::skillssh_check::requirement_error() {
+        Err(cause) => cause,
+        Ok(()) => failure,
     }
 }
 
-pub const NPX_MISSING: &str = "skills.sh necesita Node.js instalado: usa su CLI oficial \
-    (`npx skills`) en vez de una API. Instalá Node.js desde https://nodejs.org y volvé a \
-    refrescar este repositorio. Si ya lo tenés, puede que la app no vea tu PATH — probá \
-    abrirla desde una terminal.";
+pub const NPX_MISSING: &str = "skills.sh necesita Node.js 22.20 o más nuevo: usa su CLI \
+    oficial (`npx skills`) en vez de una API, y la app no pudo ejecutar `npx`. \
+    Configuración → skills.sh lo valida paso a paso y dice cómo instalarlo en este sistema.";
 
 /// Quita las secuencias de escape ANSI (colores, movimientos de cursor) de la salida.
 ///
@@ -249,10 +236,10 @@ pub fn search(query: &str, owner: Option<&str>) -> Result<Vec<SkillsShHit>, Stri
     let out = crate::util::output_with_timeout(&mut cmd, FIND_TIMEOUT)
         .map_err(|e| timeout_or(e, NPX_MISSING))?;
     if !out.status.success() {
-        return Err(format!(
+        return Err(explain(format!(
             "`npx skills find` falló: {}",
             strip_ansi(&String::from_utf8_lossy(&out.stderr)).trim()
-        ));
+        )));
     }
     Ok(parse_find_output(&String::from_utf8_lossy(&out.stdout)))
 }
@@ -276,10 +263,10 @@ pub fn install_into(staging: &Path, target: &str) -> Result<PathBuf, String> {
     let out = crate::util::output_with_timeout(&mut cmd, ADD_TIMEOUT)
         .map_err(|e| timeout_or(e, NPX_MISSING))?;
     if !out.status.success() {
-        return Err(format!(
+        return Err(explain(format!(
             "`npx skills add {target}` falló: {}",
             strip_ansi(&String::from_utf8_lossy(&out.stderr)).trim()
-        ));
+        )));
     }
 
     let installed = staging.join(INSTALL_SUBDIR);

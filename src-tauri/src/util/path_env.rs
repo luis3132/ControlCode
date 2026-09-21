@@ -43,7 +43,7 @@
 //! para encontrar y lanzar programas alcanza con el PATH.
 
 use serde::Serialize;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 #[cfg(unix)]
@@ -333,6 +333,11 @@ pub fn known_dirs(home: &Path) -> Vec<PathBuf> {
             ".deno/bin",
             ".yarn/bin",
             ".nix-profile/bin",
+            // Gestores de versiones de Node: fnm, asdf y mise. Es por donde se instala un
+            // Node nuevo en las distros cuyos repositorios traen uno viejo.
+            ".local/share/fnm/aliases/default/bin",
+            ".asdf/shims",
+            ".local/share/mise/shims",
             "bin",
         ] {
             dirs.push(home.join(rel));
@@ -374,6 +379,10 @@ pub fn known_dirs(home: &Path) -> Vec<PathBuf> {
             .into_iter()
             .flatten(),
         );
+        // Node: el instalador oficial (y `winget install OpenJS.NodeJS`) y nvm-windows. Son
+        // del sistema: solo si existen.
+        let node = [env_dir("ProgramFiles", "nodejs"), std::env::var_os("NVM_SYMLINK").map(PathBuf::from)];
+        dirs.extend(node.into_iter().flatten().filter(|d| d.is_dir()));
     }
 
     dirs
@@ -408,6 +417,28 @@ fn nvm_bins(versions: &Path) -> Vec<PathBuf> {
 /// del `.cmd` funciona.
 pub fn find_program(name: &str) -> Option<PathBuf> {
     find_in(name, std::env::var_os("PATH"), &extensions())
+}
+
+/// Dónde está un programa en un PATH dado, en vez del del proceso.
+pub fn find_program_in(name: &str, path: &OsStr) -> Option<PathBuf> {
+    find_in(name, Some(path.to_os_string()), &extensions())
+}
+
+/// El PATH como quedaría si la app arrancara ahora: le vuelve a preguntar al shell y
+/// vuelve a mirar las carpetas conocidas.
+///
+/// Es para ver algo instalado con la app abierta —un Node nuevo con nvm— sin reiniciarla.
+/// No toca el entorno del proceso (con hilos corriendo no se puede, ver `configure`):
+/// quien lo usa se lo pasa a su proceso hijo. Tarda lo que tarde el shell, hasta
+/// `SHELL_TIMEOUT`, así que no va en un camino que se repita seguido.
+pub fn fresh_path() -> OsString {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    #[cfg(unix)]
+    let from_shell = shell_path(&user_shell(), &[]).ok();
+    #[cfg(not(unix))]
+    let from_shell: Option<String> = None;
+    let known = dirs::home_dir().as_deref().map(known_dirs).unwrap_or_default();
+    std::env::join_paths(merge(from_shell.as_deref(), &current, &known)).unwrap_or(current)
 }
 
 /// Un `Command` para un programa, con la ruta completa si se encontró. Si no, con el
