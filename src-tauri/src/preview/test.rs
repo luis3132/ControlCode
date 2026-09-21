@@ -1,6 +1,6 @@
 use super::rewrite::{
-    inject_picker, is_local_host, parse_response_head, rewrite_location, rewrite_origin_value,
-    skip_request_header, skip_response_header, strip_cookie_domain,
+    inject_picker, is_local_host, is_own_host, parse_response_head, rewrite_location, rewrite_origin_value,
+    skip_request_header, skip_response_header,
 };
 
 const TAG: &str = r#"<script src="/__controlcode__/picker.js"></script>"#;
@@ -55,13 +55,17 @@ fn el_servidor_ve_su_propio_origen() {
     assert_eq!(rewrite_origin_value("https://otro.sitio", p, t), "https://otro.sitio");
 }
 
+/// Lo que guarda la sesión de un proyecto solo se lo contesta a la página, pedido por el
+/// nombre del proxy: un dominio re-apuntado a 127.0.0.1 llega con el suyo.
 #[test]
-fn a_las_cookies_se_les_saca_solo_el_dominio() {
-    assert_eq!(
-        strip_cookie_domain("sid=abc; Path=/; Domain=localhost; HttpOnly; SameSite=Lax"),
-        "sid=abc; Path=/; HttpOnly; SameSite=Lax"
-    );
-    assert_eq!(strip_cookie_domain("theme=dark"), "theme=dark");
+fn el_estado_del_sitio_solo_se_pide_por_el_nombre_del_proxy() {
+    assert!(is_own_host("localhost:41234", 41234));
+    assert!(is_own_host("127.0.0.1:41234", 41234));
+    assert!(is_own_host("[::1]:41234", 41234));
+    assert!(is_own_host("LocalHost:41234", 41234));
+    assert!(!is_own_host("localhost:41235", 41234));
+    assert!(!is_own_host("evil.example:41234", 41234));
+    assert!(!is_own_host("localhost", 41234));
 }
 
 #[test]
@@ -123,6 +127,11 @@ async fn fake_dev_server() -> u16 {
                     .find_map(|l| l.strip_prefix("origin: ").or_else(|| l.strip_prefix("Origin: ")))
                     .unwrap_or("")
                     .to_string();
+                let cookie = req
+                    .lines()
+                    .find_map(|l| l.strip_prefix("cookie: ").or_else(|| l.strip_prefix("Cookie: ")))
+                    .unwrap_or("")
+                    .to_string();
 
                 if path == "/ws" {
                     let head = format!(
@@ -138,7 +147,10 @@ async fn fake_dev_server() -> u16 {
                     return;
                 }
 
-                let (status, extra, body) = match path.split('?').next().unwrap_or("/") {
+                let bare = path.split('?').next().unwrap_or("/");
+                let (status, extra, body) = match bare {
+                    // Devuelve el `Cookie` con que llegó: lo que el servidor ve de la sesión.
+                    _ if bare.ends_with("/eco") => ("200 OK", "Content-Type: text/plain\r\n", cookie),
                     "/" => ("200 OK", "Content-Type: text/html; charset=utf-8\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: frame-ancestors 'none'\r\n",
                             "<html><head><title>Hola</title></head><body>hola</body></html>".to_string()),
                     "/app.js" => ("200 OK", "Content-Type: application/javascript\r\n", "console.log(1)".to_string()),
@@ -242,7 +254,9 @@ use super::log::{
     parse_cookie_header, parse_http_date, parse_set_cookie, Begin, ErrorKind, Finish, Head, Header, HeaderNote,
     ProxyLog, MAX_RESPONSE_BODY,
 };
-use super::proxy::{preferred_port, preview_cookies, preview_network, preview_request, proxy_host};
+use super::proxy::{
+    preferred_port, preview_cookies, preview_network, preview_request, preview_set_recording, proxy_host,
+};
 
 #[test]
 fn las_fechas_http_se_leen_en_sus_dos_grafias() {
@@ -274,8 +288,15 @@ fn la_cabecera_cookie_se_parte_en_pares() {
     assert_eq!(names, vec![("a", "1"), ("b", "x=y")]);
 }
 
+/// Un log con el panel de debug abierto: sin eso no anota nada.
+fn watched_log() -> ProxyLog {
+    let log = ProxyLog::default();
+    log.set_recording("test", true);
+    log
+}
+
 /// Un pedido entero por el log: llega, responde y termina.
-fn record(log: &ProxyLog, url: &str, set_cookies: &[&str], now: i64) -> u64 {
+fn record(log: &ProxyLog, url: &str, now: i64) -> u64 {
     let seq = log.begin(
         Begin {
             method: "GET",
@@ -288,18 +309,17 @@ fn record(log: &ProxyLog, url: &str, set_cookies: &[&str], now: i64) -> u64 {
         },
         now,
     );
-    log.head(seq, head(200, set_cookies), now);
+    log.head(seq, head(200));
     log.finish(seq, Finish { body: vec![], body_size: 0, truncated: false, encoding: None, duration_ms: 1, error: None });
     seq
 }
 
-fn head(status: u16, set_cookies: &[&str]) -> Head {
+fn head(status: u16) -> Head {
     Head {
         status,
         headers: vec![],
         http_version: Some("HTTP/1.1".into()),
         remote_address: None,
-        set_cookies: set_cookies.iter().map(|s| s.to_string()).collect(),
         content_type: None,
         content_length: None,
         ttfb_ms: 1,
@@ -308,21 +328,21 @@ fn head(status: u16, set_cookies: &[&str]) -> Head {
 
 #[test]
 fn el_log_se_lee_por_partes_y_avisa_si_se_perdio_algo() {
-    let log = ProxyLog::default();
+    let log = watched_log();
     for i in 0..3 {
-        record(&log, &format!("http://x/{i}"), &[], 0);
+        record(&log, &format!("http://x/{i}"), 0);
     }
     let first = log.since(0);
     assert_eq!(first.entries.len(), 3);
     assert!(!first.dropped);
 
-    record(&log, "http://x/3", &[], 0);
+    record(&log, "http://x/3", 0);
     let second = log.since(first.next);
     assert_eq!(second.entries.iter().map(|e| e.url.as_str()).collect::<Vec<_>>(), vec!["http://x/3"]);
 
     // Más de lo que entra: quien leyó hasta el 4 se perdió entradas y tiene que saberlo.
     for i in 0..2000 {
-        record(&log, &format!("http://x/n{i}"), &[], 0);
+        record(&log, &format!("http://x/n{i}"), 0);
     }
     assert!(log.since(second.next).dropped);
 }
@@ -331,7 +351,7 @@ fn el_log_se_lee_por_partes_y_avisa_si_se_perdio_algo() {
 /// llegar cuando cambia, con el mismo `seq`.
 #[test]
 fn un_pedido_pendiente_vuelve_a_llegar_cuando_termina() {
-    let log = ProxyLog::default();
+    let log = watched_log();
     let seq = log.begin(
         Begin {
             method: "POST",
@@ -348,7 +368,7 @@ fn un_pedido_pendiente_vuelve_a_llegar_cuando_termina() {
     assert_eq!(pending.entries.len(), 1);
     assert!(!pending.entries[0].finished && pending.entries[0].status.is_none());
 
-    log.head(seq, head(404, &[]), 0);
+    log.head(seq, head(404));
     log.finish(seq, Finish { body: b"nope".to_vec(), body_size: 4, truncated: false, encoding: None, duration_ms: 9, error: None });
     let done = log.since(pending.next);
     assert_eq!(done.entries.len(), 1);
@@ -364,14 +384,14 @@ fn un_pedido_pendiente_vuelve_a_llegar_cuando_termina() {
 
 #[test]
 fn un_cuerpo_binario_viaja_en_base64_y_uno_cortado_sigue_siendo_texto() {
-    let log = ProxyLog::default();
-    let seq = record(&log, "http://x/img", &[], 0);
+    let log = watched_log();
+    let seq = record(&log, "http://x/img", 0);
     log.finish(seq, Finish { body: vec![0xff, 0x00, 0x89], body_size: 3, truncated: false, encoding: None, duration_ms: 1, error: None });
     let body = log.detail(seq).unwrap().response_body.unwrap();
     assert_eq!((body.text, body.base64.as_deref()), (None, Some("/wCJ")));
 
     // "ñ" son dos bytes: cortar entre los dos no lo vuelve binario.
-    let seq = record(&log, "http://x/txt", &[], 0);
+    let seq = record(&log, "http://x/txt", 0);
     log.finish(seq, Finish { body: "añ".as_bytes()[..2].to_vec(), body_size: 50, truncated: true, encoding: None, duration_ms: 1, error: None });
     let body = log.detail(seq).unwrap().response_body.unwrap();
     assert_eq!(body.text.as_deref(), Some("a"));
@@ -380,10 +400,10 @@ fn un_cuerpo_binario_viaja_en_base64_y_uno_cortado_sigue_siendo_texto() {
 
 #[test]
 fn pasado_el_presupuesto_se_sueltan_los_cuerpos_mas_viejos_y_no_el_ultimo() {
-    let log = ProxyLog::default();
+    let log = watched_log();
     let seqs: Vec<u64> = (0..70)
         .map(|i| {
-            let seq = record(&log, &format!("http://x/{i}"), &[], 0);
+            let seq = record(&log, &format!("http://x/{i}"), 0);
             log.finish(seq, Finish {
                 body: vec![b'a'; MAX_RESPONSE_BODY], body_size: MAX_RESPONSE_BODY as u64,
                 truncated: false, encoding: None, duration_ms: 1, error: None,
@@ -398,66 +418,176 @@ fn pasado_el_presupuesto_se_sueltan_los_cuerpos_mas_viejos_y_no_el_ultimo() {
     assert!(!last.evicted && last.text.is_some());
 }
 
-/// Un servidor borra una cookie mandándola vencida: si el log la siguiera mostrando, el
-/// panel diría que el logout no funcionó cuando sí.
-#[test]
-fn una_cookie_vencida_desaparece_del_reporte() {
-    let log = ProxyLog::default();
-    record(&log, "http://x/login", &["sid=1; Path=/"], 5_000_000);
-    assert_eq!(log.cookies(5_000_000).set.len(), 1);
-    record(&log, "http://x/logout", &["sid=; Path=/; Max-Age=0"], 5_000_000);
-    assert!(log.cookies(5_000_000).set.is_empty());
-}
-
+/// Sin el panel de debug abierto no se anota nada —ni cabeceras ni cuerpos—, pero qué
+/// cookies viajaron se sigue sabiendo. Al cerrar el último panel se suelta lo anotado.
 #[tokio::test(flavor = "multi_thread")]
-async fn el_proxy_anota_la_red_y_las_cookies_httponly() {
+async fn la_red_se_anota_solo_con_el_panel_de_debug_abierto() {
     let port = fake_dev_server().await;
     let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
-    let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
-
+    let origin = target.proxy_origin.clone();
     let c = client();
-    c.get(format!("{}/", target.proxy_origin)).send().await.unwrap().text().await.unwrap();
-    let resp = c.get(format!("{}/sesion", target.proxy_origin)).send().await.unwrap();
-    // El Domain se quita para que el iframe en 127.0.0.1 la acepte.
-    let set: Vec<_> = resp.headers().get_all("set-cookie").iter().map(|v| v.to_str().unwrap().to_string()).collect();
-    assert!(set.iter().any(|v| v.starts_with("tema=oscuro") && !v.contains("Domain")), "{set:?}");
-    c.get(format!("{}/no-existe", target.proxy_origin))
-        .header("cookie", "sid=abc; tema=oscuro")
-        .send().await.unwrap();
+    c.get(format!("{origin}/sesion")).send().await.unwrap();
+    let body = c.get(format!("{origin}/app.js")).send().await.unwrap().text().await.unwrap();
+    assert_eq!(body, "console.log(1)", "sin panel, el stream pasa derecho y entero");
+    assert!(preview_network(origin.clone(), 0).await.unwrap().entries.is_empty());
+    c.get(format!("{origin}/eco")).send().await.unwrap();
+    assert!(preview_cookies(origin.clone()).await.unwrap().sent.is_some(), "las cookies enviadas se saben igual");
 
-    let page = preview_network(target.proxy_origin.clone(), before).await.unwrap();
-    let seen: Vec<_> = page.entries.iter().map(|e| (e.url.clone(), e.status)).collect();
-    assert_eq!(seen, vec![
-        (format!("http://127.0.0.1:{port}/"), Some(200)),
-        (format!("http://127.0.0.1:{port}/sesion"), Some(200)),
-        (format!("http://127.0.0.1:{port}/no-existe"), Some(404)),
-    ]);
-    // El HTML pierde su Content-Length al inyectarle el script; el tamaño igual se sabe.
-    assert!(page.entries[0].size.is_some_and(|s| s > 0), "{:?}", page.entries[0]);
-    assert!(page.entries[0].content_type.as_deref().is_some_and(|t| t.starts_with("text/html")));
+    // Dos tabs sobre el mismo sitio: se anota mientras quede alguna mirando.
+    assert!(preview_set_recording(origin.clone(), "a".into(), true).await.unwrap());
+    assert!(preview_set_recording(origin.clone(), "b".into(), true).await.unwrap());
+    c.get(format!("{origin}/app.js")).send().await.unwrap().text().await.unwrap();
+    assert!(preview_set_recording(origin.clone(), "a".into(), false).await.unwrap());
+    assert_eq!(preview_network(origin.clone(), 0).await.unwrap().entries.len(), 1);
+
+    assert!(!preview_set_recording(origin.clone(), "b".into(), false).await.unwrap());
+    assert!(preview_network(origin.clone(), 0).await.unwrap().entries.is_empty(), "al cerrar el último se suelta");
+    c.get(format!("{origin}/app.js")).send().await.unwrap().text().await.unwrap();
+    assert!(preview_network(origin, 0).await.unwrap().entries.is_empty());
+}
+
+/// Un pedido de la página al proxy sobre el estado del sitio, como lo hace el runtime.
+fn own(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    req.header("x-controlcode", "1")
+}
+
+/// El proxy es el frasco de cookies del sitio: el iframe no recibe ningún `Set-Cookie`, y lo
+/// que llega al servidor sale de lo guardado, no de lo que mande el navegador.
+#[tokio::test(flavor = "multi_thread")]
+async fn las_cookies_las_guarda_el_proxy_y_no_el_navegador() {
+    let port = fake_dev_server().await;
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    preview_set_recording(target.proxy_origin.clone(), "panel".into(), true).await.unwrap();
+    let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
+    let c = client();
+    let at = |path: &str| format!("{}{path}", target.proxy_origin);
+
+    let resp = c.get(at("/sesion")).send().await.unwrap();
+    assert!(resp.headers().get("set-cookie").is_none(), "el iframe no recibe cookies: {:?}", resp.headers());
+    assert!(resp.headers().get("x-controlcode-jar").is_some(), "la página se entera de que cambió el frasco");
+
+    // Lo que tenga guardado el navegador para `localhost` no llega: es de cualquier puerto.
+    let seen = c.get(at("/app/eco")).header("cookie", "intrusa=1").send().await.unwrap().text().await.unwrap();
+    assert_eq!(seen, "sid=abc; tema=oscuro", "path más largo primero");
+    // `sid` es de `/app`: a la raíz no va.
+    assert_eq!(c.get(at("/eco")).send().await.unwrap().text().await.unwrap(), "tema=oscuro");
 
     let cookies = preview_cookies(target.proxy_origin.clone()).await.unwrap();
     let sid = cookies.set.iter().find(|c| c.name == "sid").expect("la HttpOnly se ve");
     assert!(sid.http_only);
     assert_eq!(sid.path.as_deref(), Some("/app"));
-    assert_eq!(cookies.sent.unwrap().cookies.len(), 2);
+    assert_eq!(cookies.sent.unwrap().cookies.len(), 1, "el último pedido llevó solo `tema`");
 
-    // Borrarla la vence con el MISMO path con que se creó: con otro, el navegador la ignora.
-    let clear = c
-        .get(format!("{}/__controlcode__/cookies/clear?name=sid", target.proxy_origin))
-        .send().await.unwrap();
-    let expire: Vec<_> = clear.headers().get_all("set-cookie").iter().map(|v| v.to_str().unwrap().to_string()).collect();
-    assert!(expire.contains(&"sid=; Max-Age=0; Path=/app".to_string()), "{expire:?}");
+    // El panel de red muestra lo que pasó de verdad en cada punta.
+    let entries = preview_network(target.proxy_origin.clone(), before).await.unwrap().entries;
+    let seq = |suffix: &str| entries.iter().find(|e| e.url.ends_with(suffix)).unwrap().seq;
+    let sesion = preview_request(target.proxy_origin.clone(), seq("/sesion")).await.unwrap().unwrap();
+    let kept: Vec<_> = sesion.response_headers.iter().filter(|h| h.name == "set-cookie").collect();
+    assert_eq!(kept.len(), 2);
+    assert!(kept.iter().all(|h| h.note == Some(HeaderNote::Kept)), "{kept:?}");
+    let eco = preview_request(target.proxy_origin.clone(), seq("/app/eco")).await.unwrap().unwrap();
+    let sent = eco.request_headers.iter().find(|h| h.name == "cookie").unwrap();
+    assert_eq!((sent.value.as_str(), sent.note), ("sid=abc; tema=oscuro", Some(HeaderNote::Rewritten)));
+
+    // Borrar una cookie la saca del frasco, `HttpOnly` incluida.
+    let clear = own(c.get(at("/__controlcode__/cookies/clear?name=sid"))).send().await.unwrap();
+    assert_eq!(clear.status(), 204);
     assert!(preview_cookies(target.proxy_origin.clone()).await.unwrap().set.iter().all(|c| c.name != "sid"));
+    assert_eq!(c.get(at("/app/eco")).send().await.unwrap().text().await.unwrap(), "tema=oscuro");
 
-    // Un nombre que colaría atributos en el Set-Cookie se rechaza.
-    let bad = c
-        .get(format!("{}/__controlcode__/cookies/clear?name=a%3B%20Domain%3Devil", target.proxy_origin))
-        .send().await.unwrap();
-    assert_eq!(bad.status(), 400);
     // Lo propio del proxy no se anota como tráfico de la página.
-    let after = preview_network(target.proxy_origin.clone(), page.next).await.unwrap();
-    assert!(after.entries.is_empty(), "{:?}", after.entries);
+    let last = preview_network(target.proxy_origin.clone(), 0).await.unwrap().entries;
+    assert!(last.iter().all(|e| !e.url.contains("__controlcode__")), "{last:?}");
+}
+
+/// `document.cookie` se resuelve contra el frasco: ve lo que no es `HttpOnly`, y lo que
+/// escribe viaja en los pedidos siguientes.
+#[tokio::test(flavor = "multi_thread")]
+async fn document_cookie_lee_y_escribe_el_frasco_del_sitio() {
+    let port = fake_dev_server().await;
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let c = client();
+    let at = |path: &str| format!("{}{path}", target.proxy_origin);
+    c.get(at("/sesion")).send().await.unwrap();
+
+    let read = |path: &str| {
+        let url = at(&format!("/__controlcode__/cookie?path={path}"));
+        let c = c.clone();
+        async move { own(c.get(url)).send().await.unwrap().json::<serde_json::Value>().await.unwrap() }
+    };
+    let view = read("%2Fapp%2Fpanel").await;
+    assert_eq!(view["cookie"], "tema=oscuro", "la HttpOnly no se ve desde la página");
+
+    // Un script no puede pisar una HttpOnly (si pudiera, leería la sesión)…
+    let write = |path: &str, line: &str| {
+        let url = at(&format!("/__controlcode__/cookie?path={path}"));
+        let (c, line) = (c.clone(), line.to_string());
+        async move { own(c.post(url)).body(line).send().await.unwrap().json::<serde_json::Value>().await.unwrap() }
+    };
+    write("%2Fapp%2Fpanel", "sid=robada; path=/app").await;
+    assert_eq!(c.get(at("/app/eco")).send().await.unwrap().text().await.unwrap(), "sid=abc; tema=oscuro");
+    // …pero sí poner las suyas, que contesta en el acto.
+    let after = write("%2F", "idioma=es; max-age=3600").await;
+    assert_eq!(after["cookie"], "tema=oscuro; idioma=es");
+    assert!(after["v"].as_u64().unwrap() > view["v"].as_u64().unwrap(), "la versión sube con el cambio");
+    assert_eq!(c.get(at("/eco")).send().await.unwrap().text().await.unwrap(), "tema=oscuro; idioma=es");
+    // Y borrarlas como siempre: vencidas.
+    write("%2F", "idioma=; max-age=0").await;
+    assert_eq!(read("%2F").await["cookie"], "tema=oscuro");
+}
+
+/// Dos proyectos en el mismo host y distinto puerto tienen cada uno su sesión. Con las
+/// cookies del motor —que no separan por puerto— se pisaban.
+#[tokio::test(flavor = "multi_thread")]
+async fn cada_puerto_tiene_sus_propias_cookies() {
+    let (a, b) = (fake_dev_server().await, fake_dev_server().await);
+    let pa = preview_resolve(format!("http://127.0.0.1:{a}/"), String::new()).await.unwrap().proxy_origin;
+    let pb = preview_resolve(format!("http://127.0.0.1:{b}/"), String::new()).await.unwrap().proxy_origin;
+    let c = client();
+    c.get(format!("{pa}/sesion")).send().await.unwrap();
+    assert_eq!(c.get(format!("{pa}/eco")).send().await.unwrap().text().await.unwrap(), "tema=oscuro");
+    assert_eq!(c.get(format!("{pb}/eco")).send().await.unwrap().text().await.unwrap(), "");
+    assert!(preview_cookies(pb).await.unwrap().set.is_empty());
+}
+
+/// El estado del sitio tiene sesiones adentro: sin la cabecera del runtime, o pedido con
+/// otro nombre que el del proxy, no se contesta.
+#[tokio::test(flavor = "multi_thread")]
+async fn el_estado_del_sitio_no_se_le_da_a_cualquiera() {
+    let port = fake_dev_server().await;
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let c = client();
+    c.get(format!("{}/sesion", target.proxy_origin)).send().await.unwrap();
+    let url = format!("{}/__controlcode__/cookie?path=%2F", target.proxy_origin);
+    assert_eq!(c.get(&url).send().await.unwrap().status(), 403, "sin la cabecera del runtime");
+    let rebound = own(c.get(&url)).header("host", "evil.example").send().await.unwrap();
+    assert_eq!(rebound.status(), 403, "por otro nombre");
+    let storage = c.post(format!("{}/__controlcode__/storage", target.proxy_origin)).body("{}").send().await.unwrap();
+    assert_eq!(storage.status(), 403);
+    assert_eq!(own(c.get(&url)).send().await.unwrap().status(), 200);
+}
+
+/// La primera página después de arrancar puede reponer el storage que el motor perdió; en
+/// cuanto la página manda el suyo, el del navegador es el que vale.
+#[tokio::test(flavor = "multi_thread")]
+async fn el_storage_se_guarda_y_se_repone_una_vez() {
+    let port = fake_dev_server().await;
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let c = client();
+    let url = format!("{}/__controlcode__/storage", target.proxy_origin);
+    // Recién abierto y sin nada guardado: no hay qué reponer.
+    let empty: serde_json::Value = own(c.get(&url)).send().await.unwrap().json().await.unwrap();
+    assert_eq!(empty, serde_json::json!({ "local": null, "session": null }));
+
+    let saved = own(c.post(&url))
+        .body(r#"{"local":[["token","abc"]],"session":[["paso","2"]]}"#)
+        .send().await.unwrap();
+    assert_eq!(saved.status(), 204);
+    let bad = own(c.post(&url)).body("no es json").send().await.unwrap();
+    assert_eq!(bad.status(), 400);
+    // En la misma ejecución no se repone: la página ya tiene el suyo.
+    let again: serde_json::Value = own(c.get(&url)).send().await.unwrap().json().await.unwrap();
+    assert_eq!(again["local"], serde_json::Value::Null);
 }
 
 /// Lo que el panel necesita para depurar un pedido: las cabeceras de las dos puntas (con lo
@@ -466,6 +596,7 @@ async fn el_proxy_anota_la_red_y_las_cookies_httponly() {
 async fn el_detalle_trae_cabeceras_cuerpos_y_lo_que_cambio_la_vista_previa() {
     let port = fake_dev_server().await;
     let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    preview_set_recording(target.proxy_origin.clone(), "panel".into(), true).await.unwrap();
     let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
 
     let c = client();
@@ -514,6 +645,7 @@ async fn un_servidor_apagado_se_anota_como_conexion_rechazada() {
     // Un puerto que se abre y se cierra: nadie escucha ahí.
     let port = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
     let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    preview_set_recording(target.proxy_origin.clone(), "panel".into(), true).await.unwrap();
     let resp = client().get(format!("{}/api", target.proxy_origin)).send().await.unwrap();
     assert_eq!(resp.status(), 502);
     // La página de error trae el runtime como cualquier otra: la app se entera de que cargó y
@@ -539,8 +671,8 @@ fn el_proxy_se_sirve_con_el_mismo_nombre_que_el_servidor() {
     assert_eq!(proxy_host("192.168.1.40"), "localhost");
 }
 
-/// Con el mismo puerto en cada arranque, el origen de la página no cambia: su localStorage y
-/// sus cookies sobreviven a reiniciar la app, y se lo puede agregar a una lista de CORS.
+/// Con el mismo puerto en cada arranque, el origen de la página no cambia: se lo puede
+/// agregar a una lista de CORS, y el storage que el motor sí conserve sigue siendo suyo.
 #[test]
 fn cada_servidor_tiene_siempre_el_mismo_puerto() {
     let a = preferred_port("http://localhost:5173");
@@ -639,6 +771,7 @@ fn el_cuerpo_decide_el_tipo_y_una_regla_invalida_se_rechaza() {
 async fn una_regla_contesta_en_lugar_del_servidor_y_queda_anotada() {
     let port = fake_dev_server().await;
     let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    preview_set_recording(target.proxy_origin.clone(), "panel".into(), true).await.unwrap();
     let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
 
     super::proxy::preview_add_mock(
@@ -662,4 +795,144 @@ async fn una_regla_contesta_en_lugar_del_servidor_y_queda_anotada() {
     super::proxy::preview_clear_mocks(target.proxy_origin.clone(), None).await.unwrap();
     let real = client().get(format!("{}/app.js", target.proxy_origin)).send().await.unwrap();
     assert_eq!(real.text().await.unwrap(), "console.log(1)");
+}
+
+// ── Lo que se guarda de cada sitio ───────────────────────────────
+
+use super::log::SetCookie;
+use super::site::{default_path, file_name, path_matches, store_cookie, Site, StorageCopy};
+
+fn site_dir(tag: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("cc-site-{tag}-{}", uuid::Uuid::new_v4()))
+}
+
+fn cookie(line: &str, at: i64) -> SetCookie {
+    let mut c = parse_set_cookie(line, at / 1000).unwrap();
+    c.at = at;
+    c
+}
+
+#[test]
+fn el_path_de_una_cookie_sigue_el_rfc() {
+    assert_eq!(default_path("/app/login?next=/"), "/app");
+    assert_eq!(default_path("/login"), "/");
+    assert_eq!(default_path("/"), "/");
+    assert_eq!(default_path(""), "/");
+    assert!(path_matches("/app", "/app"));
+    assert!(path_matches("/app/panel?x=1", "/app"));
+    assert!(path_matches("/app/panel", "/app/"));
+    assert!(path_matches("/cualquiera", "/"));
+    assert!(!path_matches("/application", "/app"), "un prefijo de texto no es un directorio");
+    assert!(!path_matches("/", "/app"));
+}
+
+/// Un servidor borra una cookie mandándola vencida; si el frasco la siguiera teniendo, un
+/// logout no cerraría nada.
+#[test]
+fn una_cookie_vencida_se_borra_del_frasco() {
+    let mut jar = Vec::new();
+    assert!(store_cookie(&mut jar, cookie("sid=1; Path=/", 5_000_000), "/login", false, 5_000));
+    assert!(!store_cookie(&mut jar, cookie("sid=1; Path=/", 5_000_001), "/login", false, 5_000), "la misma no es un cambio");
+    assert!(store_cookie(&mut jar, cookie("sid=; Path=/; Max-Age=0", 5_000_000), "/logout", false, 5_000));
+    assert!(jar.is_empty());
+    // Una vencida que no existía no cambia nada.
+    assert!(!store_cookie(&mut jar, cookie("otra=; Max-Age=0", 5_000_000), "/", false, 5_000));
+}
+
+#[test]
+fn un_script_no_toca_las_httponly() {
+    let mut jar = Vec::new();
+    store_cookie(&mut jar, cookie("sid=secreto; Path=/; HttpOnly", 0), "/", false, 0);
+    assert!(!store_cookie(&mut jar, cookie("sid=robada; Path=/", 0), "/", true, 0));
+    assert_eq!(jar[0].value, "secreto");
+    // Y lo que pone un script nunca es HttpOnly, aunque lo pida.
+    store_cookie(&mut jar, cookie("js=1; HttpOnly", 0), "/", true, 0);
+    assert!(!jar.iter().find(|c| c.name == "js").unwrap().http_only);
+}
+
+#[test]
+fn el_frasco_tiene_techo() {
+    let mut jar = Vec::new();
+    for i in 0..200 {
+        store_cookie(&mut jar, cookie(&format!("c{i}=1"), i), "/", false, 0);
+    }
+    assert_eq!(jar.len(), 180);
+    assert!(jar.iter().all(|c| c.name != "c0"), "se va la más vieja");
+    assert!(jar.iter().any(|c| c.name == "c199"));
+}
+
+#[test]
+fn el_archivo_de_cada_sitio_se_reconoce_y_no_choca() {
+    assert!(file_name("http://localhost:5173").starts_with("http_localhost_5173-"));
+    assert_ne!(file_name("http://a-b:1"), file_name("http://a_b:1"));
+    assert_ne!(file_name("http://localhost:3000"), file_name("http://localhost:5173"));
+}
+
+/// Lo que la página tenía al cerrar la app vuelve al abrirla: las cookies —de sesión
+/// incluidas, que son las de un login típico— y la copia del storage, una sola vez.
+#[test]
+fn el_sitio_sobrevive_a_reiniciar_la_app() {
+    let dir = site_dir("reinicio");
+    let origin = "http://localhost:5173";
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    {
+        let site = Site::open(origin, Some(&dir));
+        site.store_from_server(&["sid=abc; Path=/; HttpOnly".into(), "tema=oscuro; Max-Age=3600".into()], "/login", "http://localhost:5173/login", now);
+        site.store_from_script("idioma=es", "/panel", "http://localhost:5173/panel", now);
+        site.save_storage(StorageCopy {
+            local: Some(vec![("token".into(), "xyz".into())]),
+            session: Some(vec![("paso".into(), "2".into())]),
+        });
+        site.save_now().unwrap();
+    }
+    let file = dir.join(file_name(origin));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "tiene sesiones adentro: solo lo lee el usuario");
+    }
+
+    let reopened = Site::open(origin, Some(&dir));
+    assert_eq!(reopened.cookie_header("/", now / 1000).as_deref(), Some("sid=abc; tema=oscuro; idioma=es"));
+    assert_eq!(reopened.script_cookies("/", now / 1000).0, "tema=oscuro; idioma=es");
+    let restore = reopened.take_restore();
+    assert_eq!(restore.local, Some(vec![("token".into(), "xyz".into())]));
+    assert_eq!(restore.session, Some(vec![("paso".into(), "2".into())]));
+    assert_eq!(reopened.take_restore(), StorageCopy::default(), "se repone una sola vez");
+
+    // Olvidar el sitio deja el archivo como el de uno nunca abierto.
+    reopened.forget_all();
+    reopened.save_now().unwrap();
+    let forgotten = Site::open(origin, Some(&dir));
+    assert!(forgotten.cookies(now / 1000).is_empty());
+    assert_eq!(forgotten.take_restore(), StorageCopy::default());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Si la página ya mandó su storage, esa ejecución no repone nada: la copia vieja
+/// resucitaría lo que la página borró (un logout seguido de una recarga).
+#[test]
+fn despues_de_guardar_ya_no_se_repone() {
+    let dir = site_dir("sin-reponer");
+    let origin = "http://localhost:3000";
+    let first = Site::open(origin, Some(&dir));
+    first.save_storage(StorageCopy { local: Some(vec![("token".into(), "1".into())]), session: None });
+    first.save_now().unwrap();
+
+    let second = Site::open(origin, Some(&dir));
+    second.save_storage(StorageCopy { local: Some(vec![]), session: Some(vec![]) });
+    assert_eq!(second.take_restore(), StorageCopy::default());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Un archivo roto no puede impedir que el navegador arranque.
+#[test]
+fn un_archivo_roto_se_ignora() {
+    let dir = site_dir("roto");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(file_name("http://localhost:1")), b"{ no es json").unwrap();
+    let site = Site::open("http://localhost:1", Some(&dir));
+    assert!(site.cookies(0).is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
 }

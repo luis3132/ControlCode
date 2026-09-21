@@ -1,6 +1,6 @@
 [package]
 name = "controlcode"
-version = "1.7.1"
+version = "1.7.2"
 description = "Control Code — AI coding agent command center"
 authors = ["luis3132"]
 edition = "2024"

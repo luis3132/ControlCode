@@ -11,6 +11,7 @@
  * pasó en la consola y la red durante la acción, que es lo que un agente probando una
  * página necesita ver sin tener que preguntarlo aparte.
  */
+import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
 
@@ -28,6 +29,7 @@ import {
 } from "./markedView";
 import { batchById, batchesFor, consumeMarks, newMarkId, pendingCount, type SentBatch } from "./markStore";
 import type { PageChannel } from "./pageChannel";
+import { browserToolPrefix } from "./tabMcp";
 import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
 
@@ -62,6 +64,11 @@ export interface BrowserHost {
   /** Una foto de la página como se ve ahora, guardada en disco. Devuelve la ruta. `tag`
    *  dice de quién es: va en el nombre del archivo. */
   screenshot: (tag?: string) => Promise<string>;
+  /** El panel de debug está abierto: solo mientras lo esté se anota la red. */
+  debugOpen: () => boolean;
+  /** Abre el panel de debug en la red, que es lo que prende el registro. A la vista de la
+   *  persona a propósito: así sabe por qué está abierto. */
+  openNetworkDebug: () => void;
 }
 
 /** Elementos, capturas y nota: lo que la persona señaló de una vez. */
@@ -291,7 +298,9 @@ async function marksText(
   note: string,
   /** Con qué apuntarle al runtime. `pick` = lo que la persona acaba de marcar, que se
    *  resuelve por identidad; el resto se busca por su selector. */
-  pointer?: string
+  pointer?: string,
+  /** Lo que la TUI de quien pregunta le antepone al nombre de cada tool. */
+  prefix = ""
 ): Promise<string> {
   const entries: MarkedEntry[] = [];
   for (const pick of picks) {
@@ -305,14 +314,26 @@ async function marksText(
   const proxy = host.proxyOrigin();
   const target = host.targetOrigin();
   const display = (url: string) => (proxy && target && url.startsWith(proxy) ? target + url.slice(proxy.length) : url);
-  return inServerTerms(host, formatMarked(entries, captures, note, display));
+  return inServerTerms(host, formatMarked(entries, captures, note, display, prefix));
 }
 
 /** Un envío del usuario, descrito en la tab donde lo marcó (si sigue abierta). */
-async function markedBatchText(fallback: BrowserHost, batch: SentBatch): Promise<string> {
+async function markedBatchText(fallback: BrowserHost, batch: SentBatch, prefix: string): Promise<string> {
   const host = hosts.get(batch.viewId) ?? fallback;
-  const text = await marksText(host, batch.picks, batch.captures, batch.note);
+  const text = await marksText(host, batch.picks, batch.captures, batch.note, undefined, prefix);
   return `${batchHeader(batch, Date.now())}\n\n${text}`;
+}
+
+/**
+ * Con qué nombre llama a las tools el agente que está preguntando.
+ *
+ * Se mira su TUI y no lo que mandó el servidor MCP porque el mismo texto lo sirven los dos
+ * caminos: el MCP y el puente de la CLI. Una tarea de la flota corre Claude Code, que no
+ * les pone prefijo.
+ */
+function askerPrefix(owner: ViewOwner | null): string {
+  if (owner?.kind !== "tab") return "";
+  return browserToolPrefix(useTabsStore.getState().tabs.find((tab) => tab.id === owner.id)?.agentId);
 }
 
 /** Las reglas simuladas, para que el agente sepa qué está fingiendo la página. */
@@ -411,6 +432,14 @@ async function execute(
       return `${inServerTerms(host, text)}\n\n[cursor: ${next} — pasá since=${next} para ver solo lo que llegue después]`;
     }
     case "network": {
+      // La red se anota solo con el panel de debug abierto (para no cargar la app con lo
+      // que nadie mira): si estaba cerrado no hay nada que leer, y se prende desde ahora.
+      if (!host.debugOpen()) {
+        host.openNetworkDebug();
+        return "Network recording was off: ControlCode only records network traffic while the browser's "
+          + "debug panel is open, and it was closed. It is open now and recording from this point on. "
+          + "Reload the page or repeat the action you care about, then call this tool again.";
+      }
       const origin = host.proxyOrigin();
       if (origin) await refreshProxyLog(host.viewId, origin);
       const wanted = str(request, "request");
@@ -459,13 +488,14 @@ async function execute(
       if (!picked) {
         throw new Error("The user marked nothing: they cancelled with Escape, or the wait timed out.");
       }
-      return marksText(host, [picked], [], "", "pick");
+      return marksText(host, [picked], [], "", "pick", askerPrefix(owner));
     }
     case "marked": {
       // Por id, que es lo que lleva el aviso: no hay forma de leer lo que le marcaron a
       // otro, ni de confundir dos envíos. Sin id, el último que le hayan mandado a quien
       // pregunta.
       const asking = owner?.id ?? null;
+      const prefix = askerPrefix(owner);
       const wanted = str(request, "id");
       const batch = wanted ? batchById(wanted) : batchesFor(asking ?? "")[0];
 
@@ -473,7 +503,7 @@ async function execute(
         if (asking && batch.agentId !== asking) {
           throw new Error(`${batch.id} is not yours: the user sent it to another agent. Ask them to send you yours.`);
         }
-        const text = await markedBatchText(host, batch);
+        const text = await markedBatchText(host, batch, prefix);
         consumeMarks(batch.id);
         return text;
       }
@@ -484,14 +514,14 @@ async function execute(
       }
       const pending = host.marks();
       if (pending) {
-        const text = await marksText(host, pending.picks, pending.captures, pending.note);
+        const text = await marksText(host, pending.picks, pending.captures, pending.note, undefined, prefix);
         return `The user has this marked right now (still in their panel, not sent to anyone yet):\n\n${text}`;
       }
       const others = pendingCount();
       throw new Error(
         others > 0
-          ? `Nothing is addressed to you: the ${others} batch(es) waiting were sent to another agent. Ask the user to send you theirs, or use browser_pick.`
-          : "The user has not marked anything in the browser yet. Ask them for it with browser_pick, or wait until they use the Mark button."
+          ? `Nothing is addressed to you: the ${others} batch(es) waiting were sent to another agent. Ask the user to send you theirs, or use ${prefix}browser_pick.`
+          : `The user has not marked anything in the browser yet. Ask them for it with ${prefix}browser_pick, or wait until they use the Mark button.`
       );
     }
     case "mock": {

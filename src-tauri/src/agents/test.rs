@@ -112,3 +112,29 @@ fn toda_tui_que_reanuda_declara_donde_viven_sus_sesiones() {
         }
     }
 }
+
+/// El prefijo sale del catálogo y no de un `if` con un id adentro: mientras estuvo
+/// escrito en `Terminal.tsx`, OpenCode arrancaba sin las tools y sin decir por qué.
+///
+/// El de OpenCode NO es cosmético: registra las tools de un servidor MCP con el nombre del
+/// servidor delante, así que un texto que lo mande a `browser_marked` lo manda a una tool
+/// que en su lista no existe.
+#[test]
+fn cada_tui_dice_como_recibe_el_mcp_y_como_nombra_sus_tools() {
+    use crate::agents::McpStyle;
+    use crate::ipc::mcp::tool_prefix;
+
+    let style = |id: &str| crate::agents::agent_def(id).expect(id).mcp;
+    assert_eq!(style("claude-code"), McpStyle::ClaudeFlags);
+    assert_eq!(style("opencode"), McpStyle::OpencodeConfig);
+    // Una salida a la terminal no es un agente: no hay a quién enchufarle nada.
+    assert_eq!(style("bash"), McpStyle::None);
+
+    assert_eq!(tool_prefix(McpStyle::OpencodeConfig), "controlcode_");
+    assert_eq!(tool_prefix(McpStyle::ClaudeFlags), "");
+    assert_eq!(tool_prefix(McpStyle::None), "");
+
+    // El catálogo que ve el frontend lo arrastra: es de ahí de donde lo lee.
+    let front = crate::agents::agent_registry();
+    assert_eq!(front.iter().find(|a| a.id == "opencode").expect("falta opencode").mcp, McpStyle::OpencodeConfig);
+}

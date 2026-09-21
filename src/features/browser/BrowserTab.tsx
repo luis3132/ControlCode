@@ -21,11 +21,12 @@ import { AnnotationBar, AnnotationCanvas, renderAnnotated, useAnnotationSession 
 import { canvasToPng, freezePage, thumbnail, type FrozenPage } from "./annotate/capture";
 import { composePickMessage, toTargetUrl, type AnnotatedCapture } from "./composeMessage";
 import { composePointer } from "./markedView";
+import { browserToolPrefix, hasBrowserMcp } from "./tabMcp";
 import { DebugPanel, MIN_PANEL, type DebugTab } from "./debug/DebugPanel";
-import { appendBatch, currentCounts, EMPTY_LOG, startDocument } from "./debugLog";
+import { appendBatch, clearNetwork, currentCounts, EMPTY_LOG, startDocument } from "./debugLog";
 import { useDebugStore } from "./debugStore";
 import { DeviceBar } from "./DeviceBar";
-import { previewDetectServers, previewResolve, previewSaveCapture, type PreviewTarget } from "./ipc";
+import { previewDetectServers, previewResolve, previewSaveCapture, previewSetRecording, type PreviewTarget } from "./ipc";
 import { PageChannel } from "./pageChannel";
 import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
@@ -100,6 +101,9 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const [viewport, setViewportState] = useState<Viewport | null>(view.viewport ?? null);
   const [touch, setTouchState] = useState(view.touch ?? false);
   const [debugOpen, setDebugOpen] = useState(false);
+  /** Lo lee un agente o un mensaje de la página, por fuera del render. */
+  const debugOpenRef = useRef(false);
+  debugOpenRef.current = debugOpen;
   const [debugTab, setDebugTab] = useState<DebugTab>("console");
   const [debugHeight, setDebugHeight] = useState(savedPanelHeight);
   const [docId, setDocId] = useState<string | null>(null);
@@ -158,6 +162,25 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     if (!target) return;
     iframe.current?.contentWindow?.postMessage({ source: "controlcode", type } satisfies AppMessage, target.proxyOrigin);
   }, [target]);
+
+  // La red se anota solo con el panel de debug abierto, en el proxy y en la página: guardar
+  // cabeceras y cuerpos de cada módulo que sirve un servidor de desarrollo es memoria y
+  // trabajo que no tiene sentido si nadie lo mira. Al cerrarlo se suelta lo anotado, como
+  // en las DevTools de un navegador.
+  // Atado al origen del proxy y no al objeto `target`, que cambia con cada navegación desde
+  // la barra: si no, cada una apagaría y volvería a prender el registro, y lo soltaría.
+  const recordingOrigin = target?.proxyOrigin ?? null;
+  useEffect(() => {
+    if (!recordingOrigin) return;
+    previewSetRecording(recordingOrigin, view.id, debugOpen).catch(() => undefined);
+    const message: SimpleAppMessage = { source: "controlcode", type: debugOpen ? "net:on" : "net:off" };
+    iframe.current?.contentWindow?.postMessage(message, recordingOrigin);
+    if (!debugOpen) useDebugStore.getState().apply(view.id, clearNetwork);
+    // Al cambiar de sitio o cerrar la tab, este deja de mirar el anterior.
+    return () => {
+      if (debugOpen) previewSetRecording(recordingOrigin, view.id, false).catch(() => undefined);
+    };
+  }, [debugOpen, recordingOrigin, view.id]);
 
   const setViewport = useCallback((next: Viewport | null) => {
     viewportRef.current = next;
@@ -249,6 +272,11 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       const hay = picks.length > 0 || captures.length > 0 || note.trim() !== "";
       return hay ? { picks, captures: captures.map(bare), note } : null;
     },
+    debugOpen: () => debugOpenRef.current,
+    openNetworkDebug: () => {
+      setDebugTab("network");
+      setDebugOpen(true);
+    },
     screenshot: async (tag) => {
       const page = iframe.current;
       const frame = column.current;
@@ -327,6 +355,10 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         useDebugStore.getState().apply(view.id, (log) => startDocument(log, msg.payload.doc, url, Date.now()));
         // Con esto la página aprende a quién mandarle lo que capturó durante la carga.
         (e.source as Window).postMessage({ source: "controlcode", type: "connect" } satisfies AppMessage, target.proxyOrigin);
+        // Cada documento arranca sin anotar la red: si el panel está abierto, se le avisa.
+        if (debugOpenRef.current) {
+          (e.source as Window).postMessage({ source: "controlcode", type: "net:on" } satisfies AppMessage, target.proxyOrigin);
+        }
         // Y el táctil se vuelve a poner: las hojas de estilo de la página nueva están sin
         // tocar, así que sin esto la emulación se apagaría sola al navegar.
         if (touchRef.current) channel.run({ op: "touch", on: true }, 8000).catch(() => undefined);
@@ -463,14 +495,16 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     const batchId = newMarkId("m");
     // Un agente con el MCP de Control Code no necesita el volcado: se le dice qué hay y lo
     // lee con `browser_marked`, que se lo describe como está AHORA —si algo cambió o quedó
-    // tapado desde que se marcó, se entera— y le da un ref para tocarlo.
-    const text = agent.agentId === "claude-code"
+    // tapado desde que se marcó, se entera— y le da un ref para tocarlo. Al que no lo
+    // tiene se le manda todo servido, que es lo único que le puede llegar.
+    const text = hasBrowserMcp(agent.agentId)
       ? composePointer(
         { picks: picks.length, captures: captures.length },
         display(picks[0]?.url ?? pageUrl.current ?? ""),
         note,
         captures.map((c) => c.path),
-        batchId
+        batchId,
+        browserToolPrefix(agent.agentId)
       )
       : composePickMessage(picks, note, display, captures.map(bare));
     if (!pasteIntoTab(agent.id, text, true)) {

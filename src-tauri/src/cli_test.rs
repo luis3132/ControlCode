@@ -232,3 +232,52 @@ fn dash_prefixed_values_need_the_json_escape_hatch() {
     let v = flags(&["--json-args", r#"{"text":"--algo"}"#]);
     assert_eq!(v["text"], "--algo");
 }
+
+/// Todo grupo que la app sabe atender tiene que estar en la ayuda.
+///
+/// El `USAGE` se escribió a mano y se quedó atrás: llegó a no nombrar ni `mcp` —que es lo
+/// que más corre— ni ninguno de los comandos de la flota, que se podían escribir en la
+/// terminal y no figuraban en ningún lado. Esto lo vuelve un error de test en vez de algo
+/// que se descubre cuando alguien escribe `ccode` y no encuentra lo que busca.
+///
+/// Se compara por GRUPO y no por comando: la ayuda agrupa (`tab create`, `tab close`) y
+/// exigir cada acción textual convertiría el test en una segunda copia del despachador.
+#[test]
+fn la_ayuda_nombra_todos_los_grupos_que_la_app_atiende() {
+    let dispatch = include_str!("ipc/commands/dispatch.rs");
+    let mut groups: Vec<&str> = dispatch
+        .lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix('"')?;
+            let (command, _) = rest.split_once('"')?;
+            // Solo las ramas del match, que son `"grupo.accion" => ...`.
+            if !line.contains("=>") {
+                return None;
+            }
+            command.split_once('.').map(|(group, _)| group)
+        })
+        .collect();
+    groups.sort_unstable();
+    groups.dedup();
+    assert!(groups.len() >= 8, "no se reconocieron las ramas del despachador: {groups:?}");
+
+    for group in groups {
+        // `user.ask` no se escribe en la terminal: lo llama un agente por el MCP, y la
+        // ayuda lo cuenta en la sección del servidor.
+        if group == "user" {
+            continue;
+        }
+        // Como COMANDO, no en cualquier parte: buscar la palabra suelta daba por
+        // documentado a `run` porque la ayuda decía "la app no corre".
+        let listed = USAGE.lines().any(|line| {
+            let line = line.trim_start();
+            line.strip_prefix(group)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(' ') || rest.starts_with('s'))
+        });
+        assert!(listed, "la ayuda no nombra '{group}' como comando");
+    }
+
+    // Y el servidor MCP, que no es un comando del despachador sino un modo del binario.
+    assert!(USAGE.contains("mcp --cwd"), "la ayuda no explica `ccode mcp`");
+    assert!(USAGE.contains("mcp --task"));
+}

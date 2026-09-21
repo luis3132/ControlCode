@@ -1,9 +1,43 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { agentDef } from "@/features/agents/registry";
+
 /** Lo que devuelve `tab_browser_mcp` (ver `src-tauri/src/ipc/mcp.rs`). */
 export interface TabMcp {
-  configPath: string;
+  /** El archivo para `--mcp-config`. `null` = esta TUI no lo recibe así. */
+  configPath: string | null;
   allowedTools: string[];
+  /** Variables de entorno del proceso, para las TUIs que llevan el servidor en su config
+   *  (OpenCode: `OPENCODE_CONFIG_CONTENT`). */
+  env: Record<string, string>;
+  /** Lo que esta TUI le antepone al nombre de cada tool. */
+  toolPrefix: string;
+}
+
+/**
+ * Si a esta TUI se le puede enchufar el navegador y la orquestación de la app.
+ *
+ * Sale del catálogo (`agent_registry`, espejo de `registry.rs`) y no de una lista acá: una
+ * segunda tabla solo se nota cuando ya divergió, y esto lo decide quién verificó el
+ * formato de cada CLI.
+ */
+export function hasBrowserMcp(agentId: string | null | undefined): boolean {
+  const style = agentId ? agentDef(agentId)?.mcp : undefined;
+  return style !== undefined && style !== "none";
+}
+
+/** El nombre del servidor MCP de la app (`SERVER_NAME` en `src-tauri/src/ipc/mcp.rs`). */
+const SERVER_NAME = "controlcode";
+
+/**
+ * Con qué nombre tiene que llamar a las tools este agente.
+ *
+ * OpenCode registra las de un servidor MCP con el nombre del servidor de prefijo
+ * (`controlcode_browser_marked`); Claude Code las deja como vienen. Va en todo texto que
+ * mande al agente a usar una: el nombre que lee tiene que ser el que puede escribir.
+ */
+export function browserToolPrefix(agentId: string | null | undefined): string {
+  return agentId && agentDef(agentId)?.mcp === "opencodeConfig" ? `${SERVER_NAME}_` : "";
 }
 
 const quote = (value: string) => (value.includes('"') ? `'${value}'` : `"${value}"`);
@@ -40,18 +74,37 @@ const PREVIOUS = new RegExp(
  */
 export function appendBrowserMcp(command: string, mcp: TabMcp): string {
   const clean = command.replace(PREVIOUS, "").trim();
+  if (!mcp.configPath) return clean;
   return `${clean} --mcp-config ${quote(mcp.configPath)} --allowedTools ${quote(mcp.allowedTools.join(","))}`;
 }
 
+/** Un lanzamiento con el navegador enchufado: el comando y las variables del proceso. */
+export interface BrowserLaunch {
+  command: string;
+  env: Record<string, string>;
+}
+
 /**
- * Lo mismo, pidiéndole a la app el config de esta carpeta. Si no se puede (una build sin
- * `ccode`), la tab arranca como siempre: el navegador es un agregado, no una condición.
+ * El lanzamiento de una tab con el navegador de la app enchufado, en el dialecto que
+ * acepte esa TUI: flags para Claude Code, una variable de entorno para OpenCode.
+ *
+ * Si no se puede (una build sin `ccode`, o una TUI a la que todavía no se le verificó el
+ * formato), la tab arranca como siempre: el navegador es un agregado, no una condición.
  */
-export async function withBrowserMcp(command: string, cwd: string, tabId: string): Promise<string> {
+export async function withBrowserMcp(
+  command: string,
+  cwd: string,
+  tabId: string,
+  agentId: string
+): Promise<BrowserLaunch> {
   try {
-    const mcp = await invoke<TabMcp | null>("tab_browser_mcp", { cwd, tabId });
-    return mcp ? appendBrowserMcp(command, mcp) : command;
+    const mcp = await invoke<TabMcp | null>("tab_browser_mcp", { cwd, tabId, agentId });
+    if (!mcp) return { command, env: {} };
+    return {
+      command: mcp.configPath ? appendBrowserMcp(command, mcp) : command,
+      env: mcp.env ?? {},
+    };
   } catch {
-    return command;
+    return { command, env: {} };
   }
 }

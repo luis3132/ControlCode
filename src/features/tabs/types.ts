@@ -4,12 +4,18 @@ export const DEFAULT_WORKSPACE_ID = "default";
 
 export type AgentId = string;
 
+/** La terminal pelada (`agents::SHELL_AGENT_ID` en Rust): no es un agente, así que no lleva
+ *  skills ni MCP. */
+export const SHELL_AGENT_ID: AgentId = "bash";
+
 export interface AgentInfo {
   id: AgentId;
   label: string;
   command: string;
   available: boolean;
   version?: string;
+  /** Dónde se encontró el binario. Ausente = no está (o es una custom, que no se detecta). */
+  path?: string | null;
   isCustom?: boolean;
 }
 

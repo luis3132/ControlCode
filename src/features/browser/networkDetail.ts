@@ -239,7 +239,10 @@ function bodyForAgent(title: string, body: NetBody | null): string[] {
 function headersForAgent(title: string, headers: NetHeader[]): string[] {
   if (headers.length === 0) return [];
   const note = (h: NetHeader) =>
-    h.note === "rewritten" ? "   (la vista previa lo reescribe)" : h.note === "removed" ? "   (la vista previa lo quita)" : "";
+    h.note === "rewritten" ? "   (la vista previa lo reescribe)"
+      : h.note === "removed" ? "   (la vista previa lo quita)"
+        : h.note === "kept" ? "   (stored in the preview's cookie jar; the page never receives this header)"
+          : "";
   return [`${title}:`, ...headers.map((h) => `  ${h.name}: ${h.value}${note(h)}`)];
 }
 

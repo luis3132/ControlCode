@@ -124,8 +124,18 @@ export const previewNetwork = (proxyOrigin: string, since: number) =>
 export const previewRequest = (proxyOrigin: string, seq: number) =>
   invoke<ProxyRequestDetail | null>("preview_request", { proxyOrigin, seq });
 
+/** El panel de debug de esta tab se abrió o se cerró: el proxy anota la red solo mientras
+ *  haya alguno abierto sobre el sitio. */
+export const previewSetRecording = (proxyOrigin: string, viewId: string, on: boolean) =>
+  invoke<boolean>("preview_set_recording", { proxyOrigin, viewId, on });
+
 export const previewClearNetwork = (proxyOrigin: string) =>
   invoke<void>("preview_clear_network", { proxyOrigin });
 
 export const previewCookies = (proxyOrigin: string) =>
   invoke<CookieReport>("preview_cookies", { proxyOrigin });
+
+/** Borra las cookies del sitio y lo que se guardó de su storage para el próximo arranque.
+ *  El storage vivo lo vacía la página (`storage clear`). */
+export const previewForgetSite = (proxyOrigin: string) =>
+  invoke<void>("preview_forget_site", { proxyOrigin });

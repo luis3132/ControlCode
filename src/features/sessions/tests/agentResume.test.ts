@@ -33,6 +33,8 @@ function registryFromRust(): AgentRegistryEntry[] {
       const resume = /\bresume:\s*Some\("([^"]+)"\)/.exec(block)?.[1] ?? null;
       const skillsDir = /\bskills_dir:\s*Some\("([^"]+)"\)/.exec(block)?.[1] ?? null;
       if (!id || !command) throw new Error(`fila ilegible en registry.rs: ${block.slice(0, 80)}`);
+      const mcp = /\bmcp:\s*McpStyle::(\w+)/.exec(block)?.[1];
+      if (!mcp) throw new Error(`la fila '${id}' de registry.rs no declara su McpStyle`);
       return {
         id,
         label: /\blabel:\s*"([^"]+)"/.exec(block)?.[1] ?? id,
@@ -41,6 +43,8 @@ function registryFromRust(): AgentRegistryEntry[] {
         resume,
         supportsAccounts: /\bprofile:\s*Some\(/.test(block),
         sessions: "",
+        // `ClaudeFlags` en Rust sale como `claudeFlags` por el `rename_all` de serde.
+        mcp: (mcp[0].toLowerCase() + mcp.slice(1)) as AgentRegistryEntry["mcp"],
       };
     });
 }

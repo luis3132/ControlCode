@@ -7,6 +7,7 @@ mod agents;
 mod app;
 mod database;
 mod explorer;
+mod graphify;
 pub mod ipc;
 mod marketplace;
 mod orchestrator;

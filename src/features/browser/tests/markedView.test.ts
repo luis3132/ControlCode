@@ -69,6 +69,13 @@ describe("formatMarked", () => {
     expect(text).toContain("page: http://localhost:5173/perfil");
   });
 
+  it("los refs se accionan con el nombre de tool que tenga ESE agente", () => {
+    const entry = { live: true as const, element: described() };
+    expect(formatMarked([entry], [], "", display)).toContain("(browser_click u1, browser_type u2 …)");
+    expect(formatMarked([entry], [], "", display, "controlcode_"))
+      .toContain("(controlcode_browser_click u1, controlcode_browser_type u2 …)");
+  });
+
   /// Una captura es lo único que deja "ver" la página: va la ruta sola, para abrirla con
   /// las herramientas de archivos.
   it("las capturas van como archivo que el agente puede abrir", () => {
@@ -89,11 +96,20 @@ describe("composePointer", () => {
     expect(text.split("\n")).toEqual([
       "I marked 2 elements for you in http://localhost:5173/perfil."
       + " I left 1 annotated screenshot of that page."
-      + " Read it with browser_marked id=m-3f9a71c4 — that id is yours and returns exactly this: the component and"
-      + " source file that rendered each element, where it sits, its styles and a ref you can act on.",
+      + " Read it with browser_marked id=m-3f9a71c4 — that id is yours and returns exactly this: the"
+      + " component and source file that rendered each element, where it sits, its styles and a ref you can act on.",
       "",
       "Note from the user: no anda",
     ]);
+  });
+
+  /// OpenCode registra las tools con el nombre del servidor de prefijo. Si el aviso lo
+  /// manda a `browser_marked`, lo manda a una tool que en su lista no existe.
+  it("nombra la tool como la tiene que escribir ESE agente", () => {
+    const opencode = composePointer({ picks: 1, captures: 0 }, "http://localhost:5173/", "", [], "m-3f9a71c4", "controlcode_");
+    expect(opencode).toContain("Read it with controlcode_browser_marked id=m-3f9a71c4");
+    const sinLote = composePointer({ picks: 1, captures: 0 }, "http://localhost:5173/", "", [], undefined, "controlcode_");
+    expect(sinLote).toContain("Read it with controlcode_browser_marked:");
   });
 
   it("sin lote no promete un lote, y un solo elemento va en singular", () => {

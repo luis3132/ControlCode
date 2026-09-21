@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const EXIT_OK: u8 = 0;
 const EXIT_COMMAND_FAILED: u8 = 1;
@@ -61,6 +61,30 @@ WORKSPACES
                  [--close-current]
   workspace status                            Qué hay abierto ahora
 
+FLOTA (agentes headless, los de la consola)
+  run roster                                  Qué agentes, modelos y cuentas pueden
+                                              correr ahora, con costo y cupo
+  run status [--cwd <ruta>] [--run-id <id>]   El tablero del run: cada tarea con su
+                                              estado, modelo, costo y de qué depende
+  run result --task <key|id> [--run-id <id>]  Todo lo que entregó una tarea
+  run await [--timeout-s 300]                 Bloquea hasta que una tarea cierre
+  run facts [--run-id <id>]                   Lo que los agentes se dejaron escrito
+  run add-fact --kind decision --body \"...\"   Comparte un dato con todo el run
+  run cancel-task --task <key|id>             Para una, o saca de la cola una que espera
+  run reroute-task --task <key|id>            Se la pasa a otro agente, con lo que el
+                  [--agent <id>] [--model <m>] anterior ya hizo; misma rama y worktree
+  run plan --json-args '{\"objective\":\"...\",  Declara el DAG entero de una vez
+           \"tasks\":[{...}]}'                  (más cómodo desde un agente: run_plan)
+
+  Sin --cwd ni --run-id actúa sobre el último run lanzado desde la carpeta
+  donde corrés el comando.
+
+NAVEGADOR
+  browser run --json-args '{\"cwd\":\"...\",     Una orden al navegador de un proyecto:
+              \"request\":{\"op\":\"snapshot\"}}'   snapshot, click, type, resize, console…
+                                              Es el mismo camino que usan las 26
+                                              herramientas browser_* del MCP.
+
 AGENTES, CUENTAS Y SKILLS
   agents                                      Qué poner en --agent (incluye las custom)
   accounts                                    Qué poner en --account, por TUI
@@ -76,9 +100,23 @@ AGENTES, CUENTAS Y SKILLS
   skill edit <nombre|id>                      Guarda contenido nuevo
              [--file <ruta> | --content \"...\"] [--name <nuevo>] [--copy]
 
+SERVIDOR MCP (no lo escribís vos: lo lanza la app)
+  mcp --cwd <carpeta> [--tab <id>]            El puente de una tab interactiva
+  mcp --task <id-de-tarea>                    El de una tarea de la flota
+
+  A diferencia del resto, esto NO devuelve una línea JSON: se queda tomado de stdin
+  y stdout hablando JSON-RPC con el agente que lo lanzó. Es el servidor `controlcode`
+  que le da sus herramientas: el navegador del proyecto, la orquestación de la flota,
+  preguntarle algo al usuario, y —solo con --task— el permiso de cada acción.
+
+  La app se lo agrega sola al comando de cada tab de Claude Code, con un
+  `--mcp-config` escrito en ~/.controlcode/mcp/. No hace falta instalar la CLI para
+  que funcione: el archivo apunta al binario que viene adentro de la app.
+
 OTROS
   app status                                  Versión y estado de la app
   --json-args '{...}'                         Pasa argumentos crudos en JSON
+  --version                                   Versión de esta CLI y del protocolo
 
 `agents`, `accounts` y `skills` son atajos de `agent list`, `account list` y `skill list`.
 Editar una skill que vino de un repositorio NO la pisa: guarda una copia de origen local y
@@ -89,7 +127,7 @@ Sin --account, la tab usa la cuenta principal (la de siempre).
 agente no arranca. Cada valor puede ser el nombre de un guardado o un comando literal:
   ccode tab create --cwd . --agent claude-code --pre \"entorno conda\" --pre \"nvm use\"
 
-La salida siempre es una línea JSON en stdout.
+La salida siempre es una línea JSON en stdout (salvo `mcp`, que habla JSON-RPC).
 Códigos de salida: 0 ok · 1 el comando falló · 2 uso incorrecto · 3 la app no corre
 ";
 
@@ -175,6 +213,21 @@ fn main() -> ExitCode {
 struct CliError {
     message: String,
     code: u8,
+    /// La app todavía no está alcanzable, pero podría estarlo en un momento: el handshake
+    /// no está escrito o el puerto no acepta. Un protocolo distinto o un comando rechazado
+    /// no se arreglan esperando, y esos no lo marcan.
+    retryable: bool,
+}
+
+impl CliError {
+    fn new(message: String, code: u8) -> Self {
+        CliError { message, code, retryable: false }
+    }
+
+    /// Todavía no, pero puede que sí: ver `retryable`.
+    fn not_yet(message: String) -> Self {
+        CliError { message, code: EXIT_NO_APP, retryable: true }
+    }
 }
 
 /// Grupos que se escriben solos porque tienen una sola acción útil.
@@ -408,65 +461,75 @@ fn to_camel_case(flag: &str) -> String {
     out
 }
 
+/// Cuánto espera el puente MCP a que la app esté alcanzable antes de darse por vencido.
+///
+/// Existe por el arranque: la app restaura sus ventanas —que lanzan a los agentes— y recién
+/// después abre el servidor de la CLI. Un agente que llama a una herramienta en ese hueco
+/// recibía "Control Code no parece estar corriendo", y Claude Code da por caído al servidor
+/// entero por esa respuesta. También cubre el reinicio de la app con tareas en curso.
+///
+/// Solo para `ccode mcp`. Una persona que escribe `ccode tab list` con la app cerrada tiene
+/// que enterarse en el momento, no diez segundos después.
+const MCP_WAIT_FOR_APP: Duration = Duration::from_secs(15);
+
+/// Como `send`, pero esperando a que la app aparezca en vez de fallar en el primer intento.
+fn send_waiting(command: &str, args: Value) -> Result<Response, CliError> {
+    let deadline = Instant::now() + MCP_WAIT_FOR_APP;
+    let mut pause = Duration::from_millis(100);
+    loop {
+        match send(command, args.clone()) {
+            Err(e) if e.retryable && Instant::now() < deadline => {
+                std::thread::sleep(pause);
+                // Creciente: el hueco del arranque dura poco, y si la app de verdad no está
+                // no tiene sentido golpear el disco veinte veces por segundo.
+                pause = (pause * 2).min(Duration::from_secs(1));
+            }
+            other => return other,
+        }
+    }
+}
+
 fn send(command: &str, args: Value) -> Result<Response, CliError> {
     let path = handshake_path();
-    let raw = std::fs::read_to_string(&path).map_err(|_| CliError {
-        message: format!(
+    let raw = std::fs::read_to_string(&path).map_err(|_| {
+        CliError::not_yet(format!(
             "Control Code no parece estar corriendo (no se encontró {}). Abrí la app y volvé a intentar.",
             path.display()
-        ),
-        code: EXIT_NO_APP,
+        ))
     })?;
 
-    let handshake: Handshake = serde_json::from_str(&raw).map_err(|e| CliError {
-        message: format!("El archivo de handshake está corrupto ({e}); reiniciá la app"),
-        code: EXIT_NO_APP,
-    })?;
+    let handshake: Handshake = serde_json::from_str(&raw)
+        .map_err(|e| CliError::new(format!("El archivo de handshake está corrupto ({e}); reiniciá la app"), EXIT_NO_APP))?;
 
     if handshake.protocol != PROTOCOL_VERSION {
-        return Err(CliError {
-            message: format!(
+        // A propósito NO es reintentable: esperar no cambia la versión de nadie.
+        return Err(CliError::new(
+            format!(
                 "La app habla el protocolo v{} y esta CLI la v{PROTOCOL_VERSION}. Actualizá la que haya quedado vieja.",
                 handshake.protocol
             ),
-            code: EXIT_NO_APP,
-        });
+            EXIT_NO_APP,
+        ));
     }
 
-    let stream = TcpStream::connect(("127.0.0.1", handshake.port)).map_err(|_| CliError {
-        message: format!(
+    let stream = TcpStream::connect(("127.0.0.1", handshake.port)).map_err(|_| {
+        CliError::not_yet(format!(
             "No se pudo conectar al puerto {} (la app con PID {} pudo haber cerrado). Reiniciá la app.",
             handshake.port, handshake.pid
-        ),
-        code: EXIT_NO_APP,
+        ))
     })?;
     let _ = stream.set_read_timeout(Some(read_timeout_for(command, &args)));
 
     let request = Request { token: handshake.token, command: command.to_string(), args };
-    let payload = serde_json::to_string(&request).map_err(|e| CliError {
-        message: e.to_string(),
-        code: EXIT_USAGE,
-    })?;
+    let payload = serde_json::to_string(&request).map_err(|e| CliError::new(e.to_string(), EXIT_USAGE))?;
 
-    let mut writer = stream.try_clone().map_err(|e| CliError {
-        message: e.to_string(),
-        code: EXIT_NO_APP,
-    })?;
-    writeln!(writer, "{payload}").and_then(|_| writer.flush()).map_err(|e| CliError {
-        message: format!("No se pudo enviar el comando: {e}"),
-        code: EXIT_NO_APP,
-    })?;
+    let mut writer = stream.try_clone().map_err(|e| CliError::new(e.to_string(), EXIT_NO_APP))?;
+    writeln!(writer, "{payload}").and_then(|_| writer.flush()).map_err(|e| CliError::new(format!("No se pudo enviar el comando: {e}"), EXIT_NO_APP))?;
 
     let mut line = String::new();
-    BufReader::new(stream).read_line(&mut line).map_err(|e| CliError {
-        message: format!("No llegó respuesta: {e}"),
-        code: EXIT_NO_APP,
-    })?;
+    BufReader::new(stream).read_line(&mut line).map_err(|e| CliError::new(format!("No llegó respuesta: {e}"), EXIT_NO_APP))?;
 
-    serde_json::from_str(&line).map_err(|e| CliError {
-        message: format!("Respuesta ilegible de la app: {e}"),
-        code: EXIT_NO_APP,
-    })
+    serde_json::from_str(&line).map_err(|e| CliError::new(format!("Respuesta ilegible de la app: {e}"), EXIT_NO_APP))
 }
 
 /// `ccode mcp`: el puente MCP de un agente. Con `--task` es el de una tarea de la flota
@@ -478,28 +541,49 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
 /// rompe al cliente.
 fn run_mcp(args: &[String]) -> ExitCode {
     use controlcode_lib::ipc::mcp::McpContext;
-    let context = match args {
-        [flag, value, ..] if flag == "--task" => McpContext::Task(value.clone()),
-        [flag, value, rest @ ..] if flag == "--cwd" => McpContext::Cwd {
-            cwd: value.clone(),
-            tab: match rest {
-                [tab_flag, tab, ..] if tab_flag == "--tab" => Some(tab.clone()),
-                _ => None,
-            },
-        },
-        _ => {
-            eprintln!("Uso: ccode mcp --task <id-de-tarea> | --cwd <carpeta> [--tab <id-de-tab>]");
+
+    // Por nombre y no por posición: OpenCode escribe el comando entero en un arreglo de su
+    // config, y no hay razón para que el orden en que lo escriba alguien a mano tenga que
+    // coincidir con el que escribe la app.
+    let mut flags: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        match flag.as_str() {
+            name @ ("--task" | "--cwd" | "--tab" | "--prefix") => {
+                let Some(value) = rest.next() else {
+                    eprintln!("Falta el valor de {name}");
+                    return ExitCode::from(EXIT_USAGE);
+                };
+                flags.insert(name, value.clone());
+            }
+            other => {
+                eprintln!("Argumento inesperado para 'ccode mcp': {other}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        }
+    }
+
+    let context = match (flags.remove("--task"), flags.remove("--cwd")) {
+        (Some(task), _) => McpContext::Task(task),
+        (None, Some(cwd)) => McpContext::Cwd { cwd, tab: flags.remove("--tab") },
+        (None, None) => {
+            eprintln!(
+                "Uso: ccode mcp --task <id-de-tarea> | --cwd <carpeta> [--tab <id-de-tab>] [--prefix <prefijo>]"
+            );
             return ExitCode::from(EXIT_USAGE);
         }
     };
+    // Lo que esta TUI le antepone al nombre de cada tool. Vacío = no antepone nada.
+    let prefix = flags.remove("--prefix").unwrap_or_default();
 
     let stdin = std::io::stdin();
     let result = controlcode_lib::ipc::mcp::serve(
         &context,
+        &prefix,
         stdin.lock(),
         std::io::stdout(),
         |command, payload| {
-            let response = send(command, payload).map_err(|e| e.message)?;
+            let response = send_waiting(command, payload).map_err(|e| e.message)?;
             if response.ok {
                 Ok(response.data.unwrap_or(Value::Null))
             } else {

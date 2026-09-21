@@ -326,10 +326,20 @@ fn mcp_session(
     lines: &[serde_json::Value],
     reply: impl Fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>,
 ) -> (Vec<serde_json::Value>, Vec<(String, serde_json::Value)>) {
+    mcp_session_as(context, "", lines, reply)
+}
+
+/// Lo mismo, como lo ve un cliente que prefija los nombres de tool (OpenCode).
+fn mcp_session_as(
+    context: &McpContext,
+    prefix: &str,
+    lines: &[serde_json::Value],
+    reply: impl Fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>,
+) -> (Vec<serde_json::Value>, Vec<(String, serde_json::Value)>) {
     let input: String = lines.iter().map(|l| format!("{l}\n")).collect();
     let mut output = Vec::new();
     let mut sent = Vec::new();
-    serve(context, input.as_bytes(), &mut output, |command, payload| {
+    serve(context, prefix, input.as_bytes(), &mut output, |command, payload| {
         let answer = reply(command, &payload);
         sent.push((command.to_string(), payload));
         answer
@@ -384,6 +394,65 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     // Preguntarle algo al usuario va para los dos lados y no es ni navegador ni orquestación.
     assert!(tab.contains(&super::mcp::ASK_TOOL.to_string()));
     assert_eq!(browser.len() + orchestration.len() + 1, offered.len());
+}
+
+/// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo
+/// (`controlcode_browser_click`). El nombre que este servidor PUBLICA va pelado —el
+/// prefijo lo pone la TUI, y ponerlo también acá daría `controlcode_controlcode_…`—, pero
+/// todo lo que el modelo LEE tiene que nombrarlas como él las va a poder escribir: si no,
+/// lee "usá browser_marked" y lo que tiene se llama de otra forma.
+#[test]
+fn con_un_cliente_que_prefija_los_nombres_el_texto_los_prefija_igual() {
+    let lines = [
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+    ];
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None };
+    let (pelado, _) = mcp_session(&cwd, &lines, |_, _| Ok(json!({})));
+    let (opencode, _) = mcp_session_as(&cwd, "controlcode_", &lines, |_, _| Ok(json!({})));
+
+    // Los nombres publicados no cambian: son los del servidor.
+    assert_eq!(tool_names(&pelado[1]), tool_names(&opencode[1]));
+
+    let instructions = opencode[0]["result"]["instructions"].as_str().unwrap();
+    assert!(instructions.contains("controlcode_browser_marked"), "{instructions}");
+    assert!(instructions.contains("controlcode_browser_click/controlcode_browser_type"), "{instructions}");
+    assert!(instructions.contains("controlcode_run_plan"), "{instructions}");
+    // Ni dos veces, ni sobre algo que no es una tool.
+    assert!(!instructions.contains("controlcode_controlcode_"), "{instructions}");
+    assert!(instructions.contains("Control Code"), "{instructions}");
+
+    // Las descripciones también: `browser_pick` se nombra adentro de la de `browser_marked`.
+    let description = |list: &serde_json::Value, name: &str| -> String {
+        list["result"]["tools"].as_array().unwrap().iter()
+            .find(|t| t["name"] == name).unwrap()["description"].as_str().unwrap().to_string()
+    };
+    // Y las de los parámetros, que nombran tools igual ("un ref de browser_snapshot").
+    let target = opencode[1]["result"]["tools"].as_array().unwrap().iter()
+        .find(|t| t["name"] == "browser_click").unwrap()["inputSchema"]["properties"]["target"]["description"]
+        .as_str().unwrap().to_string();
+    assert!(target.contains("controlcode_browser_snapshot"), "{target}");
+
+    // Y sin prefijo el texto queda EXACTAMENTE como está escrito en la tabla.
+    assert!(!pelado[0]["result"]["instructions"].as_str().unwrap().contains("controlcode_browser"));
+    assert!(!description(&pelado[1], "browser_marked").contains("controlcode_"));
+}
+
+/// El servidor como lo escribe OpenCode: el comando ENTERO en un arreglo, bajo `"mcp"`.
+/// Y nada más: `permission` no se toca (ver `opencode_config_content`).
+#[test]
+fn la_config_de_opencode_lleva_el_servidor_y_nada_mas() {
+    let raw = super::mcp::opencode_config_content("/opt/cc/ccode", &["mcp", "--cwd", "/p", "--tab", "t1", "--prefix", "controlcode_"]);
+    let config: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(config.as_object().unwrap().keys().collect::<Vec<_>>(), vec!["mcp"]);
+    let server = &config["mcp"]["controlcode"];
+    assert_eq!(server["type"], "local");
+    assert_eq!(server["enabled"], true);
+    assert_eq!(
+        server["command"],
+        json!(["/opt/cc/ccode", "mcp", "--cwd", "/p", "--tab", "t1", "--prefix", "controlcode_"])
+    );
+    assert!(server["timeout"].as_u64().unwrap() > 60_000);
 }
 
 /// Lanzar o parar agentes gasta plata: eso nunca va permitido de antemano a alguien que

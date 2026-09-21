@@ -11,6 +11,11 @@ pub fn run() {
     // Antes de construir Tauri, porque WebKitGTK decide cómo componer al inicializarse; y
     // antes del hilo de señales, porque toca el entorno del proceso (ver `configure`).
     super::rendering::configure(&db_conn);
+    super::rendering::configure_scrollbars();
+    // El PATH real del usuario, no el del escritorio: sin esto, en Ubuntu (y en macOS desde
+    // el Dock) no se encontraban las TUIs instaladas en el home. Mismo requisito que el de
+    // arriba: toca el entorno, así que va antes del primer hilo (ver `util::path_env`).
+    crate::util::path_env::configure();
     super::signals::cleanup_on_signals();
 
     tauri::Builder::default()
@@ -79,9 +84,11 @@ pub fn run() {
             // Tabs de navegador (proxy con selector de elementos)
             crate::preview::preview_resolve,
             crate::preview::preview_network,
+            crate::preview::preview_set_recording,
             crate::preview::preview_request,
             crate::preview::preview_clear_network,
             crate::preview::preview_cookies,
+            crate::preview::preview_forget_site,
             crate::preview::preview_detect_servers,
             crate::preview::preview_capture,
             crate::preview::preview_save_capture,
@@ -94,6 +101,7 @@ pub fn run() {
             // Detección de agentes
             crate::agents::agent_registry,
             crate::agents::detect_agents,
+            crate::agents::agent_search_path,
             // Agentes headless (consola de flota)
             crate::runs::run_list_tasks,
             crate::runs::run_list_runs,
@@ -154,6 +162,16 @@ pub fn run() {
             crate::ipc::install::cli_install_status,
             crate::ipc::install::install_cli,
             crate::ipc::install::uninstall_cli,
+            // Graphify: el grafo del proyecto, instalado paso a paso desde Configuración
+            crate::graphify::graphify_plan,
+            crate::graphify::graphify_install_command,
+            crate::graphify::graphify_save_steps,
+            crate::graphify::graphify_status,
+            crate::graphify::graphify_run_step,
+            crate::graphify::graphify_requirements,
+            crate::graphify::graphify_commands,
+            crate::graphify::graphify_render,
+            crate::graphify::graphify_package_command,
             crate::database::db_delete_session_history,
             crate::session::session_markdown,
             crate::session::export_session_markdown,
@@ -171,6 +189,8 @@ pub fn run() {
             crate::marketplace::refresh_registry,
             crate::marketplace::list_marketplace_skills,
             crate::marketplace::search_remote_registries,
+            crate::marketplace::skillssh_check_step,
+            crate::marketplace::skillssh_node_install,
             crate::marketplace::install_marketplace_skill,
             crate::marketplace::marketplace_skill_readme,
             crate::skills::registry_skills,
@@ -210,6 +230,12 @@ pub fn run() {
             // Si nunca se creó/abrió un workspace nombrado, ese "más reciente" es
             // simplemente `default`, así que el comportamiento típico es el mismo.
             let db = app.state::<DbConnection>();
+
+            // Las cookies y el storage de cada sitio que se abre en el navegador de las tabs
+            // se guardan acá (ver `preview/site.rs`): el motor del webview no los conserva.
+            if let Ok(dir) = app.path().app_data_dir() {
+                crate::preview::set_state_dir(dir.join("browser-state"));
+            }
 
             // La skill de orquestación viaja con la app: se instala (o se actualiza) sola
             // antes de que haya ventanas, así la lista de skills ya la muestra al abrir.

@@ -33,10 +33,12 @@ mod github;
 mod local;
 mod registries;
 mod skillssh;
+mod skillssh_check;
 mod types;
 #[cfg(test)]
 mod test;
 
 pub use registries::*;
 pub use skillssh::*;
+pub use skillssh_check::*;
 pub use types::*;

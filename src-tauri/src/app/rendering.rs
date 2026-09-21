@@ -52,6 +52,43 @@ pub(super) fn configure(db: &DbConnection) {
     }
 }
 
+/// Las barras de scroll overlay de GTK (las de GNOME: una raya que aparece solo al pasar el
+/// mouse por el borde). WebKitGTK las usa también para las páginas, y en el navegador de
+/// las tabs eso era no ver ninguna barra. Una página con `scrollbar-width: thin` —lo
+/// común en proyectos con Tailwind— quedaba igual aunque se le inyectara otra barra: en
+/// WebKit la propiedad estándar le gana a `::-webkit-scrollbar`. Sin overlay, WebKitGTK
+/// dibuja la barra de siempre, con los colores y el grosor que pida la página, como en
+/// Chrome. Probado con WebKitGTK 2.52.
+const OVERLAY_SCROLLING_ENV: &str = "GTK_OVERLAY_SCROLLING";
+
+/// Si fue la app la que puso `GTK_OVERLAY_SCROLLING` (y no el usuario).
+static APP_SET_OVERLAY: OnceLock<bool> = OnceLock::new();
+
+/// Barras de scroll fijas en vez de overlay. Mismas condiciones que `configure`: un solo
+/// hilo, antes de levantar GTK, y lo que haya definido el usuario manda.
+pub(super) fn configure_scrollbars() {
+    let set = cfg!(target_os = "linux") && std::env::var_os(OVERLAY_SCROLLING_ENV).is_none();
+    if set {
+        // SAFETY: igual que en `configure`, todavía no hay otro hilo.
+        unsafe { std::env::set_var(OVERLAY_SCROLLING_ENV, "0") };
+    }
+    let _ = APP_SET_OVERLAY.set(set);
+}
+
+/// Las variables que la app puso para su propio WebKit y que no son del usuario: las
+/// terminales las sacan, o un programa gráfico abierto desde ahí heredaría cómo dibuja
+/// la app (sin composición por GPU, con barras fijas).
+pub fn app_only_env() -> Vec<&'static str> {
+    let mut vars = Vec::new();
+    if USER_ENV.get() == Some(&false) && std::env::var_os(WEBKIT_ENV).is_some() {
+        vars.push(WEBKIT_ENV);
+    }
+    if APP_SET_OVERLAY.get() == Some(&true) {
+        vars.push(OVERLAY_SCROLLING_ENV);
+    }
+    vars
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RenderingInfo {

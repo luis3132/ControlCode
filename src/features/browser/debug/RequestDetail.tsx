@@ -63,7 +63,10 @@ function HeaderRows({ headers }: { headers: NetHeader[] }) {
     return <p className="pl-4 text-[11px] text-gray-400 dark:text-white/30">{t("browser.debug.network.noHeaders")}</p>;
   }
   const noteOf = (h: NetHeader) =>
-    h.note === "rewritten" ? t("browser.debug.network.noteRewritten") : h.note === "removed" ? t("browser.debug.network.noteRemoved") : null;
+    h.note === "rewritten" ? t("browser.debug.network.noteRewritten")
+      : h.note === "removed" ? t("browser.debug.network.noteRemoved")
+        : h.note === "kept" ? t("browser.debug.network.noteKept")
+          : null;
   return <Rows rows={headers.map((h) => ({ name: h.name, value: h.value, note: noteOf(h) }))} />;
 }
 

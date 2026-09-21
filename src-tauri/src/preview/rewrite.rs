@@ -71,15 +71,12 @@ pub(crate) fn rewrite_location(value: &str, target_origin: &str, proxy_origin: &
     }
 }
 
-/// El iframe habla con el proxy (`localhost:<puerto>`), no con el host del servidor: una
-/// cookie con `Domain=` de otro host se descartaría. Sin `Domain` queda atada al host que la
-/// recibe.
-pub(crate) fn strip_cookie_domain(cookie: &str) -> String {
-    cookie
-        .split(';')
-        .filter(|part| !part.trim_start().to_ascii_lowercase().starts_with("domain="))
-        .collect::<Vec<_>>()
-        .join(";")
+/// Si el `Host` de un pedido nombra a este proxy: uno de los nombres del loopback con su
+/// puerto. Un sitio que re-apunte su dominio a 127.0.0.1 (DNS rebinding) llega con su
+/// propio nombre y no pasa.
+pub(crate) fn is_own_host(host: &str, port: u16) -> bool {
+    let Some((name, p)) = host.rsplit_once(':') else { return false };
+    p.parse::<u16>().ok() == Some(port) && matches!(name.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "[::1]")
 }
 
 /// Un servidor que valida `Origin`/`Referer` (Vite con sus WebSocket, frameworks con CSRF)

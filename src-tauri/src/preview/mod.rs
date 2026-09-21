@@ -16,9 +16,11 @@ mod log;
 mod mocks;
 mod proxy;
 mod rewrite;
+mod site;
 mod snapshot;
 #[cfg(test)]
 mod test;
 
 pub use capture::*;
 pub use proxy::*;
+pub use site::set_state_dir;

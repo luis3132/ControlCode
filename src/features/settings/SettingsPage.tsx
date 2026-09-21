@@ -10,7 +10,10 @@ import { useAgentsStore } from "@/features/agents/store";
 import type { CustomAgent } from "@/features/agents/types";
 import { useSkillsStore } from "@/features/skills/store";
 import { CustomAgentForm } from "@/features/agents/CustomAgentForm";
+import { DetectedAgents } from "@/features/agents/DetectedAgents";
 import { CliInstallSection } from "@/features/settings/CliInstallSection";
+import { GraphifySection } from "@/features/graphify/GraphifySection";
+import { SkillsShSection } from "@/features/marketplace/SkillsShSection";
 import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection";
 import { RoutingSection } from "@/features/runs/RoutingSection";
 import { PrelaunchSection } from "@/features/prelaunch/PrelaunchSection";
@@ -44,8 +47,8 @@ function AgentCapabilities({ agent }: { agent: CustomAgent }) {
 }
 
 type SectionId =
-  | "appearance" | "shortcuts" | "terminal" | "skillsDir"
-  | "tuis" | "prelaunch" | "cli" | "orchestrator" | "routing";
+  | "appearance" | "shortcuts" | "terminal" | "skillsDir" | "skillssh"
+  | "tuis" | "prelaunch" | "cli" | "graphify" | "orchestrator" | "routing";
 
 /**
  * El contenido de Configuración.
@@ -83,9 +86,11 @@ export function SettingsPage() {
       { id: "shortcuts", label: t("settings.shortcuts") },
       { id: "terminal", label: t("settings.terminal") },
       { id: "skillsDir", label: t("settings.skillsDir") },
+      { id: "skillssh", label: t("settings.skillssh") },
       { id: "tuis", label: t("settings.tuis") },
       { id: "prelaunch", label: t("settings.prelaunch") },
       { id: "cli", label: t("settings.cli") },
+      { id: "graphify", label: t("settings.graphify") },
       { id: "orchestrator", label: t("settings.orchestrator") },
       { id: "routing", label: t("settings.routing") },
     ],
@@ -176,6 +181,12 @@ export function SettingsPage() {
 
         {section === "tuis" && (
           <SettingsSection title={t("settings.tuis")} description={t("settings.tuis.desc")}>
+            <DetectedAgents />
+
+            <span className="mt-2 text-[11px] font-semibold uppercase tracking-wide
+              text-gray-400 dark:text-white/30">
+              {t("settings.tuis.custom")}
+            </span>
             {customAgents.length === 0 ? (
               <p className="text-[11.5px] text-gray-400 dark:text-white/30">
                 {t("settings.tuis.empty")}
@@ -248,8 +259,10 @@ export function SettingsPage() {
           </SettingsSection>
         )}
 
+        {section === "skillssh" && <SkillsShSection />}
         {section === "prelaunch" && <PrelaunchSection />}
         {section === "cli" && <CliInstallSection />}
+        {section === "graphify" && <GraphifySection />}
         {section === "orchestrator" && <OrchestratorSection />}
         {section === "routing" && <RoutingSection />}
       </div>

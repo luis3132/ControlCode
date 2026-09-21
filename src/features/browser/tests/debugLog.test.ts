@@ -7,7 +7,6 @@ import {
 } from "../debugLog";
 import type { ProxyRequest } from "../ipc";
 import type { ConsoleEntry, DebugBatch } from "../protocol";
-import { appendBrowserMcp } from "../tabMcp";
 import { breakpointOf, clampViewport, fitScale, presetOf, rotate } from "../viewport";
 
 function entry(patch: Partial<ConsoleEntry>): ConsoleEntry {
@@ -231,46 +230,5 @@ describe("viewport", () => {
     expect(formatBytes(null)).toBe("—");
     expect(formatBytes(900)).toBe("900 B");
     expect(formatBytes(2048)).toBe("2.0 kB");
-  });
-});
-
-describe("appendBrowserMcp", () => {
-  const mcp = { configPath: "/home/u/.controlcode/mcp/tab-abc.json", allowedTools: ["mcp__controlcode__browser_click", "mcp__controlcode__browser_snapshot"] };
-
-  /// Al final y no al principio: los dos flags aceptan varios valores, y un argumento
-  /// suelto después (un prompt, un id de sesión) terminaría adentro de la lista.
-  it("agrega el config y las tools al final del comando", () => {
-    expect(appendBrowserMcp("claude --resume abc", mcp)).toBe(
-      'claude --resume abc --mcp-config "/home/u/.controlcode/mcp/tab-abc.json" '
-      + '--allowedTools "mcp__controlcode__browser_click,mcp__controlcode__browser_snapshot"'
-    );
-  });
-
-  it("no lo duplica si ya está", () => {
-    const once = appendBrowserMcp("claude", mcp);
-    expect(appendBrowserMcp(once, mcp)).toBe(once);
-  });
-
-  /// El nombre del archivo cambió entre versiones. Una tab abierta desde antes traía el
-  /// viejo, y compararlo con el de ahora no lo reconocía: el agente arrancaba con DOS
-  /// servidores, uno apuntando a un archivo que el barrido del arranque ya borró.
-  it("reemplaza el config de una versión anterior en vez de sumarle otro", () => {
-    const viejo = 'claude --resume abc --mcp-config "/home/u/.controlcode/mcp/tab-9f2c1aa0.json" '
-      + '--allowedTools "mcp__controlcode__browser_click"';
-    const nuevo = appendBrowserMcp(viejo, mcp);
-    expect(nuevo.match(/--mcp-config/g)).toHaveLength(1);
-    expect(nuevo.match(/--allowedTools/g)).toHaveLength(1);
-    expect(nuevo).toContain("tab-abc.json");
-    expect(nuevo).not.toContain("tab-9f2c1aa0.json");
-    expect(nuevo.startsWith("claude --resume abc ")).toBe(true);
-  });
-
-  /// Un `--mcp-config` del usuario apunta a otro lado y no se toca: es un MCP suyo, no uno
-  /// que puso la app.
-  it("no toca los MCP que puso el usuario", () => {
-    const propio = 'claude --mcp-config "/home/u/mis-servidores.json"';
-    const nuevo = appendBrowserMcp(propio, mcp);
-    expect(nuevo).toContain("/home/u/mis-servidores.json");
-    expect(nuevo.match(/--mcp-config/g)).toHaveLength(2);
   });
 });
