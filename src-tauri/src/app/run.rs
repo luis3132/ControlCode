@@ -86,6 +86,7 @@ pub fn run() {
             crate::preview::preview_request,
             crate::preview::preview_clear_network,
             crate::preview::preview_cookies,
+            crate::preview::preview_forget_site,
             crate::preview::preview_detect_servers,
             crate::preview::preview_capture,
             crate::preview::preview_save_capture,
@@ -225,6 +226,12 @@ pub fn run() {
             // Si nunca se creó/abrió un workspace nombrado, ese "más reciente" es
             // simplemente `default`, así que el comportamiento típico es el mismo.
             let db = app.state::<DbConnection>();
+
+            // Las cookies y el storage de cada sitio que se abre en el navegador de las tabs
+            // se guardan acá (ver `preview/site.rs`): el motor del webview no los conserva.
+            if let Ok(dir) = app.path().app_data_dir() {
+                crate::preview::set_state_dir(dir.join("browser-state"));
+            }
 
             // La skill de orquestación viaja con la app: se instala (o se actualiza) sola
             // antes de que haya ventanas, así la lista de skills ya la muestra al abrir.

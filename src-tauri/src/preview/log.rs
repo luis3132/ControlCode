@@ -1,4 +1,4 @@
-//! Lo que el proxy anota de cada pedido: el panel de red y las cookies del navegador.
+//! Lo que el proxy anota de cada pedido: el panel de red y qué cookies llevó cada uno.
 //!
 //! El proxy es el mejor lugar para mirar la red de la página, mejor que la página misma:
 //! ve el documento HTML (que ningún script de la página alcanza a ver), el status exacto
@@ -12,12 +12,12 @@
 //! viaja liviano; cabeceras y cuerpos se piden de a un pedido con `detail`.
 
 use base64::Engine as _;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
 
-/// Donde la página pide borrar una cookie: con `HttpOnly` solo la puede borrar una
-/// respuesta del servidor, y para la página el servidor es el proxy.
+/// Donde la página pide borrar una cookie: con `HttpOnly` no la puede tocar desde
+/// JavaScript, y las cookies las guarda el proxy (ver `site.rs`).
 pub(crate) const COOKIE_CLEAR_PATH: &str = "/__controlcode__/cookies/clear";
 
 /// Cuántos pedidos se recuerdan. Un servidor de desarrollo sirve cientos de módulos por
@@ -57,11 +57,14 @@ pub enum ErrorKind {
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum HeaderNote {
-    /// Cambió de valor en el camino: `Host`, `Origin` y `Referer` hacia el servidor; `Location`
-    /// y el `Domain` de `Set-Cookie` de vuelta hacia el iframe.
+    /// Cambió de valor en el camino: `Host`, `Origin`, `Referer` y `Cookie` hacia el
+    /// servidor; `Location` de vuelta hacia el iframe.
     Rewritten,
     /// No pasa: `Accept-Encoding` hacia el servidor; `X-Frame-Options` y la CSP hacia el iframe.
     Removed,
+    /// `Set-Cookie`: no llega al iframe porque la guarda el proxy, que es quien arma el
+    /// `Cookie` de cada pedido (ver `site.rs`).
+    Kept,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -147,9 +150,10 @@ pub struct RequestDetail {
     pub response_body: Option<BodyCapture>,
 }
 
-/// Una cookie tal como la mandó el servidor, con sus atributos.
-#[derive(Serialize, Clone, Debug, PartialEq, Default)]
-#[serde(rename_all = "camelCase")]
+/// Una cookie tal como la mandó el servidor, con sus atributos. Es también lo que se guarda
+/// de cada una en el archivo del sitio.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
 pub struct SetCookie {
     pub name: String,
     pub value: String,
@@ -159,7 +163,7 @@ pub struct SetCookie {
     pub same_site: Option<String>,
     /// Segundos desde epoch, de `Max-Age` o de `Expires`. `None` = de sesión.
     pub expires_at: Option<i64>,
-    /// En la respuesta a qué pedido llegó.
+    /// En la respuesta a qué pedido llegó (o en qué página la puso un script).
     pub url: String,
     pub at: i64,
 }
@@ -170,7 +174,7 @@ pub struct Cookie {
     pub value: String,
 }
 
-/// Las cookies que mandó el navegador en el último pedido que llevaba alguna.
+/// Las cookies que llevó al servidor el último pedido que llevaba alguna.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SentCookies {
@@ -182,7 +186,7 @@ pub struct SentCookies {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CookieReport {
-    /// Las que el servidor puso y siguen vigentes.
+    /// Las que tiene guardadas el sitio y siguen vigentes.
     pub set: Vec<SetCookie>,
     pub sent: Option<SentCookies>,
 }
@@ -215,7 +219,6 @@ pub struct Head {
     pub headers: Vec<Header>,
     pub http_version: Option<String>,
     pub remote_address: Option<String>,
-    pub set_cookies: Vec<String>,
     pub content_type: Option<String>,
     pub content_length: Option<u64>,
     pub ttfb_ms: u64,
@@ -300,8 +303,6 @@ struct Inner {
     entries: VecDeque<NetEntry>,
     details: BTreeMap<u64, Detail>,
     body_bytes: usize,
-    /// Por (nombre, path): la misma cookie en dos paths son dos cookies.
-    set: BTreeMap<(String, String), SetCookie>,
     sent: Option<SentCookies>,
 }
 
@@ -419,21 +420,8 @@ impl ProxyLog {
         seq
     }
 
-    pub fn head(&self, seq: u64, head: Head, now_ms: i64) {
+    pub fn head(&self, seq: u64, head: Head) {
         let Ok(mut inner) = self.inner.lock() else { return };
-        let url = inner.entries.iter().rev().find(|e| e.seq == seq).map(|e| e.url.clone()).unwrap_or_default();
-        for line in &head.set_cookies {
-            let Some(mut cookie) = parse_set_cookie(line, now_ms / 1000) else { continue };
-            cookie.url = url.clone();
-            cookie.at = now_ms;
-            let key = (cookie.name.clone(), cookie.path.clone().unwrap_or_else(|| "/".to_string()));
-            // Un `Set-Cookie` vencido es cómo un servidor borra una cookie.
-            if cookie.expires_at.is_some_and(|at| at <= now_ms / 1000) {
-                inner.set.remove(&key);
-            } else {
-                inner.set.insert(key, cookie);
-            }
-        }
         let status_text = hyper::StatusCode::from_u16(head.status)
             .ok()
             .and_then(|s| s.canonical_reason())
@@ -524,32 +512,18 @@ impl ProxyLog {
         }
     }
 
-    pub fn cookies(&self, now_ms: i64) -> CookieReport {
-        let Ok(inner) = self.inner.lock() else { return CookieReport { set: vec![], sent: None } };
-        CookieReport {
-            set: inner
-                .set
-                .values()
-                .filter(|c| c.expires_at.is_none_or(|at| at > now_ms / 1000))
-                .cloned()
-                .collect(),
-            sent: inner.sent.clone(),
-        }
+    /// Las cookies del último pedido que llevaba alguna.
+    pub fn sent(&self) -> Option<SentCookies> {
+        self.inner.lock().ok().and_then(|inner| inner.sent.clone())
     }
 
-    /// Olvida la cookie y devuelve los paths con los que hay que vencerla: el navegador
-    /// solo la borra si el `Set-Cookie` que la vence trae el mismo `Path` que la creó.
-    pub fn forget_cookie(&self, name: &str) -> Vec<String> {
-        let Ok(mut inner) = self.inner.lock() else { return vec!["/".to_string()] };
-        let mut paths: Vec<String> = inner.set.keys().filter(|(n, _)| n == name).map(|(_, p)| p.clone()).collect();
-        inner.set.retain(|(n, _), _| n != name);
-        if let Some(sent) = inner.sent.as_mut() {
+    /// Una cookie que se borró deja de figurar entre las que se mandaron.
+    pub fn forget_sent(&self, name: &str) {
+        if let Ok(mut inner) = self.inner.lock()
+            && let Some(sent) = inner.sent.as_mut()
+        {
             sent.cookies.retain(|c| c.name != name);
         }
-        if !paths.iter().any(|p| p == "/") {
-            paths.push("/".to_string());
-        }
-        paths
     }
 }
 

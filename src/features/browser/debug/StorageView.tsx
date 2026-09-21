@@ -5,7 +5,7 @@ import { TrashIcon } from "neogestify-ui-components";
 import { RefreshIcon } from "@/app/icons";
 
 import { formatBytes, mergeCookies, type CookieRow } from "../debugLog";
-import { previewCookies } from "../ipc";
+import { previewCookies, previewForgetSite } from "../ipc";
 import type { PageChannel } from "../pageChannel";
 import type { StorageArea } from "../protocol";
 import { Empty, IconAction, PanelToolbar, TextAction } from "./parts";
@@ -57,6 +57,10 @@ function Flag({ children, tone }: { children: React.ReactNode; tone?: "warn" | "
  * localStorage, sessionStorage y lo que haya en IndexedDB, Cache Storage y service
  * workers. Se puede borrar y agregar, que es lo que hace falta para probar "¿qué pasa si
  * no hay sesión?" sin abrir otro navegador.
+ *
+ * Las cookies y los dos storage se conservan al cerrar la app, por sitio (ver
+ * `src-tauri/src/preview/site.rs`): por eso está "Olvidar este sitio", que borra también
+ * lo guardado para el próximo arranque.
  */
 export function StorageView({ channel, proxyOrigin, docId }: {
   channel: PageChannel;
@@ -88,6 +92,13 @@ export function StorageView({ channel, proxyOrigin, docId }: {
     void refresh();
   }, [refresh, docId]);
 
+  const forget = async () => {
+    if (!proxyOrigin) return;
+    await previewForgetSite(proxyOrigin);
+    await channel.run({ op: "storage", action: "clear", area: "local" });
+    await channel.run({ op: "storage", action: "clear", area: "session" });
+  };
+
   const act = async (fn: () => Promise<unknown>) => {
     try {
       await fn();
@@ -100,8 +111,16 @@ export function StorageView({ channel, proxyOrigin, docId }: {
   return (
     <div className="flex flex-col h-full min-h-0">
       <PanelToolbar>
-        <span className="text-[11px] text-gray-500 dark:text-white/40">{t("browser.debug.storage.hint")}</span>
+        {/* Se corta antes que empujar los botones fuera de la barra en un panel angosto. */}
+        <span className="min-w-0 truncate text-[11px] text-gray-500 dark:text-white/40" title={t("browser.debug.storage.hint")}>
+          {t("browser.debug.storage.hint")}
+        </span>
         <div className="flex-1" />
+        {proxyOrigin && (
+          <span className="shrink-0" title={t("browser.debug.storage.forgetHint")}>
+            <TextAction danger onClick={() => void act(forget)}>{t("browser.debug.storage.forget")}</TextAction>
+          </span>
+        )}
         <IconAction label={t("browser.debug.refresh")} onClick={() => void refresh()}>
           <RefreshIcon className="w-3.5 h-3.5" />
         </IconAction>

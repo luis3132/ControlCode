@@ -27,6 +27,9 @@ import {
   errorKindOf, headerList, headerValue, parseRawHeaders, readResponseBody, requestBodyPreview, MAX_PAGE_BODY,
 } from "./netCapture";
 import { callerOf, clip, displayPath, formatConsoleArgs, formatValue, toTransferable } from "./serialize";
+import {
+  installCookieJar, installScrollbars, installStorageSync, JAR_HEADER, OWN_HEADER, takeNatives,
+} from "./siteState";
 import { isTouch, sendTouch, setTouch } from "./touch";
 import {
   displayHref, formatSnapshot, normalizeName, parseKeyCombo, parseTarget, type SnapshotNode,
@@ -43,6 +46,13 @@ declare global {
 (() => {
   if (window.__controlcodePage || window.parent === window) return;
   window.__controlcodePage = true;
+
+  // Lo primero: la página no puede leer una cookie ni su storage antes de que estén en su
+  // lugar (ver `siteState.ts`).
+  const siteNatives = takeNatives();
+  const cookieJar = installCookieJar(siteNatives);
+  installStorageSync(siteNatives);
+  installScrollbars();
 
   // Las referencias nativas se toman ahora, antes de que la página pueda envolverlas: un
   // `setTimeout` o un `fetch` parcheados por la página (mocks, polyfills) no pueden
@@ -208,7 +218,14 @@ declare global {
       }
       inFlight += 1;
       const result = nativeFetch(input, init).finally(() => { inFlight = Math.max(0, inFlight - 1); });
-      if (!url || !isForeign(url)) return result;
+      // Una respuesta del propio servidor puede haber puesto cookies: la página las tiene
+      // que encontrar en `document.cookie` apenas la recibe.
+      if (!url || !isForeign(url)) {
+        return result.then((response) => {
+          cookieJar?.seen(response.headers.get(JAR_HEADER));
+          return response;
+        });
+      }
       const at = Date.now();
       const started = performance.now();
       let detail: Pick<PageNetworkEntry, "requestHeaders" | "requestBody"> = {};
@@ -270,6 +287,14 @@ declare global {
   };
   XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     const info = xhrInfo.get(this);
+    if (info && !isForeign(info.url) && cookieJar) {
+      let seen = false;
+      this.addEventListener("readystatechange", () => {
+        if (seen || this.readyState < XMLHttpRequest.HEADERS_RECEIVED) return;
+        seen = true;
+        cookieJar.seen(this.getResponseHeader(JAR_HEADER));
+      });
+    }
     if (info && isForeign(info.url)) {
       const at = Date.now();
       const started = performance.now();
@@ -1222,25 +1247,27 @@ declare global {
   }
 
   async function cookies(command: Extract<PageCommand, { op: "cookies" }>): Promise<unknown> {
-    if (command.action === "list") return { cookies: documentCookies() };
+    if (command.action === "list") {
+      // Lo pide el panel o un agente, pocas veces: se lee el frasco tal como está ahora,
+      // aunque lo haya cambiado algo que la página no vio (olvidar el sitio desde el panel).
+      cookieJar?.invalidate();
+      return { cookies: documentCookies() };
+    }
     if (command.action === "set") {
       if (/[;\r\n]/.test(command.value) || /[=;\s]/.test(command.name)) throw new Error("El nombre o el valor tienen caracteres que una cookie no admite.");
       const maxAge = command.maxAge != null ? `; max-age=${Math.round(command.maxAge)}` : "";
       document.cookie = `${command.name}=${command.value}; path=${command.path ?? "/"}${maxAge}; samesite=lax`;
       return { set: documentCookies().some((c) => c.name === command.name) };
     }
-    const paths = new Set([command.path ?? "/", "/", location.pathname]);
-    const segments = location.pathname.split("/").filter(Boolean);
-    for (let i = 1; i < segments.length; i++) paths.add(`/${segments.slice(0, i).join("/")}`);
-    for (const path of paths) document.cookie = `${command.name}=; max-age=0; path=${path}`;
-    // Las HttpOnly no se pueden tocar desde acá: las borra el proxy, que es quien las vio
-    // llegar y sabe con qué `Path` se guardaron.
+    // La borra el proxy, que es donde se guardan, en todos sus paths y aunque sea HttpOnly
+    // (desde acá no se podría).
     let viaProxy = false;
     if (nativeFetch) {
       try {
         const response = await nativeFetch(`/__controlcode__/cookies/clear?name=${encodeURIComponent(command.name)}`, {
-          credentials: "same-origin", cache: "no-store",
+          credentials: "same-origin", cache: "no-store", headers: { [OWN_HEADER]: "1" },
         });
+        cookieJar?.invalidate();
         viaProxy = response.ok;
       } catch {
         /* sin proxy delante (una página abierta por fuera de la app) */

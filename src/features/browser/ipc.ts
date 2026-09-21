@@ -129,3 +129,8 @@ export const previewClearNetwork = (proxyOrigin: string) =>
 
 export const previewCookies = (proxyOrigin: string) =>
   invoke<CookieReport>("preview_cookies", { proxyOrigin });
+
+/** Borra las cookies del sitio y lo que se guardó de su storage para el próximo arranque.
+ *  El storage vivo lo vacía la página (`storage clear`). */
+export const previewForgetSite = (proxyOrigin: string) =>
+  invoke<void>("preview_forget_site", { proxyOrigin });

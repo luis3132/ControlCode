@@ -152,7 +152,7 @@ export type NetErrorKind =
 export interface NetHeader {
   name: string;
   value: string;
-  note?: "rewritten" | "removed" | null;
+  note?: "rewritten" | "removed" | "kept" | null;
 }
 
 /** Un cuerpo guardado para mostrar. */
