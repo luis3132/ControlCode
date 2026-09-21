@@ -10,10 +10,16 @@
 //! Cada pedido se anota en tres tiempos: cuando llega (`begin`, y ya se ve como pendiente),
 //! cuando responde el servidor (`head`) y cuando termina el cuerpo (`finish`). El listado
 //! viaja liviano; cabeceras y cuerpos se piden de a un pedido con `detail`.
+//!
+//! **Solo se anota mientras alguien mira**: el panel de debug de alguna tab de este sitio
+//! (`set_recording`). Guardar cabeceras y hasta un mega de cada cuerpo de cada módulo que
+//! sirve un servidor de desarrollo es memoria y trabajo que no tiene sentido si nadie lo
+//! va a leer. Como en las DevTools de un navegador: lo anotado se suelta al cerrar.
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 /// Donde la página pide borrar una cookie: con `HttpOnly` no la puede tocar desde
@@ -346,6 +352,10 @@ impl Inner {
 #[derive(Default)]
 pub struct ProxyLog {
     inner: Mutex<Inner>,
+    /// Las tabs que tienen abierto el panel de debug sobre este sitio.
+    watchers: Mutex<HashSet<String>>,
+    /// `!watchers.is_empty()`, para mirarlo en cada pedido sin tomar un lock.
+    recording: AtomicBool,
 }
 
 /// Lo que se guarda de un cuerpo: el principio, hasta `max`.
@@ -358,19 +368,54 @@ pub(crate) fn clip(bytes: &[u8], max: usize) -> (Vec<u8>, bool) {
 }
 
 impl ProxyLog {
-    /// Anota un pedido que acaba de llegar. Devuelve su `seq`, con el que se lo completa.
+    /// Una tab abrió (o cerró) su panel de debug sobre este sitio. Devuelve si se anota.
+    /// Cuando deja de mirar la última, se suelta todo lo anotado.
+    pub fn set_recording(&self, who: &str, on: bool) -> bool {
+        let Ok(mut watchers) = self.watchers.lock() else { return false };
+        if on {
+            watchers.insert(who.to_string());
+        } else {
+            watchers.remove(who);
+        }
+        let now = !watchers.is_empty();
+        if self.recording.swap(now, Ordering::SeqCst) && !now {
+            self.forget_all();
+        }
+        now
+    }
+
+    pub fn recording(&self) -> bool {
+        self.recording.load(Ordering::Relaxed)
+    }
+
+    fn forget_all(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            // Los contadores siguen: quien leyó hasta un `rev` no puede volver a ver números
+            // que ya vio para pedidos distintos.
+            inner.entries.clear();
+            inner.details.clear();
+            inner.body_bytes = 0;
+        }
+    }
+
+    /// Anota un pedido que acaba de llegar. Devuelve su `seq`, con el que se lo completa, o
+    /// `0` si nadie está mirando: `head` y `finish` con `0` no hacen nada.
     pub fn begin(&self, b: Begin<'_>, now_ms: i64) -> u64 {
         let Ok(mut inner) = self.inner.lock() else { return 0 };
-        inner.last_seq += 1;
-        inner.last_rev += 1;
-        let seq = inner.last_seq;
-
+        // Qué cookies viajaron se sabe siempre: es de lo que depende el panel de Storage, y
+        // no cuesta nada.
         if let Some(header) = b.cookie_header {
             let cookies = parse_cookie_header(header);
             if !cookies.is_empty() {
                 inner.sent = Some(SentCookies { url: b.url.clone(), at: now_ms, cookies });
             }
         }
+        if !self.recording() {
+            return 0;
+        }
+        inner.last_seq += 1;
+        inner.last_rev += 1;
+        let seq = inner.last_seq;
 
         let entry = NetEntry {
             seq,
@@ -421,6 +466,9 @@ impl ProxyLog {
     }
 
     pub fn head(&self, seq: u64, head: Head) {
+        if seq == 0 {
+            return;
+        }
         let Ok(mut inner) = self.inner.lock() else { return };
         let status_text = hyper::StatusCode::from_u16(head.status)
             .ok()
@@ -442,6 +490,9 @@ impl ProxyLog {
     }
 
     pub fn finish(&self, seq: u64, finish: Finish) {
+        if seq == 0 {
+            return;
+        }
         let Ok(mut inner) = self.inner.lock() else { return };
         let content_type = inner.entries.iter().rev().find(|e| e.seq == seq).and_then(|e| e.content_type.clone());
         let has_body = finish.body_size > 0;

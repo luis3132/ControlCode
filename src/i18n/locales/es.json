@@ -889,7 +889,7 @@
   "browser.debug.network.type.other": "Otro",
   "browser.debug.network.failed": "Fallidos",
   "browser.debug.network.clear": "Limpiar la red",
-  "browser.debug.network.empty": "Todavía no hay pedidos. Recargá la página para verlos desde el principio.",
+  "browser.debug.network.empty": "Todavía no hay pedidos: la red se anota solo mientras este panel está abierto. Recargá la página para verla desde el principio.",
   "browser.debug.network.status": "Estado",
   "browser.debug.network.method": "Método",
   "browser.debug.network.name": "Nombre",

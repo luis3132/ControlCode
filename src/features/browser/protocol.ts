@@ -49,7 +49,9 @@ export type SimpleAppMessage = {
   source: AppSource;
   type: "pick:on" | "pick:off" | "history:back" | "history:forward" | "hello" | "connect"
   /** La tab del navegador pasó a estar (o dejó de estar) a la vista. */
-  | "view:shown" | "view:hidden";
+  | "view:shown" | "view:hidden"
+  /** Se abrió (o cerró) el panel de debug: la página anota la red solo mientras está abierto. */
+  | "net:on" | "net:off";
 };
 
 export type AppMessage =

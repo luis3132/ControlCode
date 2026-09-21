@@ -254,7 +254,9 @@ use super::log::{
     parse_cookie_header, parse_http_date, parse_set_cookie, Begin, ErrorKind, Finish, Head, Header, HeaderNote,
     ProxyLog, MAX_RESPONSE_BODY,
 };
-use super::proxy::{preferred_port, preview_cookies, preview_network, preview_request, proxy_host};
+use super::proxy::{
+    preferred_port, preview_cookies, preview_network, preview_request, preview_set_recording, proxy_host,
+};
 
 #[test]
 fn las_fechas_http_se_leen_en_sus_dos_grafias() {
@@ -284,6 +286,13 @@ fn la_cabecera_cookie_se_parte_en_pares() {
     let cookies = parse_cookie_header("a=1; b=x=y;  ; c");
     let names: Vec<_> = cookies.iter().map(|c| (c.name.as_str(), c.value.as_str())).collect();
     assert_eq!(names, vec![("a", "1"), ("b", "x=y")]);
+}
+
+/// Un log con el panel de debug abierto: sin eso no anota nada.
+fn watched_log() -> ProxyLog {
+    let log = ProxyLog::default();
+    log.set_recording("test", true);
+    log
 }
 
 /// Un pedido entero por el log: llega, responde y termina.
@@ -319,7 +328,7 @@ fn head(status: u16) -> Head {
 
 #[test]
 fn el_log_se_lee_por_partes_y_avisa_si_se_perdio_algo() {
-    let log = ProxyLog::default();
+    let log = watched_log();
     for i in 0..3 {
         record(&log, &format!("http://x/{i}"), 0);
     }
@@ -342,7 +351,7 @@ fn el_log_se_lee_por_partes_y_avisa_si_se_perdio_algo() {
 /// llegar cuando cambia, con el mismo `seq`.
 #[test]
 fn un_pedido_pendiente_vuelve_a_llegar_cuando_termina() {
-    let log = ProxyLog::default();
+    let log = watched_log();
     let seq = log.begin(
         Begin {
             method: "POST",
@@ -375,7 +384,7 @@ fn un_pedido_pendiente_vuelve_a_llegar_cuando_termina() {
 
 #[test]
 fn un_cuerpo_binario_viaja_en_base64_y_uno_cortado_sigue_siendo_texto() {
-    let log = ProxyLog::default();
+    let log = watched_log();
     let seq = record(&log, "http://x/img", 0);
     log.finish(seq, Finish { body: vec![0xff, 0x00, 0x89], body_size: 3, truncated: false, encoding: None, duration_ms: 1, error: None });
     let body = log.detail(seq).unwrap().response_body.unwrap();
@@ -391,7 +400,7 @@ fn un_cuerpo_binario_viaja_en_base64_y_uno_cortado_sigue_siendo_texto() {
 
 #[test]
 fn pasado_el_presupuesto_se_sueltan_los_cuerpos_mas_viejos_y_no_el_ultimo() {
-    let log = ProxyLog::default();
+    let log = watched_log();
     let seqs: Vec<u64> = (0..70)
         .map(|i| {
             let seq = record(&log, &format!("http://x/{i}"), 0);
@@ -409,6 +418,34 @@ fn pasado_el_presupuesto_se_sueltan_los_cuerpos_mas_viejos_y_no_el_ultimo() {
     assert!(!last.evicted && last.text.is_some());
 }
 
+/// Sin el panel de debug abierto no se anota nada —ni cabeceras ni cuerpos—, pero qué
+/// cookies viajaron se sigue sabiendo. Al cerrar el último panel se suelta lo anotado.
+#[tokio::test(flavor = "multi_thread")]
+async fn la_red_se_anota_solo_con_el_panel_de_debug_abierto() {
+    let port = fake_dev_server().await;
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let origin = target.proxy_origin.clone();
+    let c = client();
+    c.get(format!("{origin}/sesion")).send().await.unwrap();
+    let body = c.get(format!("{origin}/app.js")).send().await.unwrap().text().await.unwrap();
+    assert_eq!(body, "console.log(1)", "sin panel, el stream pasa derecho y entero");
+    assert!(preview_network(origin.clone(), 0).await.unwrap().entries.is_empty());
+    c.get(format!("{origin}/eco")).send().await.unwrap();
+    assert!(preview_cookies(origin.clone()).await.unwrap().sent.is_some(), "las cookies enviadas se saben igual");
+
+    // Dos tabs sobre el mismo sitio: se anota mientras quede alguna mirando.
+    assert!(preview_set_recording(origin.clone(), "a".into(), true).await.unwrap());
+    assert!(preview_set_recording(origin.clone(), "b".into(), true).await.unwrap());
+    c.get(format!("{origin}/app.js")).send().await.unwrap().text().await.unwrap();
+    assert!(preview_set_recording(origin.clone(), "a".into(), false).await.unwrap());
+    assert_eq!(preview_network(origin.clone(), 0).await.unwrap().entries.len(), 1);
+
+    assert!(!preview_set_recording(origin.clone(), "b".into(), false).await.unwrap());
+    assert!(preview_network(origin.clone(), 0).await.unwrap().entries.is_empty(), "al cerrar el último se suelta");
+    c.get(format!("{origin}/app.js")).send().await.unwrap().text().await.unwrap();
+    assert!(preview_network(origin, 0).await.unwrap().entries.is_empty());
+}
+
 /// Un pedido de la página al proxy sobre el estado del sitio, como lo hace el runtime.
 fn own(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
     req.header("x-controlcode", "1")
@@ -420,6 +457,7 @@ fn own(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
 async fn las_cookies_las_guarda_el_proxy_y_no_el_navegador() {
     let port = fake_dev_server().await;
     let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    preview_set_recording(target.proxy_origin.clone(), "panel".into(), true).await.unwrap();
     let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
     let c = client();
     let at = |path: &str| format!("{}{path}", target.proxy_origin);
@@ -558,6 +596,7 @@ async fn el_storage_se_guarda_y_se_repone_una_vez() {
 async fn el_detalle_trae_cabeceras_cuerpos_y_lo_que_cambio_la_vista_previa() {
     let port = fake_dev_server().await;
     let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    preview_set_recording(target.proxy_origin.clone(), "panel".into(), true).await.unwrap();
     let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
 
     let c = client();
@@ -606,6 +645,7 @@ async fn un_servidor_apagado_se_anota_como_conexion_rechazada() {
     // Un puerto que se abre y se cierra: nadie escucha ahí.
     let port = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
     let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    preview_set_recording(target.proxy_origin.clone(), "panel".into(), true).await.unwrap();
     let resp = client().get(format!("{}/api", target.proxy_origin)).send().await.unwrap();
     assert_eq!(resp.status(), 502);
     // La página de error trae el runtime como cualquier otra: la app se entera de que cargó y
@@ -731,6 +771,7 @@ fn el_cuerpo_decide_el_tipo_y_una_regla_invalida_se_rechaza() {
 async fn una_regla_contesta_en_lugar_del_servidor_y_queda_anotada() {
     let port = fake_dev_server().await;
     let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    preview_set_recording(target.proxy_origin.clone(), "panel".into(), true).await.unwrap();
     let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
 
     super::proxy::preview_add_mock(

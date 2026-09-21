@@ -889,7 +889,7 @@
   "browser.debug.network.type.other": "Other",
   "browser.debug.network.failed": "Failed",
   "browser.debug.network.clear": "Clear network",
-  "browser.debug.network.empty": "No requests yet. Reload the page to see them from the start.",
+  "browser.debug.network.empty": "No requests yet: network traffic is only recorded while this panel is open. Reload the page to see it from the start.",
   "browser.debug.network.status": "Status",
   "browser.debug.network.method": "Method",
   "browser.debug.network.name": "Name",

@@ -84,6 +84,7 @@ pub fn run() {
             // Tabs de navegador (proxy con selector de elementos)
             crate::preview::preview_resolve,
             crate::preview::preview_network,
+            crate::preview::preview_set_recording,
             crate::preview::preview_request,
             crate::preview::preview_clear_network,
             crate::preview::preview_cookies,

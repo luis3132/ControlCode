@@ -112,6 +112,7 @@ declare global {
   }
 
   function pushNetwork(entry: PageNetworkEntry): void {
+    if (!recordingNet) return;
     if (pending.network.length >= MAX_QUEUE) pending.network.shift();
     pending.network.push(entry);
     schedule();
@@ -198,8 +199,12 @@ declare global {
       return url;
     }
   };
-  /** Pedidos sin terminar, de cualquier origen: es lo que mira `wait { idle }`. */
+  /** Pedidos sin terminar, de cualquier origen: es lo que mira `wait { idle }`. Se cuenta
+   *  siempre, con o sin panel de debug. */
   let inFlight = 0;
+  /** El panel de debug está abierto: solo ahí se anotan los pedidos (y se leen sus
+   *  cuerpos), que es lo que cuesta. Arranca apagado en cada documento; la app lo prende. */
+  let recordingNet = false;
 
   const sizeFrom = (header: string | null): number | null => {
     const n = header ? Number.parseInt(header, 10) : Number.NaN;
@@ -226,6 +231,7 @@ declare global {
           return response;
         });
       }
+      if (!recordingNet) return result;
       const at = Date.now();
       const started = performance.now();
       let detail: Pick<PageNetworkEntry, "requestHeaders" | "requestBody"> = {};
@@ -296,10 +302,12 @@ declare global {
       });
     }
     if (info && isForeign(info.url)) {
-      const at = Date.now();
-      const started = performance.now();
       inFlight += 1;
       this.addEventListener("loadend", () => { inFlight = Math.max(0, inFlight - 1); });
+    }
+    if (info && isForeign(info.url) && recordingNet) {
+      const at = Date.now();
+      const started = performance.now();
       let ttfbMs: number | null = null;
       let ended: "abort" | "timeout" | null = null;
       this.addEventListener("readystatechange", () => {
@@ -1465,6 +1473,10 @@ declare global {
     // dibujando algo que no se ve.
     if (message.type === "view:shown" || message.type === "view:hidden") {
       cursor.setWatched(message.type === "view:shown");
+      return;
+    }
+    if (message.type === "net:on" || message.type === "net:off") {
+      recordingNet = message.type === "net:on";
       return;
     }
     if (message.type === "connect" || message.type === "hello") flush();

@@ -195,6 +195,7 @@ async fn serve_mock(
     }
 
     let payload = canned.body.into_bytes();
+    let captured = if seq == 0 { Vec::new() } else { payload.iter().copied().take(MAX_RESPONSE_BODY).collect() };
     ctx.log.head(
         seq,
         Head {
@@ -218,7 +219,7 @@ async fn serve_mock(
             encoding: None,
             duration_ms: elapsed_ms(started),
             error: None,
-            body: payload.iter().copied().take(MAX_RESPONSE_BODY).collect(),
+            body: captured,
         },
     );
 
@@ -565,18 +566,20 @@ async fn forward(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Respons
                 return error_page(502, &ctx.target_origin, &message);
             }
         };
-        let (captured, truncated) = clip(&bytes, MAX_RESPONSE_BODY);
-        ctx.log.finish(
-            seq,
-            Finish {
-                body: captured,
-                body_size: bytes.len() as u64,
-                truncated,
-                encoding: None,
-                duration_ms: elapsed_ms(started),
-                error: None,
-            },
-        );
+        if seq != 0 {
+            let (captured, truncated) = clip(&bytes, MAX_RESPONSE_BODY);
+            ctx.log.finish(
+                seq,
+                Finish {
+                    body: captured,
+                    body_size: bytes.len() as u64,
+                    truncated,
+                    encoding: None,
+                    duration_ms: elapsed_ms(started),
+                    error: None,
+                },
+            );
+        }
         // Un HTML que no es UTF-8 se deja pasar sin selector antes que corromperlo.
         let body = match std::str::from_utf8(&bytes) {
             Ok(text) => full(inject_picker(text)),
@@ -587,7 +590,15 @@ async fn forward(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Respons
 
     // Todo lo demás pasa como stream: un Server-Sent Events del live reload nunca termina,
     // y leerlo entero antes de devolverlo lo dejaría colgado. El principio se va copiando
-    // para el panel mientras pasa.
+    // para el panel mientras pasa — si hay panel mirando; si no, pasa derecho.
+    if seq == 0 {
+        let plain = futures_util::StreamExt::map(upstream.bytes_stream(), |chunk: reqwest::Result<Bytes>| {
+            chunk.map(Frame::data).map_err(std::io::Error::other)
+        });
+        return builder
+            .body(StreamBody::new(plain).boxed())
+            .unwrap_or_else(|e| error_page(502, &ctx.target_origin, &e.to_string()));
+    }
     let tee = TeeStream {
         expected: upstream.content_length(),
         inner: Box::pin(upstream.bytes_stream()),
@@ -1035,6 +1046,13 @@ pub async fn preview_list_mocks(proxy_origin: String) -> Result<Vec<Mock>, Strin
 #[tauri::command]
 pub async fn preview_clear_mocks(proxy_origin: String, id: Option<String>) -> Result<usize, String> {
     Ok(mocks_for(&proxy_origin).await?.clear(id.as_deref()))
+}
+
+/// Una tab abrió o cerró su panel de debug: el proxy anota la red solo mientras haya
+/// alguno abierto (ver `log.rs`). Devuelve si está anotando.
+#[tauri::command]
+pub async fn preview_set_recording(proxy_origin: String, view_id: String, on: bool) -> Result<bool, String> {
+    Ok(log_for(&proxy_origin).await?.set_recording(&view_id, on))
 }
 
 /// Los pedidos que pasaron por el proxy después de `since`.

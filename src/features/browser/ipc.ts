@@ -124,6 +124,11 @@ export const previewNetwork = (proxyOrigin: string, since: number) =>
 export const previewRequest = (proxyOrigin: string, seq: number) =>
   invoke<ProxyRequestDetail | null>("preview_request", { proxyOrigin, seq });
 
+/** El panel de debug de esta tab se abrió o se cerró: el proxy anota la red solo mientras
+ *  haya alguno abierto sobre el sitio. */
+export const previewSetRecording = (proxyOrigin: string, viewId: string, on: boolean) =>
+  invoke<boolean>("preview_set_recording", { proxyOrigin, viewId, on });
+
 export const previewClearNetwork = (proxyOrigin: string) =>
   invoke<void>("preview_clear_network", { proxyOrigin });
 

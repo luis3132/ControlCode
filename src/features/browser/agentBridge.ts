@@ -64,6 +64,11 @@ export interface BrowserHost {
   /** Una foto de la página como se ve ahora, guardada en disco. Devuelve la ruta. `tag`
    *  dice de quién es: va en el nombre del archivo. */
   screenshot: (tag?: string) => Promise<string>;
+  /** El panel de debug está abierto: solo mientras lo esté se anota la red. */
+  debugOpen: () => boolean;
+  /** Abre el panel de debug en la red, que es lo que prende el registro. A la vista de la
+   *  persona a propósito: así sabe por qué está abierto. */
+  openNetworkDebug: () => void;
 }
 
 /** Elementos, capturas y nota: lo que la persona señaló de una vez. */
@@ -427,6 +432,14 @@ async function execute(
       return `${inServerTerms(host, text)}\n\n[cursor: ${next} — pasá since=${next} para ver solo lo que llegue después]`;
     }
     case "network": {
+      // La red se anota solo con el panel de debug abierto (para no cargar la app con lo
+      // que nadie mira): si estaba cerrado no hay nada que leer, y se prende desde ahora.
+      if (!host.debugOpen()) {
+        host.openNetworkDebug();
+        return "Network recording was off: ControlCode only records network traffic while the browser's "
+          + "debug panel is open, and it was closed. It is open now and recording from this point on. "
+          + "Reload the page or repeat the action you care about, then call this tool again.";
+      }
       const origin = host.proxyOrigin();
       if (origin) await refreshProxyLog(host.viewId, origin);
       const wanted = str(request, "request");
