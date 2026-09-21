@@ -6,7 +6,7 @@ import { Button, Input } from "neogestify-ui-components";
 import { FolderIcon, HomeIcon, ArrowRightIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 import { useTabsStore } from "@/features/tabs/store";
-import type { AgentInfo } from "@/features/tabs/types";
+import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
 import { useWorkspacesStore } from "@/features/workspaces/store";
 import type { WorkspaceSummary } from "@/features/workspaces/types";
 import { WorkspaceList } from "@/features/workspaces/WorkspaceList";
@@ -179,8 +179,8 @@ export function HomePage() {
             />
           )}
 
-          {/* Skills */}
-          {selectedAgent && (
+          {/* Skills — la terminal pelada no es un agente: no tiene */}
+          {selectedAgent && selectedAgent.id !== SHELL_AGENT_ID && (
             <div className="flex flex-col gap-3">
               <span className="text-[11px] font-semibold uppercase tracking-widest
                 text-gray-400 dark:text-gray-500">

@@ -6,9 +6,10 @@ import { useAccountsStore } from "@/features/accounts/store";
 import { AgentPickerStep } from "@/features/tabs/wizard/AgentPickerStep";
 import { AccountPickerStep, useAgentAccounts } from "@/features/tabs/wizard/AccountPickerStep";
 import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
+import { PrelaunchChain } from "@/features/prelaunch/PrelaunchChain";
 import { SkillPickerStep } from "@/features/tabs/wizard/SkillPickerStep";
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
-import type { AgentInfo } from "@/features/tabs/types";
+import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
@@ -26,7 +27,7 @@ interface NewAgentDialogProps {
   }) => void;
 }
 
-type StepId = "agent" | "account" | "skills";
+type StepId = "agent" | "account" | "skills" | "prelaunch";
 
 /**
  * Abrir otro agente en el workspace en el que estás, un paso por vez.
@@ -42,6 +43,10 @@ type StepId = "agent" | "account" | "skills";
  * Elegir la TUI avanza solo: es un paso de una sola decisión, y quedarse ahí esperando un
  * click en "Siguiente" es un trámite. Con eso, abrir un agente con lo de siempre son dos
  * clicks —el logo y "Abrir"—, que es lo que costaba antes de que esto fuera un wizard.
+ *
+ * **La terminal pelada no es un agente**: no tiene skills que elegir, así que después de
+ * elegirla solo quedan los comandos previos (activar un venv, un `nvm use`), a la vista y
+ * no plegados —son lo único del paso— y "Abrir".
  *
  * La carpeta no se decide acá: el "+" agrega un agente al workspace ACTUAL, y un workspace
  * es una carpeta. Por eso va arriba como contexto. Abrir otra es abrir otro workspace, y
@@ -73,10 +78,11 @@ export function NewAgentDialog({ isOpen, cwd, onClose, onConfirm }: NewAgentDial
     setStep("agent");
   }, [isOpen]);
 
-  const steps = useMemo<StepId[]>(
-    () => (accounts.length > 0 ? ["agent", "account", "skills"] : ["agent", "skills"]),
-    [accounts.length]
-  );
+  const isShell = agent?.id === SHELL_AGENT_ID;
+  const steps = useMemo<StepId[]>(() => {
+    const last: StepId = isShell ? "prelaunch" : "skills";
+    return accounts.length > 0 ? ["agent", "account", last] : ["agent", last];
+  }, [accounts.length, isShell]);
 
   // Cambiar de TUI puede borrar el paso donde estabas parado (la nueva no tiene cuentas).
   useEffect(() => {
@@ -90,6 +96,7 @@ export function NewAgentDialog({ isOpen, cwd, onClose, onConfirm }: NewAgentDial
     agent: t("newAgent.step.agent"),
     account: t("newAgent.step.account"),
     skills: t("newAgent.step.skills"),
+    prelaunch: t("newAgent.step.prelaunch"),
   };
 
   if (!isOpen) return null;
@@ -182,7 +189,7 @@ export function NewAgentDialog({ isOpen, cwd, onClose, onConfirm }: NewAgentDial
                 // cuentas de la TUI anterior hasta el próximo render.
                 const hasAccounts = useAccountsStore.getState()
                   .accounts.some((a) => a.agentId === next.id);
-                setStep(hasAccounts ? "account" : "skills");
+                setStep(hasAccounts ? "account" : next.id === SHELL_AGENT_ID ? "prelaunch" : "skills");
               }}
             />
           )}
@@ -198,6 +205,15 @@ export function NewAgentDialog({ isOpen, cwd, onClose, onConfirm }: NewAgentDial
                 onChange={setAccountId}
                 showLabel={false}
               />
+            </div>
+          )}
+
+          {step === "prelaunch" && agent && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {t("newAgent.shellPrelaunchDesc")}
+              </p>
+              <PrelaunchChain value={prelaunch} onChange={setPrelaunch} agentCommand={agent.command} />
             </div>
           )}
 

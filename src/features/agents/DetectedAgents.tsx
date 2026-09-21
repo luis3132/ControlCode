@@ -3,11 +3,9 @@ import { useTranslation } from "react-i18next";
 import { AnimateSpin, Button, CheckCircleIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { SHELL_AGENT_ID } from "@/features/tabs/types";
 
 import { agentSearchPath, detectAgents, type SearchPath } from "./ipc";
-
-/** La terminal pelada no es una TUI que se instale: no tiene sentido listarla acá. */
-const SHELL_AGENT_ID = "bash";
 
 /**
  * Qué TUIs de fábrica encontró la app en esta máquina, dónde, y dónde buscó.

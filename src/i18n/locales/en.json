@@ -565,6 +565,8 @@
   "newAgent.step.agent": "Agent / TUI",
   "newAgent.step.account": "Account",
   "newAgent.step.skills": "Skills",
+  "newAgent.step.prelaunch": "Pre-launch commands",
+  "newAgent.shellPrelaunchDesc": "They run in order before the terminal opens, for example to activate an environment. If you need none, just open it.",
   "newAgent.progress": "Step {{n}} of {{total}}",
   "workspaces.close": "Close workspace",
   "workspaces.forget": "Forget this workspace",
