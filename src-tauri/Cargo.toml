@@ -77,6 +77,7 @@ futures-util = "0.3"
 # Las imágenes de las tabs de archivo viajan como data URL: sin esto habría que abrirle al
 # webview el protocolo de assets sobre todo el disco. Ya venía en el árbol.
 base64 = "0.22"
+keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 
 # Señales POSIX: matar el GRUPO de procesos de una tab y no solo a su líder, para que no
 # queden huérfanos los procesos que el agente haya lanzado (ver terminal::pty_manager).

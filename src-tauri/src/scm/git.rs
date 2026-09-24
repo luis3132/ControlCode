@@ -9,14 +9,14 @@ use serde::Serialize;
 use crate::util::output_with_timeout;
 
 /// Leer estado, preparar, cambiar de rama: local, tiene que ser rápido.
-pub(super) const LOCAL: Duration = Duration::from_secs(20);
+pub(crate) const LOCAL: Duration = Duration::from_secs(20);
 /// Un commit corre los hooks del repo (lint, tests), que pueden tardar.
 pub(super) const COMMIT: Duration = Duration::from_secs(180);
 /// fetch/pull/push dependen de la red y del tamaño del repo.
 pub(super) const NETWORK: Duration = Duration::from_secs(300);
 
-/// Un error que la UI sabe distinguir. `Auth` es el que el futuro login va a resolver;
-/// hoy se muestra con la explicación de cómo darle credenciales a git.
+/// Un error que la UI sabe distinguir. Con `Auth` la UI ofrece iniciar sesión en el host
+/// (ver `forge`).
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", content = "message", rename_all = "camelCase")]
 pub enum ScmError {
@@ -77,7 +77,7 @@ fn base(root: &str, args: &[&str]) -> Command {
 }
 
 /// Corre git y devuelve su stdout, o el error ya clasificado.
-pub(super) fn run(root: &str, args: &[&str], limit: Duration) -> Result<Vec<u8>, ScmError> {
+pub(crate) fn run(root: &str, args: &[&str], limit: Duration) -> Result<Vec<u8>, ScmError> {
     let out = output_with_timeout(&mut base(root, args), limit)
         .map_err(|e| ScmError::Git(format!("git {}: {e}", args.first().unwrap_or(&""))))?;
     if out.status.success() {
@@ -90,14 +90,33 @@ pub(super) fn run(root: &str, args: &[&str], limit: Duration) -> Result<Vec<u8>,
     Err(classify_failure(&message))
 }
 
-pub(super) fn run_text(root: &str, args: &[&str], limit: Duration) -> Result<String, ScmError> {
+pub(crate) fn run_text(root: &str, args: &[&str], limit: Duration) -> Result<String, ScmError> {
     run(root, args, limit).map(|out| String::from_utf8_lossy(&out).into_owned())
 }
 
-/// Las operaciones que salen a la red. Hoy es `run` con más tiempo; es el punto donde el
-/// login con un proveedor va a inyectar sus credenciales.
-pub(super) fn network(root: &str, args: &[&str]) -> Result<String, ScmError> {
-    run_text(root, args, NETWORK)
+/// Las operaciones que salen a la red, con las variables con las que git se autentica con
+/// la cuenta de la app (ver `forge::git_env`). Sin cuenta para el host, `env` viene vacío y
+/// git usa lo que tenga configurado.
+pub(crate) fn network(root: &str, args: &[&str], env: &[(String, String)]) -> Result<String, ScmError> {
+    network_with(root, args, env, NETWORK)
+}
+
+pub(crate) fn network_with(
+    root: &str,
+    args: &[&str],
+    env: &[(String, String)],
+    limit: Duration,
+) -> Result<String, ScmError> {
+    let mut cmd = base(root, args);
+    cmd.envs(env.iter().map(|(k, v)| (k, v)));
+    let out = output_with_timeout(&mut cmd, limit)
+        .map_err(|e| ScmError::Git(format!("git {}: {e}", args.first().unwrap_or(&""))))?;
+    if out.status.success() {
+        return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let message = if stderr.trim().is_empty() { String::from_utf8_lossy(&out.stdout) } else { stderr };
+    Err(classify_failure(&message))
 }
 
 /// El root del repo que contiene `cwd`, o `None` si no hay repo.

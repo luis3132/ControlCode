@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 17;
+const SCHEMA_VERSION: i32 = 18;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -357,6 +357,32 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              dir        TEXT NOT NULL,
              created_at INTEGER NOT NULL,
              UNIQUE (agent_id, name)
+         );
+
+         -- v18 — Cuentas de GitHub / GitLab / Gitea / cualquier host git (ver `forge`).
+         --
+         -- Solo quién es y dónde: el token NO está acá, vive en el llavero del sistema
+         -- (ver `forge::secret`). `login` es el usuario en ese host, leído del propio host
+         -- al iniciar sesión. `git_user` es con qué usuario se presenta git por HTTPS
+         -- cuando el host no acepta uno fijo (los genéricos).
+         CREATE TABLE IF NOT EXISTS git_accounts (
+             id         TEXT PRIMARY KEY,
+             kind       TEXT NOT NULL,
+             host       TEXT NOT NULL,
+             login      TEXT NOT NULL,
+             name       TEXT,
+             avatar_url TEXT,
+             auth       TEXT NOT NULL,
+             git_user   TEXT,
+             created_at INTEGER NOT NULL,
+             UNIQUE (host, login)
+         );
+
+         -- Con qué cuenta trabaja cada repo cuando hay más de una para su host. Sin fila,
+         -- la primera que coincida.
+         CREATE TABLE IF NOT EXISTS git_repo_accounts (
+             root       TEXT PRIMARY KEY,
+             account_id TEXT NOT NULL REFERENCES git_accounts(id) ON DELETE CASCADE
          );
 
          -- Comandos de pre-lanzamiento guardados ('entorno conda' → 'conda activate ml').

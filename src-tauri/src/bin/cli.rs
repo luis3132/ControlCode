@@ -107,7 +107,8 @@ SERVIDOR MCP (no lo escribís vos: lo lanza la app)
   A diferencia del resto, esto NO devuelve una línea JSON: se queda tomado de stdin
   y stdout hablando JSON-RPC con el agente que lo lanzó. Es el servidor `controlcode`
   que le da sus herramientas: el navegador del proyecto, la orquestación de la flota,
-  preguntarle algo al usuario, y —solo con --task— el permiso de cada acción.
+  la cuenta de git del usuario (PRs, issues, push/pull), preguntarle algo al usuario,
+  y —solo con --task— el permiso de cada acción.
 
   La app se lo agrega sola al comando de cada tab de Claude Code, con un
   `--mcp-config` escrito en ~/.controlcode/mcp/. No hace falta instalar la CLI para

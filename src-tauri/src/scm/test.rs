@@ -279,13 +279,13 @@ async fn una_carpeta_sin_repo_no_es_un_error() {
     std::fs::remove_dir_all(dir).ok();
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn push_sin_remotos_explica_por_que() {
+#[test]
+fn push_sin_remotos_explica_por_que() {
     let dir = temp_repo("sinremoto");
     std::fs::write(dir.join("a"), "a").unwrap();
     git_in(&dir, &["add", "-A"]);
     git_in(&dir, &["commit", "-q", "-m", "a"]);
-    let err = super::commands::scm_push(dir.to_string_lossy().to_string()).await.unwrap_err();
+    let err = super::commands::push(&dir.to_string_lossy(), &[]).unwrap_err();
     assert!(matches!(err, ScmError::Git(ref m) if m.contains("remoto")), "{err:?}");
     std::fs::remove_dir_all(dir).ok();
 }

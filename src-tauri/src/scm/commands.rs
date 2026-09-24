@@ -193,40 +193,63 @@ pub async fn scm_checkout(root: String, name: String, create: bool, remote: bool
     .await
 }
 
-#[tauri::command]
-pub async fn scm_fetch(root: String) -> Result<(), ScmError> {
-    blocking(move || network(&root, &["fetch", "--all", "--prune"]).map(|_| ())).await
+/// Las tres operaciones de red. Viven en una sola función porque además de los botones
+/// del panel las usa el MCP (`git_fetch`/`git_pull`/`git_push`): un agente sube con la
+/// cuenta de la app por el mismo camino que un click.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Sync {
+    Fetch,
+    Pull,
+    Push,
 }
 
-/// `--no-edit`: si el pull termina en un merge, git abriría un editor para el mensaje, y
-/// acá no hay editor que abrir.
-#[tauri::command]
-pub async fn scm_pull(root: String) -> Result<(), ScmError> {
-    blocking(move || network(&root, &["pull", "--no-edit"]).map(|_| ())).await
+pub(crate) async fn sync(app: &tauri::AppHandle, root: String, op: Sync) -> Result<String, ScmError> {
+    let env = crate::forge::git_env(app, &root).await;
+    blocking(move || match op {
+        Sync::Fetch => network(&root, &["fetch", "--all", "--prune"], &env).map(|_| "Fetched.".to_string()),
+        // `--no-edit`: si el pull termina en un merge, git abriría un editor para el
+        // mensaje, y acá no hay editor que abrir.
+        Sync::Pull => network(&root, &["pull", "--no-edit"], &env),
+        Sync::Push => push(&root, &env),
+    })
+    .await
 }
 
 /// Push de la rama actual. Si todavía no tiene upstream la publica en `origin` (o en el
 /// único remoto que haya), que es lo que se quiere la primera vez.
+pub(super) fn push(root: &str, env: &[(String, String)]) -> Result<String, ScmError> {
+    let raw = run_text(root, &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"], LOCAL)?;
+    let info = parse_status_v2(&raw);
+    let Some(branch) = info.branch else {
+        return Err(ScmError::Git("No hay una rama activa (HEAD desprendido)".to_string()));
+    };
+    if info.upstream.is_some() {
+        network(root, &["push"], env)?;
+        return Ok(format!("Pushed {branch}."));
+    }
+    let remotes = parse_remotes(&run_text(root, &["remote", "-v"], LOCAL)?);
+    let remote = remotes
+        .iter()
+        .find(|r| r.name == "origin")
+        .or_else(|| remotes.first())
+        .ok_or_else(|| ScmError::Git("El repo no tiene ningún remoto al que subir".to_string()))?;
+    network(root, &["push", "-u", &remote.name, &branch], env)?;
+    Ok(format!("Published {branch} to {}.", remote.name))
+}
+
 #[tauri::command]
-pub async fn scm_push(root: String) -> Result<(), ScmError> {
-    blocking(move || {
-        let raw = run_text(&root, &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"], LOCAL)?;
-        let info = parse_status_v2(&raw);
-        let Some(branch) = info.branch else {
-            return Err(ScmError::Git("No hay una rama activa (HEAD desprendido)".to_string()));
-        };
-        if info.upstream.is_some() {
-            return network(&root, &["push"]).map(|_| ());
-        }
-        let remotes = parse_remotes(&run_text(&root, &["remote", "-v"], LOCAL)?);
-        let remote = remotes
-            .iter()
-            .find(|r| r.name == "origin")
-            .or_else(|| remotes.first())
-            .ok_or_else(|| ScmError::Git("El repo no tiene ningún remoto al que subir".to_string()))?;
-        network(&root, &["push", "-u", &remote.name, &branch]).map(|_| ())
-    })
-    .await
+pub async fn scm_fetch(app: tauri::AppHandle, root: String) -> Result<(), ScmError> {
+    sync(&app, root, Sync::Fetch).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn scm_pull(app: tauri::AppHandle, root: String) -> Result<(), ScmError> {
+    sync(&app, root, Sync::Pull).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn scm_push(app: tauri::AppHandle, root: String) -> Result<(), ScmError> {
+    sync(&app, root, Sync::Push).await.map(|_| ())
 }
 
 #[tauri::command]

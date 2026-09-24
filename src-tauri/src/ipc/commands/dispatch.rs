@@ -56,6 +56,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "run.approve" => run_approve(app, args),
         "browser.run" => browser_run(app, args),
         "user.ask" => user_ask(app, args),
+        "forge.run" => crate::forge::tools::run(app, args),
         "run.roster" => run_orchestrate(app, "run.roster", args),
         "run.plan" => run_orchestrate(app, "run.plan", args),
         "run.addTask" => run_orchestrate(app, "run.addTask", args),
