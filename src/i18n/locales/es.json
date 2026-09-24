@@ -99,6 +99,7 @@
   "terminal.status.connecting": "conectando",
   "terminal.status.exited": "terminado",
   "terminal.exitCode": "[Proceso terminado con código {{code}}]",
+  "terminal.scrollRail": "Arrastrá para desplazar · click para una página",
   "terminal.ptyError": "[Error al iniciar PTY: {{error}}]",
   "wizard.step1.orType": "O escribe la ruta:",
   "wizard.step2.detecting": "Detectando agentes…",

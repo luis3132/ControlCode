@@ -99,6 +99,7 @@
   "terminal.status.connecting": "connecting",
   "terminal.status.exited": "exited",
   "terminal.exitCode": "[Process exited with code {{code}}]",
+  "terminal.scrollRail": "Drag to scroll · click for a page",
   "terminal.ptyError": "[Failed to start PTY: {{error}}]",
   "wizard.step1.orType": "Or type a path:",
   "wizard.step2.detecting": "Detecting agents…",

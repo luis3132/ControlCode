@@ -230,6 +230,66 @@ html:not(.dark) .cc-term-scrollable .xterm-scrollable-element > .scrollbar {
   background: rgba(0, 0, 0, 0.04);
 }
 
+/* Carril de scroll de las TUIs de pantalla alternativa (ver `tuiScrollRail.ts`).
+   Va encima del carril de la barra de xterm, que en esa pantalla no tiene nada que mostrar. */
+.cc-tui-rail {
+  display: none;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cc-tui-rail-on .cc-tui-rail {
+  display: block;
+}
+
+/* El pulgar no marca posición (la TUI no la informa): es una perilla que vuelve al centro. */
+.cc-tui-rail-thumb {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  right: 3px;
+  height: 48px;
+  max-height: 33%;
+  border-radius: 999px;
+  transform: translateY(-50%);
+  background: rgba(230, 237, 243, 0.3);
+  cursor: grab;
+  touch-action: none;
+  transition: transform var(--cc-slow) var(--cc-ease), background var(--cc-fast);
+}
+
+.cc-tui-rail-thumb:hover {
+  background: rgba(230, 237, 243, 0.45);
+}
+
+/* Durante el arrastre el pulgar sigue al puntero sin retraso. */
+.cc-tui-rail.dragging .cc-tui-rail-thumb {
+  transition: none;
+  cursor: grabbing;
+  background: rgba(230, 237, 243, 0.6);
+}
+
+html:not(.dark) .cc-tui-rail {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+html:not(.dark) .cc-tui-rail-thumb {
+  background: rgba(31, 35, 40, 0.28);
+}
+
+html:not(.dark) .cc-tui-rail-thumb:hover {
+  background: rgba(31, 35, 40, 0.42);
+}
+
+html:not(.dark) .cc-tui-rail.dragging .cc-tui-rail-thumb {
+  background: rgba(31, 35, 40, 0.55);
+}
+
 /* Barra de progreso indeterminada (ver AddRegistryDialog): mientras no se sabe cuántos
    archivos hay que mirar, el segmento recorre la barra para indicar actividad en vez de
    mostrar un porcentaje inventado. */
