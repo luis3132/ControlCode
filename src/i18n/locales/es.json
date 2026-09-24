@@ -1184,5 +1184,16 @@
   "forge.clone.cloning": "Clonando…",
   "scm.view.changes": "Cambios",
   "scm.view.pulls": "Pull requests",
-  "scm.view.issues": "Issues"
+  "scm.view.issues": "Issues",
+  "app.saving.title": "Guardando antes de cerrar",
+  "app.saving.start": "Preparando…",
+  "app.saving.counting": "Contando lo que falta guardar…",
+  "app.saving.count": "{{done}} de {{total}}",
+  "app.saving.bounds": "Posición y tamaño de la ventana",
+  "app.saving.terminal": "Terminal: {{name}}",
+  "app.saving.write": "Escribiendo en la base de datos",
+  "app.saving.site": "Navegador: {{site}}",
+  "app.saving.window": "Ventana {{label}}",
+  "app.saving.kill": "Cerrando terminal: {{name}}",
+  "app.saving.closing": "Todo guardado. Cerrando…"
 }

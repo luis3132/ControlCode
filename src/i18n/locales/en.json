@@ -1184,5 +1184,16 @@
   "forge.clone.cloning": "Cloning…",
   "scm.view.changes": "Changes",
   "scm.view.pulls": "Pull requests",
-  "scm.view.issues": "Issues"
+  "scm.view.issues": "Issues",
+  "app.saving.title": "Saving before closing",
+  "app.saving.start": "Getting ready…",
+  "app.saving.counting": "Counting what needs saving…",
+  "app.saving.count": "{{done}} of {{total}}",
+  "app.saving.bounds": "Window position and size",
+  "app.saving.terminal": "Terminal: {{name}}",
+  "app.saving.write": "Writing to the database",
+  "app.saving.site": "Browser: {{site}}",
+  "app.saving.window": "Window {{label}}",
+  "app.saving.kill": "Closing terminal: {{name}}",
+  "app.saving.closing": "Everything saved. Closing…"
 }

@@ -59,6 +59,7 @@ pub fn run() {
             crate::window::close_and_forget_window,
             crate::window::reset_default_workspace,
             crate::window::confirm_exit_all,
+            crate::window::close_window_saved,
             // Explorador de archivos del workspace (panel derecho)
             crate::explorer::explorer_read_dir,
             crate::explorer::explorer_repo_info,
@@ -111,6 +112,8 @@ pub fn run() {
             crate::preview::preview_clear_network,
             crate::preview::preview_cookies,
             crate::preview::preview_forget_site,
+            crate::preview::preview_unsaved_sites,
+            crate::preview::preview_save_site,
             crate::preview::preview_detect_servers,
             crate::preview::preview_capture,
             crate::preview::preview_save_capture,
@@ -221,8 +224,23 @@ pub fn run() {
             crate::orchestrator::orchestrator_reset_usage,
         ])
         .on_window_event(|window, event| match event {
-            tauri::WindowEvent::CloseRequested { .. } => {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 let label = window.label().to_string();
+                // Un cierre que pide el sistema se frena para guardar con progreso; el
+                // frontend cierra de verdad al terminar (ver `window::close_guard`).
+                use crate::window::close_guard::{decide, Decision};
+                match decide(&label) {
+                    Decision::Close => {}
+                    Decision::Save => {
+                        api.prevent_close();
+                        let _ = window.app_handle().emit("cc-close-requested", &label);
+                        return;
+                    }
+                    Decision::Wait => {
+                        api.prevent_close();
+                        return;
+                    }
+                }
                 if let Some(db) = window.app_handle().try_state::<DbConnection>() {
                     let _ = crate::database::db_mark_window_closed(label, db);
                 }
@@ -304,10 +322,24 @@ pub fn run() {
                 crate::terminal::kill_all_sessions();
             }
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                let window_count = app_handle.webview_windows().len();
+                let windows = app_handle.webview_windows();
+                let window_count = windows.len();
                 if window_count > 1 {
                     api.prevent_exit();
                     let _ = app_handle.emit("cc-app-exit-requested", window_count);
+                } else if let Some(label) = windows.keys().next() {
+                    // Salir con una sola ventana (Cmd+Q) sin pasar por su cierre: se trata
+                    // igual que cerrarla, guardando antes. Si ya está guardando o la app ya
+                    // le dio paso, no se frena otra vez.
+                    use crate::window::close_guard::{decide, Decision};
+                    match decide(label) {
+                        Decision::Close => {}
+                        Decision::Save => {
+                            api.prevent_exit();
+                            let _ = app_handle.emit("cc-close-requested", label);
+                        }
+                        Decision::Wait => api.prevent_exit(),
+                    }
                 }
             }
         });

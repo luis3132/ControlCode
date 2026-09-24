@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ExitConfirmDialog } from "@/app/ExitConfirmDialog";
-import { closeAndForgetWindow, confirmExitAll } from "@/shared/ipc/window";
+import { ClosingProgress, closeWindowWithSave, exitAllWithSave, installCloseListeners } from "@/app/closeWithSave";
 
 /**
  * Escucha `cc-app-exit-requested`, emitido desde Rust (RunEvent::ExitRequested) cuando
@@ -13,10 +12,15 @@ import { closeAndForgetWindow, confirmExitAll } from "@/shared/ipc/window";
  * Nota: el botón de cerrar propio (`WindowLights`, la ventana es sin decoración) NO pasa
  * por aquí — cierra su ventana directo, porque cerrar una cualquiera mientras otras siguen
  * abiertas no dispara ExitRequested (solo se dispara al intentar salir del proceso).
+ *
+ * Acá también viven los oyentes del cierre con guardado (ver `closeWithSave`): el cierre
+ * que pide el sistema para esta ventana, y el "guardá lo tuyo" de un "cerrar todo".
  */
 export function AppExitListener() {
   const { t } = useTranslation();
   const [windowCount, setWindowCount] = useState<number | null>(null);
+
+  useEffect(() => installCloseListeners(), []);
 
   useEffect(() => {
     const unlisten = listen<number>("cc-app-exit-requested", (event) => {
@@ -25,18 +29,24 @@ export function AppExitListener() {
     return () => { unlisten.then((fn) => fn()); };
   }, []);
 
-  if (windowCount === null) return null;
-
   return (
-    <ExitConfirmDialog
-      title={t("app.exit.title")}
-      body={t("app.exit.body", { count: windowCount })}
-      onCancel={() => setWindowCount(null)}
-      onCloseAll={() => confirmExitAll().catch(console.error)}
-      onCloseCurrent={() => {
-        setWindowCount(null);
-        closeAndForgetWindow(getCurrentWindow().label).catch(console.error);
-      }}
-    />
+    <>
+      <ClosingProgress />
+      {windowCount !== null && (
+        <ExitConfirmDialog
+          title={t("app.exit.title")}
+          body={t("app.exit.body", { count: windowCount })}
+          onCancel={() => setWindowCount(null)}
+          onCloseAll={() => {
+            setWindowCount(null);
+            exitAllWithSave().catch(console.error);
+          }}
+          onCloseCurrent={() => {
+            setWindowCount(null);
+            closeWindowWithSave("button").catch(console.error);
+          }}
+        />
+      )}
+    </>
   );
 }

@@ -179,7 +179,7 @@ pub async fn open_workspace(
 
     for label in previously_open {
         if let Some(win) = app.get_webview_window(&label) {
-            let _ = win.close();
+            let _ = super::close_guard::close_now(&win);
         }
     }
 
@@ -210,7 +210,7 @@ pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String
         database::db_get_workspace_windows(default_id.to_string(), app.state::<DbConnection>())?;
     for w in &open_rows {
         if let Some(win) = app.get_webview_window(&w.label) {
-            let _ = win.close();
+            let _ = super::close_guard::close_now(&win);
         }
     }
 
@@ -268,7 +268,7 @@ pub async fn close_and_forget_window(app: tauri::AppHandle, label: String) -> Re
     database::forget_or_close_single_window(&db, &label)?;
 
     if let Some(win) = app.get_webview_window(&label) {
-        win.close().map_err(|e| e.to_string())?;
+        super::close_guard::close_now(&win).map_err(|e| e.to_string())?;
     }
 
     let _ = app.emit("cc-workspace-changed", ());

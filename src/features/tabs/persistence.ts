@@ -28,7 +28,13 @@ const scrollbackCache = new Map<number, string>();
 // dispararon, y cada una lee el estado más fresco al empezar (no al encolarse).
 let saveChain: Promise<void> = Promise.resolve();
 
+/** Después del guardado de cierre no se guarda más: las terminales se matan enseguida, y un
+ *  guardado posterior (el periódico de 20 s) leería el scrollback de un PTY que ya no
+ *  existe y pisaría con `null` el que se acaba de guardar. */
+let frozen = false;
+
 function enqueueSave(opts?: { refreshScrollback: boolean }) {
+  if (frozen) return;
   const run = () => saveNow(opts);
   saveChain = saveChain.then(run, run);
 }
@@ -54,10 +60,29 @@ async function cachedOrFetchScrollback(ptyId: number | null): Promise<string | n
   return fetchScrollback(ptyId);
 }
 
-async function saveNow(opts: { refreshScrollback: boolean } = { refreshScrollback: false }) {
+/** Cuánto va de un guardado: pasos hechos de un total que se conoce desde el principio. */
+export type SaveProgress = (done: number, total: number, step: SaveStep) => void;
+
+/** Qué se acaba de terminar: la posición de la ventana, una terminal, o la escritura. */
+export type SaveStep =
+  | { kind: "start" }
+  | { kind: "bounds" }
+  | { kind: "terminal"; title: string }
+  | { kind: "write" };
+
+async function saveNow(
+  opts: { refreshScrollback: boolean } = { refreshScrollback: false },
+  progress?: SaveProgress,
+) {
   const win = getCurrentWindow();
   const { tabs, workspaceId, hydrated } = useTabsStore.getState();
   const resolveScrollback = opts.refreshScrollback ? fetchScrollback : cachedOrFetchScrollback;
+  // Posición + una lectura de scrollback por tab + la escritura en la base. Los pasos son
+  // los reales: cada uno avisa cuando TERMINA, no cuando empieza.
+  const total = tabs.length + 2;
+  let done = 0;
+  const step = (s: SaveStep) => progress?.(++done, total, s);
+  progress?.(0, total, { kind: "start" });
 
   let bounds: { x: number | null; y: number | null; width: number | null; height: number | null } = {
     x: null, y: null, width: null, height: null,
@@ -69,6 +94,7 @@ async function saveNow(opts: { refreshScrollback: boolean } = { refreshScrollbac
   } catch {
     // ventana ya cerrándose; se guarda solo el estado de tabs
   }
+  step({ kind: "bounds" });
 
   const tabsPayload = await Promise.all(
     tabs.map(async (t, i) => ({
@@ -84,7 +110,7 @@ async function saveNow(opts: { refreshScrollback: boolean } = { refreshScrollbac
       historyId: t.historyId ?? null,
       accountId: t.accountId ?? null,
       prelaunch: t.prelaunch ?? [],
-      scrollback: await resolveScrollback(t.ptyId),
+      scrollback: await resolveScrollback(t.ptyId).finally(() => step({ kind: "terminal", title: t.title })),
       openedAt: t.openedAt,
     }))
   );
@@ -110,9 +136,11 @@ async function saveNow(opts: { refreshScrollback: boolean } = { refreshScrollbac
     // `WindowStatePayload::authoritative`.
     authoritative: hydrated,
   }).catch(console.error);
+  step({ kind: "write" });
 }
 
 function scheduleSave() {
+  if (frozen) return;
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(enqueueSave, SAVE_DEBOUNCE_MS);
 }
@@ -147,6 +175,31 @@ export async function flushPendingSave(): Promise<void> {
     debounceTimer = null;
   }
   enqueueSave();
+  await saveChain;
+}
+
+/**
+ * El guardado de antes de cerrar la ventana, con progreso: el scrollback de cada terminal
+ * leído en ese momento (no el de hasta 20 s atrás) y todo escrito en la base.
+ *
+ * Una ventana que no terminó de hidratarse no guarda nada (ver `flushPendingSave`): su
+ * payload no tiene sus tabs reales y borraría las que sí están. Avisa `0 de 0` y sigue.
+ */
+export async function saveForClose(progress: SaveProgress): Promise<void> {
+  if (!useTabsStore.getState().hydrated) {
+    progress(0, 0, { kind: "write" });
+    return;
+  }
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+  // Primero lo que ya estaba en cola: si no, un guardado viejo podría terminar después
+  // y pisar a este.
+  await saveChain;
+  frozen = true;
+  const run = () => saveNow({ refreshScrollback: true }, progress);
+  saveChain = saveChain.then(run, run);
   await saveChain;
 }
 
@@ -203,6 +256,6 @@ export function initTabsPersistence() {
 
   // Sin listener de onCloseRequested a propósito: en Tauri 2, registrar uno
   // intercepta el cierre nativo de la ventana hasta que el JS responda, y eso
-  // es justo lo que rompía el botón de cerrar. El guardado por debounce ya
-  // mantiene la DB al día (a lo sumo se pierden los últimos ~400ms de cambios).
+  // es justo lo que rompía el botón de cerrar. El cierre lo frena Rust y lo guarda
+  // `saveForClose` con su barra de progreso (ver `app/closeWithSave.ts`).
 }
