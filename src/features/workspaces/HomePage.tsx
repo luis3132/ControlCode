@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Input } from "neogestify-ui-components";
-import { FolderIcon, HomeIcon, ArrowRightIcon } from "neogestify-ui-components";
+import { CloudIcon, FolderIcon, HomeIcon, ArrowRightIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
@@ -20,6 +20,7 @@ import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { homeDir } from "@/shared/ipc/window";
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
+import { CloneRepoDialog } from "@/features/forge/CloneRepoDialog";
 
 export function HomePage() {
   const { t } = useTranslation();
@@ -36,6 +37,7 @@ export function HomePage() {
   const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>();
   const [prelaunch, setPrelaunch] = useState<PrelaunchStep[]>([]);
   const [pathError, setPathError] = useState("");
+  const [cloning, setCloning] = useState(false);
   const [openTarget, setOpenTarget] = useState<WorkspaceSummary | null>(null);
 
   useEffect(() => {
@@ -130,6 +132,13 @@ export function HomePage() {
                 <FolderIcon className="w-3.5 h-3.5" />
                 {t("btn.browse")}
               </Button>
+              {/* Un repo que todavía no está en esta máquina: se clona con la cuenta de git
+                  y la carpeta nueva queda elegida. */}
+              <Button variant="outline" onClick={() => setCloning(true)}
+                className="flex items-center gap-1.5 text-xs! h-8! px-3!">
+                <CloudIcon className="w-3.5 h-3.5" />
+                {t("forge.clone.button")}
+              </Button>
             </div>
 
             <Input
@@ -215,6 +224,17 @@ export function HomePage() {
 
       {openTarget && (
         <OpenWorkspaceDialog workspace={openTarget} onClose={() => setOpenTarget(null)} />
+      )}
+
+      {cloning && (
+        <CloneRepoDialog
+          onClose={() => setCloning(false)}
+          onCloned={(path) => {
+            setCloning(false);
+            setSelectedCwd(path);
+            setPathError("");
+          }}
+        />
       )}
     </div>
   );

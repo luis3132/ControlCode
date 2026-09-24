@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { closeAndForgetWindow } from "@/shared/ipc/window";
+import { closeWindowWithSave } from "@/app/closeWithSave";
 
 /** Rojo, ámbar y verde, en el orden de macOS. */
 const LIGHTS = [
@@ -36,9 +36,9 @@ export function WindowLights() {
   }, [win]);
 
   const act = (key: (typeof LIGHTS)[number]["key"]) => {
-    // Cerrar pasa por el mismo camino de siempre para que el estado de la ventana quede
-    // persistido antes de irse.
-    if (key === "close") closeAndForgetWindow(win.label).catch(console.error);
+    // Cerrar guarda todo antes (con la alerta de progreso) y después cierra por el camino
+    // de siempre (ver `closeWithSave`).
+    if (key === "close") closeWindowWithSave("button").catch(console.error);
     else if (key === "minimize") win.minimize().catch(console.error);
     else win.toggleMaximize().catch(console.error);
   };

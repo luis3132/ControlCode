@@ -1007,6 +1007,23 @@ pub async fn preview_resolve(url: String, picker: String) -> Result<PreviewTarge
     Ok(PreviewTarget { proxied_url: format!("{proxy_origin}{rest}"), proxy_origin, target_origin })
 }
 
+/// Los sitios del navegador con cookies o storage que todavía no se escribieron a disco.
+/// Al cerrar la app se guardan uno por uno, para que el progreso sea real.
+#[tauri::command]
+pub async fn preview_unsaved_sites() -> Vec<String> {
+    PROXIES.lock().await.iter().filter(|(_, p)| p.site.is_dirty()).map(|(origin, _)| origin.clone()).collect()
+}
+
+/// Escribe ya lo pendiente de un sitio (`origin` es el de destino, `http://localhost:5173`).
+#[tauri::command]
+pub async fn preview_save_site(origin: String) -> Result<(), String> {
+    let site = PROXIES.lock().await.get(&origin).map(|p| p.site.clone());
+    match site {
+        Some(site) => tokio::task::spawn_blocking(move || site.save_now()).await.map_err(|e| e.to_string())?,
+        None => Ok(()),
+    }
+}
+
 /// El proxy que sirve `proxy_origin` (`http://localhost:<puerto>`).
 async fn proxy_for(proxy_origin: &str) -> Result<Proxy, String> {
     let port: u16 = proxy_origin

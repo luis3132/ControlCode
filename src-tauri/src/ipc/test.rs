@@ -393,7 +393,13 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     assert!(orchestration.iter().all(|n| offered.contains(n)), "{orchestration:?}");
     // Preguntarle algo al usuario va para los dos lados y no es ni navegador ni orquestación.
     assert!(tab.contains(&super::mcp::ASK_TOOL.to_string()));
-    assert_eq!(browser.len() + orchestration.len() + 1, offered.len());
+    // Las de git remoto: todas se ofrecen, y las que se aprueban solas son solo las que leen.
+    let git: Vec<String> = offered.iter().filter(|n| n.contains("__git_")).cloned().collect();
+    assert_eq!(git.len(), crate::forge::tools::GIT_TOOLS.len());
+    let git_read = super::mcp::git_read_tool_names();
+    assert!(git_read.iter().all(|n| git.contains(n)), "{git_read:?}");
+    assert!(!git_read.iter().any(|n| n.ends_with("git_push") || n.ends_with("_create")));
+    assert_eq!(browser.len() + orchestration.len() + git.len() + 1, offered.len());
 }
 
 /// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo

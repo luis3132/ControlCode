@@ -377,6 +377,12 @@ impl Site {
         .flatten()
     }
 
+    /// Si hay cambios que todavía no llegaron al archivo (el guardador espera un momento
+    /// para juntar cambios seguidos).
+    pub fn is_dirty(&self) -> bool {
+        self.file.is_some() && self.with(|inner| inner.dirty).unwrap_or(false)
+    }
+
     /// Escribe el archivo ya, si hay algo pendiente. Es lo que hace el guardador después de
     /// cada cambio; los tests lo llaman directo.
     pub fn save_now(&self) -> Result<(), String> {

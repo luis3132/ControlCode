@@ -13,6 +13,7 @@ import { isResumable } from "@/features/sessions/agentResume";
 import { registerCapabilityResponders } from "@/features/terminal/terminalCapabilities";
 import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
+import { installTuiScrollRail } from "@/features/terminal/tuiScrollRail";
 import { registerTerminal } from "@/features/terminal/terminalRegistry";
 import { installTerminalKeyHandler } from "@/features/terminal/terminalKeys";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -245,6 +246,9 @@ export function Terminal({
     // La barra de scroll de xterm se esconde sola; se la deja fija cuando hay historial
     // que recorrer (ver terminalScrollbar.ts).
     const disposeScrollbar = keepScrollbarVisible(term, containerRef.current);
+    // En la pantalla alternativa no hay historial para esa barra: el scroll lo lleva la TUI,
+    // y ahí el carril se vuelve una perilla que le manda la rueda (ver tuiScrollRail.ts).
+    const disposeRail = installTuiScrollRail(term, containerRef.current, t("terminal.scrollRail"));
 
     // Marcas de corte en cada envío del usuario. Se lee la preferencia acá, al montar:
     // cambiarla no reconfigura las terminales que ya están abiertas (ver TerminalSection).
@@ -518,6 +522,7 @@ export function Terminal({
       disposeCapabilities();
       disposeMarks();
       disposeScrollbar();
+      disposeRail();
       unlistenData?.();
       unlistenExit?.();
       if (ptyIdRef.current !== null) {
@@ -581,7 +586,11 @@ export function Terminal({
         {/* Sin `height: 100%`: con `flex: 1` ya recibe el alto disponible, y declarar las
             dos cosas resolvía el alto por dos caminos (flex y porcentaje), que en el borde
             inferior se veía como filas cortadas o tapadas. */}
-        <div ref={containerRef} style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }} />
+        <div
+          ref={containerRef}
+          // `relative`: el carril de scroll de las TUIs se posiciona contra este contenedor.
+          style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}
+        />
       </div>
     </div>
   );
