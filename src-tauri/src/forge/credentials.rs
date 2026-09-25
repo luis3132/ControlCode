@@ -177,7 +177,7 @@ pub(crate) async fn git_env(app: &tauri::AppHandle, root: &str) -> Vec<(String, 
 }
 
 /// Lo mismo para una URL suelta (clonar): con la cuenta dada, o la primera de su host.
-pub(super) async fn git_env_for_url(
+pub(crate) async fn git_env_for_url(
     app: &tauri::AppHandle,
     url: &str,
     account_id: Option<&str>,

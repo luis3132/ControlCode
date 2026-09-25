@@ -269,3 +269,24 @@ fn un_diff_de_varios_archivos_se_parte_por_archivo() {
     assert!(parts[0].1.starts_with("@@ -1 +1,2 @@"));
     assert_eq!(count_patch(&parts[0].1), (2, 1));
 }
+
+#[test]
+fn una_release_se_lee_igual_en_github_y_gitlab() {
+    let gh = Api::new(ForgeKind::Github, "github.com", "t").unwrap();
+    let r = gh.release_from(&json!({
+        "tag_name": "v1.7.3", "name": "v1.7.3 — Git", "body": "## Notas", "draft": false, "prerelease": true,
+        "html_url": "https://github.com/o/r/releases/tag/v1.7.3", "published_at": "2026-09-24T00:00:00Z",
+        "author": { "login": "luis3132" }
+    }));
+    assert_eq!((r.tag.as_str(), r.prerelease, r.draft), ("v1.7.3", true, false));
+    assert_eq!(r.author.as_deref(), Some("luis3132"));
+
+    let gl = Api::new(ForgeKind::Gitlab, "gitlab.com", "t").unwrap();
+    let r = gl.release_from(&json!({
+        "tag_name": "v2", "name": "Dos", "description": "", "released_at": "2026-01-01T00:00:00Z",
+        "_links": { "self": "https://gitlab.com/g/p/-/releases/v2" }, "author": { "username": "ana" }
+    }));
+    assert_eq!(r.web_url, "https://gitlab.com/g/p/-/releases/v2");
+    assert_eq!(r.body, None, "una descripción vacía no es un cuerpo");
+    assert!(!r.draft);
+}

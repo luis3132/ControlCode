@@ -3,7 +3,7 @@
 use serde::Serialize;
 use tauri::AppHandle;
 
-use super::api::{normalize_state, Api, ForgeRepo, ForgeUser, Item, ItemDetail, NewIssue, NewPull};
+use super::api::{normalize_state, Api, ForgeRepo, ForgeUser, Item, ItemDetail, NewIssue, NewPull, NewRelease, Release};
 use super::credentials::{api_for, blocking, git_env, git_env_for_url, target, RepoTarget};
 use super::oauth::{self, DeviceStart, Poll};
 use super::provider::{normalize_host, ForgeError, ForgeKind};
@@ -328,4 +328,19 @@ fn checkout_pull(t: &RepoTarget, number: u64, head_ref: &str, env: &[(String, St
         run_local(&t.root, &["switch", "-c", &branch, &tracking]).map_err(scm_to_forge)?;
     }
     Ok(branch)
+}
+
+#[tauri::command]
+pub async fn forge_releases(app: AppHandle, cwd: String) -> Result<Vec<Release>, ForgeError> {
+    let (t, api) = repo_api(&app, &cwd).await?;
+    api.releases(&t.path).await
+}
+
+#[tauri::command]
+pub async fn forge_create_release(app: AppHandle, cwd: String, release: NewRelease) -> Result<Release, ForgeError> {
+    if release.tag.trim().is_empty() || release.tag.starts_with('-') {
+        return Err(ForgeError::Api("Falta el tag".into()));
+    }
+    let (t, api) = repo_api(&app, &cwd).await?;
+    api.create_release(&t.path, &release).await
 }

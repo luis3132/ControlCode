@@ -228,6 +228,21 @@ function buildEverything(selection) {
     console.log("");
     const args = ["tauri", "build", "--target", target.triple, "--bundles", ...target.bundles];
     if (plan.runner) args.push("--runner", plan.runner);
+    // Con la llave de firma a mano, cada instalador sale firmado para el actualizador de la
+    // app (`X` + `X.sig`). Sin ella se compila igual, sin actualización automática: así un
+    // build local no necesita la llave, y uno de CI sin el secret tampoco se rompe.
+    //
+    // La llave pública va a la config del plugin (`plugins.updater.pubkey`): el bundler no
+    // firma sin ella, y la app la usa para verificar lo que baja.
+    if (process.env.TAURI_SIGNING_PRIVATE_KEY) {
+      const pubkey = process.env.CC_UPDATER_PUBKEY ?? "";
+      if (!pubkey) throw new Error("Hay llave de firma pero falta CC_UPDATER_PUBKEY (la pública).");
+      args.push("--config", JSON.stringify({
+        bundle: { createUpdaterArtifacts: true },
+        plugins: { updater: { pubkey } },
+      }));
+      console.log("  (firmando para el actualizador)");
+    }
 
     try {
       run("bunx", args, {

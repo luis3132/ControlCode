@@ -289,7 +289,7 @@ pub fn delete_skill(skill_id: String, db: tauri::State<DbConnection>) -> Result<
     delete_skill_internal(&skill_id, &db)
 }
 
-pub(super) fn delete_skill_internal(skill_id: &str, db: &DbConnection) -> Result<(), String> {
+pub(crate) fn delete_skill_internal(skill_id: &str, db: &DbConnection) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
 
     let source_path: String = conn
@@ -351,7 +351,7 @@ fn adoptable_orphan(
     }
 }
 
-fn update_installed(
+pub(crate) fn update_installed(
     skill_id: &str,
     dest: &str,
     source_file: &str,

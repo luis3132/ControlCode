@@ -314,3 +314,13 @@ export function IssueIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Una etiqueta con su agujero: un tag de git. */
+export function TagIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M3 12.2V4.5A1.5 1.5 0 014.5 3h7.7a1.5 1.5 0 011 .44l7.4 7.4a1.5 1.5 0 010 2.12l-7.7 7.7a1.5 1.5 0 01-2.12 0l-7.4-7.4A1.5 1.5 0 013 12.2z" />
+      <circle cx="7.8" cy="7.8" r="1.4" />
+    </svg>
+  );
+}

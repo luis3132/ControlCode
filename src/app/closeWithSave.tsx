@@ -200,7 +200,11 @@ interface SaveAllProgress {
  * sus terminales) y le va contando a esta cuánto lleva; al final se escriben los sitios
  * del navegador y se sale.
  */
-export async function exitAllWithSave(): Promise<void> {
+/**
+ * `then`: salir (lo de siempre) o reiniciar, que es lo que hace falta después de instalar
+ * una actualización. Las dos guardan todo antes y muestran lo mismo.
+ */
+export async function exitAllWithSave(then: "exit" | "restart" = "exit"): Promise<void> {
   if (closing) return;
   closing = true;
   const alert = new SaveAlert();
@@ -252,7 +256,8 @@ export async function exitAllWithSave(): Promise<void> {
     console.error("[close] no se pudo guardar todo antes de salir", e);
   }
   // Como en `closeWindowWithSave`: la alerta se va con la app.
-  await confirmExitAll().catch((e) => {
+  const finish = then === "restart" ? invoke<void>("update_restart") : confirmExitAll();
+  await finish.catch((e) => {
     console.error(e);
     alert.close();
     closing = false;

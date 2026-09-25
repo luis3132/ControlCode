@@ -11,7 +11,13 @@
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
-use super::api::{normalize_state, overall, Api, Item, ItemDetail, NewIssue, NewPull};
+use super::api::{normalize_state, overall, Api, Item, ItemDetail, NewIssue, NewPull, NewRelease};
+
+fn scm_message(e: crate::scm::ScmError) -> String {
+    match e {
+        crate::scm::ScmError::Auth(m) | crate::scm::ScmError::Git(m) => m,
+    }
+}
 
 /// Cuánto diff se le devuelve a un agente de una vez: más que esto se come su contexto.
 const MAX_PATCH_CHARS: usize = 60_000;
@@ -148,6 +154,39 @@ pub(crate) const GIT_TOOLS: &[GitTool] = &[
             "labels": { "type": "array", "items": { "type": "string" }, "description": "Existing label names (ignored on Gitea)." },
         }),
         required: &["title"],
+        read_only: false,
+    },
+    GitTool {
+        name: "git_tag",
+        description: "Create a git tag on a commit (default HEAD) and push it to the remote with the user's Control Code account. With `message` it is an annotated tag (what releases use). In repositories whose CI publishes a release when a tag is pushed, this is how a release is made.",
+        properties: || json!({
+            "name": { "type": "string", "description": "e.g. v1.7.4" },
+            "message": { "type": "string", "description": "Annotated tag message. Omit for a lightweight tag." },
+            "ref": { "type": "string", "description": "Commit, branch or tag to put it on. Default: HEAD." },
+            "push": { "type": "boolean", "description": "Push it to the remote. Default: true." },
+        }),
+        required: &["name"],
+        read_only: false,
+    },
+    GitTool {
+        name: "git_release_list",
+        description: "List this repository's releases on the host (GitHub, GitLab, Gitea), newest first, with tag, name, draft/prerelease and link.",
+        properties: none,
+        required: &[],
+        read_only: true,
+    },
+    GitTool {
+        name: "git_release_create",
+        description: "Publish a release on the host. If the tag does not exist there it is created on `target` (default: the default branch). Without `body`, the notes are read from .github/releases/<tag>.md when that file exists.",
+        properties: || json!({
+            "tag": { "type": "string" },
+            "name": { "type": "string", "description": "Default: the tag." },
+            "body": { "type": "string", "description": "Release notes, Markdown." },
+            "target": { "type": "string", "description": "Branch or commit for a new tag." },
+            "draft": { "type": "boolean", "description": "Not supported on GitLab." },
+            "prerelease": { "type": "boolean" },
+        }),
+        required: &["tag"],
         read_only: false,
     },
     GitTool {
@@ -289,6 +328,33 @@ async fn call(app: &AppHandle, cwd: &str, name: &str, args: &Value) -> Result<St
             }
             Ok(if lines.is_empty() { "No repositories match.".into() } else { lines.join("\n") })
         }
+        "git_tag" => {
+            let t = target(app, cwd).await?;
+            let name = arg_str(args, "name").ok_or("missing `name`")?.to_string();
+            // Una rama o un tag se resuelven al commit acá: `create_tag` solo acepta commits,
+            // así nada que venga del modelo termina leído como opción de git.
+            let commit = match arg_str(args, "ref") {
+                Some(r) if r.starts_with('-') => return Err("invalid ref".into()),
+                Some(r) => crate::scm::run_local(&t.root, &["rev-parse", "--verify", "-q", &format!("{r}^{{commit}}")])
+                    .map(|s| s.trim().to_string())
+                    .map_err(|_| ForgeError::Api(format!("unknown ref {r}")))?,
+                None => "HEAD".to_string(),
+            };
+            let message = arg_str(args, "message").map(str::to_string);
+            let (root, tag) = (t.root.clone(), name.clone());
+            super::credentials::blocking(move || crate::scm::create_tag(&root, &tag, Some(&commit), message.as_deref()))
+                .await?
+                .map_err(|e| ForgeError::Api(scm_message(e)))?;
+            if !args.get("push").and_then(Value::as_bool).unwrap_or(true) {
+                return Ok(format!("Created tag {name} (not pushed)."));
+            }
+            crate::scm::push_tag(app, t.root, name.clone()).await.map_err(|e| match e {
+                crate::scm::ScmError::Auth(m) => ForgeError::Auth(format!(
+                    "Tag {name} was created locally, but git was refused credentials to push it: {m}"
+                )),
+                crate::scm::ScmError::Git(m) => ForgeError::Api(format!("Tag {name} was created locally, but pushing it failed: {m}")),
+            })
+        }
         "git_fetch" | "git_pull" | "git_push" => {
             let t = target(app, cwd).await?;
             let op = match name {
@@ -416,6 +482,49 @@ async fn call(app: &AppHandle, cwd: &str, name: &str, args: &Value) -> Result<St
                         }
                     }
                     Ok(out)
+                }
+                "git_release_list" => {
+                    let releases = api.releases(&t.path).await?;
+                    if releases.is_empty() {
+                        return Ok("No releases.".into());
+                    }
+                    Ok(releases
+                        .iter()
+                        .map(|r| {
+                            let mut flags = Vec::new();
+                            if r.draft { flags.push("draft"); }
+                            if r.prerelease { flags.push("prerelease"); }
+                            let flags = if flags.is_empty() { String::new() } else { format!(" [{}]", flags.join(", ")) };
+                            format!("{} — {}{flags} {}\n  {}", r.tag, r.name, r.created_at.as_deref().unwrap_or(""), r.web_url)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"))
+                }
+                "git_release_create" => {
+                    let tag = arg_str(args, "tag").ok_or("missing `tag`")?.to_string();
+                    // El tag arma la ruta del archivo de notas: nada de `..` ni separadores de
+                    // Windows, y nada que git lea como opción.
+                    if tag.starts_with('-') || tag.contains("..") || tag.contains('\\') || tag.chars().any(char::is_whitespace) {
+                        return Err("invalid tag".into());
+                    }
+                    // Las notas que el repo ya tiene escritas para ese tag, si no vienen otras.
+                    let body = match arg_str(args, "body") {
+                        Some(b) => Some(b.to_string()),
+                        None => {
+                            let file = std::path::Path::new(&t.root).join(".github").join("releases").join(format!("{tag}.md"));
+                            std::fs::read_to_string(file).ok()
+                        }
+                    };
+                    let release = NewRelease {
+                        tag,
+                        target: arg_str(args, "target").map(str::to_string),
+                        name: arg_str(args, "name").map(str::to_string),
+                        body,
+                        draft: args.get("draft").and_then(Value::as_bool).unwrap_or(false),
+                        prerelease: args.get("prerelease").and_then(Value::as_bool).unwrap_or(false),
+                    };
+                    let r = api.create_release(&t.path, &release).await?;
+                    Ok(format!("Published release {} ({}){}\n{}", r.name, r.tag, if r.draft { " as a draft" } else { "" }, r.web_url))
                 }
                 "git_comment" => {
                     let body = arg_str(args, "body").ok_or("missing `body`")?;

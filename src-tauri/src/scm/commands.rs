@@ -9,8 +9,8 @@ use serde::Serialize;
 
 use super::git::{network, repo_root, run, run_text, ScmError, COMMIT, LOCAL};
 use super::parse::{
-    parse_branches, parse_log, parse_name_status, parse_status_v2, Branch, Commit, ScmEntry, StatusInfo, BRANCH_FORMAT,
-    LOG_FORMAT,
+    parse_branches, parse_log, parse_name_status, parse_status_v2, parse_tags, Branch, Commit, ScmEntry, StatusInfo,
+    Tag, BRANCH_FORMAT, LOG_FORMAT, TAG_FORMAT,
 };
 use super::remote::{parse_remotes, Remote};
 
@@ -352,6 +352,89 @@ pub async fn scm_file_at(root: String, path: String, rev: String) -> Result<Opti
             return Err(ScmError::Git("Es un archivo binario".to_string()));
         }
         Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+    })
+    .await
+}
+
+// ── tags ──────────────────────────────────────────────────────────────────────────
+
+/// Los tags del repo, los más nuevos primero.
+#[tauri::command]
+pub async fn scm_tags(root: String) -> Result<Vec<Tag>, ScmError> {
+    blocking(move || {
+        let format = format!("--format={TAG_FORMAT}");
+        let raw = run_text(&root, &["for-each-ref", "--sort=-creatordate", &format, "refs/tags"], LOCAL)?;
+        Ok(parse_tags(&raw))
+    })
+    .await
+}
+
+/// Que el nombre sirva como tag y no se pueda leer como opción de git.
+fn check_tag_name(root: &str, name: &str) -> Result<(), ScmError> {
+    let invalid = || ScmError::Git(format!("«{name}» no es un nombre de tag válido"));
+    if name.is_empty() || name.starts_with('-') {
+        return Err(invalid());
+    }
+    run(root, &["check-ref-format", &format!("refs/tags/{name}")], LOCAL).map_err(|_| invalid())?;
+    Ok(())
+}
+
+/// Crea un tag en `target` (un commit; sin él, HEAD). Con `message` es anotado —el que
+/// usan las releases—, sin él liviano.
+pub(crate) fn create_tag(root: &str, name: &str, target: Option<&str>, message: Option<&str>) -> Result<(), ScmError> {
+    let name = name.trim();
+    check_tag_name(root, name)?;
+    let target = match target.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) if t == "HEAD" || valid_hash(t) => t.to_string(),
+        Some(t) => return Err(ScmError::Git(format!("«{t}» no es un commit"))),
+        None => "HEAD".to_string(),
+    };
+    match message.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(msg) => run(root, &["tag", "-a", name, "-m", msg, &target], LOCAL).map(|_| ()),
+        None => run(root, &["tag", name, &target], LOCAL).map(|_| ()),
+    }
+}
+
+#[tauri::command]
+pub async fn scm_create_tag(
+    root: String,
+    name: String,
+    target: Option<String>,
+    message: Option<String>,
+) -> Result<(), ScmError> {
+    blocking(move || create_tag(&root, &name, target.as_deref(), message.as_deref())).await
+}
+
+/// Sube un tag al remoto (`origin`, o el único que haya), con la cuenta de la app. En un
+/// repo con un workflow que publica al llegar un tag, esto ES sacar la release.
+pub(crate) async fn push_tag(app: &tauri::AppHandle, root: String, name: String) -> Result<String, ScmError> {
+    let env = crate::forge::git_env(app, &root).await;
+    blocking(move || {
+        check_tag_name(&root, &name)?;
+        let remotes = parse_remotes(&run_text(&root, &["remote", "-v"], LOCAL)?);
+        let remote = remotes
+            .iter()
+            .find(|r| r.name == "origin")
+            .or_else(|| remotes.first())
+            .ok_or_else(|| ScmError::Git("El repo no tiene ningún remoto al que subir".to_string()))?;
+        network(&root, &["push", &remote.name, &format!("refs/tags/{name}")], &env)?;
+        Ok(format!("Pushed tag {name} to {}.", remote.name))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn scm_push_tag(app: tauri::AppHandle, root: String, name: String) -> Result<(), ScmError> {
+    push_tag(&app, root, name).await.map(|_| ())
+}
+
+/// Borra un tag LOCAL. El del remoto no se toca: una release publicada depende de él, y
+/// borrarla es una decisión que se toma en el host, no con un click acá.
+#[tauri::command]
+pub async fn scm_delete_tag(root: String, name: String) -> Result<(), ScmError> {
+    blocking(move || {
+        check_tag_name(&root, &name)?;
+        run(&root, &["tag", "-d", &name], LOCAL).map(|_| ())
     })
     .await
 }

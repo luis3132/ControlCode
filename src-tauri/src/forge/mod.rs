@@ -33,3 +33,21 @@ mod test;
 
 pub use commands::*;
 pub(crate) use credentials::git_env;
+
+/// Lo que usa la sincronización (ver `crate::sync`): la API de una cuenta y cómo
+/// autenticar a git con ella, sin exponer el resto del módulo.
+pub(crate) mod for_sync {
+    pub(crate) use super::api::Api;
+    pub(crate) use super::credentials::git_env_for_url;
+    pub(crate) use super::provider::{ForgeError, ForgeKind};
+    pub(crate) use super::store::GitAccount;
+
+    /// La cuenta y su API (con el token renovado si hacía falta).
+    pub(crate) async fn account_api(app: &tauri::AppHandle, account_id: &str) -> Result<(GitAccount, Api), ForgeError> {
+        let account = super::store::get(&super::store::db(app)?.lock().unwrap(), account_id)
+            .ok_or_else(|| ForgeError::Api("Esa cuenta de git ya no existe".into()))?;
+        let token = super::credentials::token(app, &account).await?;
+        let api = Api::new(account.kind, &account.host, &token)?;
+        Ok((account, api))
+    }
+}

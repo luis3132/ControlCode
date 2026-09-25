@@ -153,8 +153,34 @@ jobs:
         run: rm -rf "src-tauri/target/${{ matrix.target }}/release/bundle"
 
       # El mismo comando que se corre a mano, con el target de esta celda fijado.
+      #
+      # Con la llave de firma en los secrets, el build además firma cada instalador (`.sig`)
+      # para el actualizador de la app (ver `scripts/build.mjs`). Sin el secret sale igual
+      # que siempre, solo que sin actualización automática.
       - name: Build
         run: bun run app:build --release --target ${{ matrix.target }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # La llave PÚBLICA, que la app lleva adentro para verificar lo que baja.
+          CC_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+
+      # En macOS el actualizador usa el `.app` comprimido, que el bundler llama igual en las
+      # dos arquitecturas (`controlcode.app.tar.gz`): al juntarlos en el release chocarían.
+      # Se les pone la versión y la arquitectura, como a los demás instaladores.
+      - name: Nombrar el paquete del actualizador de macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          arch=$([ "${{ matrix.target }}" = "aarch64-apple-darwin" ] && echo aarch64 || echo x64)
+          shopt -s nullglob
+          for f in "$dir"/*.app.tar.gz "$dir"/*.app.tar.gz.sig; do
+            name=$(basename "$f")
+            mv "$f" "$dir/${name/.app.tar.gz/_${version}_${arch}.app.tar.gz}"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
@@ -169,6 +195,8 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.sig
 
       # Los instaladores ya viajaron como artifact al job que publica, así que en este
       # runner no hacen más falta. Borrarlos acá, antes de que termine el job, es lo que los
@@ -238,6 +266,14 @@ jobs:
 
           echo "Se van a publicar $despues archivos:"
           ls -lh dist/
+
+      # Lo que lee el actualizador de la app: qué versión hay y dónde está cada instalador
+      # con su firma. Va DESPUÉS del chequeo de versión de arriba (su nombre no la lleva).
+      # Sin instaladores firmados no se escribe y el release sale igual.
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Manifiesto del actualizador
+        run: bun scripts/updater-manifest.mjs dist "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}" ".github/releases/${GITHUB_REF_NAME}.md"
 
       # Las notas se escriben a mano en `.github/releases/<tag>.md` y se versionan con el
       # código: un release describe QUÉ CAMBIÓ para quien lo usa, y eso no sale de la lista

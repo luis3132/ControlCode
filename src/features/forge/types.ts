@@ -110,6 +110,27 @@ export interface NewIssue {
   labels: string[];
 }
 
+export interface Release {
+  tag: string;
+  name: string;
+  body: string | null;
+  draft: boolean;
+  prerelease: boolean;
+  webUrl: string;
+  createdAt: string | null;
+  author: string | null;
+}
+
+export interface NewRelease {
+  tag: string;
+  /** Dónde crear el tag si todavía no existe en el host: una rama o un commit. */
+  target?: string;
+  name?: string;
+  body?: string;
+  draft: boolean;
+  prerelease: boolean;
+}
+
 /**
  * - `noAccount`: no hay cuenta para ese host (el mensaje ES el host).
  * - `auth`: el host rechazó el token; hay que volver a iniciar sesión.

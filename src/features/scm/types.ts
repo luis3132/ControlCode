@@ -66,6 +66,17 @@ export interface Commit {
   outgoing: boolean;
 }
 
+export interface Tag {
+  name: string;
+  /** El commit al que apunta (corto). */
+  target: string;
+  /** Anotado (con mensaje propio) o liviano. */
+  annotated: boolean;
+  /** El mensaje del tag anotado, o el asunto del commit en uno liviano. */
+  subject: string;
+  time: number;
+}
+
 /** `auth` = a git le faltan credenciales para el remoto. */
 export interface ScmError {
   kind: "auth" | "git";

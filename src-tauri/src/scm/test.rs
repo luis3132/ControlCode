@@ -376,3 +376,54 @@ async fn el_historial_trae_padres_ramas_y_lo_que_entra_y_sale() {
     std::fs::remove_dir_all(origin).ok();
     std::fs::remove_dir_all(local).ok();
 }
+
+/// Tags contra git de verdad: anotado y liviano, en HEAD o en otro commit, subirlo a un
+/// remoto y borrar el local sin tocar el del remoto.
+#[tokio::test(flavor = "multi_thread")]
+async fn los_tags_se_crean_listan_suben_y_borran() {
+    let origin = temp_repo("tags-origen");
+    git_in(&origin, &["config", "receive.denyCurrentBranch", "ignore"]);
+    std::fs::write(origin.join("a"), "1").unwrap();
+    git_in(&origin, &["add", "-A"]);
+    git_in(&origin, &["commit", "-q", "-m", "base"]);
+    let local = std::env::temp_dir().join(format!("cc-scm-tags-local-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&local);
+    git_in(&origin, &["clone", "-q", &origin.to_string_lossy(), &local.to_string_lossy()]);
+    git_in(&local, &["config", "user.email", "test@controlcode.dev"]);
+    git_in(&local, &["config", "user.name", "Control Code"]);
+    git_in(&local, &["config", "tag.gpgsign", "false"]);
+    std::fs::write(local.join("b"), "1").unwrap();
+    git_in(&local, &["add", "-A"]);
+    git_in(&local, &["commit", "-q", "-m", "segundo"]);
+    let root = local.to_string_lossy().to_string();
+    let first = super::commands::scm_log(root.clone(), 10).await.unwrap().last().unwrap().hash.clone();
+
+    super::commands::create_tag(&root, "v1.0.0", Some(&first), Some("Primera")).unwrap();
+    super::commands::create_tag(&root, "liviano", None, None).unwrap();
+    assert!(super::commands::create_tag(&root, "--force", None, None).is_err(), "no se lee como opción");
+    assert!(super::commands::create_tag(&root, "mal nombre", None, None).is_err());
+    assert!(super::commands::create_tag(&root, "x", Some("--all"), None).is_err());
+
+    let tags = super::commands::scm_tags(root.clone()).await.unwrap();
+    let v1 = tags.iter().find(|t| t.name == "v1.0.0").unwrap();
+    assert!(v1.annotated);
+    assert_eq!(v1.subject, "Primera");
+    assert!(first.starts_with(&v1.target), "el tag anotado apunta al commit, no a sí mismo");
+    let light = tags.iter().find(|t| t.name == "liviano").unwrap();
+    assert!(!light.annotated);
+    assert_eq!(light.subject, "segundo");
+
+    // Subir: el tag aparece en el remoto. Sin la app no hay `AppHandle`, así que se prueba
+    // el mismo `git push` que arma `push_tag`, sin credenciales (el remoto es local).
+    super::git::network(&root, &["push", "origin", "refs/tags/v1.0.0"], &[]).unwrap();
+    let remote_tags = std::process::Command::new("git").args(["-C", &origin.to_string_lossy(), "tag"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&remote_tags.stdout).contains("v1.0.0"));
+
+    super::commands::scm_delete_tag(root.clone(), "v1.0.0".into()).await.unwrap();
+    assert!(!super::commands::scm_tags(root).await.unwrap().iter().any(|t| t.name == "v1.0.0"));
+    let remote_tags = std::process::Command::new("git").args(["-C", &origin.to_string_lossy(), "tag"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&remote_tags.stdout).contains("v1.0.0"), "borrar el local no toca el remoto");
+
+    std::fs::remove_dir_all(origin).ok();
+    std::fs::remove_dir_all(local).ok();
+}

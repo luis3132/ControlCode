@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { EmptyState, Skeleton } from "neogestify-ui-components";
 
-import { IssueIcon, PullRequestIcon } from "@/app/icons";
+import { IssueIcon, PullRequestIcon, TagIcon } from "@/app/icons";
 import { useShellGroups } from "@/app/shellContext";
 import { useTabsStore } from "@/features/tabs/store";
 import type { RepoGroup, WorkspaceNode } from "@/features/workspaces/workspaceTree";
@@ -11,10 +11,11 @@ import { ForgeItemsView, type ItemFilter } from "./ForgeItemsView";
 import { ForgeIcon } from "./forgeMeta";
 import { forgeSetRepoAccount } from "./ipc";
 import { ItemDetailView } from "./ItemDetailView";
+import { ReleasesView } from "./ReleasesView";
 import type { ForgeItem } from "./types";
 import { useRepoTarget } from "./useRepoTarget";
 
-type Section = "pulls" | "issues";
+type Section = "pulls" | "issues" | "releases";
 
 /** Un repo con workspaces abiertos, y la carpeta desde la que se le habla. */
 interface OpenRepo {
@@ -158,8 +159,8 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
   const cwd = repo.main.cwd;
   const { target, reload } = useRepoTarget(cwd);
   const [section, setSection] = useState<Section>("pulls");
-  const [filters, setFilters] = useState<Record<Section, ItemFilter>>({ pulls: "open", issues: "open" });
-  const [opened, setOpened] = useState<Record<Section, ForgeItem | null>>({ pulls: null, issues: null });
+  const [filters, setFilters] = useState<Record<"pulls" | "issues", ItemFilter>>({ pulls: "open", issues: "open" });
+  const [opened, setOpened] = useState<Record<"pulls" | "issues", ForgeItem | null>>({ pulls: null, issues: null });
   // Cambia cuando algo se modificó adentro de un PR o issue (comentario, fusión): la lista
   // se vuelve a montar y se relee al volver.
   const [version, setVersion] = useState(0);
@@ -175,7 +176,7 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
     return <EmptyState className="m-auto" icon={<PullRequestIcon className="w-8 h-8" />} title={t("forge.page.noRemote")} />;
   }
 
-  const item = opened[section];
+  const item = section === "releases" ? null : opened[section];
 
   return (
     <>
@@ -186,8 +187,8 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
           {target.path}
         </span>
         <div className="flex items-center gap-0.5 ml-2">
-          {(["pulls", "issues"] as Section[]).map((s) => {
-            const Icon = s === "pulls" ? PullRequestIcon : IssueIcon;
+          {(["pulls", "issues", "releases"] as Section[]).map((s) => {
+            const Icon = s === "pulls" ? PullRequestIcon : s === "issues" ? IssueIcon : TagIcon;
             return (
               <button
                 key={s}
@@ -226,7 +227,9 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
         )}
       </div>
 
-      {item ? (
+      {section === "releases" ? (
+        <ReleasesView key={`releases-${target.account?.id ?? "none"}`} cwd={cwd} target={target} />
+      ) : item ? (
         <ItemDetailView
           key={`${section}-${item.number}`}
           cwd={cwd}

@@ -52,5 +52,13 @@
         }
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/luis3132/ControlCode/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

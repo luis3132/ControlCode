@@ -296,3 +296,44 @@ pub(crate) fn parse_name_status(raw: &str) -> Vec<ScmEntry> {
     }
     out
 }
+
+/// Un tag del repo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tag {
+    pub name: String,
+    /// El commit al que apunta (corto).
+    pub target: String,
+    /// Anotado (con mensaje y autor propios) o liviano (solo un nombre para un commit).
+    pub annotated: bool,
+    /// El mensaje del tag anotado, o el asunto del commit en uno liviano.
+    pub subject: String,
+    /// Epoch en segundos: cuándo se creó el tag anotado, o la fecha del commit.
+    pub time: i64,
+}
+
+/// `%(*objectname)` es el commit de un tag anotado; en uno liviano viene vacío y el commit
+/// es `%(objectname)` mismo.
+pub(crate) const TAG_FORMAT: &str =
+    "%(refname:short)%1f%(objecttype)%1f%(objectname:short)%1f%(*objectname:short)%1f%(creatordate:unix)%1f%(contents:subject)%1e";
+
+pub(crate) fn parse_tags(raw: &str) -> Vec<Tag> {
+    raw.split('\u{1e}')
+        .map(|r| r.trim_start_matches('\n'))
+        .filter(|r| !r.is_empty())
+        .filter_map(|record| {
+            let f: Vec<&str> = record.splitn(6, '\u{1f}').collect();
+            if f.len() < 6 {
+                return None;
+            }
+            let annotated = f[1] == "tag";
+            Some(Tag {
+                name: f[0].to_string(),
+                target: if annotated && !f[3].is_empty() { f[3] } else { f[2] }.to_string(),
+                annotated,
+                subject: f[5].trim().to_string(),
+                time: f[4].parse().unwrap_or(0),
+            })
+        })
+        .collect()
+}

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CloudIcon, DocumentIcon, Tooltip } from "neogestify-ui-components";
 
-import { BranchIcon, PullIcon, PushIcon } from "@/app/icons";
+import { BranchIcon, PullIcon, PushIcon, TagIcon } from "@/app/icons";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
 
@@ -104,7 +104,13 @@ function Continuing({ row, width }: { row: GraphRow; width: number }) {
  * Un click en un commit despliega los archivos que cambió; uno de ellos abre el diff de ese
  * commit contra su padre.
  */
-export function CommitGraph({ cwd, root, commits }: { cwd: string; root: string; commits: Commit[] }) {
+export function CommitGraph({ cwd, root, commits, onTag }: {
+  cwd: string;
+  root: string;
+  commits: Commit[];
+  /** "Crear tag aquí", desde el botón que aparece al pasar sobre un commit. */
+  onTag?: (commit: Commit) => void;
+}) {
   const { t } = useTranslation();
   const openDiff = useViewTabsStore((s) => s.openDiff);
   const rows = useMemo(() => layoutGraph(commits), [commits]);
@@ -134,7 +140,7 @@ export function CommitGraph({ cwd, root, commits }: { cwd: string; root: string;
             <button
               onClick={() => toggle(c)}
               title={tip}
-              className={`flex items-center gap-1.5 w-full pr-3 text-left
+              className={`group flex items-center gap-1.5 w-full pr-3 text-left
                 ${isOpen ? "bg-blue-500/10 dark:bg-blue-400/10" : "hover:bg-gray-200/50 dark:hover:bg-white/4"}`}
               style={{ height: ROW }}
             >
@@ -149,6 +155,21 @@ export function CommitGraph({ cwd, root, commits }: { cwd: string; root: string;
                 <span className="flex items-center gap-1 min-w-0 shrink overflow-hidden">
                   {c.refs.map((r) => <RefChip key={`${r.kind}:${r.name}`} r={r} />)}
                 </span>
+              )}
+              {onTag && !c.incoming && (
+                <Tooltip content={t("scm.tag.createHere")} placement="left">
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    aria-label={t("scm.tag.createHere")}
+                    onClick={(e) => { e.stopPropagation(); onTag(c); }}
+                    className="hidden group-hover:flex items-center justify-center w-5 h-5 shrink-0 rounded
+                      text-gray-400 dark:text-white/40 hover:text-amber-600 dark:hover:text-amber-400
+                      hover:bg-gray-200 dark:hover:bg-white/10"
+                  >
+                    <TagIcon className="w-3 h-3" />
+                  </span>
+                </Tooltip>
               )}
               {c.outgoing && (
                 <Tooltip content={t("scm.graph.outgoing")} placement="left">

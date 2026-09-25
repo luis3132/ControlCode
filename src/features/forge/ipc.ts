@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   DevicePoll, DeviceStart, ForgeItem, ForgeItemDetail, ForgeKind, ForgeKindInfo, ForgeRepo, GitAccount,
-  NewIssue, NewPull, RepoTarget,
+  NewIssue, NewPull, NewRelease, Release, RepoTarget,
 } from "./types";
 
 export const forgeKinds = () => invoke<ForgeKindInfo[]>("forge_kinds");
@@ -47,3 +47,7 @@ export const forgeDefaultBranch = (cwd: string) => invoke<string | null>("forge_
 /** Devuelve el nombre de la rama local (`pr/<n>`). */
 export const forgeCheckoutPull = (cwd: string, number: number) =>
   invoke<string>("forge_checkout_pull", { cwd, number });
+
+export const forgeReleases = (cwd: string) => invoke<Release[]>("forge_releases", { cwd });
+export const forgeCreateRelease = (cwd: string, release: NewRelease) =>
+  invoke<Release>("forge_create_release", { cwd, release });

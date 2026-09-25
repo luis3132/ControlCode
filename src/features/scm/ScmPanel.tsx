@@ -15,6 +15,8 @@ import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
 
 import { BranchMenu } from "./BranchMenu";
 import { CommitGraph } from "./CommitGraph";
+import { CreateTagDialog } from "./CreateTagDialog";
+import { TagsSection } from "./TagsSection";
 import {
   scmCheckout, scmCommit, scmDiscard, scmFetch, scmInit, scmLog, scmPull, scmPush, scmStage, scmStatus, scmUnstage,
 } from "./ipc";
@@ -96,6 +98,10 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
   const [log, setLog] = useState<Commit[] | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [logLimit, setLogLimit] = useState(LOG_PAGE);
+  /** El commit sobre el que se crea un tag; "head" = HEAD. */
+  const [tagOn, setTagOn] = useState<Commit | "head" | null>(null);
+  /** Sube cada vez que se crea o sube un tag: la lista de tags y el grafo se releen. */
+  const [tagsVersion, setTagsVersion] = useState(0);
   const [discard, setDiscard] = useState<{ tracked: string[]; untracked: string[]; label: string } | null>(null);
   const busyRef = useRef(busy);
   busyRef.current = busy;
@@ -491,7 +497,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
               <p className="px-3 py-2 text-[11px] text-gray-400 dark:text-white/30">{t("scm.noCommits")}</p>
             ) : (
               <>
-                <CommitGraph cwd={cwd} root={status.root} commits={log} />
+                <CommitGraph cwd={cwd} root={status.root} commits={log} onTag={(c) => setTagOn(c)} />
                 {/* Si vino lleno, puede haber más: se pide otro tramo. */}
                 {log.length >= logLimit && (
                   <button
@@ -505,6 +511,13 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
             )}
           </div>
         )}
+
+        <TagsSection
+          root={status.root}
+          version={tagsVersion}
+          onCreate={() => setTagOn("head")}
+          onChanged={() => { if (logOpen) loadLog(); }}
+        />
 
         {remote && (
           <div className="flex items-center gap-2 h-7 px-3 border-t border-gray-200 dark:border-white/7">
@@ -520,6 +533,19 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
           </div>
         )}
       </div>
+
+      {tagOn && (
+        <CreateTagDialog
+          root={status.root}
+          target={tagOn === "head" ? null : { hash: tagOn.hash, short: tagOn.short, subject: tagOn.subject }}
+          onClose={() => setTagOn(null)}
+          onDone={() => {
+            setTagOn(null);
+            setTagsVersion((v) => v + 1);
+            if (logOpen) loadLog();
+          }}
+        />
+      )}
 
       {discard && (
         <AppDialog

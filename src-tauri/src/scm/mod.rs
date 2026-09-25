@@ -16,11 +16,16 @@ mod remote;
 mod test;
 
 pub use commands::*;
-pub(crate) use commands::{sync, Sync};
+pub(crate) use commands::{create_tag, push_tag, sync, Sync};
 pub(crate) use remote::{host_and_path, parse_remotes, provider_of, Provider};
 pub(crate) use git::{network, network_with, ScmError};
 
 /// Un git local, con el mismo entorno que el panel (sin terminal, con tiempo límite).
 pub(crate) fn run_local(root: &str, args: &[&str]) -> Result<String, ScmError> {
     git::run_text(root, args, git::LOCAL)
+}
+
+/// Lo mismo, devolviendo los bytes tal cual (archivos binarios).
+pub(crate) fn run_bytes(root: &str, args: &[&str]) -> Result<Vec<u8>, ScmError> {
+    git::run(root, args, git::LOCAL)
 }

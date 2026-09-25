@@ -25,6 +25,8 @@ import { ResizeHandles } from "@/app/ResizeHandles";
 import { useGlobalShortcuts } from "@/app/useGlobalShortcuts";
 import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
 import { AppExitListener } from "@/app/AppExitListener";
+import { SyncRunner } from "@/features/sync/SyncRunner";
+import { UpdateNotifier } from "@/features/updates/UpdateNotifier";
 import type { ShellOutletContext } from "@/app/shellContext";
 import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
@@ -198,6 +200,8 @@ export function AppShell() {
 
       <ResizeHandles />
       <AppExitListener />
+      <SyncRunner />
+      <UpdateNotifier />
       {/* Encima de todo y fuera de las rutas: lo pregunta un agente que está esperando, y
           no puede depender de en qué pantalla esté parado el usuario. */}
       <AskDialog />

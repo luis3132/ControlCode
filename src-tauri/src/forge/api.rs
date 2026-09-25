@@ -251,6 +251,37 @@ pub(super) fn split_diff(raw: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Una release publicada (o en borrador) en el host.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Release {
+    pub tag: String,
+    pub name: String,
+    pub body: Option<String>,
+    pub draft: bool,
+    pub prerelease: bool,
+    pub web_url: String,
+    pub created_at: Option<String>,
+    pub author: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewRelease {
+    pub tag: String,
+    /// Dónde crear el tag si todavía no existe en el host: una rama o un commit.
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub draft: bool,
+    #[serde(default)]
+    pub prerelease: bool,
+}
+
 /// Qué lista se pide: `open`, `closed`, `merged` (solo PRs) o `all`.
 pub fn normalize_state(state: Option<&str>) -> &'static str {
     match state.unwrap_or("open") {
@@ -691,6 +722,44 @@ impl Api {
         Ok(s(&self.get(&path).await?, "/default_branch"))
     }
 
+    /// Un repo por su ruta (`owner/nombre`). `None` si no existe o la cuenta no lo ve.
+    pub async fn find_repo(&self, full_name: &str) -> Result<Option<ForgeRepo>, ForgeError> {
+        let path = match self.kind {
+            ForgeKind::Gitlab => format!("/projects/{}", gl_project(full_name)),
+            _ => format!("/repos/{full_name}"),
+        };
+        match self.get(&path).await {
+            Ok(v) => Ok(Some(self.repo_from(&v))),
+            Err(ForgeError::Api(m)) if m.starts_with("Not found") => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Crea un repo PRIVADO en la cuenta, vacío (sin README: el primer commit lo hace la
+    /// app, así no hay historia que mezclar).
+    pub async fn create_private_repo(&self, name: &str, description: &str) -> Result<ForgeRepo, ForgeError> {
+        let v = match self.kind {
+            ForgeKind::Gitlab => {
+                self.call(
+                    Method::POST,
+                    "/projects",
+                    Some(json!({ "name": name, "path": name, "visibility": "private", "description": description })),
+                )
+                .await?
+            }
+            // GitHub y Gitea: el mismo endpoint y los mismos campos.
+            _ => {
+                self.call(
+                    Method::POST,
+                    "/user/repos",
+                    Some(json!({ "name": name, "private": true, "description": description, "auto_init": false })),
+                )
+                .await?
+            }
+        };
+        Ok(self.repo_from(&v))
+    }
+
     /// El commit de la cabeza de un PR: sobre él corre el CI.
     pub async fn pull_head_sha(&self, repo: &str, number: u64) -> Result<String, ForgeError> {
         let v = match self.kind {
@@ -808,6 +877,76 @@ impl Api {
                     .collect())
             }
         }
+    }
+
+    pub(super) fn release_from(&self, v: &Value) -> Release {
+        match self.kind {
+            ForgeKind::Gitlab => Release {
+                tag: s(v, "/tag_name").unwrap_or_default(),
+                name: s(v, "/name").unwrap_or_default(),
+                body: s(v, "/description").filter(|b| !b.is_empty()),
+                draft: false,
+                prerelease: b(v, "/upcoming_release"),
+                web_url: s(v, "/_links/self").unwrap_or_default(),
+                created_at: s(v, "/released_at").or_else(|| s(v, "/created_at")),
+                author: s(v, "/author/username"),
+            },
+            _ => Release {
+                tag: s(v, "/tag_name").unwrap_or_default(),
+                name: s(v, "/name").unwrap_or_default(),
+                body: s(v, "/body").filter(|b| !b.is_empty()),
+                draft: b(v, "/draft"),
+                prerelease: b(v, "/prerelease"),
+                web_url: s(v, "/html_url").unwrap_or_default(),
+                created_at: s(v, "/published_at").or_else(|| s(v, "/created_at")),
+                author: s(v, "/author/login"),
+            },
+        }
+    }
+
+    /// Las releases del repo, las más nuevas primero.
+    pub async fn releases(&self, repo: &str) -> Result<Vec<Release>, ForgeError> {
+        let items = match self.kind {
+            ForgeKind::Gitlab => self.get_list(&format!("/projects/{}/releases?per_page=30", gl_project(repo))).await?,
+            ForgeKind::Github => self.get_list(&format!("/repos/{repo}/releases?per_page=30")).await?,
+            _ => self.get_list(&format!("/repos/{repo}/releases?limit=30")).await?,
+        };
+        Ok(items.iter().map(|v| self.release_from(v)).collect())
+    }
+
+    /// Publica una release. Si el tag no existe en el host, lo crea en `target` (o en la
+    /// rama por defecto).
+    pub async fn create_release(&self, repo: &str, new: &NewRelease) -> Result<Release, ForgeError> {
+        let name = new.name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| new.tag.clone());
+        let body = new.body.clone().unwrap_or_default();
+        let v = match self.kind {
+            ForgeKind::Gitlab => {
+                if new.draft {
+                    return Err(ForgeError::Api("GitLab no tiene releases en borrador".into()));
+                }
+                let mut payload = json!({ "tag_name": new.tag, "name": name, "description": body });
+                // `ref` solo hace falta si el tag no existe: GitLab lo crea ahí.
+                let reference = match &new.target {
+                    Some(t) => Some(t.clone()),
+                    None => self.default_branch(repo).await?,
+                };
+                if let Some(r) = reference {
+                    payload["ref"] = json!(r);
+                }
+                self.call(Method::POST, &format!("/projects/{}/releases", gl_project(repo)), Some(payload)).await?
+            }
+            _ => {
+                let mut payload = json!({
+                    "tag_name": new.tag, "name": name, "body": body,
+                    "draft": new.draft, "prerelease": new.prerelease,
+                });
+                if let Some(t) = &new.target {
+                    payload["target_commitish"] = json!(t);
+                }
+                self.call(Method::POST, &format!("/repos/{repo}/releases"), Some(payload)).await?
+            }
+        };
+        Ok(self.release_from(&v))
     }
 
     /// La ref de git con la que el host publica la cabeza de un PR.
