@@ -100,6 +100,157 @@ pub struct NewIssue {
     pub labels: Vec<String>,
 }
 
+/// Un chequeo de CI sobre un commit: un job de GitHub Actions, un status de un servicio
+/// externo, un job de un pipeline de GitLab.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Check {
+    pub name: String,
+    /// `success`, `failure`, `pending`, `running`, `skipped`, `cancelled` o `neutral`.
+    pub state: String,
+    pub url: Option<String>,
+}
+
+/// El resultado de todos los chequeos juntos: falla si alguno falló, pendiente si alguno
+/// sigue, y bien solo si todos terminaron sin fallar. Sin chequeos no hay veredicto.
+pub fn overall(checks: &[Check]) -> &'static str {
+    if checks.is_empty() {
+        "none"
+    } else if checks.iter().any(|c| c.state == "failure") {
+        "failure"
+    } else if checks.iter().any(|c| c.state == "pending" || c.state == "running") {
+        "pending"
+    } else if checks.iter().any(|c| c.state == "cancelled") {
+        "cancelled"
+    } else {
+        "success"
+    }
+}
+
+/// Un archivo que toca un PR.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PullFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    /// `added`, `removed`, `modified` o `renamed`.
+    pub status: String,
+    pub additions: u64,
+    pub deletions: u64,
+    /// El diff unificado de ese archivo, cuando el host lo da.
+    pub patch: Option<String>,
+}
+
+/// Cuenta líneas agregadas y quitadas de un diff unificado (GitLab no las da sueltas).
+pub(super) fn count_patch(patch: &str) -> (u64, u64) {
+    patch.lines().fold((0, 0), |(a, d), l| {
+        if l.starts_with('+') && !l.starts_with("+++") {
+            (a + 1, d)
+        } else if l.starts_with('-') && !l.starts_with("---") {
+            (a, d + 1)
+        } else {
+            (a, d)
+        }
+    })
+}
+
+/// GitHub: los check runs (Actions y apps) más los statuses (servicios que usan la API
+/// vieja). Un mismo commit puede tener de los dos.
+pub(super) fn github_checks(runs: &Value, combined: &Value) -> Vec<Check> {
+    let mut out: Vec<Check> = runs
+        .get("check_runs")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .map(|r| {
+                    let state = match (s(r, "/status").as_deref(), s(r, "/conclusion").as_deref()) {
+                        (Some("completed"), Some("success")) => "success",
+                        (Some("completed"), Some("failure" | "timed_out" | "action_required" | "startup_failure")) => "failure",
+                        (Some("completed"), Some("cancelled")) => "cancelled",
+                        (Some("completed"), Some("skipped")) => "skipped",
+                        (Some("completed"), _) => "neutral",
+                        (Some("in_progress"), _) => "running",
+                        _ => "pending",
+                    };
+                    Check {
+                        name: s(r, "/name").unwrap_or_default(),
+                        state: state.into(),
+                        url: s(r, "/html_url").or_else(|| s(r, "/details_url")),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(statuses) = combined.get("statuses").and_then(Value::as_array) {
+        out.extend(statuses.iter().map(|st| Check {
+            name: s(st, "/context").unwrap_or_default(),
+            state: match s(st, "/state").as_deref() {
+                Some("success") => "success",
+                Some("failure" | "error") => "failure",
+                _ => "pending",
+            }
+            .into(),
+            url: s(st, "/target_url").filter(|u| !u.is_empty()),
+        }));
+    }
+    out
+}
+
+/// GitLab: los jobs del último pipeline del commit.
+pub(super) fn gitlab_checks(jobs: &[Value]) -> Vec<Check> {
+    jobs.iter()
+        .map(|j| Check {
+            name: s(j, "/name").unwrap_or_default(),
+            state: match s(j, "/status").as_deref() {
+                Some("success") => "success",
+                Some("failed") => "failure",
+                Some("running") => "running",
+                Some("canceled") => "cancelled",
+                Some("skipped" | "manual") => "skipped",
+                _ => "pending",
+            }
+            .into(),
+            url: s(j, "/web_url"),
+        })
+        .collect()
+}
+
+/// Gitea/Forgejo: los statuses combinados del commit (Actions los publica ahí).
+pub(super) fn gitea_checks(combined: &Value) -> Vec<Check> {
+    combined
+        .get("statuses")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .map(|st| Check {
+                    name: s(st, "/context").unwrap_or_default(),
+                    state: match s(st, "/status").as_deref() {
+                        Some("success") => "success",
+                        Some("failure" | "error") => "failure",
+                        Some("warning") => "neutral",
+                        _ => "pending",
+                    }
+                    .into(),
+                    url: s(st, "/target_url").filter(|u| !u.is_empty()),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Separa un diff de varios archivos (`git diff`) en uno por archivo, por su ruta nueva.
+pub(super) fn split_diff(raw: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for chunk in raw.split("\ndiff --git ").enumerate().map(|(i, c)| if i == 0 { c.trim_start_matches("diff --git ").to_string() } else { c.to_string() }) {
+        let Some(header) = chunk.lines().next() else { continue };
+        // `a/ruta b/ruta`: la nueva es la de `b/`.
+        let Some(path) = header.rsplit_once(" b/").map(|(_, p)| p.to_string()) else { continue };
+        let body = chunk.split_once("\n@@").map(|(_, rest)| format!("@@{rest}")).unwrap_or_default();
+        out.push((path, body));
+    }
+    out
+}
+
 /// Qué lista se pide: `open`, `closed`, `merged` (solo PRs) o `all`.
 pub fn normalize_state(state: Option<&str>) -> &'static str {
     match state.unwrap_or("open") {
@@ -538,6 +689,125 @@ impl Api {
             _ => format!("/repos/{repo}"),
         };
         Ok(s(&self.get(&path).await?, "/default_branch"))
+    }
+
+    /// El commit de la cabeza de un PR: sobre él corre el CI.
+    pub async fn pull_head_sha(&self, repo: &str, number: u64) -> Result<String, ForgeError> {
+        let v = match self.kind {
+            ForgeKind::Gitlab => self.get(&format!("/projects/{}/merge_requests/{number}", gl_project(repo))).await?,
+            _ => self.get(&format!("/repos/{repo}/pulls/{number}")).await?,
+        };
+        match self.kind {
+            ForgeKind::Gitlab => s(&v, "/sha"),
+            _ => s(&v, "/head/sha"),
+        }
+        .ok_or_else(|| ForgeError::Api("La API no dijo el commit del PR".into()))
+    }
+
+    /// Los chequeos de CI de un commit.
+    pub async fn checks(&self, repo: &str, sha: &str) -> Result<Vec<Check>, ForgeError> {
+        match self.kind {
+            ForgeKind::Github => {
+                let runs = self.get(&format!("/repos/{repo}/commits/{sha}/check-runs?per_page=100")).await?;
+                // Los statuses viejos pueden no existir; su falta no es un error.
+                let combined = self.get(&format!("/repos/{repo}/commits/{sha}/status")).await.unwrap_or(Value::Null);
+                Ok(github_checks(&runs, &combined))
+            }
+            ForgeKind::Gitlab => {
+                let project = gl_project(repo);
+                let pipelines = self.get_list(&format!("/projects/{project}/pipelines?sha={sha}&per_page=1")).await?;
+                let Some(id) = pipelines.first().and_then(|p| n(p, "/id")) else { return Ok(Vec::new()) };
+                let jobs = self.get_list(&format!("/projects/{project}/pipelines/{id}/jobs?per_page=100")).await?;
+                Ok(gitlab_checks(&jobs))
+            }
+            _ => Ok(gitea_checks(&self.get(&format!("/repos/{repo}/commits/{sha}/status")).await?)),
+        }
+    }
+
+    /// Los archivos que toca un PR, con su diff cuando el host lo da. Hasta 300: más que
+    /// eso no entra en ningún contexto.
+    pub async fn pull_files(&self, repo: &str, number: u64) -> Result<Vec<PullFile>, ForgeError> {
+        match self.kind {
+            ForgeKind::Github => {
+                let mut all = Vec::new();
+                for page in 1..=3 {
+                    let items = self.get_list(&format!("/repos/{repo}/pulls/{number}/files?per_page=100&page={page}")).await?;
+                    let count = items.len();
+                    all.extend(items.iter().map(|f| PullFile {
+                        path: s(f, "/filename").unwrap_or_default(),
+                        old_path: s(f, "/previous_filename"),
+                        status: s(f, "/status").map(|st| if st == "changed" { "modified".into() } else { st }).unwrap_or_default(),
+                        additions: n(f, "/additions").unwrap_or(0),
+                        deletions: n(f, "/deletions").unwrap_or(0),
+                        patch: s(f, "/patch"),
+                    }));
+                    if count < 100 {
+                        break;
+                    }
+                }
+                Ok(all)
+            }
+            ForgeKind::Gitlab => {
+                let project = gl_project(repo);
+                // `/diffs` desde GitLab 15.7; antes, los mismos datos en `/changes`.
+                let items = match self.get_list(&format!("/projects/{project}/merge_requests/{number}/diffs?per_page=100")).await {
+                    Ok(items) => items,
+                    Err(_) => self
+                        .get(&format!("/projects/{project}/merge_requests/{number}/changes"))
+                        .await?
+                        .get("changes")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default(),
+                };
+                Ok(items
+                    .iter()
+                    .map(|f| {
+                        let patch = s(f, "/diff");
+                        let (additions, deletions) = patch.as_deref().map(count_patch).unwrap_or((0, 0));
+                        let status = if b(f, "/new_file") {
+                            "added"
+                        } else if b(f, "/deleted_file") {
+                            "removed"
+                        } else if b(f, "/renamed_file") {
+                            "renamed"
+                        } else {
+                            "modified"
+                        };
+                        let new_path = s(f, "/new_path").unwrap_or_default();
+                        PullFile {
+                            old_path: s(f, "/old_path").filter(|o| *o != new_path),
+                            path: new_path,
+                            status: status.into(),
+                            additions,
+                            deletions,
+                            patch,
+                        }
+                    })
+                    .collect())
+            }
+            _ => {
+                let items = self.get_list(&format!("/repos/{repo}/pulls/{number}/files?limit=100")).await?;
+                // Gitea no manda el diff por archivo: sale del `.diff` del PR, partido.
+                let raw = self.get(&format!("/repos/{repo}/pulls/{number}.diff")).await.ok();
+                let patches = raw.as_ref().and_then(Value::as_str).map(split_diff).unwrap_or_default();
+                Ok(items
+                    .iter()
+                    .map(|f| {
+                        let path = s(f, "/filename").unwrap_or_default();
+                        let patch = patches.iter().find(|(p, _)| *p == path).map(|(_, body)| body.clone());
+                        PullFile {
+                            old_path: s(f, "/previous_filename").filter(|o| !o.is_empty()),
+                            status: s(f, "/status").unwrap_or_else(|| "modified".into()),
+                            additions: n(f, "/additions").unwrap_or(0),
+                            deletions: n(f, "/deletions").unwrap_or(0),
+                            patch,
+                            path,
+                        }
+                    })
+                    .collect())
+            }
+        }
     }
 
     /// La ref de git con la que el host publica la cabeza de un PR.

@@ -11,7 +11,10 @@
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
-use super::api::{normalize_state, Api, Item, ItemDetail, NewIssue, NewPull};
+use super::api::{normalize_state, overall, Api, Item, ItemDetail, NewIssue, NewPull};
+
+/// Cuánto diff se le devuelve a un agente de una vez: más que esto se come su contexto.
+const MAX_PATCH_CHARS: usize = 60_000;
 use super::credentials::{api_for, target, token};
 use super::provider::ForgeError;
 use super::store::{self, db};
@@ -64,6 +67,27 @@ pub(crate) const GIT_TOOLS: &[GitTool] = &[
         name: "git_pr_view",
         description: "Read one pull request: description, branches, state and its comment thread.",
         properties: number_prop,
+        required: &["number"],
+        read_only: true,
+    },
+    GitTool {
+        name: "git_checks",
+        description: "CI status (GitHub Actions, GitLab pipelines, Gitea/Forgejo Actions and external statuses) of a commit: overall result plus each check with its state and link. Default: the current HEAD, which must be pushed. Pass `pr` for a pull request's head. Use it after git_push to see whether the build passed.",
+        properties: || json!({
+            "pr": { "type": "integer", "description": "A pull/merge request number: checks of its head commit." },
+            "ref": { "type": "string", "description": "A commit, branch or tag. Default: HEAD." },
+        }),
+        required: &[],
+        read_only: true,
+    },
+    GitTool {
+        name: "git_pr_files",
+        description: "Files a pull request changes, with +/- line counts. With `patch: true` (or a `path`), the unified diff of each file too — read it to review the PR.",
+        properties: || json!({
+            "number": { "type": "integer", "description": "The PR/MR number (GitLab: the iid)." },
+            "path": { "type": "string", "description": "Only this file (its diff included)." },
+            "patch": { "type": "boolean", "description": "Include each file's diff. Default: false." },
+        }),
         required: &["number"],
         read_only: true,
     },
@@ -323,6 +347,75 @@ async fn call(app: &AppHandle, cwd: &str, name: &str, args: &Value) -> Result<St
                     };
                     let item = api.create_issue(&t.path, &issue).await?;
                     Ok(format!("Created {}", item_line(&item)))
+                }
+                "git_checks" => {
+                    let (sha, what) = match (args.get("pr").and_then(Value::as_u64), arg_str(args, "ref")) {
+                        (Some(pr), _) => (api.pull_head_sha(&t.path, pr).await?, format!("PR #{pr}")),
+                        (None, reference) => {
+                            let reference = reference.unwrap_or("HEAD");
+                            if reference.starts_with('-') {
+                                return Err("invalid ref".into());
+                            }
+                            let sha = crate::scm::run_local(&t.root, &["rev-parse", "--verify", "-q", &format!("{reference}^{{commit}}")])
+                                .map(|s| s.trim().to_string())
+                                .map_err(|_| ForgeError::Api(format!("unknown ref {reference}")))?;
+                            (sha, reference.to_string())
+                        }
+                    };
+                    let checks = api.checks(&t.path, &sha).await?;
+                    let short = &sha[..sha.len().min(10)];
+                    if checks.is_empty() {
+                        return Ok(format!(
+                            "No CI checks for {what} ({short}). Either the repository has no CI, or this commit was not pushed yet (git_push first)."
+                        ));
+                    }
+                    let mut out = format!("{what} ({short}): {}", overall(&checks));
+                    for c in &checks {
+                        out.push_str(&format!("\n- [{}] {}", c.state, c.name));
+                        if let Some(url) = &c.url {
+                            out.push_str(&format!(" — {url}"));
+                        }
+                    }
+                    Ok(out)
+                }
+                "git_pr_files" => {
+                    let number = arg_number(args)?;
+                    let only = arg_str(args, "path");
+                    let with_patch = only.is_some() || args.get("patch").and_then(Value::as_bool).unwrap_or(false);
+                    let files: Vec<_> = api
+                        .pull_files(&t.path, number)
+                        .await?
+                        .into_iter()
+                        .filter(|f| only.is_none_or(|p| f.path == p || f.old_path.as_deref() == Some(p)))
+                        .collect();
+                    if files.is_empty() {
+                        return Ok(match only {
+                            Some(p) => format!("PR #{number} does not touch {p}."),
+                            None => format!("PR #{number} changes no files."),
+                        });
+                    }
+                    let (adds, dels) = files.iter().fold((0, 0), |(a, d), f| (a + f.additions, d + f.deletions));
+                    let mut out = format!("PR #{number}: {} file(s), +{adds} −{dels}", files.len());
+                    for f in &files {
+                        let from = f.old_path.as_deref().map(|o| format!("{o} → ")).unwrap_or_default();
+                        out.push_str(&format!("\n{} {from}{} (+{} −{})", f.status, f.path, f.additions, f.deletions));
+                    }
+                    if with_patch {
+                        for f in &files {
+                            if out.len() >= MAX_PATCH_CHARS {
+                                out.push_str("\n\n[output truncated: ask for one file with `path`]");
+                                break;
+                            }
+                            out.push_str(&format!("\n\n--- {}\n", f.path));
+                            out.push_str(f.patch.as_deref().unwrap_or("(no diff: binary or too large)"));
+                        }
+                        if out.len() > MAX_PATCH_CHARS {
+                            let cut = (0..=MAX_PATCH_CHARS).rev().find(|i| out.is_char_boundary(*i)).unwrap_or(0);
+                            out.truncate(cut);
+                            out.push_str("\n\n[output truncated: ask for one file with `path`]");
+                        }
+                    }
+                    Ok(out)
                 }
                 "git_comment" => {
                     let body = arg_str(args, "body").ok_or("missing `body`")?;

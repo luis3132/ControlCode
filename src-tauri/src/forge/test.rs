@@ -224,3 +224,48 @@ fn el_llavero_del_sistema_guarda_y_devuelve_el_token() {
     secret::delete(&dir, &id);
     assert!(secret::load(&dir, &id).is_err());
 }
+
+#[test]
+fn el_ci_de_github_junta_check_runs_y_statuses() {
+    use super::api::{github_checks, overall};
+    let runs = json!({ "check_runs": [
+        { "name": "build", "status": "completed", "conclusion": "success", "html_url": "https://gh/1" },
+        { "name": "lint", "status": "in_progress", "conclusion": null },
+        { "name": "e2e", "status": "completed", "conclusion": "timed_out" },
+    ]});
+    let combined = json!({ "statuses": [{ "context": "vercel", "state": "success", "target_url": "https://v" }] });
+    let checks = github_checks(&runs, &combined);
+    let states: Vec<(&str, &str)> = checks.iter().map(|c| (c.name.as_str(), c.state.as_str())).collect();
+    assert_eq!(states, vec![("build", "success"), ("lint", "running"), ("e2e", "failure"), ("vercel", "success")]);
+    assert_eq!(overall(&checks), "failure");
+    assert_eq!(overall(&checks[..2]), "pending");
+    assert_eq!(overall(&checks[..1]), "success");
+    assert_eq!(overall(&[]), "none");
+}
+
+#[test]
+fn el_ci_de_gitlab_y_gitea_se_lee_igual() {
+    use super::api::{gitea_checks, gitlab_checks, overall};
+    let jobs = vec![
+        json!({ "name": "test", "status": "success", "web_url": "u" }),
+        json!({ "name": "deploy", "status": "manual" }),
+        json!({ "name": "lint", "status": "failed" }),
+    ];
+    let gl = gitlab_checks(&jobs);
+    assert_eq!(gl.iter().map(|c| c.state.as_str()).collect::<Vec<_>>(), vec!["success", "skipped", "failure"]);
+    assert_eq!(overall(&gl), "failure");
+
+    let gt = gitea_checks(&json!({ "statuses": [{ "context": "ci/build", "status": "pending", "target_url": "" }] }));
+    assert_eq!(gt[0].state, "pending");
+    assert_eq!(gt[0].url, None, "una URL vacía no es un link");
+}
+
+#[test]
+fn un_diff_de_varios_archivos_se_parte_por_archivo() {
+    use super::api::{count_patch, split_diff};
+    let raw = "diff --git a/src/a.ts b/src/a.ts\nindex 1..2 100644\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1,2 @@\n-uno\n+UNO\n+dos\ndiff --git a/viejo.md b/nuevo.md\nsimilarity index 90%\n@@ -3 +3 @@\n-x\n+y\n";
+    let parts = split_diff(raw);
+    assert_eq!(parts.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), vec!["src/a.ts", "nuevo.md"]);
+    assert!(parts[0].1.starts_with("@@ -1 +1,2 @@"));
+    assert_eq!(count_patch(&parts[0].1), (2, 1));
+}

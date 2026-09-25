@@ -454,9 +454,16 @@ fn await_run(db: &DbConnection, payload: &Value) -> Result<String, String> {
     let was: HashMap<String, String> = before.into_iter().map(|t| (t.id, t.status)).collect();
     let deadline = Instant::now() + timeout;
     let mut seen = scheduler::version(&run.id);
+    // Si el agente cancela la llamada, se deja de esperar: por eso los tramos son cortos
+    // cuando viene del MCP (`callId`), y largos cuando no hay quién cancele.
+    let call_id = payload.get("callId").and_then(Value::as_str);
+    let slice = if call_id.is_some() { Duration::from_secs(2) } else { Duration::from_secs(30) };
     loop {
+        if crate::ipc::cancel::is_cancelled(call_id) {
+            return Err("Cancelled by the client.".to_string());
+        }
         let remaining = deadline.saturating_duration_since(Instant::now());
-        seen = scheduler::wait_change(&run.id, seen, remaining.min(Duration::from_secs(30)));
+        seen = scheduler::wait_change(&run.id, seen, remaining.min(slice));
         let (_, now) = snapshot(db)?;
         let finished: Vec<String> = now
             .iter()
