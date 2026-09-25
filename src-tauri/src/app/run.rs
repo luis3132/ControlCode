@@ -82,6 +82,7 @@ pub fn run() {
             crate::scm::scm_push,
             crate::scm::scm_log,
             crate::scm::scm_file_at,
+            crate::scm::scm_commit_files,
             // Cuentas de git (GitHub, GitLab, Gitea…): repos, clonar, PRs e issues
             crate::forge::forge_kinds,
             crate::forge::forge_oauth_available,

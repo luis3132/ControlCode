@@ -5,6 +5,8 @@ import {
   Alert, Button, DocumentIcon, EmptyState, FolderIcon, SaveIcon, SegmentedControl, Skeleton, Tooltip,
 } from "neogestify-ui-components";
 
+import { repoInfo } from "@/features/explorer/ipc";
+import { scmFileAt } from "@/features/scm/ipc";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { relativeTo, type FileView } from "@/features/tabs/viewTabs";
 
@@ -50,6 +52,11 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
   const dirty = useRef(false);
   /** Un cambio en disco que el usuario ya decidió ignorar: no se vuelve a avisar. */
   const ignoredMtime = useRef<number | null>(null);
+  /** La versión del índice de git, para las marcas de cambios al margen. */
+  const [baseline, setBaseline] = useState<string | null>(null);
+  /** Dónde está el archivo dentro de su repo. `null` = fuera de git; sin resolver todavía
+   *  mientras es `undefined`. */
+  const inRepo = useRef<{ root: string; rel: string } | null | undefined>(undefined);
 
   const markdown = isMarkdownPath(view.path);
   const preview = markdown && !!view.preview && content?.kind === "text";
@@ -84,6 +91,25 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
     load(false).catch((e) => setError(String(e)));
   }, [load]);
 
+  /** Relee la versión del índice. Cambia sin que el archivo cambie: preparar o descartar
+   *  desde el panel, un commit de un agente. Por eso se relee junto con el vigilante. */
+  const loadBaseline = useCallback(async () => {
+    if (inRepo.current === undefined) {
+      const dir = view.path.replace(/[\\/][^\\/]*$/, "");
+      const info = await repoInfo(dir).catch(() => null);
+      inRepo.current = info?.root ? { root: info.root, rel: relativeTo(view.path, info.root) } : null;
+    }
+    const where = inRepo.current;
+    // Un archivo sin seguimiento no está en el índice: `null`, y no se marca nada (VS Code
+    // tampoco pinta entero de verde un archivo nuevo).
+    const next = where ? await scmFileAt(where.root, where.rel, "INDEX").catch(() => null) : null;
+    setBaseline((prev) => (prev === next ? prev : next));
+  }, [view.path]);
+
+  useEffect(() => {
+    if (active && content?.kind === "text") loadBaseline();
+  }, [active, content?.kind, loadBaseline]);
+
   const save = useCallback(async (overwrite = false) => {
     if (!editor.current || saving) return;
     setSaving(true);
@@ -108,6 +134,7 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
     if (!active || content?.kind !== "text") return;
     const id = setInterval(async () => {
       if (document.visibilityState !== "visible") return;
+      loadBaseline();
       const stat = await fileStat(view.path).catch(() => undefined);
       if (stat === undefined) return;
       if (stat === null) {
@@ -119,7 +146,7 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
       else load(true).catch((e) => setError(String(e)));
     }, WATCH_MS);
     return () => clearInterval(id);
-  }, [active, content?.kind, view.path, load]);
+  }, [active, content?.kind, view.path, load, loadBaseline]);
 
   // Volver a la tab es para escribir en ella. En vista previa no: el editor está debajo, y
   // lo que se tipeara iría a un documento que no se ve.
@@ -231,6 +258,13 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
             onSave={() => save()}
             reveal={view.reveal}
             handleRef={editor}
+            baseline={baseline}
+            changeLabels={{
+              before: t("editor.changes.before"),
+              revert: t("editor.changes.revert"),
+              close: t("editor.changes.close"),
+              added: t("editor.changes.added"),
+            }}
           />
         ) : content.kind === "image" ? (
           <div className="flex items-center justify-center h-full p-6 overflow-auto

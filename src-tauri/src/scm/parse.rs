@@ -188,37 +188,111 @@ pub(crate) fn parse_branches(raw: &str) -> Vec<Branch> {
     out
 }
 
+/// Qué es una referencia que apunta a un commit. Es lo que decide su color en el grafo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RefKind {
+    /// Donde está parado el checkout: `HEAD -> rama` (o `HEAD` suelto, desprendido).
+    Head,
+    Local,
+    Remote,
+    Tag,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitRef {
+    pub name: String,
+    pub kind: RefKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Commit {
     pub hash: String,
     pub short: String,
+    /// Los padres, en orden: el primero es la rama en la que se estaba; los demás, lo que
+    /// se fusionó. Con esto se dibujan las líneas del grafo.
+    pub parents: Vec<String>,
     pub author: String,
     /// Epoch en segundos. El "hace 2 h" lo arma la UI, que sabe el idioma.
     pub time: i64,
     pub subject: String,
+    pub refs: Vec<CommitRef>,
+    /// Está en el remoto y no en la rama local: lo que traería un pull.
+    pub incoming: bool,
+    /// Está en la rama local y no en el remoto: lo que falta subir.
+    pub outgoing: bool,
 }
 
 /// Campos separados por `\x1f`, commits por `\x1e`: un asunto puede tener cualquier cosa
-/// menos esos dos caracteres de control.
-pub(crate) const LOG_FORMAT: &str = "%H%x1f%h%x1f%an%x1f%at%x1f%s%x1e";
+/// menos esos dos caracteres de control. El asunto va último por lo mismo.
+pub(crate) const LOG_FORMAT: &str = "%H%x1f%h%x1f%P%x1f%an%x1f%at%x1f%D%x1f%s%x1e";
 
-pub(crate) fn parse_log(raw: &str) -> Vec<Commit> {
+/// Las decoraciones de `%D` (`HEAD -> main, origin/main, tag: v1.0`), clasificadas. Una
+/// rama local puede tener `/` en el nombre (`feat/x`): es remota solo si empieza con el
+/// nombre de un remoto de verdad.
+pub(crate) fn parse_refs(raw: &str, remotes: &[String]) -> Vec<CommitRef> {
+    raw.split(", ")
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .flat_map(|r| {
+            if let Some(branch) = r.strip_prefix("HEAD -> ") {
+                return vec![CommitRef { name: branch.to_string(), kind: RefKind::Head }];
+            }
+            if r == "HEAD" {
+                return vec![CommitRef { name: "HEAD".to_string(), kind: RefKind::Head }];
+            }
+            if let Some(tag) = r.strip_prefix("tag: ") {
+                return vec![CommitRef { name: tag.to_string(), kind: RefKind::Tag }];
+            }
+            // `origin/HEAD` no dice nada que no diga ya `origin/main`.
+            if r.ends_with("/HEAD") {
+                return vec![];
+            }
+            let remote = remotes.iter().any(|name| r.starts_with(&format!("{name}/")));
+            vec![CommitRef { name: r.to_string(), kind: if remote { RefKind::Remote } else { RefKind::Local } }]
+        })
+        .collect()
+}
+
+pub(crate) fn parse_log(raw: &str, remotes: &[String]) -> Vec<Commit> {
     raw.split('\u{1e}')
         .map(|r| r.trim_start_matches('\n'))
         .filter(|r| !r.is_empty())
         .filter_map(|record| {
-            let f: Vec<&str> = record.split('\u{1f}').collect();
-            if f.len() < 5 {
+            let f: Vec<&str> = record.splitn(7, '\u{1f}').collect();
+            if f.len() < 7 {
                 return None;
             }
             Some(Commit {
                 hash: f[0].to_string(),
                 short: f[1].to_string(),
-                author: f[2].to_string(),
-                time: f[3].parse().unwrap_or(0),
-                subject: f[4].to_string(),
+                parents: f[2].split_whitespace().map(str::to_string).collect(),
+                author: f[3].to_string(),
+                time: f[4].parse().unwrap_or(0),
+                refs: parse_refs(f[5], remotes),
+                subject: f[6].to_string(),
+                incoming: false,
+                outgoing: false,
             })
         })
         .collect()
+}
+
+/// `git diff --name-status -z`: estado, ruta, y en renombres y copias la de origen antes.
+pub(crate) fn parse_name_status(raw: &str) -> Vec<ScmEntry> {
+    let mut out = Vec::new();
+    let mut fields = raw.split('\0').filter(|f| !f.is_empty());
+    while let Some(code) = fields.next() {
+        let status = code.chars().next().map(|c| c.to_string()).unwrap_or_default();
+        if status == "R" || status == "C" {
+            let (Some(from), Some(to)) = (fields.next(), fields.next()) else { break };
+            out.push(ScmEntry { path: to.to_string(), orig_path: Some(from.to_string()), status });
+        } else {
+            let Some(path) = fields.next() else { break };
+            out.push(ScmEntry { path: path.to_string(), orig_path: None, status });
+        }
+    }
+    out
 }

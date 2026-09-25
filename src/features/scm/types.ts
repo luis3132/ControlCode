@@ -44,12 +44,26 @@ export interface Branch {
   updatedAt: number;
 }
 
+export type RefKind = "head" | "local" | "remote" | "tag";
+
+export interface CommitRef {
+  name: string;
+  kind: RefKind;
+}
+
 export interface Commit {
   hash: string;
   short: string;
+  /** El primero es la rama en la que se estaba; los demás, lo que se fusionó. */
+  parents: string[];
   author: string;
   time: number;
   subject: string;
+  refs: CommitRef[];
+  /** Está en el remoto y no en la rama local: lo que traería un pull. */
+  incoming: boolean;
+  /** Está en la rama local y no en el remoto: lo que falta subir. */
+  outgoing: boolean;
 }
 
 /** `auth` = a git le faltan credenciales para el remoto. */

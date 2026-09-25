@@ -5,6 +5,7 @@ import { indentWithTab } from "@codemirror/commands";
 import { basicSetup } from "codemirror";
 import { useTheme } from "neogestify-ui-components";
 
+import { changeGutter, setBaseline, type ChangeGutterLabels } from "./changeGutter";
 import { editorTheme, languageFor } from "./codemirror";
 
 /** Marca los cambios que no hizo el usuario (recargar desde disco): no ensucian la tab. */
@@ -24,13 +25,16 @@ export interface EditorHandle {
  * Pasarlo como prop controlada obligaría a copiar el archivo entero en cada tecla, y en un
  * archivo de miles de líneas eso se siente al escribir.
  */
-export function CodeEditor({ path, doc, onDirty, onSave, reveal, handleRef }: {
+export function CodeEditor({ path, doc, onDirty, onSave, reveal, handleRef, baseline, changeLabels }: {
   path: string;
   doc: string;
   onDirty: () => void;
   onSave: () => void;
   reveal?: { line: number; column: number; nonce: number };
   handleRef: React.RefObject<EditorHandle | null>;
+  /** La versión de git contra la que se marcan los cambios al margen. `null` = sin marcas. */
+  baseline?: string | null;
+  changeLabels: ChangeGutterLabels;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -47,6 +51,9 @@ export function CodeEditor({ path, doc, onDirty, onSave, reveal, handleRef }: {
         doc,
         extensions: [
           basicSetup,
+          // Después de `basicSetup`: la barra de cambios queda entre los números de línea y
+          // el texto, como en VS Code.
+          changeGutter(changeLabels),
           keymap.of([indentWithTab]),
           // Por encima de todo: Ctrl+S es guardar aunque CodeMirror o el navegador tengan
           // otra idea.
@@ -100,6 +107,10 @@ export function CodeEditor({ path, doc, onDirty, onSave, reveal, handleRef }: {
   useEffect(() => {
     viewRef.current?.dispatch({ effects: themeSlot.current.reconfigure(editorTheme(theme === "dark")) });
   }, [theme]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: setBaseline.of(baseline ?? null) });
+  }, [baseline]);
 
   // Saltar a una línea (desde el buscador). Va por `nonce`: dos clicks en el mismo
   // resultado son dos pedidos, aunque la línea sea la misma.

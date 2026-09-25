@@ -25,6 +25,7 @@ import { ResizeHandles } from "@/app/ResizeHandles";
 import { useGlobalShortcuts } from "@/app/useGlobalShortcuts";
 import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
 import { AppExitListener } from "@/app/AppExitListener";
+import type { ShellOutletContext } from "@/app/shellContext";
 import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
@@ -33,7 +34,7 @@ import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
 
 /** Las rutas que se muestran como modal encima de las terminales en vez de reemplazarlas. */
-const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet"];
+const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/forge"];
 
 function toFrontendTab(row: RestoredTabRow): Tab {
   return {
@@ -237,13 +238,13 @@ export function AppShell() {
               TODAS las páginas, incluidas las que no lo necesitan. */}
           {!isWorkspace && !asModal && (
             <div className="absolute inset-0 z-10 overflow-hidden">
-              <Outlet />
+              <Outlet context={{ groups } satisfies ShellOutletContext} />
             </div>
           )}
 
           {asModal && (
             <RouteModal onClose={() => navigate(tabs.length > 0 ? "/workspace" : "/")}>
-              <Outlet />
+              <Outlet context={{ groups } satisfies ShellOutletContext} />
             </RouteModal>
           )}
 

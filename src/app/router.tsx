@@ -8,6 +8,7 @@ import { SessionsPage } from "@/features/sessions/SessionsPage";
 import { FleetPage } from "@/features/runs/FleetPage";
 import { MarketplacePage } from "@/features/marketplace/MarketplacePage";
 import { RegistriesPage } from "@/features/marketplace/RegistriesPage";
+import { ForgePage } from "@/features/forge/ForgePage";
 
 export const router = createHashRouter([
   {
@@ -21,6 +22,7 @@ export const router = createHashRouter([
       { path: "skills/:id", element: <SkillDetailPage /> },
       { path: "sessions", element: <SessionsPage /> },
       { path: "fleet", element: <FleetPage /> },
+      { path: "forge", element: <ForgePage /> },
       { path: "marketplace", element: <MarketplacePage /> },
       { path: "marketplace/registries", element: <RegistriesPage /> },
     ],

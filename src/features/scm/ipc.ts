@@ -1,7 +1,7 @@
 /** Control de versiones. Ver `src-tauri/src/scm/commands.rs`. */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { Branch, Commit, ScmStatus } from "./types";
+import type { Branch, Commit, ScmEntry, ScmStatus } from "./types";
 
 /** `null` = la carpeta no está en un repo. */
 export const scmStatus = (cwd: string) => invoke<ScmStatus | null>("scm_status", { cwd });
@@ -20,6 +20,10 @@ export const scmFetch = (root: string) => invoke<void>("scm_fetch", { root });
 export const scmPull = (root: string) => invoke<void>("scm_pull", { root });
 export const scmPush = (root: string) => invoke<void>("scm_push", { root });
 export const scmLog = (root: string, limit: number) => invoke<Commit[]>("scm_log", { root, limit });
-/** Contenido en HEAD o en el índice; `null` si no existe ahí. */
-export const scmFileAt = (root: string, path: string, rev: "HEAD" | "INDEX") =>
+/** Contenido en una revisión: `HEAD`, `INDEX`, un commit o su padre (`abc123^`); `null`
+ *  si no existe ahí. */
+export const scmFileAt = (root: string, path: string, rev: string) =>
   invoke<string | null>("scm_file_at", { root, path, rev });
+/** Los archivos que cambió un commit, contra su primer padre. */
+export const scmCommitFiles = (root: string, hash: string) =>
+  invoke<ScmEntry[]>("scm_commit_files", { root, hash });

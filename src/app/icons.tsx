@@ -292,3 +292,25 @@ export function RotateIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Pull request: una rama que vuelve a la principal, con la flecha del pedido. */
+export function PullRequestIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className} strokeWidth={1.9}>
+      <circle cx="6" cy="6" r="2.6" />
+      <circle cx="6" cy="18" r="2.6" />
+      <circle cx="18" cy="18" r="2.6" />
+      <path d="M6 8.6v6.8M18 15.4V9a3 3 0 00-3-3h-4M13 3.5L10.5 6 13 8.5" />
+    </svg>
+  );
+}
+
+/** Issue: un círculo con un punto, como en GitHub. */
+export function IssueIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className} strokeWidth={1.9}>
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+    </svg>
+  );
+}
