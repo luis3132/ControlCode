@@ -8,7 +8,10 @@ use std::path::Path;
 use serde::Serialize;
 
 use super::git::{network, repo_root, run, run_text, ScmError, COMMIT, LOCAL};
-use super::parse::{parse_branches, parse_log, parse_status_v2, Branch, Commit, StatusInfo, BRANCH_FORMAT, LOG_FORMAT};
+use super::parse::{
+    parse_branches, parse_log, parse_name_status, parse_status_v2, parse_tags, Branch, Commit, ScmEntry, StatusInfo,
+    Tag, BRANCH_FORMAT, LOG_FORMAT, TAG_FORMAT,
+};
 use super::remote::{parse_remotes, Remote};
 
 #[derive(Debug, Serialize)]
@@ -252,28 +255,186 @@ pub async fn scm_push(app: tauri::AppHandle, root: String) -> Result<(), ScmErro
     sync(&app, root, Sync::Push).await.map(|_| ())
 }
 
+/// El historial para el grafo: la rama actual y, si tiene, su upstream — así se ven juntos
+/// lo que falta subir y lo que traería un pull, como en VS Code.
+///
+/// `--topo-order` no es cosmético: el grafo necesita que cada commit aparezca antes que sus
+/// padres, y el orden por fecha no lo garantiza cuando hay ramas con relojes cruzados.
 #[tauri::command]
 pub async fn scm_log(root: String, limit: u32) -> Result<Vec<Commit>, ScmError> {
     blocking(move || {
-        let n = format!("-n{}", limit.clamp(1, 200));
+        let n = format!("-n{}", limit.clamp(1, 500));
         let format = format!("--format={LOG_FORMAT}");
+        let remotes: Vec<String> = run_text(&root, &["remote"], LOCAL)
+            .map(|r| r.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect())
+            .unwrap_or_default();
+        let upstream = run_text(&root, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], LOCAL)
+            .ok()
+            .map(|u| u.trim().to_string())
+            .filter(|u| !u.is_empty());
+
+        let mut args = vec!["log", "--topo-order", n.as_str(), format.as_str(), "HEAD"];
+        if let Some(u) = &upstream {
+            args.push(u.as_str());
+        }
         // Un repo sin commits hace fallar a `git log`: no es un error, es una lista vacía.
-        Ok(run_text(&root, &["log", &n, &format], LOCAL).map(|raw| parse_log(&raw)).unwrap_or_default())
+        let mut commits = run_text(&root, &args, LOCAL).map(|raw| parse_log(&raw, &remotes)).unwrap_or_default();
+
+        // `<` = solo en la rama local (sin subir), `>` = solo en el upstream (sin traer).
+        let sides = upstream
+            .as_ref()
+            .and_then(|_| run_text(&root, &["rev-list", "--left-right", "HEAD...@{u}"], LOCAL).ok());
+        if let Some(sides) = sides {
+            let mut outgoing = std::collections::HashSet::new();
+            let mut incoming = std::collections::HashSet::new();
+            for line in sides.lines() {
+                if let Some(h) = line.strip_prefix('<') {
+                    outgoing.insert(h.to_string());
+                } else if let Some(h) = line.strip_prefix('>') {
+                    incoming.insert(h.to_string());
+                }
+            }
+            for c in &mut commits {
+                c.outgoing = outgoing.contains(&c.hash);
+                c.incoming = incoming.contains(&c.hash);
+            }
+        }
+        Ok(commits)
     })
     .await
 }
 
-/// El contenido de un archivo en `HEAD` o en el índice (`rev = "INDEX"`), para el diff.
-/// `None` si no existe ahí: un archivo nuevo no está en HEAD.
+/// Un hash de commit tal cual lo da git: hexadecimal, nada que se pueda leer como opción.
+fn valid_hash(hash: &str) -> bool {
+    (4..=64).contains(&hash.len()) && hash.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Qué archivos cambió un commit, contra su primer padre (en un merge, lo que la fusión
+/// trajo a la rama). El primer commit del repo, contra nada.
+#[tauri::command]
+pub async fn scm_commit_files(root: String, hash: String) -> Result<Vec<ScmEntry>, ScmError> {
+    blocking(move || {
+        if !valid_hash(&hash) {
+            return Err(ScmError::Git(format!("«{hash}» no es un commit")));
+        }
+        let line = run_text(&root, &["rev-list", "--parents", "-n1", &hash], LOCAL)?;
+        let parent = line.split_whitespace().nth(1).map(str::to_string);
+        let raw = match parent {
+            Some(p) => run_text(&root, &["diff", "--name-status", "-z", "-M", &p, &hash], LOCAL)?,
+            None => run_text(
+                &root,
+                &["diff-tree", "--root", "--no-commit-id", "-r", "-M", "--name-status", "-z", &hash],
+                LOCAL,
+            )?,
+        };
+        Ok(parse_name_status(&raw))
+    })
+    .await
+}
+
+/// El contenido de un archivo en una revisión, para el diff: `INDEX` (el índice), `HEAD`,
+/// o un commit (`abc123`, y `abc123^` para su padre). `None` si no existe ahí: un archivo
+/// nuevo no está en HEAD, ni el primer commit tiene padre.
 #[tauri::command]
 pub async fn scm_file_at(root: String, path: String, rev: String) -> Result<Option<String>, ScmError> {
     blocking(move || {
-        let spec = if rev == "INDEX" { format!(":{path}") } else { format!("HEAD:{path}") };
+        let spec = if rev == "INDEX" {
+            format!(":{path}")
+        } else {
+            let base = rev.strip_suffix('^').unwrap_or(&rev);
+            if base != "HEAD" && !valid_hash(base) {
+                return Err(ScmError::Git(format!("«{rev}» no es una revisión")));
+            }
+            format!("{rev}:{path}")
+        };
         let Ok(bytes) = run(&root, &["show", &spec], LOCAL) else { return Ok(None) };
         if bytes.contains(&0) {
             return Err(ScmError::Git("Es un archivo binario".to_string()));
         }
         Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+    })
+    .await
+}
+
+// ── tags ──────────────────────────────────────────────────────────────────────────
+
+/// Los tags del repo, los más nuevos primero.
+#[tauri::command]
+pub async fn scm_tags(root: String) -> Result<Vec<Tag>, ScmError> {
+    blocking(move || {
+        let format = format!("--format={TAG_FORMAT}");
+        let raw = run_text(&root, &["for-each-ref", "--sort=-creatordate", &format, "refs/tags"], LOCAL)?;
+        Ok(parse_tags(&raw))
+    })
+    .await
+}
+
+/// Que el nombre sirva como tag y no se pueda leer como opción de git.
+fn check_tag_name(root: &str, name: &str) -> Result<(), ScmError> {
+    let invalid = || ScmError::Git(format!("«{name}» no es un nombre de tag válido"));
+    if name.is_empty() || name.starts_with('-') {
+        return Err(invalid());
+    }
+    run(root, &["check-ref-format", &format!("refs/tags/{name}")], LOCAL).map_err(|_| invalid())?;
+    Ok(())
+}
+
+/// Crea un tag en `target` (un commit; sin él, HEAD). Con `message` es anotado —el que
+/// usan las releases—, sin él liviano.
+pub(crate) fn create_tag(root: &str, name: &str, target: Option<&str>, message: Option<&str>) -> Result<(), ScmError> {
+    let name = name.trim();
+    check_tag_name(root, name)?;
+    let target = match target.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) if t == "HEAD" || valid_hash(t) => t.to_string(),
+        Some(t) => return Err(ScmError::Git(format!("«{t}» no es un commit"))),
+        None => "HEAD".to_string(),
+    };
+    match message.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(msg) => run(root, &["tag", "-a", name, "-m", msg, &target], LOCAL).map(|_| ()),
+        None => run(root, &["tag", name, &target], LOCAL).map(|_| ()),
+    }
+}
+
+#[tauri::command]
+pub async fn scm_create_tag(
+    root: String,
+    name: String,
+    target: Option<String>,
+    message: Option<String>,
+) -> Result<(), ScmError> {
+    blocking(move || create_tag(&root, &name, target.as_deref(), message.as_deref())).await
+}
+
+/// Sube un tag al remoto (`origin`, o el único que haya), con la cuenta de la app. En un
+/// repo con un workflow que publica al llegar un tag, esto ES sacar la release.
+pub(crate) async fn push_tag(app: &tauri::AppHandle, root: String, name: String) -> Result<String, ScmError> {
+    let env = crate::forge::git_env(app, &root).await;
+    blocking(move || {
+        check_tag_name(&root, &name)?;
+        let remotes = parse_remotes(&run_text(&root, &["remote", "-v"], LOCAL)?);
+        let remote = remotes
+            .iter()
+            .find(|r| r.name == "origin")
+            .or_else(|| remotes.first())
+            .ok_or_else(|| ScmError::Git("El repo no tiene ningún remoto al que subir".to_string()))?;
+        network(&root, &["push", &remote.name, &format!("refs/tags/{name}")], &env)?;
+        Ok(format!("Pushed tag {name} to {}.", remote.name))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn scm_push_tag(app: tauri::AppHandle, root: String, name: String) -> Result<(), ScmError> {
+    push_tag(&app, root, name).await.map(|_| ())
+}
+
+/// Borra un tag LOCAL. El del remoto no se toca: una release publicada depende de él, y
+/// borrarla es una decisión que se toma en el host, no con un click acá.
+#[tauri::command]
+pub async fn scm_delete_tag(root: String, name: String) -> Result<(), ScmError> {
+    blocking(move || {
+        check_tag_name(&root, &name)?;
+        run(&root, &["tag", "-d", &name], LOCAL).map(|_| ())
     })
     .await
 }

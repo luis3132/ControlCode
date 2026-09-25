@@ -37,6 +37,10 @@ export interface DiffView extends ViewBase {
   path: string;
   /** Qué diff: lo preparado (HEAD → índice) o lo que falta preparar (índice → disco). */
   staged: boolean;
+  /** Si está, el diff es el de ESE commit contra su padre, y `staged` no aplica. */
+  commit?: string;
+  /** En un commit que renombró el archivo: dónde estaba antes. */
+  origPath?: string;
 }
 
 /** El agente que abrió un navegador y lo está manejando. */
@@ -97,7 +101,8 @@ export function findExisting(views: ViewTab[], wanted: ViewTarget): ViewTab | un
     if (v.kind === "diff" && wanted.kind === "diff") {
       return comparablePath(v.root) === comparablePath(wanted.root)
         && comparablePath(v.path) === comparablePath(wanted.path)
-        && v.staged === wanted.staged;
+        && v.staged === wanted.staged
+        && (v.commit ?? null) === (wanted.commit ?? null);
     }
     // Navegadores puede haber varios a propósito: dos pantallas del mismo proyecto.
     return false;

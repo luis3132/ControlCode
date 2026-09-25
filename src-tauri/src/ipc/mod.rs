@@ -5,9 +5,11 @@
 //! - [`commands`] — un handler por comando.
 //! - [`bridge`] — el puente al frontend, para lo que solo él sabe.
 //! - [`install`] — instalar/desinstalar el binario `ccode` en el PATH del usuario.
-//! - [`mcp`] — el puente por el que un agente headless pide permiso.
+//! - [`mcp`] — el servidor MCP que les da a los agentes sus herramientas.
+//! - [`cancel`] — las llamadas de ese servidor que el agente canceló.
 
 pub mod bridge;
+pub mod cancel;
 mod commands;
 pub mod install;
 pub mod mcp;

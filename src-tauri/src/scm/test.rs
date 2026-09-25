@@ -1,5 +1,8 @@
 use super::git::{classify_failure, ScmError};
-use super::parse::{parse_branches, parse_log, parse_status_v2, ScmEntry, BRANCH_FORMAT, LOG_FORMAT};
+use super::parse::{
+    parse_branches, parse_log, parse_name_status, parse_refs, parse_status_v2, RefKind, ScmEntry, BRANCH_FORMAT,
+    LOG_FORMAT,
+};
 use super::remote::{host_and_path, parse_remotes, provider_of, remote_from, Provider};
 
 fn entry(path: &str, status: &str) -> ScmEntry {
@@ -99,13 +102,39 @@ fn las_ramas_locales_van_primero_y_origin_head_no_aparece() {
 
 #[test]
 fn un_asunto_con_separadores_comunes_no_rompe_el_log() {
-    let raw = "abc123\u{1f}abc\u{1f}Ana\u{1f}1700000000\u{1f}fix: a | b, c; d\u{1e}\ndef456\u{1f}def\u{1f}Luis\u{1f}1700000100\u{1f}feat: otra\u{1e}";
-    let log = parse_log(raw);
+    let raw = "abc123\u{1f}abc\u{1f}p1 p2\u{1f}Ana\u{1f}1700000000\u{1f}HEAD -> main\u{1f}fix: a | b, c; d\u{1e}\ndef456\u{1f}def\u{1f}\u{1f}Luis\u{1f}1700000100\u{1f}\u{1f}feat: otra\u{1e}";
+    let log = parse_log(raw, &[]);
     assert_eq!(log.len(), 2);
     assert_eq!(log[0].subject, "fix: a | b, c; d");
+    assert_eq!(log[0].parents, vec!["p1", "p2"]);
+    assert!(log[1].parents.is_empty(), "el primer commit no tiene padres");
     assert_eq!(log[1].author, "Luis");
     assert_eq!(log[1].time, 1_700_000_100);
     assert!(LOG_FORMAT.ends_with("%x1e"));
+}
+
+#[test]
+fn las_referencias_se_clasifican_por_lo_que_son() {
+    let remotes = vec!["origin".to_string()];
+    let refs = parse_refs("HEAD -> feat/x, origin/feat/x, origin/HEAD, tag: v1.7.3, fix/y", &remotes);
+    let kinds: Vec<(&str, RefKind)> = refs.iter().map(|r| (r.name.as_str(), r.kind)).collect();
+    assert_eq!(kinds, vec![
+        ("feat/x", RefKind::Head),
+        ("origin/feat/x", RefKind::Remote),
+        ("v1.7.3", RefKind::Tag),
+        // Tiene barra pero no empieza con un remoto: es una rama local.
+        ("fix/y", RefKind::Local),
+    ]);
+}
+
+#[test]
+fn los_archivos_de_un_commit_con_renombres() {
+    let raw = "M\0src/a.ts\0R087\0viejo.ts\0nuevo.ts\0A\0b.ts\0";
+    let files = parse_name_status(raw);
+    assert_eq!(files.len(), 3);
+    assert_eq!(files[1].path, "nuevo.ts");
+    assert_eq!(files[1].orig_path.as_deref(), Some("viejo.ts"));
+    assert_eq!(files[1].status, "R");
 }
 
 // ── remotos y proveedores ────────────────────────────────────────
@@ -288,4 +317,113 @@ fn push_sin_remotos_explica_por_que() {
     let err = super::commands::push(&dir.to_string_lossy(), &[]).unwrap_err();
     assert!(matches!(err, ScmError::Git(ref m) if m.contains("remoto")), "{err:?}");
     std::fs::remove_dir_all(dir).ok();
+}
+
+/// El grafo contra git de verdad: un merge da dos padres, y con upstream se distingue lo
+/// que falta subir de lo que traería un pull.
+#[tokio::test(flavor = "multi_thread")]
+async fn el_historial_trae_padres_ramas_y_lo_que_entra_y_sale() {
+    let origin = temp_repo("grafo-origen");
+    std::fs::write(origin.join("a"), "1").unwrap();
+    git_in(&origin, &["add", "-A"]);
+    git_in(&origin, &["commit", "-q", "-m", "base"]);
+    git_in(&origin, &["switch", "-q", "-c", "feat"]);
+    std::fs::write(origin.join("b"), "1").unwrap();
+    git_in(&origin, &["add", "-A"]);
+    git_in(&origin, &["commit", "-q", "-m", "feat"]);
+    git_in(&origin, &["switch", "-q", "main"]);
+    git_in(&origin, &["merge", "-q", "--no-ff", "-m", "merge feat", "feat"]);
+
+    let local = std::env::temp_dir().join(format!("cc-scm-grafo-local-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&local);
+    git_in(&origin, &["clone", "-q", &origin.to_string_lossy(), &local.to_string_lossy()]);
+    git_in(&local, &["config", "user.email", "test@controlcode.dev"]);
+    git_in(&local, &["config", "user.name", "Control Code"]);
+    git_in(&local, &["config", "commit.gpgsign", "false"]);
+
+    // Uno sin subir en el clon, y uno sin traer en el origen.
+    std::fs::write(local.join("c"), "1").unwrap();
+    git_in(&local, &["add", "-A"]);
+    git_in(&local, &["commit", "-q", "-m", "local"]);
+    std::fs::write(origin.join("d"), "1").unwrap();
+    git_in(&origin, &["add", "-A"]);
+    git_in(&origin, &["commit", "-q", "-m", "remoto"]);
+    git_in(&local, &["fetch", "-q"]);
+
+    let root = local.to_string_lossy().to_string();
+    let log = super::commands::scm_log(root.clone(), 50).await.unwrap();
+    let by = |s: &str| log.iter().find(|c| c.subject == s).unwrap_or_else(|| panic!("falta {s}"));
+
+    assert_eq!(by("merge feat").parents.len(), 2);
+    assert!(by("local").outgoing && !by("local").incoming);
+    assert!(by("remoto").incoming && !by("remoto").outgoing);
+    assert!(!by("base").incoming && !by("base").outgoing);
+    assert!(by("local").refs.iter().any(|r| r.kind == RefKind::Head && r.name == "main"));
+    assert!(by("remoto").refs.iter().any(|r| r.kind == RefKind::Remote && r.name == "origin/main"));
+
+    // Los archivos de un commit, y el contenido antes y después para el diff.
+    let files = super::commands::scm_commit_files(root.clone(), by("local").hash.clone()).await.unwrap();
+    assert_eq!(files.iter().map(|f| (f.path.as_str(), f.status.as_str())).collect::<Vec<_>>(), vec![("c", "A")]);
+    let hash = by("local").hash.clone();
+    assert_eq!(super::commands::scm_file_at(root.clone(), "c".into(), hash.clone()).await.unwrap().as_deref(), Some("1"));
+    assert_eq!(super::commands::scm_file_at(root.clone(), "c".into(), format!("{hash}^")).await.unwrap(), None);
+    assert!(super::commands::scm_file_at(root.clone(), "c".into(), "--output=x".into()).await.is_err());
+
+    // El primer commit no tiene padre: sus archivos se leen contra nada.
+    let first = super::commands::scm_commit_files(root, by("base").hash.clone()).await.unwrap();
+    assert_eq!(first.len(), 1);
+
+    std::fs::remove_dir_all(origin).ok();
+    std::fs::remove_dir_all(local).ok();
+}
+
+/// Tags contra git de verdad: anotado y liviano, en HEAD o en otro commit, subirlo a un
+/// remoto y borrar el local sin tocar el del remoto.
+#[tokio::test(flavor = "multi_thread")]
+async fn los_tags_se_crean_listan_suben_y_borran() {
+    let origin = temp_repo("tags-origen");
+    git_in(&origin, &["config", "receive.denyCurrentBranch", "ignore"]);
+    std::fs::write(origin.join("a"), "1").unwrap();
+    git_in(&origin, &["add", "-A"]);
+    git_in(&origin, &["commit", "-q", "-m", "base"]);
+    let local = std::env::temp_dir().join(format!("cc-scm-tags-local-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&local);
+    git_in(&origin, &["clone", "-q", &origin.to_string_lossy(), &local.to_string_lossy()]);
+    git_in(&local, &["config", "user.email", "test@controlcode.dev"]);
+    git_in(&local, &["config", "user.name", "Control Code"]);
+    git_in(&local, &["config", "tag.gpgsign", "false"]);
+    std::fs::write(local.join("b"), "1").unwrap();
+    git_in(&local, &["add", "-A"]);
+    git_in(&local, &["commit", "-q", "-m", "segundo"]);
+    let root = local.to_string_lossy().to_string();
+    let first = super::commands::scm_log(root.clone(), 10).await.unwrap().last().unwrap().hash.clone();
+
+    super::commands::create_tag(&root, "v1.0.0", Some(&first), Some("Primera")).unwrap();
+    super::commands::create_tag(&root, "liviano", None, None).unwrap();
+    assert!(super::commands::create_tag(&root, "--force", None, None).is_err(), "no se lee como opción");
+    assert!(super::commands::create_tag(&root, "mal nombre", None, None).is_err());
+    assert!(super::commands::create_tag(&root, "x", Some("--all"), None).is_err());
+
+    let tags = super::commands::scm_tags(root.clone()).await.unwrap();
+    let v1 = tags.iter().find(|t| t.name == "v1.0.0").unwrap();
+    assert!(v1.annotated);
+    assert_eq!(v1.subject, "Primera");
+    assert!(first.starts_with(&v1.target), "el tag anotado apunta al commit, no a sí mismo");
+    let light = tags.iter().find(|t| t.name == "liviano").unwrap();
+    assert!(!light.annotated);
+    assert_eq!(light.subject, "segundo");
+
+    // Subir: el tag aparece en el remoto. Sin la app no hay `AppHandle`, así que se prueba
+    // el mismo `git push` que arma `push_tag`, sin credenciales (el remoto es local).
+    super::git::network(&root, &["push", "origin", "refs/tags/v1.0.0"], &[]).unwrap();
+    let remote_tags = std::process::Command::new("git").args(["-C", &origin.to_string_lossy(), "tag"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&remote_tags.stdout).contains("v1.0.0"));
+
+    super::commands::scm_delete_tag(root.clone(), "v1.0.0".into()).await.unwrap();
+    assert!(!super::commands::scm_tags(root).await.unwrap().iter().any(|t| t.name == "v1.0.0"));
+    let remote_tags = std::process::Command::new("git").args(["-C", &origin.to_string_lossy(), "tag"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&remote_tags.stdout).contains("v1.0.0"), "borrar el local no toca el remoto");
+
+    std::fs::remove_dir_all(origin).ok();
+    std::fs::remove_dir_all(local).ok();
 }

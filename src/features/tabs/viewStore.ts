@@ -16,7 +16,8 @@ interface ViewTabsState {
   keepMountedIds: string[];
 
   openFile: (cwd: string, path: string, reveal?: { line: number; column: number }) => void;
-  openDiff: (cwd: string, root: string, path: string, staged: boolean) => void;
+  /** Con `commit`, el diff de ese commit contra su padre. */
+  openDiff: (cwd: string, root: string, path: string, staged: boolean, commit?: { hash: string; short: string; origPath?: string | null }) => void;
   /** Devuelve el id de la tab. `activate: false` la abre sin sacar al usuario de lo que mira;
    *  `owner` la marca como manejada por un agente. */
   openBrowser: (cwd: string, url?: string, opts?: { activate?: boolean; owner?: ViewOwner }) => string;
@@ -53,14 +54,19 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
     set((s) => ({ views: [...s.views, view], activeViewId: view.id }));
   },
 
-  openDiff: (cwd, root, path, staged) => {
-    const wanted = { kind: "diff", cwd, root, path, staged } as const;
+  openDiff: (cwd, root, path, staged, commit) => {
+    const wanted = {
+      kind: "diff", cwd, root, path, staged,
+      ...(commit ? { commit: commit.hash, origPath: commit.origPath ?? undefined } : {}),
+    } as const;
     const existing = findExisting(get().views, wanted);
     if (existing) {
       set({ activeViewId: existing.id });
       return;
     }
-    const view: DiffView = { ...wanted, id: crypto.randomUUID(), title: baseName(path) };
+    // El commit en el título: el mismo archivo puede estar abierto en varios commits.
+    const title = commit ? `${baseName(path)} @ ${commit.short}` : baseName(path);
+    const view: DiffView = { ...wanted, id: crypto.randomUUID(), title };
     set((s) => ({ views: [...s.views, view], activeViewId: view.id }));
   },
 

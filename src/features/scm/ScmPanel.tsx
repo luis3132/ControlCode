@@ -9,12 +9,14 @@ import {
 import { BranchIcon, ExternalIcon, GithubIcon, GitlabIcon, PullIcon, PushIcon, UndoIcon } from "@/app/icons";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import { ForgeItemsView } from "@/features/forge/ForgeItemsView";
-import { RepoAccountBar, SignInButton } from "@/features/forge/RepoAccountBar";
+import { SignInButton } from "@/features/forge/SignInButton";
 import { useRepoTarget } from "@/features/forge/useRepoTarget";
-import { elapsed, invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
+import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
 
 import { BranchMenu } from "./BranchMenu";
+import { CommitGraph } from "./CommitGraph";
+import { CreateTagDialog } from "./CreateTagDialog";
+import { TagsSection } from "./TagsSection";
 import {
   scmCheckout, scmCommit, scmDiscard, scmFetch, scmInit, scmLog, scmPull, scmPush, scmStage, scmStatus, scmUnstage,
 } from "./ipc";
@@ -23,6 +25,9 @@ import { isScmError, type Commit, type Provider, type ScmEntry, type ScmError, t
 /** Cada cuánto se vuelve a leer el estado mientras el panel está a la vista. Los agentes
  *  escriben archivos todo el tiempo; sin esto la lista quedaría vieja enseguida. */
 const POLL_MS = 4000;
+
+/** Cuántos commits trae el historial por vez. */
+const LOG_PAGE = 50;
 
 const STATUS_CLASS: Record<string, string> = {
   M: "text-amber-600 dark:text-amber-400",
@@ -67,9 +72,6 @@ function IconAction({ label, onClick, children, disabled, danger }: {
 
 type Group = "conflicted" | "staged" | "changes";
 
-/** Lo local (cambios, commit, historial) o lo de la nube (PRs, issues). */
-type ScmView = "changes" | "pulls" | "issues";
-
 /**
  * Control de versiones del workspace activo, al estilo del de VS Code.
  *
@@ -78,7 +80,8 @@ type ScmView = "changes" | "pulls" | "issues";
  * host del remoto si hay una (ver `forge`); si no, lo que git tenga configurado. Cuando a
  * git le faltan credenciales se ofrece iniciar sesión en ese host, ahí mismo.
  *
- * Con un remoto conocido aparecen además los PRs y los issues del repo.
+ * Los PRs y los issues NO van acá: tienen su propia pantalla en el riel (ver
+ * `forge/ForgePage`), con todos los repos abiertos. Este panel es lo local del workspace.
  *
  * Un click en un archivo abre su diff como tab.
  */
@@ -94,11 +97,15 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
   const [closedGroups, setClosedGroups] = useState<Set<Group>>(new Set());
   const [log, setLog] = useState<Commit[] | null>(null);
   const [logOpen, setLogOpen] = useState(false);
+  const [logLimit, setLogLimit] = useState(LOG_PAGE);
+  /** El commit sobre el que se crea un tag; "head" = HEAD. */
+  const [tagOn, setTagOn] = useState<Commit | "head" | null>(null);
+  /** Sube cada vez que se crea o sube un tag: la lista de tags y el grafo se releen. */
+  const [tagsVersion, setTagsVersion] = useState(0);
   const [discard, setDiscard] = useState<{ tracked: string[]; untracked: string[]; label: string } | null>(null);
   const busyRef = useRef(busy);
   busyRef.current = busy;
-  const { target, reload: reloadTarget } = useRepoTarget(cwd);
-  const [view, setView] = useState<ScmView>("changes");
+  const { target } = useRepoTarget(cwd);
 
   /** Cuántos cambios había en la lectura anterior: si cambia, las demás vistas del repo
    *  (el número sobre el icono, las marcas del árbol) también tienen que enterarse. */
@@ -124,9 +131,9 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
     setStatus(undefined);
     setError(null);
     setLog(null);
+    setLogLimit(LOG_PAGE);
     lastCount.current = null;
     setBranchMenu(false);
-    setView("changes");
     load();
   }, [load]);
 
@@ -142,8 +149,8 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
   const root = status?.root ?? null;
 
   const loadLog = useCallback(() => {
-    if (root) scmLog(root, 30).then(setLog).catch(() => setLog([]));
-  }, [root]);
+    if (root) scmLog(root, logLimit).then(setLog).catch(() => setLog([]));
+  }, [root, logLimit]);
 
   useEffect(() => { if (logOpen) loadLog(); }, [logOpen, loadLog]);
 
@@ -371,174 +378,173 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
         )}
       </div>
 
-      {target && (
-        <div className="flex items-center gap-0.5 h-7 shrink-0 px-2 border-b border-gray-200 dark:border-white/7">
-          {(["changes", "pulls", "issues"] as ScmView[]).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={`cc-t h-5.5 px-2 rounded-md text-[10.5px]
-                ${view === v
-                  ? "bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white font-semibold"
-                  : "text-gray-500 dark:text-white/40 hover:bg-gray-200/60 dark:hover:bg-white/6"}`}
-            >
-              {t(`scm.view.${v}`)}
-            </button>
-          ))}
-        </div>
-      )}
-
       {busy && (
         <div className="h-0.5 shrink-0 overflow-hidden bg-blue-500/15">
           <div className="h-full w-1/3 bg-blue-500 animate-[cc-indeterminate_1.1s_ease-in-out_infinite]" />
         </div>
       )}
 
-      {target && view !== "changes" ? (
-        <>
-          <RepoAccountBar target={target} onChanged={reloadTarget} />
-          <ForgeItemsView key={view} cwd={cwd} target={target} what={view} branch={status.branch} />
-        </>
-      ) : (
-        <>
-          <div className="flex-1 min-h-0 cc-scroll">
-            {status.operation && (
-              <div className="mx-2.5 mt-2.5 px-2.5 py-2 rounded-lg text-[11px] leading-relaxed
-                bg-amber-50 text-amber-800 border border-amber-200
-                dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/25">
-                {t(`scm.operation.${status.operation}`)}
-              </div>
+      <div className="flex-1 min-h-0 cc-scroll">
+        {status.operation && (
+          <div className="mx-2.5 mt-2.5 px-2.5 py-2 rounded-lg text-[11px] leading-relaxed
+            bg-amber-50 text-amber-800 border border-amber-200
+            dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/25">
+            {t(`scm.operation.${status.operation}`)}
+          </div>
+        )}
+
+        {error && (
+          <div className="mx-2.5 mt-2.5">
+            <Alert variant={error.kind === "auth" ? "warning" : "danger"}>
+              <span className="block text-[11.5px]">
+                {error.kind === "auth"
+                  ? t("scm.error.auth", { host: remote?.host ?? t("scm.error.remote") })
+                  : t("scm.error.git")}
+              </span>
+              <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words font-mono text-[10.5px] opacity-80">
+                {error.message}
+              </pre>
+              {/* El remoto puede ser SSH: ahí una cuenta no cambia nada (git usa la llave), y
+                  ofrecer iniciar sesión mandaría a un camino que no arregla el error. */}
+              {error.kind === "auth" && target && !target.ssh && (
+                <div className="mt-2">
+                  <SignInButton target={target}
+                    label={target.account ? t("forge.signInAgain", { host: target.host }) : undefined} />
+                </div>
+              )}
+            </Alert>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-1.5 px-2.5 pt-2.5 pb-2">
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                commit();
+              }
+            }}
+            rows={message.includes("\n") ? 4 : 2}
+            placeholder={t("scm.message", { branch: status.branch ?? "HEAD" })}
+            spellCheck={false}
+            className="w-full resize-none px-2.5 py-1.5 rounded-lg outline-none text-[12px] leading-relaxed
+              bg-white dark:bg-white/4 border border-gray-200 dark:border-white/10
+              focus:border-blue-500 dark:focus:border-blue-400
+              text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/25"
+          />
+          <Button size="sm" variant="primary" fullWidth disabled={!canCommit} onClick={commit}>
+            {busy === "commit"
+              ? t("scm.committing")
+              : stagedCount === 0 && totalChanges > 0 ? t("scm.commitAll") : t("scm.commit")}
+          </Button>
+        </div>
+
+        {totalChanges === 0 ? (
+          <p className="px-3 py-4 text-center text-[11.5px] text-gray-400 dark:text-white/30">
+            {t("explorer.noChanges")}
+          </p>
+        ) : (
+          <div className="pb-2">
+            {renderGroup("conflicted", t("scm.group.conflicts"), status.conflicted, null)}
+            {renderGroup("staged", t("scm.group.staged"), status.staged, (
+              <IconAction label={t("scm.unstageAll")} disabled={!!busy}
+                onClick={() => run("unstage", () => scmUnstage(status.root, []))}>
+                <MinusIcon className="w-3 h-3" />
+              </IconAction>
+            ))}
+            {renderGroup("changes", t("scm.group.changes"), changes, (
+              <>
+                <IconAction label={t("scm.discardAll")} danger disabled={!!busy}
+                  onClick={() => setDiscard({
+                    tracked: status.unstaged.map((e) => e.path),
+                    untracked: status.untracked.map((e) => e.path),
+                    label: t("scm.discardAll.label", { count: changes.length }),
+                  })}>
+                  <UndoIcon className="w-3 h-3" />
+                </IconAction>
+                <IconAction label={t("scm.stageAll")} disabled={!!busy}
+                  onClick={() => run("stage", () => scmStage(status.root, []))}>
+                  <AddIcon className="w-3 h-3" />
+                </IconAction>
+              </>
+            ))}
+            {status.truncated && (
+              <p className="px-3 py-1 text-[10.5px] text-gray-400 dark:text-white/30">{t("scm.truncated")}</p>
             )}
+          </div>
+        )}
+      </div>
 
-            {error && (
-              <div className="mx-2.5 mt-2.5">
-                <Alert variant={error.kind === "auth" ? "warning" : "danger"}>
-                  <span className="block text-[11.5px]">
-                    {error.kind === "auth"
-                      ? t("scm.error.auth", { host: remote?.host ?? t("scm.error.remote") })
-                      : t("scm.error.git")}
-                  </span>
-                  <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words font-mono text-[10.5px] opacity-80">
-                    {error.message}
-                  </pre>
-                  {/* El remoto puede ser SSH: ahí una cuenta no cambia nada (git usa la llave), y
-                      ofrecer iniciar sesión mandaría a un camino que no arregla el error. */}
-                  {error.kind === "auth" && target && !target.ssh && (
-                    <div className="mt-2">
-                      <SignInButton target={target}
-                        label={target.account ? t("forge.signInAgain", { host: target.host }) : undefined} />
-                    </div>
-                  )}
-                </Alert>
-              </div>
-            )}
-
-            <div className="flex flex-col gap-1.5 px-2.5 pt-2.5 pb-2">
-              <textarea
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault();
-                    commit();
-                  }
-                }}
-                rows={message.includes("\n") ? 4 : 2}
-                placeholder={t("scm.message", { branch: status.branch ?? "HEAD" })}
-                spellCheck={false}
-                className="w-full resize-none px-2.5 py-1.5 rounded-lg outline-none text-[12px] leading-relaxed
-                  bg-white dark:bg-white/4 border border-gray-200 dark:border-white/10
-                  focus:border-blue-500 dark:focus:border-blue-400
-                  text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/25"
-              />
-              <Button size="sm" variant="primary" fullWidth disabled={!canCommit} onClick={commit}>
-                {busy === "commit"
-                  ? t("scm.committing")
-                  : stagedCount === 0 && totalChanges > 0 ? t("scm.commitAll") : t("scm.commit")}
-              </Button>
-            </div>
-
-            {totalChanges === 0 ? (
-              <p className="px-3 py-4 text-center text-[11.5px] text-gray-400 dark:text-white/30">
-                {t("explorer.noChanges")}
-              </p>
+      <div className="shrink-0 border-t border-gray-200 dark:border-white/7">
+        <button
+          onClick={() => setLogOpen((v) => !v)}
+          className="flex items-center gap-1 w-full h-7 pl-1.5 pr-2 text-left hover:bg-gray-200/50 dark:hover:bg-white/4"
+        >
+          <span className="w-3.5 shrink-0 text-gray-400 dark:text-white/30">
+            {logOpen ? <ChevronDownIcon className="w-2.5 h-2.5" /> : <ChevronRightIcon className="w-2.5 h-2.5" />}
+          </span>
+          <span className="flex-1 text-[10px] font-extrabold uppercase tracking-[0.09em] text-gray-500 dark:text-white/40">
+            {t("scm.log")}
+          </span>
+        </button>
+        {logOpen && (
+          <div className="max-h-80 cc-scroll pb-1">
+            {log === null ? (
+              <p className="px-3 py-2 text-[11px] text-gray-400 dark:text-white/30">{t("scm.loading")}</p>
+            ) : log.length === 0 ? (
+              <p className="px-3 py-2 text-[11px] text-gray-400 dark:text-white/30">{t("scm.noCommits")}</p>
             ) : (
-              <div className="pb-2">
-                {renderGroup("conflicted", t("scm.group.conflicts"), status.conflicted, null)}
-                {renderGroup("staged", t("scm.group.staged"), status.staged, (
-                  <IconAction label={t("scm.unstageAll")} disabled={!!busy}
-                    onClick={() => run("unstage", () => scmUnstage(status.root, []))}>
-                    <MinusIcon className="w-3 h-3" />
-                  </IconAction>
-                ))}
-                {renderGroup("changes", t("scm.group.changes"), changes, (
-                  <>
-                    <IconAction label={t("scm.discardAll")} danger disabled={!!busy}
-                      onClick={() => setDiscard({
-                        tracked: status.unstaged.map((e) => e.path),
-                        untracked: status.untracked.map((e) => e.path),
-                        label: t("scm.discardAll.label", { count: changes.length }),
-                      })}>
-                      <UndoIcon className="w-3 h-3" />
-                    </IconAction>
-                    <IconAction label={t("scm.stageAll")} disabled={!!busy}
-                      onClick={() => run("stage", () => scmStage(status.root, []))}>
-                      <AddIcon className="w-3 h-3" />
-                    </IconAction>
-                  </>
-                ))}
-                {status.truncated && (
-                  <p className="px-3 py-1 text-[10.5px] text-gray-400 dark:text-white/30">{t("scm.truncated")}</p>
+              <>
+                <CommitGraph cwd={cwd} root={status.root} commits={log} onTag={(c) => setTagOn(c)} />
+                {/* Si vino lleno, puede haber más: se pide otro tramo. */}
+                {log.length >= logLimit && (
+                  <button
+                    onClick={() => setLogLimit((n) => n + LOG_PAGE)}
+                    className="w-full h-6 text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    {t("scm.graph.more")}
+                  </button>
                 )}
-              </div>
+              </>
             )}
           </div>
+        )}
 
-          <div className="shrink-0 border-t border-gray-200 dark:border-white/7">
-            <button
-              onClick={() => setLogOpen((v) => !v)}
-              className="flex items-center gap-1 w-full h-7 pl-1.5 pr-2 text-left hover:bg-gray-200/50 dark:hover:bg-white/4"
-            >
-              <span className="w-3.5 shrink-0 text-gray-400 dark:text-white/30">
-                {logOpen ? <ChevronDownIcon className="w-2.5 h-2.5" /> : <ChevronRightIcon className="w-2.5 h-2.5" />}
-              </span>
-              <span className="flex-1 text-[10px] font-extrabold uppercase tracking-[0.09em] text-gray-500 dark:text-white/40">
-                {t("scm.log")}
-              </span>
-            </button>
-            {logOpen && (
-              <div className="max-h-48 cc-scroll pb-1">
-                {log === null ? (
-                  <p className="px-3 py-2 text-[11px] text-gray-400 dark:text-white/30">{t("scm.loading")}</p>
-                ) : log.length === 0 ? (
-                  <p className="px-3 py-2 text-[11px] text-gray-400 dark:text-white/30">{t("scm.noCommits")}</p>
-                ) : log.map((c) => (
-                  <div key={c.hash} title={`${c.hash}\n${c.author}`} className="flex items-center gap-2 h-[22px] px-3">
-                    <span className="shrink-0 font-mono text-[10px] text-blue-600/80 dark:text-blue-400/80">{c.short}</span>
-                    <span className="flex-1 min-w-0 truncate text-[11px] text-gray-700 dark:text-gray-300">{c.subject}</span>
-                    <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/30">
-                      {elapsed(c.time * 1000)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+        <TagsSection
+          root={status.root}
+          version={tagsVersion}
+          onCreate={() => setTagOn("head")}
+          onChanged={() => { if (logOpen) loadLog(); }}
+        />
 
-            {remote && (
-              <div className="flex items-center gap-2 h-7 px-3 border-t border-gray-200 dark:border-white/7">
-                <ProviderIcon provider={remote.provider} className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-white/45" />
-                <span className="flex-1 min-w-0 truncate text-[10.5px] text-gray-500 dark:text-white/40" title={remote.url}>
-                  {remote.name} · {remote.host ?? remote.url}
-                </span>
-                {remote.webUrl && (
-                  <IconAction label={t("scm.openWeb")} onClick={() => openUrl(remote.webUrl!).catch(console.error)}>
-                    <ExternalIcon className="w-3 h-3" />
-                  </IconAction>
-                )}
-              </div>
+        {remote && (
+          <div className="flex items-center gap-2 h-7 px-3 border-t border-gray-200 dark:border-white/7">
+            <ProviderIcon provider={remote.provider} className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-white/45" />
+            <span className="flex-1 min-w-0 truncate text-[10.5px] text-gray-500 dark:text-white/40" title={remote.url}>
+              {remote.name} · {remote.host ?? remote.url}
+            </span>
+            {remote.webUrl && (
+              <IconAction label={t("scm.openWeb")} onClick={() => openUrl(remote.webUrl!).catch(console.error)}>
+                <ExternalIcon className="w-3 h-3" />
+              </IconAction>
             )}
           </div>
-        </>
+        )}
+      </div>
+
+      {tagOn && (
+        <CreateTagDialog
+          root={status.root}
+          target={tagOn === "head" ? null : { hash: tagOn.hash, short: tagOn.short, subject: tagOn.subject }}
+          onClose={() => setTagOn(null)}
+          onDone={() => {
+            setTagOn(null);
+            setTagsVersion((v) => v + 1);
+            if (logOpen) loadLog();
+          }}
+        />
       )}
 
       {discard && (

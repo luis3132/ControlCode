@@ -4,6 +4,7 @@ import { Badge, BoxIcon, ClockIcon, CloudIcon, GearIcon, NetworkIcon, StackIcon,
 
 import { useUiStore } from "@/app/uiStore";
 import { shortcutForPath } from "@/app/shortcuts";
+import { PullRequestIcon } from "@/app/icons";
 
 /** "Marketplace · Ctrl+M". El tooltip es donde alguien se entera del atajo. */
 function withShortcut(label: string, path: string | null): string {
@@ -94,6 +95,10 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
 
       <RailButton label={t("sidebar.fleet")} path="/fleet" active={on("/fleet")} onClick={() => navigate("/fleet")}>
         <NetworkIcon className="w-[18px] h-[18px]" />
+      </RailButton>
+
+      <RailButton label={t("sidebar.forge")} path="/forge" active={on("/forge")} onClick={() => navigate("/forge")}>
+        <PullRequestIcon className="w-[18px] h-[18px]" />
       </RailButton>
 
       <RailButton label={t("sidebar.skills")} path="/skills" active={on("/skills")} onClick={() => navigate("/skills")}>

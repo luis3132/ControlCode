@@ -324,7 +324,7 @@ use super::mcp::{browser_tool_names, orchestration_tool_names, serve, McpContext
 fn mcp_session(
     context: &McpContext,
     lines: &[serde_json::Value],
-    reply: impl Fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>,
+    reply: impl Fn(&str, &serde_json::Value) -> Result<serde_json::Value, String> + Sync,
 ) -> (Vec<serde_json::Value>, Vec<(String, serde_json::Value)>) {
     mcp_session_as(context, "", lines, reply)
 }
@@ -334,17 +334,23 @@ fn mcp_session_as(
     context: &McpContext,
     prefix: &str,
     lines: &[serde_json::Value],
-    reply: impl Fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>,
+    reply: impl Fn(&str, &serde_json::Value) -> Result<serde_json::Value, String> + Sync,
 ) -> (Vec<serde_json::Value>, Vec<(String, serde_json::Value)>) {
     let input: String = lines.iter().map(|l| format!("{l}\n")).collect();
     let mut output = Vec::new();
-    let mut sent = Vec::new();
-    serve(context, prefix, input.as_bytes(), &mut output, |command, payload| {
+    let sent = std::sync::Mutex::new(Vec::new());
+    serve(context, prefix, input.as_bytes(), &mut output, |command, mut payload| {
+        // Cada llamada viaja con un `callId` único (para poder cancelarla); se prueba aparte
+        // y acá se saca para comparar el resto del pedido tal cual.
+        if let Some(obj) = payload.as_object_mut() {
+            obj.remove("callId");
+        }
         let answer = reply(command, &payload);
-        sent.push((command.to_string(), payload));
+        sent.lock().unwrap().push((command.to_string(), payload));
         answer
     })
     .unwrap();
+    let sent = sent.into_inner().unwrap();
     let responses = String::from_utf8(output)
         .unwrap()
         .lines()
@@ -444,13 +450,19 @@ fn con_un_cliente_que_prefija_los_nombres_el_texto_los_prefija_igual() {
     assert!(!description(&pelado[1], "browser_marked").contains("controlcode_"));
 }
 
-/// El servidor como lo escribe OpenCode: el comando ENTERO en un arreglo, bajo `"mcp"`.
-/// Y nada más: `permission` no se toca (ver `opencode_config_content`).
+/// El servidor como lo escribe OpenCode: el comando ENTERO en un arreglo, bajo `"mcp"`, y
+/// `"ask"` para las tools que en Claude Code no se aprueban solas.
 #[test]
-fn la_config_de_opencode_lleva_el_servidor_y_nada_mas() {
-    let raw = super::mcp::opencode_config_content("/opt/cc/ccode", &["mcp", "--cwd", "/p", "--tab", "t1", "--prefix", "controlcode_"]);
+fn la_config_de_opencode_lleva_el_servidor_y_pide_permiso_para_lo_que_escribe() {
+    let raw = super::mcp::opencode_config_content(
+        "/opt/cc/ccode",
+        &["mcp", "--cwd", "/p", "--tab", "t1", "--prefix", "controlcode_"],
+        "controlcode_",
+    );
     let config: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    assert_eq!(config.as_object().unwrap().keys().collect::<Vec<_>>(), vec!["mcp"]);
+    let mut keys: Vec<_> = config.as_object().unwrap().keys().collect();
+    keys.sort();
+    assert_eq!(keys, vec!["mcp", "permission"]);
     let server = &config["mcp"]["controlcode"];
     assert_eq!(server["type"], "local");
     assert_eq!(server["enabled"], true);
@@ -459,6 +471,57 @@ fn la_config_de_opencode_lleva_el_servidor_y_nada_mas() {
         json!(["/opt/cc/ccode", "mcp", "--cwd", "/p", "--tab", "t1", "--prefix", "controlcode_"])
     );
     assert!(server["timeout"].as_u64().unwrap() > 60_000);
+
+    let permission = config["permission"].as_object().unwrap();
+    for asks in ["controlcode_git_push", "controlcode_git_pr_create", "controlcode_task_add", "controlcode_run_plan"] {
+        assert_eq!(permission.get(asks), Some(&json!("ask")), "{asks}");
+    }
+    // Lo que se aprueba solo en Claude Code tampoco pregunta acá; y nada fuera de nuestras
+    // tools (la regla global del usuario no se toca).
+    for free in ["controlcode_browser_click", "controlcode_git_pr_list", "controlcode_ask_user", "controlcode_fact_add"] {
+        assert!(!permission.contains_key(free), "{free}");
+    }
+    assert!(permission.keys().all(|k| k.starts_with("controlcode_")));
+}
+
+/// Una sola regla para las dos TUIs: lo que Claude Code aprueba solo es exactamente lo que
+/// OpenCode no pregunta.
+#[test]
+fn claude_y_opencode_aprueban_solas_las_mismas_tools() {
+    let raw = super::mcp::opencode_config_content("/c", &[], "");
+    let config: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let asks: Vec<&String> = config["permission"].as_object().unwrap().keys().collect();
+    for name in asks {
+        assert!(!super::mcp::auto_approved(name), "{name}");
+    }
+    assert!(super::mcp::auto_approved("browser_click"));
+    assert!(!super::mcp::auto_approved("git_push"));
+}
+
+/// Cada tool lleva sus anotaciones, y dicen la verdad: las de lectura no escriben, y
+/// `destructiveHint` (que por la especificación vale `true` si falta) se dice siempre que
+/// la tool escribe.
+#[test]
+fn cada_tool_declara_si_lee_escribe_o_destruye() {
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let (tab, _) = mcp_session(&McpContext::Cwd { cwd: "/p".into(), tab: None }, &[list], |_, _| Ok(json!({})));
+    let tools = tab[0]["result"]["tools"].as_array().unwrap();
+    let find = |n: &str| tools.iter().find(|t| t["name"] == n).unwrap()["annotations"].clone();
+    for t in tools {
+        let a = &t["annotations"];
+        assert!(a["readOnlyHint"].is_boolean(), "{}", t["name"]);
+        if a["readOnlyHint"] == false {
+            assert!(a["destructiveHint"].is_boolean(), "{}", t["name"]);
+        }
+    }
+    assert_eq!(find("browser_snapshot")["readOnlyHint"], true);
+    assert_eq!(find("git_pr_list")["readOnlyHint"], true);
+    assert_eq!(find("git_push")["readOnlyHint"], false);
+    assert_eq!(find("git_push")["destructiveHint"], false);
+    assert_eq!(find("task_cancel")["destructiveHint"], true);
+    assert_eq!(find("browser_eval")["destructiveHint"], true);
+    assert_eq!(find("git_push")["openWorldHint"], true);
+    assert_eq!(find("fact_add")["openWorldHint"], false);
 }
 
 /// Lanzar o parar agentes gasta plata: eso nunca va permitido de antemano a alguien que
@@ -685,4 +748,88 @@ fn lo_que_manda_el_puente_mcp_lo_atienden_el_despachador_y_el_frontend() {
     }
     let bridge = include_str!("../../../src/features/orchestrator/cliBridge.ts");
     assert!(bridge.contains("case \"browser.run\""), "el frontend no atiende browser.run");
+}
+
+// ── protocolo: ping, cancelar, progreso ──────────────────────────────────────────
+
+/// Corre el servidor con un `send` propio y devuelve lo que escribió, en orden.
+fn raw_session(
+    context: &McpContext,
+    lines: &[serde_json::Value],
+    reply: impl Fn(&str, serde_json::Value) -> Result<serde_json::Value, String> + Sync,
+) -> Vec<serde_json::Value> {
+    let input: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    let mut output = Vec::new();
+    serve(context, "", input.as_bytes(), &mut output, reply).unwrap();
+    String::from_utf8(output).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+}
+
+#[test]
+fn el_ping_se_contesta_con_un_resultado_vacio() {
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None };
+    let out = raw_session(&cwd, &[json!({ "jsonrpc": "2.0", "id": 9, "method": "ping" })], |_, _| Ok(json!({})));
+    assert_eq!(out, vec![json!({ "jsonrpc": "2.0", "id": 9, "result": {} })]);
+}
+
+/// Una llamada cancelada no se contesta (lo pide la especificación) y la app recibe el
+/// mismo `callId` con el que viajó la llamada, para cortar lo suyo.
+#[test]
+fn una_llamada_cancelada_no_se_contesta_y_la_app_se_entera() {
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None };
+    let seen = std::sync::Mutex::new(Vec::new());
+    let out = raw_session(
+        &cwd,
+        &[
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": { "name": "run_await", "arguments": {} } }),
+            json!({ "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": 1 } }),
+            json!({ "jsonrpc": "2.0", "id": 2, "method": "ping" }),
+        ],
+        |command, payload| {
+            seen.lock().unwrap().push((command.to_string(), payload["callId"].clone()));
+            if command == "run.await" {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+            }
+            Ok(json!({ "text": "terminó" }))
+        },
+    );
+    // El ping se contestó mientras la llamada esperaba; la llamada, nunca.
+    assert_eq!(out, vec![json!({ "jsonrpc": "2.0", "id": 2, "result": {} })]);
+    let seen = seen.into_inner().unwrap();
+    let call = seen.iter().find(|(c, _)| c == "run.await").expect("la llamada llegó a la app");
+    let cancel = seen.iter().find(|(c, _)| c == "mcp.cancel").expect("la app se enteró de la cancelación");
+    assert!(call.1.is_string());
+    assert_eq!(call.1, cancel.1, "la cancelación nombra a la misma llamada");
+}
+
+/// Con `progressToken`, una llamada larga avisa que sigue viva; sin él, no se manda nada.
+#[test]
+fn una_llamada_larga_avisa_su_progreso_si_se_lo_piden() {
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None };
+    let slow = |_: &str, _: serde_json::Value| {
+        std::thread::sleep(std::time::Duration::from_millis(350));
+        Ok(json!({ "text": "listo" }))
+    };
+    let call = |meta: serde_json::Value| json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": { "name": "facts_read", "arguments": {}, "_meta": meta } });
+
+    let out = raw_session(&cwd, &[call(json!({ "progressToken": "tok" }))], slow);
+    let progress: Vec<_> = out.iter().filter(|m| m["method"] == "notifications/progress").collect();
+    assert!(!progress.is_empty(), "{out:?}");
+    assert!(progress.iter().all(|p| p["params"]["progressToken"] == "tok"));
+    // El valor solo puede crecer (lo pide la especificación).
+    let values: Vec<u64> = progress.iter().map(|p| p["params"]["progress"].as_u64().unwrap()).collect();
+    assert!(values.windows(2).all(|w| w[0] <= w[1]));
+    assert_eq!(out.last().unwrap()["id"], 3, "la respuesta llega después del progreso");
+
+    let quiet = raw_session(&cwd, &[call(json!({}))], slow);
+    assert!(quiet.iter().all(|m| m["method"] != "notifications/progress"));
+}
+
+#[test]
+fn una_cancelacion_se_recuerda_por_su_id() {
+    assert!(!crate::ipc::cancel::is_cancelled(Some("otra")));
+    crate::ipc::cancel::cancel("c-1");
+    assert!(crate::ipc::cancel::is_cancelled(Some("c-1")));
+    assert!(!crate::ipc::cancel::is_cancelled(None), "un pedido de la CLI nunca está cancelado");
 }

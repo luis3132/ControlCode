@@ -21,6 +21,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(crate::updates::plugin())
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
             // Terminal embebida (PTY)
@@ -82,6 +83,11 @@ pub fn run() {
             crate::scm::scm_push,
             crate::scm::scm_log,
             crate::scm::scm_file_at,
+            crate::scm::scm_commit_files,
+            crate::scm::scm_tags,
+            crate::scm::scm_create_tag,
+            crate::scm::scm_push_tag,
+            crate::scm::scm_delete_tag,
             // Cuentas de git (GitHub, GitLab, Gitea…): repos, clonar, PRs e issues
             crate::forge::forge_kinds,
             crate::forge::forge_oauth_available,
@@ -104,6 +110,18 @@ pub fn run() {
             crate::forge::forge_merge_pull,
             crate::forge::forge_default_branch,
             crate::forge::forge_checkout_pull,
+            crate::forge::forge_releases,
+            // Sincronización de skills y configuración por un repo privado
+            crate::sync::sync_status,
+            crate::sync::sync_setup,
+            crate::sync::sync_now,
+            crate::sync::sync_disconnect,
+            crate::sync::sync_set_auto,
+            // Actualizaciones desde las releases de GitHub
+            crate::updates::update_check,
+            crate::updates::update_install,
+            crate::updates::update_restart,
+            crate::forge::forge_create_release,
             // Tabs de navegador (proxy con selector de elementos)
             crate::preview::preview_resolve,
             crate::preview::preview_network,
