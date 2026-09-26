@@ -159,11 +159,11 @@ export function ForgeItemsView({ cwd, target, what, branch, filter, onFilter, on
       </div>
 
       {creating && pr && (
-        <CreatePullDialog cwd={cwd} branch={branch} onClose={() => setCreating(false)}
+        <CreatePullDialog cwd={cwd} target={target} branch={branch} onClose={() => setCreating(false)}
           onCreated={(item) => { setCreating(false); onFilter("open"); load(); onOpen(item); }} />
       )}
       {creating && !pr && (
-        <CreateIssueDialog cwd={cwd} onClose={() => setCreating(false)}
+        <CreateIssueDialog cwd={cwd} kind={target.account?.kind ?? target.kind} onClose={() => setCreating(false)}
           onCreated={(item) => { setCreating(false); onFilter("open"); load(); onOpen(item); }} />
       )}
     </>

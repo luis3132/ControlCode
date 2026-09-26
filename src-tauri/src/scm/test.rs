@@ -209,7 +209,7 @@ fn la_falta_de_credenciales_se_distingue_del_resto() {
 // son los que git acepta (flags, orden, `--`) en un repo real.
 
 use super::commands::{
-    scm_branches, scm_checkout, scm_commit, scm_discard, scm_file_at, scm_log, scm_stage, scm_status, scm_unstage,
+    parse_shortstat, scm_branches, scm_checkout, scm_compare, scm_commit, scm_discard, scm_file_at, scm_log, scm_stage, scm_status, scm_unstage,
 };
 
 fn git_in(dir: &std::path::Path, args: &[&str]) {
@@ -426,4 +426,41 @@ async fn los_tags_se_crean_listan_suben_y_borran() {
 
     std::fs::remove_dir_all(origin).ok();
     std::fs::remove_dir_all(local).ok();
+}
+
+#[test]
+fn el_resumen_de_un_diff_se_lee_aunque_falten_partes() {
+    assert_eq!(parse_shortstat(" 3 files changed, 10 insertions(+), 2 deletions(-)\n"), (3, 10, 2));
+    assert_eq!(parse_shortstat(" 1 file changed, 1 deletion(-)"), (1, 0, 1));
+    assert_eq!(parse_shortstat(""), (0, 0, 0));
+}
+
+/// Lo que se muestra antes de abrir un PR: los commits de la rama que `base` no tiene,
+/// cuánto le falta de `base` y el tamaño del cambio.
+#[tokio::test(flavor = "multi_thread")]
+async fn comparar_dos_ramas_da_lo_que_entraria_en_el_pr() {
+    let dir = temp_repo("compare");
+    let root = std::fs::canonicalize(&dir).unwrap().to_string_lossy().to_string();
+    let write = |name: &str, body: &str| std::fs::write(dir.join(name), body).unwrap();
+    write("a.txt", "uno\n");
+    git_in(&dir, &["add", "."]);
+    git_in(&dir, &["commit", "-qm", "base"]);
+    git_in(&dir, &["switch", "-qc", "feat"]);
+    write("a.txt", "uno\ndos\n");
+    write("b.txt", "nuevo\n");
+    git_in(&dir, &["add", "."]);
+    git_in(&dir, &["commit", "-qm", "feat: dos cosas"]);
+    git_in(&dir, &["switch", "-q", "main"]);
+    write("c.txt", "otra\n");
+    git_in(&dir, &["add", "."]);
+    git_in(&dir, &["commit", "-qm", "main avanza"]);
+
+    let cmp = scm_compare(root.clone(), "main".into(), "feat".into()).await.unwrap();
+    assert_eq!(cmp.commits.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(), ["feat: dos cosas"]);
+    assert_eq!(cmp.behind, 1);
+    assert_eq!((cmp.files, cmp.insertions, cmp.deletions), (2, 2, 0));
+    assert!(!cmp.truncated);
+
+    assert!(scm_compare(root.clone(), "--output=x".into(), "feat".into()).await.is_err());
+    let _ = std::fs::remove_dir_all(&dir);
 }

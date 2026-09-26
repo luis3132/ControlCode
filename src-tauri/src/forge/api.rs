@@ -251,6 +251,16 @@ pub(super) fn split_diff(raw: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Una etiqueta del repo, para ofrecerla al abrir un issue.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Label {
+    pub name: String,
+    /// Hex sin `#` (`d73a4a`). Cada host lo da con o sin él.
+    pub color: Option<String>,
+    pub description: Option<String>,
+}
+
 /// Una release publicada (o en borrador) en el host.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -324,6 +334,14 @@ fn labels(v: &Value) -> Vec<String> {
 }
 
 /// El id de proyecto de GitLab: la ruta completa, con las barras escapadas.
+pub(super) fn label_from(v: &Value) -> Option<Label> {
+    Some(Label {
+        name: s(v, "/name").filter(|n| !n.is_empty())?,
+        color: s(v, "/color").map(|c| c.trim_start_matches('#').to_string()).filter(|c| !c.is_empty()),
+        description: s(v, "/description").filter(|d| !d.is_empty()),
+    })
+}
+
 fn gl_project(repo: &str) -> String {
     repo.replace('/', "%2F")
 }
@@ -902,6 +920,16 @@ impl Api {
                 author: s(v, "/author/login"),
             },
         }
+    }
+
+    /// Las etiquetas del repo.
+    pub async fn repo_labels(&self, repo: &str) -> Result<Vec<Label>, ForgeError> {
+        let items = match self.kind {
+            ForgeKind::Gitlab => self.get_list(&format!("/projects/{}/labels?per_page=100", gl_project(repo))).await?,
+            ForgeKind::Github => self.get_list(&format!("/repos/{repo}/labels?per_page=100")).await?,
+            _ => self.get_list(&format!("/repos/{repo}/labels?limit=50")).await?,
+        };
+        Ok(items.iter().filter_map(label_from).collect())
     }
 
     /// Las releases del repo, las más nuevas primero.

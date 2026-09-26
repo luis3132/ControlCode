@@ -110,6 +110,13 @@ export interface NewIssue {
   labels: string[];
 }
 
+export interface Label {
+  name: string;
+  /** Hex sin `#`. */
+  color: string | null;
+  description: string | null;
+}
+
 export interface Release {
   tag: string;
   name: string;

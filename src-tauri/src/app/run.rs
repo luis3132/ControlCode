@@ -87,6 +87,7 @@ pub fn run() {
             crate::scm::scm_log,
             crate::scm::scm_file_at,
             crate::scm::scm_commit_files,
+            crate::scm::scm_compare,
             crate::scm::scm_tags,
             crate::scm::scm_create_tag,
             crate::scm::scm_push_tag,
@@ -114,6 +115,7 @@ pub fn run() {
             crate::forge::forge_default_branch,
             crate::forge::forge_checkout_pull,
             crate::forge::forge_releases,
+            crate::forge::forge_labels,
             // Sincronización de skills y configuración por un repo privado
             crate::sync::sync_status,
             crate::sync::sync_setup,

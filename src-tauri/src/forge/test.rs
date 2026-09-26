@@ -290,3 +290,15 @@ fn una_release_se_lee_igual_en_github_y_gitlab() {
     assert_eq!(r.body, None, "una descripción vacía no es un cuerpo");
     assert!(!r.draft);
 }
+
+/// Cada host da el color con o sin `#`, y alguno deja la descripción vacía.
+#[test]
+fn las_etiquetas_se_leen_igual_de_cualquier_host() {
+    use super::api::label_from;
+    let gh = label_from(&serde_json::json!({ "name": "bug", "color": "d73a4a", "description": "Algo anda mal" })).unwrap();
+    assert_eq!(gh.color.as_deref(), Some("d73a4a"));
+    let gl = label_from(&serde_json::json!({ "name": "ui", "color": "#0e8a16", "description": "" })).unwrap();
+    assert_eq!(gl.color.as_deref(), Some("0e8a16"));
+    assert_eq!(gl.description, None);
+    assert!(label_from(&serde_json::json!({ "color": "fff" })).is_none());
+}

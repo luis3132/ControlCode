@@ -1,7 +1,7 @@
 /** Control de versiones. Ver `src-tauri/src/scm/commands.rs`. */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { Branch, Commit, ScmEntry, ScmStatus, Tag } from "./types";
+import type { Branch, Commit, Compare, ScmEntry, ScmStatus, Tag } from "./types";
 
 /** `null` = la carpeta no está en un repo. */
 export const scmStatus = (cwd: string) => invoke<ScmStatus | null>("scm_status", { cwd });
@@ -20,6 +20,9 @@ export const scmFetch = (root: string) => invoke<void>("scm_fetch", { root });
 export const scmPull = (root: string) => invoke<void>("scm_pull", { root });
 export const scmPush = (root: string) => invoke<void>("scm_push", { root });
 export const scmLog = (root: string, limit: number) => invoke<Commit[]>("scm_log", { root, limit });
+/** Lo que entraría en un PR de `head` hacia `base` (refs como las da `scmBranches`). */
+export const scmCompare = (root: string, base: string, head: string) =>
+  invoke<Compare>("scm_compare", { root, base, head });
 /** Contenido en una revisión: `HEAD`, `INDEX`, un commit o su padre (`abc123^`); `null`
  *  si no existe ahí. */
 export const scmFileAt = (root: string, path: string, rev: string) =>

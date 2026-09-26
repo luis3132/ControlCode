@@ -304,6 +304,76 @@ pub async fn scm_log(root: String, limit: u32) -> Result<Vec<Commit>, ScmError> 
     .await
 }
 
+/// Lo que entraría en un PR de `head` hacia `base`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Compare {
+    /// Los commits de `head` que `base` no tiene, del más nuevo al más viejo.
+    pub commits: Vec<Commit>,
+    /// Si hay más de los que se listan.
+    pub truncated: bool,
+    /// Los commits de `base` que `head` no tiene: un PR atrasado puede tener conflictos.
+    pub behind: u32,
+    pub files: u32,
+    pub insertions: u32,
+    pub deletions: u32,
+}
+
+/// Cuántos commits de una comparación se listan.
+const COMPARE_LIMIT: usize = 100;
+
+/// `3 files changed, 10 insertions(+), 2 deletions(-)` → `(3, 10, 2)`. Git omite las
+/// partes en cero, y las traduce si el sistema está en otro idioma: se leen los números
+/// por la palabra que los sigue, y lo que no se reconoce queda en cero.
+pub(super) fn parse_shortstat(raw: &str) -> (u32, u32, u32) {
+    let mut out = (0, 0, 0);
+    for part in raw.split(',') {
+        let mut words = part.split_whitespace();
+        let Some(n) = words.next().and_then(|w| w.parse::<u32>().ok()) else { continue };
+        match words.next().unwrap_or("") {
+            w if w.starts_with("file") => out.0 = n,
+            w if w.starts_with("insertion") => out.1 = n,
+            w if w.starts_with("deletion") => out.2 = n,
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Qué entraría en un PR de `head` hacia `base`: sus commits, cuánto le falta de `base` y
+/// el tamaño del cambio. Las dos son refs tal cual las da `scm_branches` (`main`,
+/// `origin/main`).
+#[tauri::command]
+pub async fn scm_compare(root: String, base: String, head: String) -> Result<Compare, ScmError> {
+    blocking(move || {
+        for r in [&base, &head] {
+            if r.trim().is_empty() || r.starts_with('-') {
+                return Err(ScmError::Git(format!("«{r}» no es una rama")));
+            }
+        }
+        let range = format!("{base}..{head}");
+        let format = format!("--format={LOG_FORMAT}");
+        let n = format!("-n{}", COMPARE_LIMIT + 1);
+        let raw = run_text(&root, &["log", n.as_str(), format.as_str(), range.as_str(), "--"], LOCAL)?;
+        let mut commits = parse_log(&raw, &[]);
+        let truncated = commits.len() > COMPARE_LIMIT;
+        commits.truncate(COMPARE_LIMIT);
+
+        let behind_range = format!("{head}..{base}");
+        let behind = run_text(&root, &["rev-list", "--count", behind_range.as_str(), "--"], LOCAL)
+            .ok()
+            .and_then(|c| c.trim().parse().ok())
+            .unwrap_or(0);
+        // Con tres puntos: contra el ancestro común, que es lo que muestra el host.
+        let diff_range = format!("{base}...{head}");
+        let (files, insertions, deletions) = run_text(&root, &["diff", "--shortstat", diff_range.as_str(), "--"], LOCAL)
+            .map(|s| parse_shortstat(&s))
+            .unwrap_or_default();
+        Ok(Compare { commits, truncated, behind, files, insertions, deletions })
+    })
+    .await
+}
+
 /// Un hash de commit tal cual lo da git: hexadecimal, nada que se pueda leer como opción.
 fn valid_hash(hash: &str) -> bool {
     (4..=64).contains(&hash.len()) && hash.chars().all(|c| c.is_ascii_hexdigit())

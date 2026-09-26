@@ -66,6 +66,18 @@ export interface Commit {
   outgoing: boolean;
 }
 
+export interface Compare {
+  /** Los commits de `head` que `base` no tiene, del más nuevo al más viejo. */
+  commits: Commit[];
+  /** Hay más de los que se listan. */
+  truncated: boolean;
+  /** Commits de `base` que `head` no tiene. */
+  behind: number;
+  files: number;
+  insertions: number;
+  deletions: number;
+}
+
 export interface Tag {
   name: string;
   /** El commit al que apunta (corto). */

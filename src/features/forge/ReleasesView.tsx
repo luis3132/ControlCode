@@ -130,7 +130,7 @@ export function ReleasesView({ cwd, target }: { cwd: string; target: RepoTarget 
       {creating && (
         <CreateReleaseDialog
           cwd={cwd}
-          root={target.root}
+          target={target}
           kind={target.account.kind}
           onClose={() => setCreating(false)}
           onCreated={(r) => { setCreating(false); load(); setOpen(r); }}

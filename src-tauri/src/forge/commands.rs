@@ -3,7 +3,9 @@
 use serde::Serialize;
 use tauri::AppHandle;
 
-use super::api::{normalize_state, Api, ForgeRepo, ForgeUser, Item, ItemDetail, NewIssue, NewPull, NewRelease, Release};
+use super::api::{
+    normalize_state, Api, ForgeRepo, ForgeUser, Item, ItemDetail, Label, NewIssue, NewPull, NewRelease, Release,
+};
 use super::credentials::{api_for, blocking, git_env, git_env_for_url, target, RepoTarget};
 use super::oauth::{self, DeviceStart, Poll};
 use super::provider::{normalize_host, ForgeError, ForgeKind};
@@ -328,6 +330,13 @@ fn checkout_pull(t: &RepoTarget, number: u64, head_ref: &str, env: &[(String, St
         run_local(&t.root, &["switch", "-c", &branch, &tracking]).map_err(scm_to_forge)?;
     }
     Ok(branch)
+}
+
+/// Las etiquetas del repo, para sugerirlas al abrir un issue.
+#[tauri::command]
+pub async fn forge_labels(app: AppHandle, cwd: String) -> Result<Vec<Label>, ForgeError> {
+    let (t, api) = repo_api(&app, &cwd).await?;
+    api.repo_labels(&t.path).await
 }
 
 #[tauri::command]
