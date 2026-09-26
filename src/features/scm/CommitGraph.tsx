@@ -6,7 +6,7 @@ import { BranchIcon, PullIcon, PushIcon, TagIcon } from "@/app/icons";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
 
-import { graphWidth, layoutGraph, type GraphRow, type Segment } from "./commitGraph";
+import { graphWidth, layoutGraph, type GraphRow, type Segment } from "./graphLayout";
 import { scmCommitFiles } from "./ipc";
 import type { Commit, CommitRef, ScmEntry } from "./types";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { graphWidth, layoutGraph } from "../commitGraph";
+import { graphWidth, layoutGraph } from "../graphLayout";
 
 const c = (hash: string, ...parents: string[]) => ({ hash, parents });
 
