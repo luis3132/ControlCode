@@ -18,4 +18,4 @@ mod server;
 #[cfg(test)]
 mod test;
 
-pub use server::{cleanup, start};
+pub use server::{cleanup, export_instance_env, start};

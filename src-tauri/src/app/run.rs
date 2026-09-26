@@ -16,6 +16,9 @@ pub fn run() {
     // el Dock) no se encontraban las TUIs instaladas en el home. Mismo requisito que el de
     // arriba: toca el entorno, así que va antes del primer hilo (ver `util::path_env`).
     crate::util::path_env::configure();
+    // Que cada agente que lance esta instancia hable con ELLA y no con otra que esté abierta
+    // (ver `ipc::protocol::HANDSHAKE_ENV`). También toca el entorno: antes del primer hilo.
+    crate::ipc::export_instance_env();
     super::signals::cleanup_on_signals();
 
     tauri::Builder::default()

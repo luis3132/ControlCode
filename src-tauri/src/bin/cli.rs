@@ -7,7 +7,7 @@
 //! El código de salida distingue los casos que a un agente le importan: 0 todo bien,
 //! 1 la app rechazó el comando, 2 error de uso, 3 la app no está corriendo.
 
-use controlcode_lib::ipc::protocol::{handshake_path, Handshake, Request, Response, PROTOCOL_VERSION};
+use controlcode_lib::ipc::protocol::{client_handshake_path, Handshake, Request, Response, PROTOCOL_VERSION};
 use serde_json::{json, Map, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -91,7 +91,7 @@ AGENTES, CUENTAS Y SKILLS
   prelaunch [list]                            Qué poner en --pre
   skills                                      Qué poner en --skills (instaladas)
   skill search <texto>                        Busca en TODOS los repos, skills.sh incluido
-                                              (tarda: el directorio se consulta por npx)
+                                              (skills.sh se consulta por internet)
   skill install <nombre>                      Instala desde los repos habilitados
   skill show <nombre|id>                      Metadata + contenido del SKILL.md
   skill new <nombre>                          Crea una skill propia (origen local)
@@ -491,7 +491,7 @@ fn send_waiting(command: &str, args: Value) -> Result<Response, CliError> {
 }
 
 fn send(command: &str, args: Value) -> Result<Response, CliError> {
-    let path = handshake_path();
+    let path = client_handshake_path();
     let raw = std::fs::read_to_string(&path).map_err(|_| {
         CliError::not_yet(format!(
             "Control Code no parece estar corriendo (no se encontró {}). Abrí la app y volvé a intentar.",
@@ -499,8 +499,9 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
         ))
     })?;
 
+    // Reintentable: la app lo reescribe sola si quedó mal (ver `ipc::server::watch_handshakes`).
     let handshake: Handshake = serde_json::from_str(&raw)
-        .map_err(|e| CliError::new(format!("El archivo de handshake está corrupto ({e}); reiniciá la app"), EXIT_NO_APP))?;
+        .map_err(|e| CliError::not_yet(format!("El archivo de handshake {} está corrupto ({e}); reiniciá la app", path.display())))?;
 
     if handshake.protocol != PROTOCOL_VERSION {
         // A propósito NO es reintentable: esperar no cambia la versión de nadie.

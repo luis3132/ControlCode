@@ -12,12 +12,37 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Archivo donde la app publica cómo alcanzarla. La CLI lo lee para conectarse.
+/// Archivo donde la app publica cómo alcanzarla. La CLI lo lee para conectarse cuando no
+/// la lanzó ninguna instancia en particular (una terminal cualquiera del sistema).
 pub fn handshake_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_default()
         .join(".controlcode")
         .join("ipc.json")
+}
+
+/// La variable con la que cada instancia les dice a sus hijos —las TUIs de sus tabs, las
+/// tareas de la flota y, a través de ellos, los puentes `ccode mcp`— cuál es SU handshake.
+///
+/// Existe porque el archivo global es uno solo: con dos instancias abiertas (la app abierta
+/// dos veces, un `tauri dev` al lado de la instalada, el reinicio de una actualización) la
+/// última en arrancar lo pisaba, y la primera en cerrarse lo borraba. Desde ahí los agentes
+/// de la que seguía abierta recibían "Control Code no parece estar corriendo" hablando
+/// desde adentro de la app.
+pub const HANDSHAKE_ENV: &str = "CONTROLCODE_HANDSHAKE";
+
+/// El handshake propio de la instancia con ese PID.
+pub fn instance_handshake_path(pid: u32) -> PathBuf {
+    handshake_path().with_file_name("ipc").join(format!("{pid}.json"))
+}
+
+/// El handshake que tiene que usar la CLI: el de la instancia que la lanzó si existe, si no
+/// el global. Si esa instancia se cerró, el global lleva a la que esté abierta ahora.
+pub fn client_handshake_path() -> PathBuf {
+    std::env::var_os(HANDSHAKE_ENV)
+        .map(PathBuf::from)
+        .filter(|p| p.is_file())
+        .unwrap_or_else(handshake_path)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -9,6 +9,30 @@ use super::commands::{
 use super::install::{is_installed, target_dir};
 use super::protocol::{arg_str, Handshake, Request, Response, PROTOCOL_VERSION};
 
+// ── Handshake con varias instancias ─────────────────────────────
+
+/// Con dos instancias abiertas, el `ipc.json` global solo se reescribe si falta o si es de
+/// una que ya murió: el de otra viva se respeta (cada una tiene el suyo para sus agentes).
+#[test]
+fn el_handshake_global_solo_se_recupera_si_quedo_huerfano() {
+    use super::server::global_needs_rewrite;
+    let hs = |pid| Handshake { port: 1, token: "t".into(), pid, protocol: PROTOCOL_VERSION };
+    assert!(global_needs_rewrite(None, 7, |_| true), "borrado por otra instancia al cerrarse");
+    assert!(!global_needs_rewrite(Some(&hs(7)), 7, |_| false), "es el propio");
+    assert!(!global_needs_rewrite(Some(&hs(8)), 7, |_| true), "otra instancia viva");
+    assert!(global_needs_rewrite(Some(&hs(8)), 7, |_| false), "otra instancia que ya murió");
+}
+
+/// Cada instancia tiene su handshake al lado del global, con su PID en el nombre.
+#[test]
+fn cada_instancia_tiene_su_propio_handshake() {
+    use super::protocol::{handshake_path, instance_handshake_path};
+    let own = instance_handshake_path(4242);
+    assert_eq!(own.file_name().unwrap(), "4242.json");
+    assert_eq!(own.parent().unwrap().parent(), handshake_path().parent());
+    assert_ne!(own, instance_handshake_path(4243));
+}
+
 // ── Formato del cable ───────────────────────────────────────────
 
 /// El handshake y las requests son el contrato entre dos binarios que se compilan juntos
