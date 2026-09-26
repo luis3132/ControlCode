@@ -51,9 +51,9 @@ export function MarketplacePage() {
   // skills.sh se consulta SIEMPRE, junto con el resto: buscar en el Marketplace tiene que
   // mostrar todo lo que hay, sin que el usuario tenga que decidir cuándo mirar cada fuente.
   //
-  // Va en su propio efecto y con más espera que el filtro local porque cada disparo arranca
-  // un proceso `npx` que tarda segundos: la espera es para no lanzar uno por tecla, no para
-  // que el usuario tenga que pedirlo.
+  // Va en su propio efecto y con más espera que el filtro local porque cada disparo sale a
+  // internet: la espera es para no lanzar una búsqueda por tecla, no para que el usuario
+  // tenga que pedirlo.
   useEffect(() => {
     // Al terminar se relee el catálogo instalado. La búsqueda es lo que le deja al backend
     // el cache del repositorio, y con ese cache puede reconocer las instalaciones viejas

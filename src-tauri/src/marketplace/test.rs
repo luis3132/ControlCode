@@ -3,8 +3,8 @@
 
 use super::github::{normalize_github_location, parse_github_location};
 use super::skillssh::{
-    add_target, ensure_npx, find_installed_skill, install_into, normalize_owner_filter,
-    parse_find_output, search, skillssh_entry, strip_ansi, SkillsShHit,
+    add_target, download_into, find_installed_skill, format_installs, install_into, normalize_owner_filter,
+    parse_search_response, search, skillssh_entry, strip_ansi, write_download, SkillsShHit,
 };
 use super::types::MarketplaceSkillEntry;
 
@@ -93,18 +93,21 @@ fn el_filtro_por_publicador_acepta_vacio_nombre_y_link() {
     }
 }
 
-/// Salida textual real de `npx skills find`, con los colores que la CLI emite incluso
-/// redirigida.
+/// Respuesta real de `/api/search` (recortada): lo que devuelve es lo que la CLI muestra
+/// con `npx skills find`, así que el resultado tiene que ser el mismo que antes daba el
+/// parser de su salida — ordenado por instalaciones y con ellas abreviadas.
 #[test]
-fn el_parser_saca_las_skills_de_la_salida_real() {
-    let raw = "\u{1b}[38;5;102mInstall with\u{1b}[0m npx skills add <owner/repo@skill>\n\n\
-        \u{1b}[38;5;145mcallstack/react-native-testing-library@react-native-testing\u{1b}[0m \u{1b}[36m3.3K installs\u{1b}[0m\n\
-        \u{1b}[38;5;102m└ https://skills.sh/callstack/react-native-testing-library/react-native-testing\u{1b}[0m\n\n\
-        \u{1b}[38;5;145mgithub/awesome-copilot@react19-test-patterns\u{1b}[0m \u{1b}[36m1.1K installs\u{1b}[0m\n\
-        \u{1b}[38;5;102m└ https://skills.sh/github/awesome-copilot/react19-test-patterns\u{1b}[0m\n";
+fn la_busqueda_de_la_api_da_las_mismas_skills_que_la_cli() {
+    let body = r#"{"query":"react","searchType":"fuzzy","skills":[
+        {"id":"github/awesome-copilot/react19-test-patterns","source":"github/awesome-copilot","skillId":"react19-test-patterns","name":"react19-test-patterns","installs":1100},
+        {"id":"callstack/react-native-testing-library/react-native-testing","source":"callstack/react-native-testing-library","skillId":"react-native-testing","name":"react-native-testing","installs":3312},
+        {"id":"open.feishu.cn/lark-event","source":"open.feishu.cn","skillId":"lark-event","name":"lark-event","installs":726862},
+        {"id":"someone/repo/nueva","source":"someone/repo","skillId":"nueva","name":"nueva","installs":0}
+    ],"count":4}"#;
 
-    let hits = parse_find_output(raw);
-    assert_eq!(hits.len(), 2);
+    let hits = parse_search_response(body).unwrap();
+    // La de un dominio (dos partes) no sale de un repo de GitHub: `add` no sabría instalarla.
+    assert_eq!(hits.len(), 3);
     assert_eq!(
         hits[0],
         SkillsShHit {
@@ -116,22 +119,45 @@ fn el_parser_saca_las_skills_de_la_salida_real() {
     );
     assert_eq!(hits[1].source, "github/awesome-copilot");
     assert_eq!(hits[1].installs.as_deref(), Some("1.1K"));
+    // Sin instalaciones igual se lista, pero sin el número.
+    assert_eq!(hits[2].installs, None);
+
+    assert!(parse_search_response(r#"{"skills":[]}"#).unwrap().is_empty());
+    assert!(parse_search_response("<html>error</html>").is_err());
 }
 
-/// La línea de encabezado del propio comando también contiene "skills.sh"; no debe
-/// colarse como resultado. Lo mismo cualquier link que no sea de tres segmentos. Y una
-/// skill sin instalaciones igual se lista.
 #[test]
-fn el_parser_distingue_una_skill_de_cualquier_otro_link() {
-    let ruido = "Browse at https://skills.sh/\n\
-        └ https://skills.sh/owner\n\
-        └ https://skills.sh/owner/repo\n\
-        └ https://skills.sh/a/b/c/d\n";
-    assert!(parse_find_output(ruido).is_empty());
+fn las_instalaciones_se_abrevian_como_en_la_web() {
+    assert_eq!(format_installs(12), "12");
+    assert_eq!(format_installs(1_000), "1K");
+    assert_eq!(format_installs(968_596), "968.6K");
+    assert_eq!(format_installs(1_260_000), "1.3M");
+}
 
-    let hits = parse_find_output("someone/repo@nueva\n└ https://skills.sh/someone/repo/nueva\n");
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].installs, None);
+/// Los archivos de una descarga vienen de un servicio de terceros y se escriben en disco:
+/// nada puede salirse de la carpeta de la skill.
+#[test]
+fn la_descarga_no_escribe_fuera_de_la_carpeta_de_la_skill() {
+    let root = std::env::temp_dir().join(format!("cc-skillssh-dl-{}", uuid::Uuid::new_v4()));
+    let dir = root.join("skill");
+    let files = |list: &[(&str, &str)]| list.iter().map(|(p, c)| (p.to_string(), c.to_string())).collect::<Vec<_>>();
+
+    write_download(&dir, &files(&[
+        ("skill.md", "---\nname: x\n---\n"),
+        ("refs/uno.md", "uno"),
+        ("../fuera.md", "no"),
+        ("/etc/fuera.md", "no"),
+        ("refs\\dos.md", "dos"),
+    ]))
+    .unwrap();
+    assert!(dir.join("SKILL.md").is_file(), "el SKILL.md queda con su nombre exacto");
+    assert!(dir.join("refs/uno.md").is_file());
+    assert!(dir.join("refs/dos.md").is_file(), "las barras de Windows también son carpetas");
+    assert!(!root.join("fuera.md").exists());
+
+    let err = write_download(&root.join("otra"), &files(&[("README.md", "sin skill")])).unwrap_err();
+    assert!(err.contains("SKILL.md"), "{err}");
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -156,11 +182,11 @@ fn el_id_se_traduce_al_target_que_espera_la_cli() {
 }
 
 /// El servicio exige dos caracteres; devolver vacío sin lanzar el proceso es la
-/// diferencia entre no hacer nada y arrancar un `npx` por cada tecla.
-#[test]
-fn una_busqueda_demasiado_corta_no_llega_a_ejecutar_nada() {
-    assert_eq!(search("a", None).unwrap(), Vec::new());
-    assert_eq!(search("   ", None).unwrap(), Vec::new());
+/// diferencia entre no hacer nada y salir a internet por cada tecla.
+#[tokio::test]
+async fn una_busqueda_demasiado_corta_no_llega_a_ejecutar_nada() {
+    assert_eq!(search("a", None).await.unwrap(), Vec::new());
+    assert_eq!(search("   ", None).await.unwrap(), Vec::new());
 }
 
 /// Con varias candidatas se elige la que coincide con el slug, y **solo** esa: `read_dir`
@@ -238,20 +264,18 @@ fn el_cache_viejo_sin_installs_sigue_siendo_legible() {
 
 // ── Contrato real con la CLI de skills.sh ───────────────────────
 
-/// Busca e instala de verdad. Va con `#[ignore]` porque necesita red y Node instalado —
-/// no puede correr en la suite normal. Es la única prueba que detecta que `npx skills`
-/// cambió el formato de su salida o el nombre de sus flags, así que conviene correrla al
+/// Busca e instala de verdad. Va con `#[ignore]` porque necesita red (y Node para el
+/// respaldo) — no puede correr en la suite normal. Es la única prueba que detecta que la
+/// API de skills.sh o las flags de `npx skills` cambiaron, así que conviene correrla al
 /// tocar este módulo:
 ///
 /// ```text
 /// cargo test --lib marketplace -- --ignored --nocapture
 /// ```
-#[test]
+#[tokio::test]
 #[ignore = "necesita red y Node.js instalado"]
-fn e2e_la_cli_responde_como_espera_el_parser() {
-    ensure_npx().expect("npx tiene que estar disponible para esta prueba");
-
-    let hits = search("react testing", None).expect("la búsqueda debe funcionar");
+async fn e2e_la_api_y_la_cli_responden_como_se_espera() {
+    let hits = search("react testing", None).await.expect("la búsqueda debe funcionar");
     assert!(!hits.is_empty(), "el directorio tiene que devolver algo para 'react testing'");
     for h in &hits {
         assert_eq!(h.id.split('/').count(), 3, "id mal parseado: {}", h.id);
@@ -259,9 +283,13 @@ fn e2e_la_cli_responde_como_espera_el_parser() {
     }
 
     // Un publicador que no existe no es un error: es una búsqueda sin resultados.
-    assert!(search("react testing", Some("no-existe-este-publicador-xyz")).unwrap().is_empty());
+    assert!(search("react testing", Some("no-existe-este-publicador-xyz")).await.unwrap().is_empty());
 
     let tmp = std::env::temp_dir().join(format!("cc-skillssh-e2e-{}", uuid::Uuid::new_v4()));
+    let dir = download_into(&tmp.join("api"), "anthropics/skills/webapp-testing").await.expect("debe descargar");
+    assert!(dir.join("SKILL.md").is_file(), "la descarga necesita su SKILL.md");
+    assert!(download_into(&tmp.join("nada"), "no-existe/nada/nada").await.is_err());
+
     let dir = install_into(&tmp, "anthropics/skills@webapp-testing").expect("debe instalar");
     assert!(dir.join("SKILL.md").is_file(), "la skill instalada necesita su SKILL.md");
     // `--copy` tiene que dejar archivos reales: la carpeta temporal se borra enseguida.
@@ -274,7 +302,7 @@ fn e2e_la_cli_responde_como_espera_el_parser() {
 /// sin esto, el parser puede estar bien y el cache quedar con algo que
 /// `install_marketplace_skill` no sabe reinstalar.
 #[tokio::test]
-#[ignore = "necesita red y Node.js instalado"]
+#[ignore = "necesita red"]
 async fn e2e_buscar_deja_el_cache_listo_para_instalar() {
     let conn = crate::database::test_db();
     conn.execute(

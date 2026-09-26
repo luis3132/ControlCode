@@ -1,8 +1,10 @@
 //! Si esta máquina puede usar skills.sh, paso por paso: la sección de Configuración que lo
 //! valida, y el mismo criterio para los errores del marketplace.
 //!
-//! skills.sh se consulta con su CLI (`npx skills`, ver `skillssh.rs`), y eso depende de
-//! tres cosas que cambian de máquina en máquina:
+//! Buscar e instalar hablan HTTP con skills.sh (ver `skillssh.rs`) y no necesitan nada
+//! instalado: el paso de búsqueda es el único que tiene que andar. Node, `npx` y la CLI son
+//! el respaldo para instalar una skill de la que skills.sh no tenga copia lista, y dependen
+//! de tres cosas que cambian de máquina en máquina:
 //!
 //! - **Node, y nuevo.** La CLI pide Node 22.20 o más. Los repositorios de Ubuntu 24.04 y
 //!   Debian 12 traen Node 18: `npx` existe, `npx --version` contesta, y la CLI falla después
@@ -26,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::util::path_env::{fresh_path, find_program_in};
 
-use super::skillssh::{parse_find_output, strip_ansi, with_env};
+use super::skillssh::{strip_ansi, with_env};
 
 /// Lo que pide la CLI: `engines.node` de su `package.json` (`npm view skills engines` dio
 /// `>=22.20.0` con skills 1.7.0, en 2026-09). Es un aviso y no una puerta: si un día sube,
@@ -211,30 +213,31 @@ pub fn npx_status() -> StepResult {
     result
 }
 
+/// Busca de verdad, por la misma vía que el marketplace (HTTP, sin Node).
+pub async fn search_status() -> StepResult {
+    let mut result = StepResult::new(CheckStep::Search, CheckState::Fail);
+    match tokio::time::timeout(SEARCH_TIMEOUT, super::skillssh::search("react", None)).await {
+        Ok(Ok(hits)) => {
+            result.results = Some(hits.len());
+            // Contestó pero sin nada: para "react" solo pasa si algo en el camino filtró la
+            // respuesta.
+            result.state = if hits.is_empty() { CheckState::Warn } else { CheckState::Ok };
+        }
+        Ok(Err(e)) => result.output = Some(e),
+        Err(_) => result.output = Some(format!("no terminó en {} s", SEARCH_TIMEOUT.as_secs())),
+    }
+    result
+}
+
 /// Corre la CLI de verdad. Con esto, lo que diga `npx` (sin red, un Node que no le sirve,
 /// un registro de npm inaccesible) queda a la vista tal cual.
-fn cli_status(step: CheckStep) -> StepResult {
+fn cli_status() -> StepResult {
     let (mut cmd, _) = tool("npx");
     with_env(&mut cmd);
-    let timeout = if step == CheckStep::Search {
-        cmd.args(["-y", "skills", "find", "react"]);
-        SEARCH_TIMEOUT
-    } else {
-        cmd.args(["-y", "skills", "--version"]);
-        CLI_TIMEOUT
-    };
-    let mut result = StepResult::new(step, CheckState::Fail);
+    cmd.args(["-y", "skills", "--version"]);
+    let timeout = CLI_TIMEOUT;
+    let mut result = StepResult::new(CheckStep::Cli, CheckState::Fail);
     match crate::util::output_with_timeout(&mut cmd, timeout) {
-        Ok(out) if out.status.success() && step == CheckStep::Search => {
-            let found = parse_find_output(&String::from_utf8_lossy(&out.stdout)).len();
-            result.results = Some(found);
-            // Contestó pero sin nada: la CLI anda y el directorio no trajo resultados, que
-            // para "react" solo pasa si algo en el camino filtró la respuesta.
-            result.state = if found > 0 { CheckState::Ok } else { CheckState::Warn };
-            if found == 0 {
-                result.output = Some(tail(&out.stdout, &out.stderr));
-            }
-        }
         Ok(out) if out.status.success() => {
             result.state = CheckState::Ok;
             result.version = first_line(&out.stdout);
@@ -248,23 +251,12 @@ fn cli_status(step: CheckStep) -> StepResult {
     result
 }
 
-/// Un paso del diagnóstico. El de Node es el primero y vuelve a leer el PATH del shell.
-pub fn run_step(step: CheckStep) -> StepResult {
-    match step {
-        CheckStep::Node => {
-            let fresh = fresh_path();
-            if let Ok(mut current) = CLI_PATH.write() {
-                *current = Some(fresh);
-            }
-            node_status()
-        }
-        CheckStep::Npx => npx_status(),
-        CheckStep::Cli | CheckStep::Search => cli_status(step),
-    }
-}
-
-/// Lo que dice el marketplace cuando skills.sh no puede andar en esta máquina, o `Ok` si
-/// puede. Mismos criterios que la sección de Configuración, y la manda ahí.
+/// Lo que se dice cuando el respaldo con la CLI no puede ni arrancar en esta máquina (no hay
+/// Node, o no hay `npx`), o `Ok` si puede intentarlo. Un Node más viejo que el que pide la
+/// CLI NO corta: muchas veces anda igual (un 22.17 corre `skills find` y `skills add` sin
+/// problemas), y rechazarlo de entrada dejaba sin skills.sh a máquinas donde funcionaba —
+/// por ejemplo con el `default` de nvm en un 22 viejo aunque hubiera un 26 instalado. Si la
+/// CLI falla de verdad, [`old_node_note`] agrega la versión como pista.
 pub fn requirement_error() -> Result<(), String> {
     let min = node_install(std::env::consts::OS).min_node;
     let node = node_status();
@@ -279,14 +271,7 @@ pub fn requirement_error() -> Result<(), String> {
                 node.output.unwrap_or_default()
             ));
         }
-        (CheckState::Warn, path) => {
-            return Err(format!(
-                "skills.sh necesita Node.js {min} o más nuevo, y la app encontró {} en {}. {where_to}",
-                node.version.as_deref().unwrap_or("una versión que no se pudo leer"),
-                path.unwrap_or("?")
-            ));
-        }
-        (CheckState::Ok, _) => {}
+        (CheckState::Warn | CheckState::Ok, _) => {}
     }
     let npx = npx_status();
     match (npx.state, npx.path) {
@@ -302,10 +287,41 @@ pub fn requirement_error() -> Result<(), String> {
     }
 }
 
-/// Un paso del diagnóstico de skills.sh (Configuración → skills.sh).
+/// La pista que se agrega cuando la CLI falló y el Node que encontró la app es más viejo
+/// que el que ella pide. `None` si el Node alcanza (o no se pudo leer).
+pub fn old_node_note() -> Option<String> {
+    let node = node_status();
+    (node.state == CheckState::Warn).then(|| {
+        format!(
+            "Puede ser por la versión de Node: la CLI de skills.sh pide {} o más nuevo, y la app encontró {} en {}. \
+             Configuración → skills.sh lo valida paso a paso.",
+            node_install(std::env::consts::OS).min_node,
+            node.version.as_deref().unwrap_or("una versión que no se pudo leer"),
+            node.path.as_deref().unwrap_or("?")
+        )
+    })
+}
+
+/// Un paso del diagnóstico de skills.sh (Configuración → skills.sh). El de Node vuelve a
+/// leer el PATH del shell. Los que lanzan procesos salen del hilo del runtime.
 #[tauri::command]
 pub async fn skillssh_check_step(step: CheckStep) -> Result<StepResult, String> {
-    tauri::async_runtime::spawn_blocking(move || run_step(step)).await.map_err(|e| e.to_string())
+    let blocking = |run: fn() -> StepResult| async move {
+        tauri::async_runtime::spawn_blocking(run).await.map_err(|e| e.to_string())
+    };
+    match step {
+        CheckStep::Search => Ok(search_status().await),
+        CheckStep::Node => blocking(|| {
+            let fresh = fresh_path();
+            if let Ok(mut current) = CLI_PATH.write() {
+                *current = Some(fresh);
+            }
+            node_status()
+        })
+        .await,
+        CheckStep::Npx => blocking(npx_status).await,
+        CheckStep::Cli => blocking(cli_status).await,
+    }
 }
 
 /// Cómo instalar un Node que le sirva a la CLI, en este sistema y en los otros.
@@ -366,16 +382,23 @@ mod test {
         let node = node_status();
         assert_eq!(node.state, CheckState::Warn);
         assert_eq!(node.version.as_deref(), Some("v18.19.1"));
-        let err = requirement_error().unwrap_err();
-        assert!(err.contains("22.20.0") && err.contains("v18.19.1") && err.contains(dir.to_str().unwrap()), "{err}");
+        let note = old_node_note().expect("un Node viejo deja la pista");
+        assert!(note.contains("22.20.0") && note.contains("v18.19.1") && note.contains(dir.to_str().unwrap()), "{note}");
 
         script("node", "echo v24.14.0");
+        assert_eq!(old_node_note(), None);
         let err = requirement_error().unwrap_err();
         assert!(err.contains("npx") && err.contains("npm"), "sin npx dice en qué paquete viene: {err}");
 
         script("npx", "echo 11.9.0");
         assert_eq!(npx_status().version.as_deref(), Some("11.9.0"));
         assert_eq!(requirement_error(), Ok(()));
+
+        // Un Node más viejo que el que pide la CLI no le impide intentarlo: el 22 que nvm
+        // deja por defecto corre la CLI sin problemas.
+        script("node", "echo v22.17.1");
+        assert_eq!(requirement_error(), Ok(()));
+        assert!(old_node_note().is_some());
 
         set_path(None);
         let _ = std::fs::remove_dir_all(&dir);

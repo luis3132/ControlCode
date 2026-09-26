@@ -11,17 +11,21 @@ import {
   skillsshCheckStep, skillsshNodeInstall, type NodeInstall, type SkillsShStep, type SkillsShStepResult,
 } from "./ipc";
 
-/** En este orden: cada uno supone el anterior (sin `npx` no hay CLI que probar). */
-const STEPS: SkillsShStep[] = ["node", "npx", "cli", "search"];
+/**
+ * La búsqueda primero: es lo único que tiene que andar (va por HTTP, sin Node). Node, `npx`
+ * y la CLI son el respaldo para instalar, y cada uno supone el anterior.
+ */
+const STEPS: SkillsShStep[] = ["search", "node", "npx", "cli"];
 
 /**
  * Si esta máquina puede usar skills.sh, paso por paso.
  *
- * Existe porque en otra distro o sistema el marketplace solo decía "no anda": skills.sh se
- * consulta con su CLI (`npx skills`), que pide Node 22.20 o más, y lo que falla cambia de
- * máquina en máquina — no hay Node, es el 18 de los repositorios de Ubuntu, falta `npx`
- * (en Debian viene aparte), la app no lo encuentra en su PATH, o no hay red hasta npm o
- * skills.sh. Acá se prueba cada cosa por separado y se muestra lo que contestó.
+ * Buscar e instalar hablan HTTP con skills.sh y no necesitan nada instalado. La CLI
+ * (`npx skills`, Node 22.20 o más) queda de respaldo para instalar las skills de las que
+ * skills.sh no tiene copia lista, y lo que le falla cambia de máquina en máquina — no hay
+ * Node, es el 18 de los repositorios de Ubuntu, falta `npx` (en Debian viene aparte) o la
+ * app no lo encuentra en su PATH. Acá se prueba cada cosa por separado y se muestra lo que
+ * contestó.
  *
  * Validar vuelve a leer el PATH del shell (ver `marketplace/skillssh_check.rs`): instalar
  * Node desde la terminal que se abre acá y validar de nuevo alcanza, sin reiniciar la app.
@@ -57,8 +61,10 @@ export function SkillsShSection() {
         result = { step, state: "fail", path: null, version: null, output: String(e), results: null };
       }
       setResults((prev) => ({ ...prev, [step]: result }));
-      // Un Node viejo no corta: el paso de la CLI es el que dice si de verdad no le sirve.
-      if (result.state === "fail") break;
+      // Una búsqueda fallida no corta (el respaldo se prueba igual), y un Node viejo
+      // tampoco: el paso de la CLI es el que dice si de verdad no le sirve. Sin Node o sin
+      // `npx` no hay CLI que probar.
+      if (result.state === "fail" && step !== "search") break;
     }
     setRunning(null);
   };

@@ -1,29 +1,33 @@
 //! Fuente `skillssh` — el directorio abierto de skills de <https://skills.sh>.
 //!
-//! A diferencia de `local` y `github`, acá NO se habla con ninguna API: todo pasa por la
-//! CLI oficial (`npx skills …`), que es la vía pública y gratuita del proyecto. Eso deja
-//! la integración atada a un contrato que ellos mantienen y documentan, en vez de a
-//! endpoints internos que pueden cambiar sin aviso.
+//! Se habla con los mismos dos endpoints públicos que usa su CLI oficial (`npx skills`):
 //!
-//! Dos comandos alcanzan:
+//! - `GET /api/search?q=…&owner=…` — lo que hace `npx skills find`, que no es más que
+//!   esa llamada y un formato para la terminal.
+//! - `GET /api/download/<owner>/<repo>/<slug>` — lo que hace `npx skills add` antes de
+//!   recurrir a clonar el repo: devuelve los archivos de la skill ya listos.
 //!
-//! - `npx skills find <query>` — con query en la línea de comandos imprime la lista y
-//!   termina; sin query abre un buscador interactivo, que acá no serviría de nada.
-//! - `npx skills add <owner/repo@slug>` — instala la skill.
+//! Antes todo pasaba por la CLI, y eso ataba skills.sh a tener un Node reciente, `npx` y
+//! un PATH donde encontrarlos — lo que falla distinto en cada máquina (el Node 18 de
+//! Ubuntu, un `default` de nvm más viejo que el que pide la CLI, el `npx.cmd` de Windows
+//! lanzado desde una app de ventana). Hablando HTTP desde acá, buscar e instalar anda en
+//! cualquier sistema sin nada instalado.
 //!
+//! La CLI queda como respaldo para instalar ([`install_into`]): si el endpoint de descarga
+//! no tiene una copia de la skill, `npx skills add <owner/repo@slug>` la saca del repo.
 //! `add` no tiene forma de elegir el destino: escribe siempre relativo a su directorio de
 //! trabajo (`./.claude/skills/<slug>/`). Se aprovecha eso corriéndolo con el cwd apuntando
 //! a una carpeta temporal nuestra, y de ahí el `SKILL.md` resultante entra por el mismo
 //! pipeline de instalación que usa cualquier otra fuente. Así una skill de skills.sh queda
 //! indistinguible del resto: misma copia global, mismos symlinks, mismo desinstalador.
 //!
-//! Requiere Node 22.20 o más nuevo. Cuando no está, o es viejo, el error lo dice con todas
-//! las letras en vez de dejar un "no se encontró el programa" del sistema operativo — ver
-//! [`ensure_npx`] y `skillssh_check`, que es también la sección de Configuración que lo
+//! Ese respaldo pide Node 22.20 o más nuevo; cuando no está, el error lo dice con todas
+//! las letras — ver `skillssh_check`, que es también la sección de Configuración que lo
 //! valida paso a paso.
 
 use rusqlite::params;
-use std::path::{Path, PathBuf};
+use serde::Deserialize;
+use std::path::{Component, Path, PathBuf};
 use uuid::Uuid;
 use std::process::Command;
 
@@ -34,10 +38,9 @@ use crate::util::now_ts;
 
 use super::types::MarketplaceSkillEntry;
 
-/// Plazos de cada llamada a la CLI. `add` clona el repo de origen entero para sacar una
+/// Plazo del respaldo con la CLI. `add` clona el repo de origen entero para sacar una
 /// sola skill, así que un repo grande con una conexión lenta necesita bastante más que un
 /// fetch normal.
-const FIND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const ADD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Un plazo vencido merece su propio mensaje: "Node no está instalado" mandaría a revisar
@@ -51,6 +54,16 @@ fn timeout_or(e: std::io::Error, ausente: &str) -> String {
 }
 
 const CLONE_TIMEOUT_MS: &str = "180000";
+
+/// El servicio. Es el mismo valor por defecto que usa la CLI (`SKILLS_API_URL`).
+const API_BASE: &str = "https://skills.sh";
+
+/// Cuántos resultados se piden por búsqueda. La CLI pide 10 porque los muestra en una
+/// terminal; acá van a una grilla con scroll.
+const SEARCH_LIMIT: &str = "50";
+
+/// Plazo de cada llamada HTTP. Una descarga trae la skill entera en un solo JSON.
+const HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// El identificador de Claude Code dentro de la CLI de skills — define en qué carpeta deja
 /// la skill instalada (`.claude/skills/`). No es el mismo string que el `agent_id` de
@@ -114,23 +127,18 @@ pub(super) fn with_env(cmd: &mut Command) {
     cmd.env("npm_config_yes", "true");
 }
 
-/// Verifica que skills.sh pueda andar en esta máquina antes de intentar nada más.
-///
-/// Es la diferencia entre "necesitás Node 22.20 y tenés el 18" y un críptico "No such file
-/// or directory (os error 2)" saliendo del sistema operativo —o un error de sintaxis de la
-/// CLI corriendo en un Node que no le sirve—. Se llama al refrescar el repositorio, así el
-/// problema se ve en la pantalla de repositorios y no recién cuando alguien busca algo.
-pub fn ensure_npx() -> Result<(), String> {
-    super::skillssh_check::requirement_error()
-}
-
 /// Cuando la CLI falla, la causa más común no está en lo que imprime: con un Node viejo
 /// revienta con un `SyntaxError` sobre `node:util` (probado con el Node 18 de Ubuntu 24.04),
-/// que no dice nada de versiones. Si es eso, se dice eso; si no, va el error tal cual.
+/// que no dice nada de versiones. Si falta Node o `npx`, se dice eso; si el Node es más
+/// viejo que el que pide la CLI, se agrega como pista — sin reemplazar el error, porque
+/// muchas veces anda igual (un 22.17 corre la CLI sin problemas).
 fn explain(failure: String) -> String {
-    match super::skillssh_check::requirement_error() {
-        Err(cause) => cause,
-        Ok(()) => failure,
+    if let Err(cause) = super::skillssh_check::requirement_error() {
+        return cause;
+    }
+    match super::skillssh_check::old_node_note() {
+        Some(note) => format!("{failure}. {note}"),
+        None => failure,
     }
 }
 
@@ -165,83 +173,182 @@ pub(super) fn strip_ansi(raw: &str) -> String {
     out
 }
 
-// ── Búsqueda ─────────────────────────────────────────────────────
+// ── API HTTP ─────────────────────────────────────────────────────
 
-/// Parsea la salida de `npx skills find`. Cada resultado ocupa dos líneas:
-///
-/// ```text
-/// callstack/react-native-testing-library@react-native-testing 3.3K installs
-/// └ https://skills.sh/callstack/react-native-testing-library/react-native-testing
-/// ```
-///
-/// El ancla es la línea del link, no la del nombre: de ahí sale el `owner/repo/slug`
-/// completo y sin ambigüedad (un slug puede tener guiones, y el `@` del nombre no alcanza
-/// para separar si el repo tuviera uno). La línea de arriba solo aporta las instalaciones.
-pub(super) fn parse_find_output(raw: &str) -> Vec<SkillsShHit> {
-    const LINK: &str = "https://skills.sh/";
-    let clean = strip_ansi(raw);
-    let lines: Vec<&str> = clean.lines().map(str::trim).collect();
+fn api_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .user_agent("ControlCode-App")
+        .timeout(HTTP_TIMEOUT)
+        .build()
+        .map_err(|e| e.to_string())
+}
 
-    let mut out = Vec::new();
-    for (i, line) in lines.iter().enumerate() {
-        let Some(pos) = line.find(LINK) else { continue };
-        let id = line[pos + LINK.len()..].trim().trim_end_matches('/');
+/// Una URL de la API con cada segmento escapado: un slug no debería traer `/` ni `?`,
+/// pero si lo trae no puede terminar pidiendo otra cosa.
+fn api_url(segments: &[&str]) -> Result<reqwest::Url, String> {
+    let mut url = reqwest::Url::parse(API_BASE).map_err(|e| e.to_string())?;
+    url.path_segments_mut()
+        .map_err(|_| "URL base de skills.sh inválida".to_string())?
+        .extend(segments);
+    Ok(url)
+}
 
-        // `owner/repo/slug`: menos partes es un link a otra cosa (el home, un pack), más
-        // partes no lo produce esta salida.
-        let parts: Vec<&str> = id.split('/').filter(|s| !s.is_empty()).collect();
-        if parts.len() != 3 {
-            continue;
-        }
-
-        // Las instalaciones vienen en la línea anterior, después del nombre. Que falten no
-        // invalida el resultado: la CLI las omite cuando son cero.
-        let installs = i
-            .checked_sub(1)
-            .and_then(|p| lines.get(p))
-            .and_then(|prev| prev.split_once(" installs"))
-            .and_then(|(head, _)| head.rsplit(char::is_whitespace).next())
-            .filter(|s| !s.is_empty() && s.chars().next().is_some_and(|c| c.is_ascii_digit()))
-            .map(|s| s.to_string());
-
-        out.push(SkillsShHit {
-            id: parts.join("/"),
-            source: format!("{}/{}", parts[0], parts[1]),
-            slug: parts[2].to_string(),
-            installs,
-        });
+/// Un error de red dicho de forma que se entienda desde la grilla del marketplace.
+fn network_error(what: &str, e: reqwest::Error) -> String {
+    if e.is_timeout() {
+        format!("skills.sh no respondió a tiempo al {what}. Probá de nuevo o revisá tu conexión.")
+    } else {
+        format!("No se pudo conectar con skills.sh al {what}: {e}")
     }
-    out
+}
+
+#[derive(Deserialize)]
+struct ApiSearch {
+    #[serde(default)]
+    skills: Vec<ApiSkill>,
+}
+
+#[derive(Deserialize)]
+struct ApiSkill {
+    /// `owner/repo/slug`. Las skills que no salen de GitHub traen dos partes
+    /// (`dominio/slug`): no hay repo del que `add` pueda sacarlas, y se omiten — igual
+    /// que antes, cuando se parseaban los links de la salida de la CLI.
+    id: String,
+    #[serde(default)]
+    installs: Option<u64>,
+}
+
+/// `968596` → `"968.6K"`, como lo muestra la CLI (y la web).
+pub(super) fn format_installs(n: u64) -> String {
+    let compact = |value: f64, suffix: &str| {
+        let text = format!("{value:.1}");
+        format!("{}{suffix}", text.strip_suffix(".0").unwrap_or(&text))
+    };
+    match n {
+        0..=999 => n.to_string(),
+        1_000..=999_999 => compact(n as f64 / 1_000.0, "K"),
+        _ => compact(n as f64 / 1_000_000.0, "M"),
+    }
+}
+
+/// Parsea la respuesta de `/api/search`, ordenada por instalaciones como la ordena la CLI.
+pub(super) fn parse_search_response(body: &str) -> Result<Vec<SkillsShHit>, String> {
+    let parsed: ApiSearch =
+        serde_json::from_str(body).map_err(|e| format!("skills.sh devolvió una búsqueda que no se entiende: {e}"))?;
+    let mut skills = parsed.skills;
+    skills.sort_by(|a, b| b.installs.unwrap_or(0).cmp(&a.installs.unwrap_or(0)));
+    Ok(skills
+        .into_iter()
+        .filter_map(|skill| {
+            let parts: Vec<&str> = skill.id.split('/').filter(|s| !s.is_empty()).collect();
+            if parts.len() != 3 {
+                return None;
+            }
+            Some(SkillsShHit {
+                id: parts.join("/"),
+                source: format!("{}/{}", parts[0], parts[1]),
+                slug: parts[2].to_string(),
+                // La CLI las omite cuando son cero.
+                installs: skill.installs.filter(|n| *n > 0).map(format_installs),
+            })
+        })
+        .collect())
 }
 
 /// Busca en el directorio de skills.sh. `owner` restringe a un publicador puntual.
-///
-/// Bloquea el hilo hasta que la CLI termina — quien la llame desde un contexto async tiene
-/// que sacarla del hilo del runtime (ver `marketplace::search_remote_registries`).
-pub fn search(query: &str, owner: Option<&str>) -> Result<Vec<SkillsShHit>, String> {
+pub async fn search(query: &str, owner: Option<&str>) -> Result<Vec<SkillsShHit>, String> {
     let query = query.trim();
     // Menos de dos caracteres los rechaza el buscador del propio servicio; cortar acá evita
-    // un `npx` entero para recibir un error.
+    // una llamada entera para recibir un error.
     if query.len() < 2 {
         return Ok(Vec::new());
     }
 
-    let mut cmd = npx_command();
-    with_env(&mut cmd);
-    cmd.args(["-y", "skills", "find", query]);
+    let mut url = api_url(&["api", "search"])?;
+    url.query_pairs_mut().append_pair("q", query).append_pair("limit", SEARCH_LIMIT);
     if let Some(owner) = owner.map(str::trim).filter(|o| !o.is_empty()) {
-        cmd.args(["--owner", owner]);
+        url.query_pairs_mut().append_pair("owner", owner);
     }
 
-    let out = crate::util::output_with_timeout(&mut cmd, FIND_TIMEOUT)
-        .map_err(|e| timeout_or(e, NPX_MISSING))?;
-    if !out.status.success() {
-        return Err(explain(format!(
-            "`npx skills find` falló: {}",
-            strip_ansi(&String::from_utf8_lossy(&out.stderr)).trim()
-        )));
+    let response = api_client()?.get(url).send().await.map_err(|e| network_error("buscar", e))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("skills.sh contestó {status} a la búsqueda"));
     }
-    Ok(parse_find_output(&String::from_utf8_lossy(&out.stdout)))
+    let body = response.text().await.map_err(|e| network_error("buscar", e))?;
+    parse_search_response(&body)
+}
+
+#[derive(Deserialize)]
+struct ApiDownload {
+    #[serde(default)]
+    files: Vec<ApiFile>,
+}
+
+#[derive(Deserialize)]
+struct ApiFile {
+    path: String,
+    contents: String,
+}
+
+/// Una ruta de la descarga convertida en una ruta segura dentro de la carpeta de la skill.
+/// `None` para lo que se saldría de ella (`..`, rutas absolutas, `C:\`): los archivos
+/// vienen de un servicio de terceros y se escriben en disco.
+fn safe_relative(path: &str) -> Option<PathBuf> {
+    let normalized = path.replace('\\', "/");
+    let mut out = PathBuf::new();
+    for component in Path::new(&normalized).components() {
+        match component {
+            Component::Normal(part) => out.push(part),
+            Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    (!out.as_os_str().is_empty()).then_some(out)
+}
+
+/// Escribe los archivos de una descarga en `dir`. El `SKILL.md` de la raíz queda con ese
+/// nombre exacto aunque venga como `skill.md`: en Linux el resto de la app lo busca así.
+pub(super) fn write_download(dir: &Path, files: &[(String, String)]) -> Result<(), String> {
+    for (path, contents) in files {
+        let Some(mut relative) = safe_relative(path) else { continue };
+        if relative.as_os_str().eq_ignore_ascii_case("skill.md") {
+            relative = PathBuf::from("SKILL.md");
+        }
+        let target = dir.join(relative);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&target, contents).map_err(|e| format!("{}: {e}", target.display()))?;
+    }
+    if dir.join("SKILL.md").is_file() {
+        Ok(())
+    } else {
+        Err("la descarga de skills.sh no trajo un SKILL.md".into())
+    }
+}
+
+/// Baja una skill del directorio (`owner/repo/slug`) a `staging/<slug>/` y devuelve esa
+/// carpeta. Es el mismo endpoint que usa `npx skills add` antes de recurrir a clonar.
+pub async fn download_into(staging: &Path, id: &str) -> Result<PathBuf, String> {
+    let parts: Vec<&str> = id.split('/').collect();
+    let [owner, repo, slug] = parts.as_slice() else {
+        return Err(format!("Identificador de skill inesperado: {id}"));
+    };
+    let url = api_url(&["api", "download", owner, repo, slug])?;
+    let response = api_client()?.get(url).send().await.map_err(|e| network_error("descargar", e))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("skills.sh contestó {status} al pedir {id}"));
+    }
+    let body = response.text().await.map_err(|e| network_error("descargar", e))?;
+    let parsed: ApiDownload =
+        serde_json::from_str(&body).map_err(|e| format!("skills.sh devolvió una descarga que no se entiende: {e}"))?;
+
+    let dir = staging.join(safe_relative(slug).unwrap_or_else(|| PathBuf::from("skill")));
+    let files: Vec<(String, String)> = parsed.files.into_iter().map(|f| (f.path, f.contents)).collect();
+    write_download(&dir, &files)?;
+    Ok(dir)
 }
 
 // ── Instalación ──────────────────────────────────────────────────
@@ -407,14 +514,7 @@ pub async fn search_remote_conn(db: &DbConnection, query: &str) -> Result<(), St
     }
 
     for (id, name, owner) in targets {
-        // La CLI es un proceso que bloquea; correrla en el hilo del runtime congelaría toda
-        // la app mientras busca.
-        let (q, owner_owned) = (query.to_string(), owner.clone());
-        let found = tauri::async_runtime::spawn_blocking(move || {
-            search(&q, Some(owner_owned.as_str()))
-        })
-        .await
-        .map_err(|e| e.to_string())?;
+        let found = search(query, Some(owner.as_str())).await;
 
         let now = now_ts();
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -454,20 +554,12 @@ pub async fn search_remote_conn(db: &DbConnection, query: &str) -> Result<(), St
     Ok(())
 }
 
-/// "Refrescar" un repositorio de skills.sh no puede rebajar la lista completa —  no existe
-/// tal cosa sin su API privada. Lo que sí puede es comprobar que la herramienta con la que
-/// se lo consulta esté disponible, que es el único motivo real por el que esta fuente deja
-/// de funcionar en una máquina. Los resultados de la última búsqueda se conservan.
-/// `ensure_npx` arranca un proceso y espera: eso NO puede pasar en el hilo del runtime.
-/// Refrescar repositorios recorre todos en serie, así que dejar esta comprobación bloqueando
-/// congelaba un worker durante todo el arranque de Node — y la instalación de skills, que es
-/// async, quedaba encolada detrás sin motivo aparente. La búsqueda y la instalación ya salían
-/// del runtime con `spawn_blocking`; esto se me había escapado.
+/// "Refrescar" un repositorio de skills.sh no puede rebajar la lista completa: el
+/// directorio solo sabe buscar. Los resultados de la última búsqueda se conservan.
+///
+/// Antes esto exigía Node y `npx` y marcaba el repositorio como roto sin ellos. Ya no hacen
+/// falta para buscar ni para instalar (ver el encabezado del módulo), así que no se exigen.
 pub(super) async fn refresh_skillssh(db: &DbConnection, id: &str) -> Result<Vec<MarketplaceSkillEntry>, String> {
-    tauri::async_runtime::spawn_blocking(ensure_npx)
-        .await
-        .map_err(|e| e.to_string())??;
-
     let conn = db.lock().map_err(|e| e.to_string())?;
     let cache: Option<String> = conn
         .query_row("SELECT cache_json FROM registries WHERE id = ?1", [id], |r| r.get(0))
@@ -475,8 +567,11 @@ pub(super) async fn refresh_skillssh(db: &DbConnection, id: &str) -> Result<Vec<
     Ok(cache.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default())
 }
 
-/// Instala una skill del directorio: la CLI la deja en una carpeta temporal nuestra y de
-/// ahí sigue por el mismo camino que cualquier otra fuente.
+/// Instala una skill del directorio: se baja a una carpeta temporal nuestra y de ahí sigue
+/// por el mismo camino que cualquier otra fuente.
+///
+/// Primero por la API (no necesita nada instalado). Si skills.sh no tiene una copia lista
+/// —la CLI en ese caso clona el repo—, se recurre a `npx skills add`.
 pub(super) async fn install_from_skillssh(
     entry: &MarketplaceSkillEntry,
     origin: crate::skills::SkillOrigin<'_>,
@@ -486,11 +581,17 @@ pub(super) async fn install_from_skillssh(
         .ok_or_else(|| format!("Identificador de skill inesperado: {}", entry.folder_path))?;
 
     let staging = std::env::temp_dir().join(format!("controlcode-skillssh-{}", Uuid::new_v4()));
-    let staged = {
-        let staging = staging.clone();
-        tauri::async_runtime::spawn_blocking(move || install_into(&staging, &target))
-            .await
-            .map_err(|e| e.to_string())?
+    let staged = match download_into(&staging.join("api"), &entry.folder_path).await {
+        Ok(dir) => Ok(dir),
+        Err(api_error) => {
+            let cli_staging = staging.join("cli");
+            tauri::async_runtime::spawn_blocking(move || install_into(&cli_staging, &target))
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|cli_error| {
+                    format!("{api_error}. El respaldo con la CLI (`npx skills add`) también falló: {cli_error}")
+                })
+        }
     };
 
     let result = staged.and_then(|dir| {

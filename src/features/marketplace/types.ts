@@ -1,4 +1,4 @@
-/** `skillssh` es el directorio abierto de skills.sh, consultado por su CLI (`npx skills`). */
+/** `skillssh` es el directorio abierto de skills.sh, consultado por su API pública (la misma que usa `npx skills`). */
 export type RegistrySourceType = "local" | "github" | "skillssh";
 
 export interface RegistrySummary {

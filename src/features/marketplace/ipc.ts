@@ -54,7 +54,7 @@ export const previewRegistryLocation = (sourceType: RegistrySourceType, location
  * El `SKILL.md` de una entrada del catálogo, para leerla ANTES de instalarla.
  *
  * Falla a propósito en los repos que no pueden servir el archivo sin instalar la skill
- * (skills.sh baja la carpeta con `npx`, que tarda segundos): quien llama se queda con la
+ * (skills.sh baja la skill entera para eso): quien llama se queda con la
  * descripción que ya tiene del listado.
  */
 export const marketplaceSkillReadme = (registryId: string, skillId: string) =>
@@ -62,7 +62,7 @@ export const marketplaceSkillReadme = (registryId: string, skillId: string) =>
 
 // ── Diagnóstico de skills.sh (Configuración → skills.sh) ────────────────────
 
-/** Ver `marketplace/skillssh_check.rs`. Van en este orden: cada uno supone el anterior. */
+/** Ver `marketplace/skillssh_check.rs`. `search` va por HTTP; el resto es el respaldo con la CLI. */
 export type SkillsShStep = "node" | "npx" | "cli" | "search";
 
 export interface SkillsShStepResult {

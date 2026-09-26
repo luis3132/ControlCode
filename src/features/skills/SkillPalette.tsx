@@ -106,7 +106,7 @@ export function SkillPalette({ target: initial, onClose }: {
    * Al abrir, la ventana muestra TU catálogo: las instaladas, que son las que se adjuntan
    * el 99% de las veces. Listar de entrada todo lo que hay en los repositorios las ahogaba
    * entre cientos de entradas que nadie pidió — y de paso disparaba una búsqueda remota
-   * (un proceso `npx`) apenas se abría el panel.
+   * a skills.sh apenas se abría el panel.
    */
   const searching = query.trim().length >= 2;
 

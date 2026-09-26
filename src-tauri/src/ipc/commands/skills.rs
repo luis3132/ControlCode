@@ -70,13 +70,13 @@ pub(super) fn skill_search(app: &AppHandle, args: &Value) -> Result<Value, Strin
 
     // El directorio se consulta SIEMPRE, igual que en el Marketplace: buscar tiene que
     // mostrar todo lo que hay, sin que nadie tenga que pedir cada fuente por separado.
-    // Cuesta un proceso `npx` de varios segundos, así que esta llamada tarda — es el precio
-    // de que el resultado esté completo.
+    // Cuesta una llamada HTTP a skills.sh, así que esta llamada tarda un poco más — es el
+    // precio de que el resultado esté completo.
     let mut sources = vec![json!("repos")];
     let mut remote_error: Option<String> = None;
     match blocking_runtime()?.block_on(crate::marketplace::search_remote_conn(&db, &query)) {
         Ok(()) => sources.push(json!("skills.sh")),
-        // Que falle el directorio (sin Node, sin red) no puede tapar lo que los repos
+        // Que falle el directorio (sin red) no puede tapar lo que los repos
         // propios sí respondieron: se reporta aparte y la búsqueda sigue.
         Err(e) => remote_error = Some(e),
     }
