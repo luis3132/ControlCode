@@ -265,19 +265,33 @@ pub fn list_marketplace_skills(
     db: tauri::State<DbConnection>,
 ) -> Result<Vec<MarketplaceSkillEntry>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
+    list_cached_skills(&conn, query, category)
+}
+
+/// El trabajo de [`list_marketplace_skills`] sobre una conexión, para poder probarlo.
+pub(super) fn list_cached_skills(
+    conn: &rusqlite::Connection,
+    query: Option<String>,
+    category: Option<String>,
+) -> Result<Vec<MarketplaceSkillEntry>, String> {
     let mut stmt = conn
-        .prepare("SELECT name, cache_json FROM registries WHERE enabled = 1 ORDER BY priority ASC")
+        .prepare("SELECT name, cache_json, source_type FROM registries WHERE enabled = 1 ORDER BY priority ASC")
         .map_err(|e| e.to_string())?;
-    let cached: Vec<(String, Option<String>)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+    let cached: Vec<(String, Option<String>, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
 
     let query_lower = query.as_deref().map(|q| q.to_lowercase());
     let mut out = Vec::new();
-    for (live_name, json) in cached {
+    for (live_name, json, source_type) in cached {
         let Some(json) = json else { continue };
+        // Lo de skills.sh ya ES el resultado de buscar este texto en su directorio, y su
+        // búsqueda es difusa: trae skills cuyo nombre no contiene lo que se escribió (una
+        // de `azure` para "cloud"). Volver a filtrarlas por texto las descartaba todas y el
+        // marketplace quedaba vacío aunque la búsqueda hubiera traído decenas.
+        let already_searched = source_type == "skillssh";
         let entries: Vec<MarketplaceSkillEntry> = serde_json::from_str(&json).unwrap_or_default();
         for mut entry in entries {
             // El nombre cacheado puede haber quedado viejo si el usuario renombró el
@@ -289,7 +303,7 @@ pub fn list_marketplace_skills(
                     continue;
                 }
             }
-            if let Some(q) = &query_lower {
+            if let Some(q) = query_lower.as_ref().filter(|_| !already_searched) {
                 let haystack = format!("{} {}", entry.name, entry.description.as_deref().unwrap_or(""))
                     .to_lowercase();
                 if !haystack.contains(q.as_str()) {

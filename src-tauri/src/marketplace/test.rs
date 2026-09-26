@@ -350,3 +350,37 @@ async fn e2e_buscar_deja_el_cache_listo_para_instalar() {
         .collect();
     assert_ne!(antes, despues, "el cache tiene que quedar con la búsqueda nueva");
 }
+
+/// La búsqueda de skills.sh es difusa: trae skills cuyo nombre no contiene el texto. El
+/// marketplace las volvía a filtrar por texto y quedaba vacío; las de un repo común sí se
+/// siguen filtrando.
+#[test]
+fn lo_que_trajo_skills_sh_no_se_vuelve_a_filtrar_por_texto() {
+    let conn = crate::database::test_db();
+    let entry = |id: &str, registry: &str| MarketplaceSkillEntry {
+        id: id.into(),
+        registry_id: registry.into(),
+        registry_name: registry.into(),
+        name: id.into(),
+        author: None,
+        description: None,
+        categories: Vec::new(),
+        compatible_agents: Vec::new(),
+        folder_path: id.into(),
+        files: Vec::new(),
+        installs: None,
+    };
+    for (id, source, skill) in [("r-sh", "skillssh", "azure-kusto"), ("r-gh", "github", "otra-cosa")] {
+        let json = serde_json::to_string(&vec![entry(skill, id)]).unwrap();
+        conn.execute(
+            "INSERT INTO registries (id, name, source_type, location, priority, enabled, created_at, cache_json)
+             VALUES (?1, ?1, ?2, '', 0, 1, 0, ?3)",
+            rusqlite::params![id, source, json],
+        )
+        .unwrap();
+    }
+
+    let found = super::registries::list_cached_skills(&conn, Some("cloud".into()), None).unwrap();
+    let names: Vec<&str> = found.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["azure-kusto"]);
+}
