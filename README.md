@@ -104,7 +104,7 @@ The [orchestration skill](#orchestration-skill) ships with the app and installs 
 
 Add skill repositories and install from them in one click. Paste a plain GitHub link — including a `/tree/branch/subfolder` URL — or point at a local folder. Repos with a `registry.json` manifest are read from it; repos without one are scanned for `SKILL.md` files, with results cached locally. Browse and search from a palette, with each `SKILL.md` rendered.
 
-Ships preconfigured with [autoskills](https://github.com/midudev/autoskills), [anthropics/skills](https://github.com/anthropics/skills) and the [skills.sh](https://skills.sh) directory.
+Ships preconfigured with [autoskills](https://github.com/midudev/autoskills), [anthropics/skills](https://github.com/anthropics/skills) and the [skills.sh](https://skills.sh) directory. skills.sh is searched and installed through its public API — the same one its `npx skills` CLI uses — so it needs nothing installed; the CLI is only a fallback for the few skills it can't serve ready-made.
 
 **Two skills can share a name and be nothing alike.** A skill is identified by the repository it came from *plus* the entry inside it, and the author is shown next to the name. Reinstalling updates the copy you already have instead of creating a second one, so whatever you attached it to keeps working.
 
@@ -136,7 +136,7 @@ Close a tab and it's archived — along with the skills it had and the tabs that
 
 ### 🤖 A CLI your agent can drive
 
-`ccode` lets any agent orchestrate the app it's running inside. Ask Claude Code to *"open three tabs for this monorepo"* and it does it. Output is always one line of JSON — no scraping, no heuristics. See the [CLI reference](#cli-reference).
+`ccode` lets any agent orchestrate the app it's running inside. Ask Claude Code to *"open three tabs for this monorepo"*, or to *"start the dev server and tell me if it compiles"*, and it does it — agent tabs and plain terminal tabs alike: it opens them, types into them, reads what they printed and waits for them to finish. Output is always one line of JSON — no scraping, no heuristics. See the [CLI reference](#cli-reference).
 
 An orchestrator's real constraint is its context window, so reading a terminal is designed to be cheap:
 
@@ -180,7 +180,7 @@ Shortcuts are captured before the terminal sees them, so they never reach the ag
 
 ## Installation
 
-**Requirements:** [Bun](https://bun.sh), a Rust toolchain, and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS. The skills.sh source also needs Node (it runs `npx skills`).
+**Requirements:** [Bun](https://bun.sh), a Rust toolchain, and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS. Node is optional: skills.sh only falls back to `npx skills` for skills its API doesn't serve.
 
 ```bash
 git clone https://github.com/luis3132/ControlCode.git
@@ -264,6 +264,16 @@ The first value can be given positionally, without its flag: `ccode skill instal
 | `tab output <id> [--lines 40]` | What's *new* since the last read, compressed. `--full` for everything, `--raw` for unprocessed bytes |
 | `tab send <id> "..."` | Type into its terminal, then Enter. `--no-enter` to skip |
 
+**Terminal tabs.** `--agent bash` opens a plain shell instead of an agent, and every command above works on it. It's how an agent runs something that should stay visible and keep running — a dev server, a test watcher, a log tail:
+
+```bash
+ccode tab create ./web --agent bash --initprompt "bun dev"   # the first command, run once the shell is up
+ccode watch add <id> --idle 5 && ccode watch wait            # returns when it goes quiet or prints an error
+ccode tab output <id>                                        # "Local: http://localhost:5173", or the error
+ccode tab send <id> "bun test"                               # run another command in it
+ccode tab send <id> $'\x03' --no-enter                       # Ctrl-C
+```
+
 **Options for `tab create`**
 
 | Flag | Meaning |
@@ -311,6 +321,27 @@ Folder workspaces live in the workspaces panel. These commands act on **saved la
 
 Editing a skill that came from a repository saves a local copy rather than overwriting it, so the original keeps updating. A name that matches more than one installed skill is an error listing the candidates, never a guess.
 
+#### Fleet
+
+Background agents, each in its own git worktree, shown in the fleet console. Without `--cwd` or `--run-id`, these act on the last run launched from the current folder.
+
+| Command | Description |
+|---|---|
+| `run roster` | Which agents, models and accounts can run now, with cost and quota |
+| `run plan --json-args '{...}'` | Declare a whole task DAG at once |
+| `run status` | The run's board: every task with its state, model, cost and dependencies |
+| `run await [--timeout-s 300]` | Block until a task finishes |
+| `run result --task <key\|id>` | Everything a task delivered |
+| `run facts` / `run add-fact --kind decision --body "..."` | Read / share a fact with every agent of the run |
+| `run cancel-task --task <key\|id>` | Stop a task, or take a queued one off the queue |
+| `run reroute-task --task <key\|id> [--agent <id>] [--model <m>]` | Hand it to another agent, same branch and worktree |
+
+#### Browser
+
+| Command | Description |
+|---|---|
+| `browser run --json-args '{"cwd":"...","request":{"op":"snapshot"}}'` | One order to a project's browser — the same path as the `browser_*` MCP tools |
+
 #### Discovery
 
 | Command | Description |
@@ -328,7 +359,7 @@ Editing a skill that came from a repository saves a local copy rather than overw
 | `--json-args '{...}'` | Pass raw arguments as JSON |
 | `--version` / `--help` | Version / usage |
 
-`ccode mcp --task <id>` also exists, but it isn't for you: it's the permission server that background agents launch to ask the app before using a tool.
+`ccode mcp` also exists, but it isn't for you: it's the `controlcode` MCP server the app attaches to its agents. With `--cwd <folder> [--tab <id>]` it gives an interactive tab its tools (the project browser, fleet orchestration, your git account, asking you a question); with `--task <id>` it's also the permission server a background agent asks before using a tool. It speaks JSON-RPC on stdin/stdout instead of printing one JSON line.
 
 ### Exit codes
 
@@ -350,7 +381,7 @@ The distinct codes matter for agents: `3` means *start the app and retry*, while
 
 ### Orchestration skill
 
-`skills/controlcode-orchestrator/SKILL.md` documents all of the above for an agent. It ships with the app and installs itself, so Claude Code (or any agent that reads Agent Skills) can drive the app without you explaining the CLI first.
+`skills/controlcode-orchestrator/SKILL.md` documents all of the above for an agent: opening agent and terminal tabs, running servers and commands in them, the watch loop, holding a conversation with a tab, skills, the fleet and the browser — with the rules that keep an orchestrator from making a mess (look before creating, never poll, nothing destructive unasked). It ships with the app and installs itself, and updates itself when a new version of the app brings a new version of it, so Claude Code (or any agent that reads Agent Skills) can drive the app without you explaining the CLI first.
 
 ---
 
@@ -417,6 +448,8 @@ TCP-on-loopback rather than a Unix socket, so the same code works on Windows wit
 
 The `protocol` field guards against a stale CLI: a version mismatch produces a clear message instead of a confusing deserialisation failure.
 
+Several instances can run at once (the app opened twice, a dev build next to the installed one, the restart after an update). Each one also writes its own handshake to `~/.controlcode/ipc/<pid>.json` and passes its path to everything it launches in `CONTROLCODE_HANDSHAKE`, so a tab's agents and its MCP bridge always reach the instance that opened them; `ccode` from any other terminal reaches the most recently started one. An instance only removes the shared `ipc.json` if it's still its own, and puts it back within seconds if something deletes it or leaves it pointing at an instance that's gone.
+
 ---
 
 ## Configuration
@@ -431,6 +464,7 @@ Everything is local. Nothing leaves your machine except the requests to skill re
 ~/.controlcode/worktrees/    one git worktree per fleet task that asked for one
 ~/.controlcode/runs/         raw event log of each fleet task
 ~/.controlcode/ipc.json      CLI handshake — port and token of the running app
+~/.controlcode/ipc/<pid>.json the same, per running instance, for the tabs it launched
 <app data>/accounts/         one home directory per agent account, written by the agent itself
 ```
 
