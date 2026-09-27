@@ -40,7 +40,7 @@ export function UpdateNotifier() {
   const pct = progress?.total ? Math.round((progress.downloaded / progress.total) * 100) : 0;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-[360px] max-w-[calc(100vw-2rem)] rounded-xl shadow-2xl
+    <div className="w-[360px] max-w-[calc(100vw-2rem)] rounded-xl shadow-2xl
       border border-gray-200 dark:border-white/10 bg-white dark:bg-[#11161d]">
       <div className="flex items-start gap-2 px-4 pt-3">
         <div className="flex flex-col gap-0.5 flex-1 min-w-0">

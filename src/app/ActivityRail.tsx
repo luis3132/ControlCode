@@ -5,6 +5,7 @@ import { Badge, BoxIcon, ClockIcon, CloudIcon, GearIcon, NetworkIcon, StackIcon,
 import { useUiStore } from "@/app/uiStore";
 import { shortcutForPath } from "@/app/shortcuts";
 import { PullRequestIcon } from "@/app/icons";
+import { useRunsStore } from "@/features/runs/store";
 
 /** "Marketplace · Ctrl+M". El tooltip es donde alguien se entera del atajo. */
 function withShortcut(label: string, path: string | null): string {
@@ -13,12 +14,14 @@ function withShortcut(label: string, path: string | null): string {
 }
 
 function RailButton({
-  label, path, active, badge, onClick, children,
+  label, path, active, badge, badgeVariant = "accent", onClick, children,
 }: {
   label: string;
   path: string | null;
   active: boolean;
   badge?: number;
+  /** `warning` = alguien te está esperando, no un simple conteo. */
+  badgeVariant?: "accent" | "warning";
   onClick: () => void;
   children: React.ReactNode;
 }) {
@@ -40,10 +43,11 @@ function RailButton({
       {children}
       {badge != null && badge > 0 && (
         <Badge
-          variant="accent"
+          variant={badgeVariant}
           size="sm"
           pill
-          className="absolute -top-0.5 -right-0.5 pointer-events-none"
+          className={`absolute -top-0.5 -right-0.5 pointer-events-none
+            ${badgeVariant === "warning" ? "animate-pulse" : ""}`}
         >
           {badge}
         </Badge>
@@ -70,6 +74,8 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const setAccountsOpen = useUiStore((s) => s.setAccountsOpen);
   const accountsOpen = useUiStore((s) => s.accountsOpen);
+  // Permisos que un agente de la flota está esperando: se ven desde cualquier pantalla.
+  const pendingApprovals = useRunsStore((s) => s.approvals.length);
 
   // `startsWith` y no `===`: si no, /marketplace/registries no ilumina Marketplace.
   const on = (path: string) => pathname.startsWith(path) && path !== "/";
@@ -93,7 +99,14 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
         <ClockIcon className="w-[18px] h-[18px]" />
       </RailButton>
 
-      <RailButton label={t("sidebar.fleet")} path="/fleet" active={on("/fleet")} onClick={() => navigate("/fleet")}>
+      <RailButton
+        label={pendingApprovals > 0 ? t("rail.fleetWaiting", { count: pendingApprovals }) : t("sidebar.fleet")}
+        path="/fleet"
+        active={on("/fleet")}
+        badge={pendingApprovals}
+        badgeVariant="warning"
+        onClick={() => navigate("/fleet")}
+      >
         <NetworkIcon className="w-[18px] h-[18px]" />
       </RailButton>
 

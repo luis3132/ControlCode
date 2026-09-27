@@ -27,6 +27,7 @@ import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
 import { AppExitListener } from "@/app/AppExitListener";
 import { SyncRunner } from "@/features/sync/SyncRunner";
 import { UpdateNotifier } from "@/features/updates/UpdateNotifier";
+import { ApprovalToast } from "@/features/runs/ApprovalToast";
 import type { ShellOutletContext } from "@/app/shellContext";
 import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
@@ -201,7 +202,13 @@ export function AppShell() {
       <ResizeHandles />
       <AppExitListener />
       <SyncRunner />
-      <UpdateNotifier />
+      {/* Los avisos de la esquina, apilados: un permiso pendiente arriba de la versión
+          nueva, sin taparse entre ellos. */}
+      <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2 pointer-events-none
+        [&>*]:pointer-events-auto">
+        <ApprovalToast />
+        <UpdateNotifier />
+      </div>
       {/* Encima de todo y fuera de las rutas: lo pregunta un agente que está esperando, y
           no puede depender de en qué pantalla esté parado el usuario. */}
       <AskDialog />
