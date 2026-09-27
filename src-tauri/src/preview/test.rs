@@ -193,7 +193,9 @@ async fn el_html_llega_con_el_selector_y_sin_las_trabas_para_mostrarse() {
     let picker = client()
         .get(format!("{}/__controlcode__/picker.js", target.proxy_origin))
         .send().await.unwrap().text().await.unwrap();
-    assert_eq!(picker, "window.__picker=1", "sirve el script que mandó la app");
+    // Adelante, el origen real de la página: el runtime lo usa para rutear los pedidos.
+    let prelude = format!("self.__controlcode_target=\"{}\";\n", target.target_origin);
+    assert_eq!(picker, format!("{prelude}window.__picker=1"), "sirve el script que mandó la app");
 
     // Lo que no es HTML pasa intacto.
     let js = client().get(format!("{}/app.js", target.proxy_origin)).send().await.unwrap().text().await.unwrap();
@@ -935,4 +937,211 @@ fn un_archivo_roto_se_ignora() {
     let site = Site::open("http://localhost:1", Some(&dir));
     assert!(site.cookies(0).is_empty());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── Pedidos a otros orígenes (`cors.rs`) ─────────────────────────
+
+use super::cors::{
+    check_preflight, check_response, fwd_location, fwd_url, is_safelisted_header, needs_preflight, same_site,
+    unsafe_headers, Credentials, Preflight,
+};
+
+fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
+    list.iter().map(|(n, v)| (n.to_string(), v.to_string())).collect()
+}
+
+#[test]
+fn un_pedido_simple_no_necesita_preflight() {
+    assert!(!needs_preflight("GET", &[]));
+    assert!(!needs_preflight("post", &pairs(&[("content-type", "text/plain;charset=utf-8"), ("accept", "*/*")])));
+    assert!(needs_preflight("PUT", &[]));
+    assert!(needs_preflight("POST", &pairs(&[("content-type", "application/json")])));
+    assert!(needs_preflight("GET", &pairs(&[("Authorization", "Bearer x")])));
+    assert!(is_safelisted_header("Content-Type", "multipart/form-data; boundary=x"));
+    assert_eq!(
+        unsafe_headers(&pairs(&[("X-B", "1"), ("authorization", "a"), ("x-b", "2"), ("accept", "x")])),
+        ["authorization", "x-b"]
+    );
+}
+
+#[test]
+fn la_respuesta_tiene_que_autorizar_al_origen_real() {
+    let page = "http://localhost:5173";
+    assert!(check_response(page, false, Some("*"), None).is_ok());
+    assert!(check_response(page, true, Some("*"), Some("true")).is_err(), "comodín con credenciales");
+    assert!(check_response(page, false, Some(page), None).is_ok());
+    assert!(check_response(page, true, Some(page), None).is_err(), "credenciales sin Allow-Credentials");
+    assert!(check_response(page, true, Some(page), Some("true")).is_ok());
+    let err = check_response(page, false, Some("http://localhost:3000"), None).unwrap_err();
+    assert!(err.contains("localhost:3000") && err.contains(page), "{err}");
+    assert!(check_response(page, false, None, None).is_err());
+}
+
+#[test]
+fn el_preflight_autoriza_metodo_y_encabezados() {
+    let page = "http://localhost:5173";
+    let answer = |methods: &'static str, headers: &'static str| Preflight {
+        status: 204,
+        allow_origin: Some("http://localhost:5173"),
+        allow_credentials: Some("true"),
+        allow_methods: Some(methods),
+        allow_headers: Some(headers),
+    };
+    let asked = vec!["authorization".to_string(), "content-type".to_string()];
+    assert!(check_preflight(page, true, "PUT", &asked, &answer("GET, PUT", "Content-Type, Authorization")).is_ok());
+    assert!(check_preflight(page, true, "DELETE", &asked, &answer("GET, PUT", "content-type, authorization")).is_err());
+    assert!(check_preflight(page, true, "PUT", &asked, &answer("PUT", "content-type")).is_err());
+    // El comodín no vale con credenciales, y nunca cubre `Authorization`.
+    assert!(check_preflight(page, true, "PUT", &asked, &answer("*", "*")).is_err());
+    let open = Preflight { allow_origin: Some("*"), allow_credentials: None, ..answer("*", "*") };
+    assert!(check_preflight(page, false, "PUT", &["x-a".to_string()], &open).is_ok());
+    assert!(check_preflight(page, false, "PUT", &asked, &open).is_err(), "authorization no entra en '*'");
+    let failed = Preflight { status: 404, ..answer("PUT", "*") };
+    assert!(check_preflight(page, false, "PUT", &[], &failed).unwrap_err().contains("404"));
+}
+
+#[test]
+fn las_cookies_viajan_segun_el_modo_y_el_sitio() {
+    assert!(!Credentials::parse(None).sends_cookies(false), "same-origin a otro origen: sin cookies");
+    assert!(Credentials::parse(None).sends_cookies(true));
+    assert!(Credentials::parse(Some("include")).sends_cookies(false));
+    assert!(!Credentials::parse(Some("omit")).sends_cookies(true));
+    assert!(same_site("localhost", "127.0.0.1"), "el loopback es un solo sitio");
+    assert!(same_site("app.ejemplo.com", "api.ejemplo.com"));
+    assert!(!same_site("localhost", "api.ejemplo.com"));
+}
+
+#[test]
+fn las_redirecciones_de_otro_origen_vuelven_al_proxy() {
+    let proxy = "http://localhost:47000";
+    let page = "http://localhost:5173";
+    let api = "http://localhost:8080/login";
+    assert_eq!(fwd_location("/me", api, page, proxy), fwd_url(proxy, "http://localhost:8080/me"));
+    assert_eq!(fwd_location("http://localhost:5173/panel?x=1", api, page, proxy), "http://localhost:47000/panel?x=1");
+    assert_eq!(fwd_url(proxy, "http://a/b?c=1&d=2"), "http://localhost:47000/__controlcode__/fwd?url=http%3A%2F%2Fa%2Fb%3Fc%3D1%26d%3D2");
+    assert_eq!(fwd_location("mailto:x@y", api, page, proxy), "mailto:x@y");
+}
+
+/// Una API en otro puerto, con CORS para un solo origen y una sesión por cookie. Cuenta los
+/// pedidos que no son preflight: un pedido bloqueado en el preflight no puede llegar.
+async fn fake_api(allowed: String) -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let hits = std::sync::Arc::new(AtomicUsize::new(0));
+    let counter = hits.clone();
+    tokio::spawn(async move {
+        loop {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let (allowed, hits) = (allowed.clone(), counter.clone());
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let mut words = req.split_whitespace();
+                let (method, path) = (words.next().unwrap_or("").to_string(), words.next().unwrap_or("/").to_string());
+                let header = |name: &str| {
+                    req.lines()
+                        .find_map(|l| l.split_once(':').filter(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string()))
+                        .unwrap_or_default()
+                };
+                let origin = header("origin");
+                let cors = if origin == allowed {
+                    format!("Access-Control-Allow-Origin: {origin}\r\nAccess-Control-Allow-Credentials: true\r\nVary: Origin\r\n")
+                } else {
+                    String::new()
+                };
+                let (status, extra, body) = if method == "OPTIONS" {
+                    let allow = if origin == allowed { "Access-Control-Allow-Methods: GET, POST, PUT\r\nAccess-Control-Allow-Headers: content-type\r\n" } else { "" };
+                    ("204 No Content", allow.to_string(), String::new())
+                } else {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    match path.as_str() {
+                        "/login" => ("200 OK", "Set-Cookie: sid=abc; Path=/; HttpOnly; SameSite=Lax\r\n".to_string(), "ok".to_string()),
+                        "/me" => ("200 OK", String::new(), format!("{}|{}", header("cookie"), origin)),
+                        "/go" => ("302 Found", "Location: /me\r\n".to_string(), String::new()),
+                        "/public" => ("200 OK", "Access-Control-Allow-Origin: *\r\n".to_string(), "public".to_string()),
+                        _ => ("404 Not Found", String::new(), String::new()),
+                    }
+                };
+                let cors = if path == "/public" && method != "OPTIONS" { String::new() } else { cors };
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\n{cors}{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    (port, hits)
+}
+
+/// El caso que fallaba: un front que llama a su API en otro puerto, con sesión por cookie.
+/// Pasando por el proxy, la API ve el origen real de la página, la cookie viaja, y lo que
+/// la API no autoriza sigue bloqueado — sin que el pedido llegue si el preflight lo niega.
+#[tokio::test(flavor = "multi_thread")]
+async fn la_pagina_llama_a_su_api_en_otro_origen_con_cors_y_cookies() {
+    use std::sync::atomic::Ordering;
+    let page_port = fake_dev_server().await;
+    let page = preview_resolve(format!("http://127.0.0.1:{page_port}/"), String::new()).await.unwrap();
+    let (api_port, hits) = fake_api(page.target_origin.clone()).await;
+    let api = |path: &str| format!("http://127.0.0.1:{api_port}{path}");
+    let c = client();
+    let fwd = |proxy: &str, url: &str, cred: &str| {
+        own(c.get(fwd_url(proxy, url))).header("x-controlcode-cred", cred)
+    };
+
+    // Sin la cabecera del runtime no es un relevo para nadie.
+    assert_eq!(c.get(fwd_url(&page.proxy_origin, &api("/me"))).send().await.unwrap().status(), 403);
+
+    // Login con credenciales: la cookie queda en el frasco de la API, no le llega al iframe.
+    let login = own(c.post(fwd_url(&page.proxy_origin, &api("/login"))))
+        .header("x-controlcode-cred", "include")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(login.status(), 200);
+    assert!(login.headers().get("set-cookie").is_none());
+
+    // Con `include` viaja la cookie, y la API ve el origen real de la página.
+    let me = fwd(&page.proxy_origin, &api("/me"), "include").send().await.unwrap().text().await.unwrap();
+    assert_eq!(me, format!("sid=abc|{}", page.target_origin));
+    // Con el modo de siempre (`same-origin`), a otro origen no van cookies.
+    let anon = fwd(&page.proxy_origin, &api("/me"), "same-origin").send().await.unwrap().text().await.unwrap();
+    assert_eq!(anon, format!("|{}", page.target_origin));
+
+    // Un pedido que necesita preflight, autorizado.
+    let put = own(c.put(fwd_url(&page.proxy_origin, &api("/me"))))
+        .header("x-controlcode-cred", "include")
+        .header("content-type", "application/json")
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(put.status(), 200);
+
+    // Una redirección de la API vuelve a pasar por el proxy.
+    let go = fwd(&page.proxy_origin, &api("/go"), "include").send().await.unwrap();
+    assert_eq!(go.status(), 302);
+    assert_eq!(go.headers()["location"].to_str().unwrap(), fwd_url(&page.proxy_origin, &api("/me")));
+
+    // Otro sitio abierto en el navegador (otro origen) no está autorizado por la API.
+    let other_port = fake_dev_server().await;
+    let other = preview_resolve(format!("http://127.0.0.1:{other_port}/"), String::new()).await.unwrap();
+    let blocked = fwd(&other.proxy_origin, &api("/me"), "include").send().await.unwrap();
+    assert!(blocked.headers().get("x-controlcode-cors").is_some(), "{:?}", blocked.headers());
+    assert!(!blocked.text().await.unwrap().contains("sid=abc"), "no puede leer la sesión");
+    let before = hits.load(Ordering::SeqCst);
+    let denied = own(c.put(fwd_url(&other.proxy_origin, &api("/me"))))
+        .header("x-controlcode-cred", "include")
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .unwrap();
+    assert!(denied.headers().get("x-controlcode-cors").is_some());
+    assert_eq!(hits.load(Ordering::SeqCst), before, "el preflight negado no deja llegar el pedido");
+
+    // `*` alcanza sin credenciales.
+    let public = fwd(&other.proxy_origin, &api("/public"), "same-origin").send().await.unwrap();
+    assert_eq!(public.text().await.unwrap(), "public");
 }

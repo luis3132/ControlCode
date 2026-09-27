@@ -22,8 +22,9 @@
 //! (sin vencimiento) también se guardan: son las que usa un login de desarrollo típico, y
 //! perderlas al cerrar la app es justo lo que esto viene a evitar.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,31 @@ pub fn set_state_dir(dir: PathBuf) {
 
 pub(crate) fn state_dir() -> Option<PathBuf> {
     STATE_DIR.read().ok().and_then(|d| d.clone())
+}
+
+/// Los sitios abiertos, uno por origen. Un origen tiene UN frasco aunque lo usen varios:
+/// el proxy de su propia pestaña y los pedidos que le hacen otras páginas (su API, llamada
+/// desde el front). Con dos instancias, cada una guardaba su versión en el mismo archivo y
+/// la última en escribir se llevaba la sesión de la otra.
+static SITES: LazyLock<Mutex<HashMap<String, Arc<Site>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// El sitio de `origin`, abriéndolo (y empezando a guardarlo) la primera vez. Tiene que
+/// llamarse desde el runtime de tokio: el guardado corre ahí.
+pub(crate) fn site_for(origin: &str) -> Arc<Site> {
+    let mut sites = SITES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(site) = sites.get(origin) {
+        return site.clone();
+    }
+    let site = Site::open(origin, state_dir().as_deref());
+    site.spawn_saver();
+    sites.insert(origin.to_string(), site.clone());
+    site
+}
+
+/// Los sitios abiertos, con su origen: al cerrar la app se guardan los que tengan cambios.
+pub(crate) fn open_sites() -> Vec<(String, Arc<Site>)> {
+    let sites = SITES.lock().unwrap_or_else(|e| e.into_inner());
+    sites.iter().map(|(o, s)| (o.clone(), s.clone())).collect()
 }
 
 /// Lo que el runtime de la página le pide al proxy (ver `proxy::site_request`).
@@ -251,6 +277,19 @@ impl Site {
     pub fn cookie_header(&self, path: &str, now_secs: i64) -> Option<String> {
         self.with(|inner| join(&matching(&inner.saved.cookies, path, now_secs, false)))
             .filter(|h| !h.is_empty())
+    }
+
+    /// El `Cookie` de un pedido que viene de una página de OTRO sitio (`cross_site`): ahí
+    /// solo viajan las `SameSite=None`, como en un navegador. Del mismo sitio, todas.
+    pub fn cookie_header_from(&self, path: &str, now_secs: i64, cross_site: bool) -> Option<String> {
+        self.with(|inner| {
+            let found: Vec<&SetCookie> = matching(&inner.saved.cookies, path, now_secs, false)
+                .into_iter()
+                .filter(|c| !cross_site || c.same_site.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("none")))
+                .collect();
+            join(&found)
+        })
+        .filter(|h| !h.is_empty())
     }
 
     /// Lo que ve `document.cookie` en una página de `path`: las que no son `HttpOnly`.

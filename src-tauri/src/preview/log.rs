@@ -56,6 +56,8 @@ pub enum ErrorKind {
     Body,
     /// La página cortó antes de que terminara (una navegación, un Server-Sent Events).
     Aborted,
+    /// CORS no la dejó pasar: el servidor no autoriza al origen de la página.
+    Cors,
     Other,
 }
 

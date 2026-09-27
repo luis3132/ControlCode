@@ -35,6 +35,8 @@ export interface PickedElement {
 
 export type PageMessage =
   | { source: PageSource; type: "nav"; payload: { url: string; title: string } }
+  /** Un enlace de la página lleva a otro sitio: la app lo abre con el proxy de ese sitio. */
+  | { source: PageSource; type: "nav:open"; payload: { url: string } }
   | { source: PageSource; type: "pick:selected"; payload: { element: PickedElement; keepPicking: boolean } }
   | { source: PageSource; type: "pick:cancel"; payload?: undefined }
   /** El runtime acaba de arrancar en un documento nuevo. Va antes de saber el origen de la
@@ -148,7 +150,7 @@ export interface ConsoleEntry {
  */
 export type NetErrorKind =
   | "connectionRefused" | "connectionReset" | "timeout" | "dns" | "tls" | "protocol" | "body" | "aborted"
-  | "network" | "other";
+  | "cors" | "network" | "other";
 
 /** Una cabecera. `note`: lo que la vista previa le hizo en el camino (solo las del proxy). */
 export interface NetHeader {

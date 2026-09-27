@@ -35,6 +35,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
+use super::cors::{
+    check_preflight, check_response, fwd_location, needs_preflight, same_site, unsafe_headers, Credentials, Preflight,
+    CORS_HEADER, CRED_HEADER, FWD_PATH,
+};
 use super::log::{
     clip, Begin, CookieReport, ErrorKind, Finish, Head, Header, HeaderNote, NetPage, ProxyLog, RequestDetail,
     COOKIE_CLEAR_PATH, MAX_RESPONSE_BODY,
@@ -45,7 +49,7 @@ use super::rewrite::{
     rewrite_origin_value, skip_request_header, skip_response_header, PICKER_PATH,
 };
 use super::site::{
-    state_dir, ScriptCookies, Site, StorageCopy, JAR_HEADER, MAX_SCRIPT_COOKIE_BYTES, MAX_STORAGE_BYTES, OWN_HEADER,
+    open_sites, site_for, ScriptCookies, Site, StorageCopy, JAR_HEADER, MAX_SCRIPT_COOKIE_BYTES, MAX_STORAGE_BYTES, OWN_HEADER,
     SITE_COOKIE_PATH, SITE_STORAGE_PATH,
 };
 
@@ -140,11 +144,22 @@ fn now_ms() -> i64 {
 
 async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Response<Body> {
     if req.uri().path() == PICKER_PATH {
+        // Adelante, el origen REAL de la página: el runtime lo necesita para saber qué
+        // pedidos van a su propio servidor y cuáles a otro (ver `cors.rs`).
+        let prelude = format!(
+            "self.__controlcode_target={};\n",
+            serde_json::to_string(&ctx.target_origin).unwrap_or_else(|_| "null".into())
+        );
+        let script = PICKER.read().map(|p| p.clone()).unwrap_or_default();
         return Response::builder()
             .header(CONTENT_TYPE, "application/javascript; charset=utf-8")
             .header("cache-control", "no-store")
-            .body(full(PICKER.read().map(|p| p.clone()).unwrap_or_default()))
+            .body(full(prelude + &script))
             .expect("respuesta del selector válida");
+    }
+    if req.uri().path() == FWD_PATH {
+        let started = Instant::now();
+        return forward_foreign(req, &ctx, started).await;
     }
     if matches!(req.uri().path(), COOKIE_CLEAR_PATH | SITE_COOKIE_PATH | SITE_STORAGE_PATH) {
         return site_request(req, &ctx).await;
@@ -616,6 +631,254 @@ async fn forward(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Respons
         .unwrap_or_else(|e| error_page(502, &ctx.target_origin, &e.to_string()))
 }
 
+/// Los clientes para los pedidos a otros orígenes. Como el del proxy: sin seguir
+/// redirecciones (las sigue la página, pasando otra vez por acá) y aceptando certificados
+/// propios solo en hosts locales.
+static LOCAL_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| foreign_client(true));
+static REMOTE_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| foreign_client(false));
+
+fn foreign_client(local: bool) -> reqwest::Client {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .danger_accept_invalid_certs(local)
+        .connect_timeout(Duration::from_secs(10))
+        .build()
+        .unwrap_or_default()
+}
+
+/// Un pedido que CORS no deja pasar: lo que un navegador haría fallar como error de red.
+/// El runtime lo convierte en eso (un `TypeError` en `fetch`) y escribe el motivo en la
+/// consola, que es donde un navegador lo pone.
+fn cors_blocked(reason: &str) -> Response<Body> {
+    let header = reason.chars().filter(|c| c.is_ascii() && !c.is_ascii_control()).collect::<String>();
+    Response::builder()
+        .status(502)
+        .header(CONTENT_TYPE, "text/plain; charset=utf-8")
+        .header("cache-control", "no-store")
+        .header(CORS_HEADER, HeaderValue::from_str(&header).unwrap_or_else(|_| HeaderValue::from_static("blocked")))
+        .body(full(format!("CORS: {reason}")))
+        .expect("respuesta válida")
+}
+
+fn header_str<'a>(headers: &'a reqwest::header::HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name).and_then(|v| v.to_str().ok())
+}
+
+/// Un pedido de la página a otro origen, como lo haría la capa de red de un navegador que
+/// corre la página en su origen real (ver `cors.rs`).
+async fn forward_foreign(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Response<Body> {
+    // Solo la página misma: con la cabecera del runtime (otro sitio no la puede poner sin un
+    // preflight, y acá no se aprueba ninguno) y por el nombre de loopback del proxy. Sin
+    // eso, el proxy sería un relevo abierto para cualquier página del navegador del sistema.
+    let host = req.headers().get(HOST).and_then(|v| v.to_str().ok()).unwrap_or("");
+    let own = req.headers().get(OWN_HEADER).is_some_and(|v| v.as_bytes() == b"1");
+    if !own || !is_own_host(host, ctx.proxy_port) {
+        return plain_status(403);
+    }
+    let Some(target) = req.uri().query().and_then(|q| query_param(q, "url")) else { return plain_status(400) };
+    let Ok(url) = reqwest::Url::parse(&target) else { return plain_status(400) };
+    if !matches!(url.scheme(), "http" | "https") {
+        return plain_status(400);
+    }
+    let foreign_origin = url.origin().ascii_serialization();
+    let foreign_host = url.host_str().unwrap_or("").to_string();
+    let same_origin = foreign_origin == ctx.target_origin;
+    let credentials = Credentials::parse(req.headers().get(CRED_HEADER).and_then(|v| v.to_str().ok()));
+    let with_cookies = credentials.sends_cookies(same_origin);
+    let cross_site = !same_site(&ctx.target_host, &foreign_host);
+    let method = req.method().clone();
+
+    // Lo que manda la página, sin lo que agrega el camino (el proxy, el motor del webview).
+    let mut headers = reqwest::header::HeaderMap::new();
+    let mut page_headers: Vec<(String, String)> = Vec::new();
+    let mut shown = Vec::new();
+    for (name, value) in req.headers() {
+        let lower = name.as_str();
+        if skip_request_header(lower) || *name == COOKIE || *name == ORIGIN || lower == OWN_HEADER || lower == CRED_HEADER {
+            continue;
+        }
+        // Lo que pone el motor del webview por su cuenta no es algo que la página pidió, y un
+        // preflight no se lo pide al servidor.
+        if lower.starts_with("sec-") || lower == "user-agent" || lower == "referer" {
+            if lower == "referer"
+                && let Ok(original) = value.to_str()
+            {
+                let rewritten = rewrite_origin_value(original, &ctx.proxy_origin, &ctx.target_origin);
+                if let Ok(v) = HeaderValue::from_str(&rewritten) {
+                    headers.append(name.clone(), v);
+                }
+            } else {
+                headers.append(name.clone(), value.clone());
+            }
+            continue;
+        }
+        let text = String::from_utf8_lossy(value.as_bytes()).into_owned();
+        page_headers.push((lower.to_string(), text.clone()));
+        shown.push(Header::new(lower, text));
+        headers.append(name.clone(), value.clone());
+    }
+    if !same_origin && let Ok(origin) = HeaderValue::from_str(&ctx.target_origin) {
+        // Lo que un navegador manda en todo pedido CORS: el origen real de la página.
+        headers.insert(ORIGIN, origin);
+        shown.push(Header::noted(ORIGIN.as_str(), ctx.target_origin.clone(), HeaderNote::Rewritten));
+    }
+    let site = if same_origin { ctx.site.clone() } else { site_for(&foreign_origin) };
+    let cookie = with_cookies.then(|| site.cookie_header_from(url.path(), now_ms() / 1000, cross_site)).flatten();
+    if let Some(value) = cookie.as_deref().and_then(|c| HeaderValue::from_str(c).ok()) {
+        headers.insert(COOKIE, value);
+        shown.push(Header::noted(COOKIE.as_str(), cookie.clone().unwrap_or_default(), HeaderNote::Rewritten));
+    }
+
+    let body = req.into_body().collect().await.map(|c| c.to_bytes()).unwrap_or_default();
+    let request_type = page_headers.iter().find(|(n, _)| n == "content-type").map(|(_, v)| v.clone());
+    let seq = ctx.log.begin(
+        Begin {
+            method: method.as_str(),
+            url: url.to_string(),
+            // El panel de cookies es del sitio de la página: las de la API no son de él.
+            cookie_header: if same_origin { cookie.as_deref() } else { None },
+            request_headers: shown,
+            request_body: &body,
+            request_content_type: request_type,
+            websocket: false,
+        },
+        now_ms(),
+    );
+    let client = if is_local_host(&foreign_host) { &*LOCAL_CLIENT } else { &*REMOTE_CLIENT };
+    let fail = |kind: ErrorKind, message: String| {
+        ctx.log.finish(seq, Finish::failed(kind, message, elapsed_ms(started)));
+    };
+
+    // El preflight, antes de mandar nada que pueda tener efectos.
+    if !same_origin && needs_preflight(method.as_str(), &page_headers) {
+        let asked = unsafe_headers(&page_headers);
+        let mut preflight = client
+            .request(Method::OPTIONS, url.clone())
+            .header(ORIGIN, &ctx.target_origin)
+            .header("access-control-request-method", method.as_str());
+        if !asked.is_empty() {
+            preflight = preflight.header("access-control-request-headers", asked.join(","));
+        }
+        let answer = match preflight.send().await {
+            Ok(answer) => answer,
+            Err(e) => {
+                let (kind, message) = classify(&e);
+                fail(kind, format!("preflight: {message}"));
+                return cors_blocked(&format!("el preflight no llegó al servidor: {message}"));
+            }
+        };
+        let h = answer.headers();
+        let verdict = check_preflight(
+            &ctx.target_origin,
+            credentials == Credentials::Include,
+            method.as_str(),
+            &asked,
+            &Preflight {
+                status: answer.status().as_u16(),
+                allow_origin: header_str(h, "access-control-allow-origin"),
+                allow_credentials: header_str(h, "access-control-allow-credentials"),
+                allow_methods: header_str(h, "access-control-allow-methods"),
+                allow_headers: header_str(h, "access-control-allow-headers"),
+            },
+        );
+        if let Err(reason) = verdict {
+            fail(ErrorKind::Cors, reason.clone());
+            return cors_blocked(&reason);
+        }
+    }
+
+    let upstream = match client.request(method, url.clone()).headers(headers).body(body).send().await {
+        Ok(upstream) => upstream,
+        Err(e) => {
+            let (kind, message) = classify(&e);
+            fail(kind, message.clone());
+            // Un error de red es un error de red: el runtime lo convierte en el `TypeError`
+            // de siempre.
+            return cors_blocked(&message);
+        }
+    };
+    let status = upstream.status();
+    if !same_origin {
+        let h = upstream.headers();
+        let verdict = check_response(
+            &ctx.target_origin,
+            credentials == Credentials::Include,
+            header_str(h, "access-control-allow-origin"),
+            header_str(h, "access-control-allow-credentials"),
+        );
+        if let Err(reason) = verdict {
+            fail(ErrorKind::Cors, reason.clone());
+            return cors_blocked(&reason);
+        }
+    }
+
+    let mut builder = Response::builder().status(status);
+    let mut response_headers = Vec::new();
+    let mut set_cookies = Vec::new();
+    for (name, value) in upstream.headers() {
+        let text = String::from_utf8_lossy(value.as_bytes()).into_owned();
+        if *name == SET_COOKIE {
+            response_headers.push(Header::noted(name.as_str(), text.clone(), HeaderNote::Kept));
+            set_cookies.push(text);
+            continue;
+        }
+        if skip_response_header(name.as_str()) {
+            continue;
+        }
+        let forwarded = match (name, value.to_str()) {
+            (n, Ok(original)) if *n == LOCATION => {
+                HeaderValue::from_str(&fwd_location(original, url.as_str(), &ctx.target_origin, &ctx.proxy_origin))
+                    .unwrap_or_else(|_| value.clone())
+            }
+            _ => value.clone(),
+        };
+        let note = (forwarded != value).then_some(HeaderNote::Rewritten);
+        response_headers.push(Header { name: name.as_str().to_string(), value: text, note });
+        builder = builder.header(name, forwarded);
+    }
+    // Sin credenciales, un navegador ignora los `Set-Cookie`.
+    if with_cookies {
+        site.store_from_server(&set_cookies, url.path(), url.as_str(), now_ms());
+    }
+    if same_origin {
+        builder = builder.header(JAR_HEADER, ctx.site.version());
+    }
+    ctx.log.head(
+        seq,
+        Head {
+            status: status.as_u16(),
+            headers: response_headers,
+            http_version: Some(version_text(upstream.version())),
+            remote_address: upstream.remote_addr().map(|a| a.to_string()),
+            content_type: header_str(upstream.headers(), CONTENT_TYPE.as_str()).map(str::to_string),
+            content_length: upstream.content_length(),
+            ttfb_ms: elapsed_ms(started),
+        },
+    );
+    let encoding = header_str(upstream.headers(), CONTENT_ENCODING.as_str())
+        .filter(|e| !e.eq_ignore_ascii_case("identity"))
+        .map(str::to_string);
+    if seq == 0 {
+        let plain = futures_util::StreamExt::map(upstream.bytes_stream(), |chunk: reqwest::Result<Bytes>| {
+            chunk.map(Frame::data).map_err(std::io::Error::other)
+        });
+        return builder.body(StreamBody::new(plain).boxed()).unwrap_or_else(|_| plain_status(502));
+    }
+    let tee = TeeStream {
+        expected: upstream.content_length(),
+        inner: Box::pin(upstream.bytes_stream()),
+        log: ctx.log.clone(),
+        seq,
+        started,
+        captured: Vec::new(),
+        size: 0,
+        truncated: false,
+        encoding,
+        done: false,
+    };
+    builder.body(StreamBody::new(tee).boxed()).unwrap_or_else(|_| plain_status(502))
+}
+
 /// El cuerpo de una respuesta que pasa como stream: guarda el principio para el panel y le
 /// avisa al log cuando termina, falla, o la página corta antes.
 struct TeeStream {
@@ -924,8 +1187,7 @@ async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
 
     let log = Arc::new(ProxyLog::default());
     let mocks = Arc::new(Mocks::default());
-    let site = Site::open(&target_origin, state_dir().as_deref());
-    site.spawn_saver();
+    let site = site_for(&target_origin);
     let ctx = Arc::new(Ctx {
         mocks: mocks.clone(),
         log: log.clone(),
@@ -1011,13 +1273,15 @@ pub async fn preview_resolve(url: String, picker: String) -> Result<PreviewTarge
 /// Al cerrar la app se guardan uno por uno, para que el progreso sea real.
 #[tauri::command]
 pub async fn preview_unsaved_sites() -> Vec<String> {
-    PROXIES.lock().await.iter().filter(|(_, p)| p.site.is_dirty()).map(|(origin, _)| origin.clone()).collect()
+    // Todos los sitios, no solo los de un proxy: también los de las APIs que llamaron las
+    // páginas, que guardan sus cookies aunque nunca se hayan abierto en una pestaña.
+    open_sites().into_iter().filter(|(_, site)| site.is_dirty()).map(|(origin, _)| origin).collect()
 }
 
 /// Escribe ya lo pendiente de un sitio (`origin` es el de destino, `http://localhost:5173`).
 #[tauri::command]
 pub async fn preview_save_site(origin: String) -> Result<(), String> {
-    let site = PROXIES.lock().await.get(&origin).map(|p| p.site.clone());
+    let site = open_sites().into_iter().find(|(o, _)| *o == origin).map(|(_, site)| site);
     match site {
         Some(site) => tokio::task::spawn_blocking(move || site.save_now()).await.map_err(|e| e.to_string())?,
         None => Ok(()),

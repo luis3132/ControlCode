@@ -362,6 +362,11 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         // Y el táctil se vuelve a poner: las hojas de estilo de la página nueva están sin
         // tocar, así que sin esto la emulación se apagaría sola al navegar.
         if (touchRef.current) channel.run({ op: "touch", on: true }, 8000).catch(() => undefined);
+      } else if (msg.type === "nav:open") {
+        // Un enlace a otro sitio: se abre acá mismo, con el proxy de ese sitio.
+        if (typeof msg.payload?.url === "string" && /^https?:\/\//i.test(msg.payload.url)) {
+          void goRef.current(msg.payload.url);
+        }
       } else if (msg.type === "page:reply") {
         channel.reply(msg.payload);
       } else if (msg.type === "debug:batch") {

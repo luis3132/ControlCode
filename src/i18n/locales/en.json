@@ -992,6 +992,7 @@
   "browser.debug.network.errorKind.protocol": "The server answered something that isn't valid HTTP.",
   "browser.debug.network.errorKind.body": "The response was cut off while the body was arriving.",
   "browser.debug.network.errorKind.aborted": "Cancelled before finishing: a navigation, an AbortController, or the page closed the connection.",
+  "browser.debug.network.errorKind.cors": "Blocked by CORS: the server doesn't allow the page's origin. The reason is in the console.",
   "browser.debug.network.errorKind.network": "No response: the network, a server that is down, or a CORS policy that blocked it. The browser doesn't let the page tell them apart; the console usually says which.",
   "browser.debug.network.errorKind.other": "The request failed.",
   "browser.debug.network.code.400": "Bad request: the server didn't understand the request (invalid syntax or data).",

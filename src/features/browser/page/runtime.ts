@@ -31,6 +31,7 @@ import {
   installCookieJar, installScrollbars, installStorageSync, JAR_HEADER, OWN_HEADER, takeNatives,
 } from "./siteState";
 import { isTouch, sendTouch, setTouch } from "./touch";
+import { CORS_HEADER, CRED_HEADER, corsMessage, routeRequest, type Routed } from "./route";
 import {
   displayHref, formatSnapshot, normalizeName, parseKeyCombo, parseTarget, type SnapshotNode,
 } from "./snapshotFormat";
@@ -60,6 +61,11 @@ declare global {
   const setTimer = window.setTimeout.bind(window);
   const clearTimer = window.clearTimeout.bind(window);
   const nativeFetch = typeof window.fetch === "function" ? window.fetch.bind(window) : null;
+  const reportError = console.error.bind(console);
+  /** El origen real de la página (`http://localhost:5173`): lo antepone el proxy al servir
+   *  este script. Sin él (una versión vieja del proxy) no se reescribe nada. */
+  const targetOrigin: string | null = (self as { __controlcode_target?: string }).__controlcode_target ?? null;
+  const route = (raw: string): Routed | null => routeRequest(raw, location.href, targetOrigin);
 
   const doc = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   let parentOrigin: string | null = null;
@@ -211,8 +217,56 @@ declare global {
     return Number.isFinite(n) ? n : null;
   };
 
+  /**
+   * Un `fetch` que va a otro origen (o al propio por URL absoluta), mandado por el proxy
+   * (ver `route.ts`). Se arma un pedido nuevo con todo lo que pidió la página; lo que
+   * cambia es adónde va y que las cookies y el CORS los resuelve el proxy.
+   */
+  async function routedFetch(routed: Routed, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const request = new Request(input, init);
+    const headers = new Headers(request.headers);
+    if (routed.forwarded) {
+      headers.set(OWN_HEADER, "1");
+      headers.set(CRED_HEADER, request.credentials);
+    }
+    const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.blob();
+    inFlight += 1;
+    try {
+      const response = await nativeFetch!(routed.url, {
+        method: request.method,
+        headers,
+        body,
+        credentials: "same-origin",
+        redirect: request.redirect,
+        signal: request.signal,
+        cache: request.cache,
+        referrerPolicy: request.referrerPolicy,
+        keepalive: request.keepalive,
+      });
+      const blocked = routed.forwarded ? response.headers.get(CORS_HEADER) : null;
+      if (blocked) {
+        reportError(corsMessage(routed.original, targetOrigin, blocked));
+        // En `no-cors` un navegador no falla: da una respuesta que no se puede leer.
+        if (request.mode === "no-cors") return Response.error();
+        throw new TypeError("Failed to fetch");
+      }
+      if (!routed.forwarded) cookieJar?.seen(response.headers.get(JAR_HEADER));
+      return response;
+    } finally {
+      inFlight = Math.max(0, inFlight - 1);
+    }
+  }
+
   if (nativeFetch) {
     window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+      try {
+        const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const routed = route(raw);
+        // Lo registra el proxy, con cookies y todo: acá no se anota.
+        if (routed) return routedFetch(routed, input, init);
+      } catch {
+        /* un input raro: fetch decide */
+      }
       let url = "";
       let method = "GET";
       try {
@@ -279,13 +333,18 @@ declare global {
     };
   }
 
-  const xhrInfo = new WeakMap<XMLHttpRequest, { method: string; url: string; headers: { name: string; value: string }[] }>();
+  const xhrInfo = new WeakMap<
+    XMLHttpRequest,
+    { method: string; url: string; headers: { name: string; value: string }[]; routed: Routed | null }
+  >();
   const xhrOpen = XMLHttpRequest.prototype.open;
   const xhrSend = XMLHttpRequest.prototype.send;
   const xhrSetHeader = XMLHttpRequest.prototype.setRequestHeader;
   XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
-    xhrInfo.set(this, { method: String(method).toUpperCase(), url: String(url), headers: [] });
-    return (xhrOpen as (...args: unknown[]) => void).call(this, method, url, ...rest);
+    let routed: Routed | null = null;
+    try { routed = route(String(url)); } catch { /* una URL rara: el XHR decide */ }
+    xhrInfo.set(this, { method: String(method).toUpperCase(), url: String(url), headers: [], routed });
+    return (xhrOpen as (...args: unknown[]) => void).call(this, method, routed ? routed.url : url, ...rest);
   };
   XMLHttpRequest.prototype.setRequestHeader = function (this: XMLHttpRequest, name: string, value: string) {
     xhrInfo.get(this)?.headers.push({ name: String(name).toLowerCase(), value: String(value) });
@@ -293,7 +352,19 @@ declare global {
   };
   XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     const info = xhrInfo.get(this);
-    if (info && !isForeign(info.url) && cookieJar) {
+    const routed = info?.routed ?? null;
+    if (routed?.forwarded) {
+      xhrSetHeader.call(this, OWN_HEADER, "1");
+      xhrSetHeader.call(this, CRED_HEADER, this.withCredentials ? "include" : "same-origin");
+      let checked = false;
+      this.addEventListener("readystatechange", () => {
+        if (checked || this.readyState < XMLHttpRequest.HEADERS_RECEIVED) return;
+        checked = true;
+        const blocked = this.getResponseHeader(CORS_HEADER);
+        if (blocked) reportError(corsMessage(routed.original, targetOrigin, blocked));
+      });
+    }
+    if (info && (!isForeign(info.url) || (routed && !routed.forwarded)) && cookieJar) {
       let seen = false;
       this.addEventListener("readystatechange", () => {
         if (seen || this.readyState < XMLHttpRequest.HEADERS_RECEIVED) return;
@@ -305,7 +376,8 @@ declare global {
       inFlight += 1;
       this.addEventListener("loadend", () => { inFlight = Math.max(0, inFlight - 1); });
     }
-    if (info && isForeign(info.url) && recordingNet) {
+    // Los que pasan por el proxy los registra él.
+    if (info && isForeign(info.url) && !routed && recordingNet) {
       const at = Date.now();
       const started = performance.now();
       let ttfbMs: number | null = null;
@@ -1482,6 +1554,32 @@ declare global {
     if (message.type === "connect" || message.type === "hello") flush();
     else if (message.type === "page:run") void run(message.id, message.command);
   });
+
+  // Enlaces y formularios con URL absoluta. Al servidor de la página se reescriben a la ruta
+  // del proxy antes de que el navegador los siga (en captura: un router de SPA que lea el
+  // `href` después ve uno del propio origen y lo maneja él). A otro sitio, la app lo abre
+  // con su propio proxy, en vez de que el iframe se vaya directo y pierda el runtime.
+  document.addEventListener("click", (event) => {
+    const link = (event.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+    if (!link) return;
+    const routed = route(link.href);
+    if (routed && !routed.forwarded) link.href = routed.url;
+  }, true);
+  window.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = (event.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+    if (!link || (link.target && link.target !== "_self") || link.hasAttribute("download")) return;
+    const routed = route(link.href);
+    if (!routed?.forwarded) return;
+    event.preventDefault();
+    post({ type: "nav:open", payload: { url: routed.original } });
+  });
+  document.addEventListener("submit", (event) => {
+    const form = event.target as HTMLFormElement | null;
+    if (!(form instanceof HTMLFormElement)) return;
+    const routed = route(form.action);
+    if (routed && !routed.forwarded) form.action = routed.url;
+  }, true);
 
   post({ type: "page:ready", payload: { doc, url: location.href } }, true);
 })();

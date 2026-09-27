@@ -12,6 +12,7 @@
 //! reposicionarlo a mano con cada cambio de layout.
 
 mod capture;
+mod cors;
 mod log;
 mod mocks;
 mod proxy;

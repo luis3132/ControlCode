@@ -992,6 +992,7 @@
   "browser.debug.network.errorKind.protocol": "El servidor contestó algo que no es HTTP válido.",
   "browser.debug.network.errorKind.body": "La respuesta se cortó mientras llegaba el cuerpo.",
   "browser.debug.network.errorKind.aborted": "Se canceló antes de terminar: una navegación, un AbortController o la página cerró la conexión.",
+  "browser.debug.network.errorKind.cors": "CORS no lo dejó pasar: el servidor no autoriza al origen de la página. El motivo está en la consola.",
   "browser.debug.network.errorKind.network": "No hubo respuesta: la red, el servidor apagado o una política de CORS que la bloqueó. Desde la página el navegador no deja distinguirlo; la consola suele decir cuál fue.",
   "browser.debug.network.errorKind.other": "El pedido falló.",
   "browser.debug.network.code.400": "Solicitud incorrecta: el servidor no entendió el pedido (sintaxis o datos inválidos).",
