@@ -209,7 +209,7 @@ fn la_falta_de_credenciales_se_distingue_del_resto() {
 // son los que git acepta (flags, orden, `--`) en un repo real.
 
 use super::commands::{
-    parse_shortstat, scm_branches, scm_checkout, scm_compare, scm_commit, scm_discard, scm_file_at, scm_log, scm_stage, scm_status, scm_unstage,
+    existing_branch_refs, parse_shortstat, scm_branches, scm_checkout, scm_compare, scm_commit, scm_discard, scm_file_at, scm_log, scm_stage, scm_status, scm_unstage,
 };
 
 fn git_in(dir: &std::path::Path, args: &[&str]) {
@@ -291,7 +291,7 @@ async fn el_ciclo_completo_en_un_repo_real() {
     assert!(scm_checkout(root.clone(), "-f".into(), false, false).await.is_err());
     assert!(scm_checkout(root.clone(), "no válida..".into(), true, false).await.is_err());
 
-    let log = scm_log(root.clone(), 10).await.unwrap();
+    let log = scm_log(root.clone(), 10, None).await.unwrap();
     assert_eq!(log.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(), ["segundo", "primero"]);
 
     // Un commit con el mensaje vacío no llega a git.
@@ -351,7 +351,7 @@ async fn el_historial_trae_padres_ramas_y_lo_que_entra_y_sale() {
     git_in(&local, &["fetch", "-q"]);
 
     let root = local.to_string_lossy().to_string();
-    let log = super::commands::scm_log(root.clone(), 50).await.unwrap();
+    let log = super::commands::scm_log(root.clone(), 50, None).await.unwrap();
     let by = |s: &str| log.iter().find(|c| c.subject == s).unwrap_or_else(|| panic!("falta {s}"));
 
     assert_eq!(by("merge feat").parents.len(), 2);
@@ -396,7 +396,7 @@ async fn los_tags_se_crean_listan_suben_y_borran() {
     git_in(&local, &["add", "-A"]);
     git_in(&local, &["commit", "-q", "-m", "segundo"]);
     let root = local.to_string_lossy().to_string();
-    let first = super::commands::scm_log(root.clone(), 10).await.unwrap().last().unwrap().hash.clone();
+    let first = super::commands::scm_log(root.clone(), 10, None).await.unwrap().last().unwrap().hash.clone();
 
     super::commands::create_tag(&root, "v1.0.0", Some(&first), Some("Primera")).unwrap();
     super::commands::create_tag(&root, "liviano", None, None).unwrap();
@@ -462,5 +462,45 @@ async fn comparar_dos_ramas_da_lo_que_entraria_en_el_pr() {
     assert!(!cmp.truncated);
 
     assert!(scm_compare(root.clone(), "--output=x".into(), "feat".into()).await.is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn solo_se_grafican_ramas_que_existen() {
+    let existing = "refs/heads/main\nrefs/heads/feat\nrefs/remotes/origin/main\n";
+    let asked: Vec<String> = ["refs/heads/feat", "refs/heads/borrada", "refs/remotes/origin/main", "--all", "HEAD", "refs/heads/feat"]
+        .iter().map(|s| s.to_string()).collect();
+    assert_eq!(existing_branch_refs(&asked, existing), ["refs/heads/feat", "refs/remotes/origin/main"]);
+}
+
+/// Con ramas elegidas, el grafo trae los commits de todas, no solo los de la actual.
+#[tokio::test(flavor = "multi_thread")]
+async fn el_historial_muestra_varias_ramas_a_la_vez() {
+    let dir = temp_repo("log-refs");
+    let root = std::fs::canonicalize(&dir).unwrap().to_string_lossy().to_string();
+    let commit = |file: &str, msg: &str| {
+        std::fs::write(dir.join(file), msg).unwrap();
+        git_in(&dir, &["add", "."]);
+        git_in(&dir, &["commit", "-qm", msg]);
+    };
+    commit("a", "base");
+    git_in(&dir, &["switch", "-qc", "otra"]);
+    commit("b", "en otra");
+    git_in(&dir, &["switch", "-q", "main"]);
+    commit("c", "en main");
+
+    let subjects = |log: Vec<super::parse::Commit>| log.into_iter().map(|c| c.subject).collect::<Vec<_>>();
+    let solo = subjects(scm_log(root.clone(), 50, None).await.unwrap());
+    assert!(!solo.contains(&"en otra".to_string()), "sin elegir, solo la actual: {solo:?}");
+
+    let ambas = subjects(scm_log(root.clone(), 50, Some(vec!["refs/heads/main".into(), "refs/heads/otra".into()])).await.unwrap());
+    assert!(ambas.contains(&"en otra".to_string()) && ambas.contains(&"en main".to_string()), "{ambas:?}");
+
+    let todas = subjects(scm_log(root.clone(), 50, Some(vec!["*".into()])).await.unwrap());
+    assert_eq!(todas.len(), 3);
+
+    // Una que ya no existe no rompe el historial: vuelve a lo de siempre.
+    let borrada = subjects(scm_log(root.clone(), 50, Some(vec!["refs/heads/borrada".into()])).await.unwrap());
+    assert_eq!(borrada, solo);
     let _ = std::fs::remove_dir_all(&dir);
 }

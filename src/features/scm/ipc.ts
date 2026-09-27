@@ -19,7 +19,10 @@ export const scmCheckout = (root: string, name: string, create: boolean, remote:
 export const scmFetch = (root: string) => invoke<void>("scm_fetch", { root });
 export const scmPull = (root: string) => invoke<void>("scm_pull", { root });
 export const scmPush = (root: string) => invoke<void>("scm_push", { root });
-export const scmLog = (root: string, limit: number) => invoke<Commit[]>("scm_log", { root, limit });
+/** `refs` = qué ramas (`refs/heads/x`, `refs/remotes/origin/x`, o `["*"]` para todas);
+ *  sin él, la actual y su upstream. */
+export const scmLog = (root: string, limit: number, refs: string[] | null = null) =>
+  invoke<Commit[]>("scm_log", { root, limit, refs });
 /** Lo que entraría en un PR de `head` hacia `base` (refs como las da `scmBranches`). */
 export const scmCompare = (root: string, base: string, head: string) =>
   invoke<Compare>("scm_compare", { root, base, head });

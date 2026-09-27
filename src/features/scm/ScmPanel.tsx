@@ -16,6 +16,7 @@ import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { BranchMenu } from "./BranchMenu";
 import { CommitGraph } from "./CommitGraph";
 import { CreateTagDialog } from "./CreateTagDialog";
+import { GraphBranchFilter, logRefs, useGraphRefs, useGraphRefsLabel } from "./GraphBranchFilter";
 import { TagsSection } from "./TagsSection";
 import {
   scmCheckout, scmCommit, scmDiscard, scmFetch, scmInit, scmLog, scmPull, scmPush, scmStage, scmStatus, scmUnstage,
@@ -98,6 +99,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
   const [log, setLog] = useState<Commit[] | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [logLimit, setLogLimit] = useState(LOG_PAGE);
+  const [graphMenu, setGraphMenu] = useState(false);
   /** El commit sobre el que se crea un tag; "head" = HEAD. */
   const [tagOn, setTagOn] = useState<Commit | "head" | null>(null);
   /** Sube cada vez que se crea o sube un tag: la lista de tags y el grafo se releen. */
@@ -134,6 +136,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
     setLogLimit(LOG_PAGE);
     lastCount.current = null;
     setBranchMenu(false);
+    setGraphMenu(false);
     load();
   }, [load]);
 
@@ -147,10 +150,19 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
   }, [load]);
 
   const root = status?.root ?? null;
+  const [graphRefs, setGraphRefs] = useGraphRefs(root);
+  const graphLabel = useGraphRefsLabel(graphRefs);
+  const shownRefs = useMemo(() => logRefs(graphRefs), [graphRefs]);
+
+  // Otras ramas son otro historial: se vuelve a la primera página y se muestra cargando.
+  useEffect(() => {
+    setLog(null);
+    setLogLimit(LOG_PAGE);
+  }, [shownRefs]);
 
   const loadLog = useCallback(() => {
-    if (root) scmLog(root, logLimit).then(setLog).catch(() => setLog([]));
-  }, [root, logLimit]);
+    if (root) scmLog(root, logLimit, shownRefs).then(setLog).catch(() => setLog([]));
+  }, [root, logLimit, shownRefs]);
 
   useEffect(() => { if (logOpen) loadLog(); }, [logOpen, loadLog]);
 
@@ -478,17 +490,43 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
       </div>
 
       <div className="shrink-0 border-t border-gray-200 dark:border-white/7">
-        <button
-          onClick={() => setLogOpen((v) => !v)}
-          className="flex items-center gap-1 w-full h-7 pl-1.5 pr-2 text-left hover:bg-gray-200/50 dark:hover:bg-white/4"
-        >
-          <span className="w-3.5 shrink-0 text-gray-400 dark:text-white/30">
-            {logOpen ? <ChevronDownIcon className="w-2.5 h-2.5" /> : <ChevronRightIcon className="w-2.5 h-2.5" />}
-          </span>
-          <span className="flex-1 text-[10px] font-extrabold uppercase tracking-[0.09em] text-gray-500 dark:text-white/40">
-            {t("scm.log")}
-          </span>
-        </button>
+        <div className="relative flex items-center h-7 pr-1.5 hover:bg-gray-200/50 dark:hover:bg-white/4">
+          <button
+            onClick={() => setLogOpen((v) => !v)}
+            className="flex flex-1 min-w-0 items-center gap-1 h-full pl-1.5 text-left"
+          >
+            <span className="w-3.5 shrink-0 text-gray-400 dark:text-white/30">
+              {logOpen ? <ChevronDownIcon className="w-2.5 h-2.5" /> : <ChevronRightIcon className="w-2.5 h-2.5" />}
+            </span>
+            <span className="flex-1 truncate text-[10px] font-extrabold uppercase tracking-[0.09em] text-gray-500 dark:text-white/40">
+              {t("scm.log")}
+            </span>
+          </button>
+          {/* Qué ramas se ven: la actual, todas, o las que se elijan. */}
+          <Tooltip content={t("scm.graph.refs.title")} placement="top">
+            <button
+              onClick={() => { setLogOpen(true); setGraphMenu((v) => !v); }}
+              aria-haspopup="menu"
+              aria-expanded={graphMenu}
+              className={`cc-t flex items-center gap-1 max-w-[9rem] h-5 px-1.5 rounded-md text-[10px] font-medium
+                ${graphRefs === "current"
+                  ? "text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white/80 hover:bg-gray-200 dark:hover:bg-white/10"
+                  : "bg-blue-500/12 text-blue-700 dark:text-blue-300 hover:bg-blue-500/20"}`}
+            >
+              <BranchIcon className="w-3 h-3 shrink-0" />
+              <span className="truncate">{graphLabel}</span>
+              <ChevronDownIcon className="w-2 h-2 shrink-0 opacity-60" />
+            </button>
+          </Tooltip>
+          {graphMenu && (
+            <GraphBranchFilter
+              root={status.root}
+              value={graphRefs}
+              onChange={setGraphRefs}
+              onClose={() => setGraphMenu(false)}
+            />
+          )}
+        </div>
         {logOpen && (
           <div className="max-h-80 cc-scroll pb-1">
             {log === null ? (

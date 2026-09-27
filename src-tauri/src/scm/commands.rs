@@ -255,13 +255,34 @@ pub async fn scm_push(app: tauri::AppHandle, root: String) -> Result<(), ScmErro
     sync(&app, root, Sync::Push).await.map(|_| ())
 }
 
-/// El historial para el grafo: la rama actual y, si tiene, su upstream — así se ven juntos
-/// lo que falta subir y lo que traería un pull, como en VS Code.
+/// De las refs pedidas, las que existen, como refs completas (`refs/heads/x`,
+/// `refs/remotes/origin/x`). Solo se aceptan ramas: una ref que no empieza así no llega a
+/// la línea de comandos de git, y una rama que se borró desde que se eligió se descarta en
+/// vez de hacer fallar el historial entero.
+pub(super) fn existing_branch_refs(requested: &[String], existing: &str) -> Vec<String> {
+    let existing: std::collections::HashSet<&str> = existing.lines().map(str::trim).collect();
+    let mut out: Vec<String> = Vec::new();
+    for r in requested {
+        let r = r.trim();
+        let is_branch = r.starts_with("refs/heads/") || r.starts_with("refs/remotes/");
+        if is_branch && existing.contains(r) && !out.iter().any(|o| o == r) {
+            out.push(r.to_string());
+        }
+    }
+    out
+}
+
+/// El historial para el grafo.
+///
+/// Sin `refs`, la rama actual y, si tiene, su upstream — así se ven juntos lo que falta
+/// subir y lo que traería un pull, como en VS Code. Con `refs`, las ramas elegidas
+/// (`refs/heads/x`, `refs/remotes/origin/x`), todas en el mismo grafo; `["*"]` son todas
+/// las locales y remotas.
 ///
 /// `--topo-order` no es cosmético: el grafo necesita que cada commit aparezca antes que sus
 /// padres, y el orden por fecha no lo garantiza cuando hay ramas con relojes cruzados.
 #[tauri::command]
-pub async fn scm_log(root: String, limit: u32) -> Result<Vec<Commit>, ScmError> {
+pub async fn scm_log(root: String, limit: u32, refs: Option<Vec<String>>) -> Result<Vec<Commit>, ScmError> {
     blocking(move || {
         let n = format!("-n{}", limit.clamp(1, 500));
         let format = format!("--format={LOG_FORMAT}");
@@ -273,10 +294,29 @@ pub async fn scm_log(root: String, limit: u32) -> Result<Vec<Commit>, ScmError> 
             .map(|u| u.trim().to_string())
             .filter(|u| !u.is_empty());
 
-        let mut args = vec!["log", "--topo-order", n.as_str(), format.as_str(), "HEAD"];
-        if let Some(u) = &upstream {
-            args.push(u.as_str());
+        let requested = refs.unwrap_or_default();
+        let chosen: Vec<String> = if requested.iter().any(|r| r == "*") {
+            vec!["--branches".into(), "--remotes".into()]
+        } else if requested.is_empty() {
+            Vec::new()
+        } else {
+            let existing = run_text(&root, &["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"], LOCAL)
+                .unwrap_or_default();
+            existing_branch_refs(&requested, &existing)
+        };
+
+        let mut args = vec!["log", "--topo-order", n.as_str(), format.as_str()];
+        if chosen.is_empty() {
+            // Lo de siempre; también si ninguna de las elegidas existe ya.
+            args.push("HEAD");
+            if let Some(u) = &upstream {
+                args.push(u.as_str());
+            }
+        } else {
+            args.extend(chosen.iter().map(String::as_str));
         }
+        // Que ninguna ref se pueda leer como ruta.
+        args.push("--");
         // Un repo sin commits hace fallar a `git log`: no es un error, es una lista vacía.
         let mut commits = run_text(&root, &args, LOCAL).map(|raw| parse_log(&raw, &remotes)).unwrap_or_default();
 
