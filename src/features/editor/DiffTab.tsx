@@ -38,6 +38,19 @@ const naturalHeight = Prec.highest(EditorView.theme({
 }));
 
 /**
+ * Los colores de VS Code en vez de los de la librería: la línea cambiada con un fondo verde
+ * (o rojo) transparente, y lo que cambió dentro de ella con uno un poco más fuerte. La
+ * librería marca lo cambiado con un subrayado de 2px, que en una línea entera se lee como
+ * una raya debajo del código. Solo fondos: nada acá cambia un alto (ver `naturalHeight`).
+ */
+const vscodeColors = Prec.high(EditorView.theme({
+  "&.cm-merge-a .cm-changedLine, .cm-deletedChunk": { backgroundColor: "rgba(255, 0, 0, 0.12)" },
+  "&.cm-merge-b .cm-changedLine, .cm-inlineChangedLine": { backgroundColor: "rgba(155, 185, 85, 0.16)" },
+  "&.cm-merge-a .cm-changedText, .cm-deletedChunk .cm-deletedText": { background: "rgba(255, 0, 0, 0.22)" },
+  "&.cm-merge-b .cm-changedText": { background: "rgba(156, 204, 44, 0.25)" },
+}));
+
+/**
  * Lo que cambió en un archivo, lado a lado como en VS Code: a la izquierda la versión
  * vieja, a la derecha la nueva, alineadas línea con línea y con lo cambiado resaltado.
  *
@@ -88,6 +101,7 @@ export function DiffTab({ view, active }: { view: DiffView; active: boolean }) {
         language,
         slot.of(editorTheme(dark)),
         naturalHeight,
+        vscodeColors,
       ];
       merge.current = new MergeView({
         parent: host.current,
