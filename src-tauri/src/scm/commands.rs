@@ -12,7 +12,7 @@ use super::parse::{
     parse_branches, parse_log, parse_name_status, parse_status_v2, parse_tags, Branch, Commit, ScmEntry, StatusInfo,
     Tag, BRANCH_FORMAT, LOG_FORMAT, TAG_FORMAT,
 };
-use super::remote::{parse_remotes, Remote};
+use super::remote::{is_published, parse_remotes, publish_remote, Remote};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +21,9 @@ pub struct ScmStatus {
     #[serde(flatten)]
     pub info: StatusInfo,
     pub remotes: Vec<Remote>,
+    /// La rama sigue a una del mismo nombre en un remoto. `false` = hay que publicarla
+    /// (no tiene upstream, o el que tiene es de otra rama).
+    pub published: bool,
     /// Una operación a medias que cambia lo que se puede hacer: `merge`, `rebase`,
     /// `cherryPick` o `revert`.
     pub operation: Option<String>,
@@ -74,10 +77,16 @@ pub async fn scm_status(cwd: String) -> Result<Option<ScmStatus>, ScmError> {
         let remotes = run_text(&root, &["remote", "-v"], LOCAL)
             .map(|r| parse_remotes(&r))
             .unwrap_or_default();
+        let info = parse_status_v2(&raw);
+        let published = info
+            .branch
+            .as_deref()
+            .is_some_and(|b| is_published(info.upstream.as_deref(), b, &remotes));
         Ok(Some(ScmStatus {
             operation: operation_in_progress(&root),
-            info: parse_status_v2(&raw),
+            info,
             remotes,
+            published,
             root,
         }))
     })
@@ -226,17 +235,17 @@ pub(super) fn push(root: &str, env: &[(String, String)]) -> Result<String, ScmEr
     let Some(branch) = info.branch else {
         return Err(ScmError::Git("No hay una rama activa (HEAD desprendido)".to_string()));
     };
-    if info.upstream.is_some() {
+    let remotes = parse_remotes(&run_text(root, &["remote", "-v"], LOCAL)?);
+    if is_published(info.upstream.as_deref(), &branch, &remotes) {
         network(root, &["push"], env)?;
         return Ok(format!("Pushed {branch}."));
     }
-    let remotes = parse_remotes(&run_text(root, &["remote", "-v"], LOCAL)?);
-    let remote = remotes
-        .iter()
-        .find(|r| r.name == "origin")
-        .or_else(|| remotes.first())
+    // Sin upstream, o siguiendo a una rama de otro nombre: se publica con el suyo. El
+    // refspec explícito `rama:rama` no depende de `push.default`, y `-u` deja el upstream
+    // apuntando a la rama recién subida.
+    let remote = publish_remote(info.upstream.as_deref(), &remotes)
         .ok_or_else(|| ScmError::Git("El repo no tiene ningún remoto al que subir".to_string()))?;
-    network(root, &["push", "-u", &remote.name, &branch], env)?;
+    network(root, &["push", "-u", &remote.name, &format!("{branch}:{branch}")], env)?;
     Ok(format!("Published {branch} to {}.", remote.name))
 }
 

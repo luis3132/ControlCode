@@ -362,14 +362,14 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
             {status.behind > 0 && <span className="text-[10px] tabular-nums">{status.behind}</span>}
           </button>
         </Tooltip>
-        <Tooltip content={status.upstream ? t("scm.push") : t("scm.publish")} placement="bottom">
+        <Tooltip content={status.published ? t("scm.push") : t("scm.publish")} placement="bottom">
           <button
             onClick={() => run("push", () => scmPush(status.root))}
             disabled={!!busy || !status.branch || status.remotes.length === 0}
-            aria-label={status.upstream ? t("scm.push") : t("scm.publish")}
+            aria-label={status.published ? t("scm.push") : t("scm.publish")}
             className={`cc-t flex items-center gap-0.5 h-5.5 px-1 rounded-md shrink-0
               hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent
-              ${status.ahead > 0 || (!status.upstream && status.branch)
+              ${status.ahead > 0 || (!status.published && status.branch)
                 ? "text-blue-600 dark:text-blue-400"
                 : "text-gray-400 dark:text-white/40 hover:text-gray-800 dark:hover:text-white"}`}
           >
@@ -446,11 +446,26 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
               focus:border-blue-500 dark:focus:border-blue-400
               text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/25"
           />
-          <Button size="sm" variant="primary" fullWidth disabled={!canCommit} onClick={commit}>
-            {busy === "commit"
-              ? t("scm.committing")
-              : stagedCount === 0 && totalChanges > 0 ? t("scm.commitAll") : t("scm.commit")}
-          </Button>
+          {/* Con el árbol limpio no hay nada que commitear, y lo que sigue es subir: publicar
+              la rama si nunca se subió, o mandar los commits que faltan. Es el botón de VS
+              Code, y sin él una rama nueva no tenía por dónde salir. */}
+          {totalChanges === 0 && status.branch && status.remotes.length > 0
+            && (!status.published || status.ahead > 0) ? (
+            <Button size="sm" variant="primary" fullWidth disabled={!!busy}
+              onClick={() => run("push", () => scmPush(status.root))}
+              className="flex items-center justify-center gap-1.5">
+              <PushIcon className="w-3.5 h-3.5" />
+              {busy === "push"
+                ? t("scm.pushing")
+                : !status.published ? t("scm.publish") : t("scm.pushCommits", { count: status.ahead })}
+            </Button>
+          ) : (
+            <Button size="sm" variant="primary" fullWidth disabled={!canCommit} onClick={commit}>
+              {busy === "commit"
+                ? t("scm.committing")
+                : stagedCount === 0 && totalChanges > 0 ? t("scm.commitAll") : t("scm.commit")}
+            </Button>
+          )}
         </div>
 
         {totalChanges === 0 ? (
