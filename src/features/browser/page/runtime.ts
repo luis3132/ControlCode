@@ -31,7 +31,7 @@ import {
   installCookieJar, installScrollbars, installStorageSync, JAR_HEADER, OWN_HEADER, takeNatives,
 } from "./siteState";
 import { isTouch, sendTouch, setTouch } from "./touch";
-import { CORS_HEADER, CRED_HEADER, corsMessage, routeRequest, type Routed } from "./route";
+import { CORS_HEADER, CRED_HEADER, HEADERS_HEADER, corsMessage, routeRequest, type Routed } from "./route";
 import {
   displayHref, formatSnapshot, normalizeName, parseKeyCombo, parseTarget, type SnapshotNode,
 } from "./snapshotFormat";
@@ -226,6 +226,7 @@ declare global {
     const request = new Request(input, init);
     const headers = new Headers(request.headers);
     if (routed.forwarded) {
+      headers.set(HEADERS_HEADER, [...request.headers.keys()].join(","));
       headers.set(OWN_HEADER, "1");
       headers.set(CRED_HEADER, request.credentials);
     }
@@ -354,6 +355,7 @@ declare global {
     const info = xhrInfo.get(this);
     const routed = info?.routed ?? null;
     if (routed?.forwarded) {
+      xhrSetHeader.call(this, HEADERS_HEADER, [...new Set((info?.headers ?? []).map((h) => h.name))].join(","));
       xhrSetHeader.call(this, OWN_HEADER, "1");
       xhrSetHeader.call(this, CRED_HEADER, this.withCredentials ? "include" : "same-origin");
       let checked = false;

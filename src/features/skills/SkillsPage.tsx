@@ -169,28 +169,28 @@ export function SkillsPage() {
           {/* Crear la propia va PRIMERO y en secundario: instalar es lo más frecuente,
               pero escribir una skill es lo que la mayoría no descubre que puede hacer. */}
           <Tooltip content={t("skills.builder.new")} placement="bottom">
-            <button
+            <Button variant="icon"
               onClick={() => setBuilderOpen(true)}
               aria-label={t("skills.builder.new")}
               className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
                 text-gray-400 dark:text-white/35
                 hover:text-gray-700 dark:hover:text-white
-                hover:bg-gray-200 dark:hover:bg-white/10"
+                hover:bg-gray-200 dark:hover:bg-white/10 p-0"
             >
               <EditIcon className="w-3.5 h-3.5" />
-            </button>
+            </Button>
           </Tooltip>
           <Tooltip content={t("skills.install.btn")} placement="bottom">
-            <button
+            <Button variant="icon"
               onClick={() => setInstallOpen(true)}
               aria-label={t("skills.install.btn")}
               className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
                 text-gray-400 dark:text-white/35
                 hover:text-gray-700 dark:hover:text-white
-                hover:bg-gray-200 dark:hover:bg-white/10"
+                hover:bg-gray-200 dark:hover:bg-white/10 p-0"
             >
               <AddIcon className="w-3.5 h-3.5" />
-            </button>
+            </Button>
           </Tooltip>
         </div>
 
@@ -230,26 +230,26 @@ export function SkillsPage() {
                     </span>
                     {skill && usage && (
                       <span className="flex gap-1 shrink-0">
-                        <button
+                        <Button variant="custom"
                           onClick={() => useSkillsStore.getState()
                             .attachSkill(skill.id, usage.workspaceId, usage.scope, usage.tabId ?? undefined, usage.cwd)
                             .then(() => checkHealth(workspaceId))}
                           className="cc-t px-1.5 h-5 rounded text-[10px] font-sans
                             bg-amber-200/60 dark:bg-amber-500/15
-                            hover:bg-amber-300/70 dark:hover:bg-amber-500/25"
+                            hover:bg-amber-300/70 dark:hover:bg-amber-500/25 inline-block"
                         >
                           {t("skills.health.repair")}
-                        </button>
-                        <button
+                        </Button>
+                        <Button variant="custom"
                           onClick={() => useSkillsStore.getState()
                             .detachSkill(skill.id, usage.workspaceId, usage.scope, usage.tabId ?? undefined, usage.cwd)
                             .then(() => checkHealth(workspaceId))}
                           className="cc-t px-1.5 h-5 rounded text-[10px] font-sans
                             bg-amber-200/60 dark:bg-amber-500/15
-                            hover:bg-amber-300/70 dark:hover:bg-amber-500/25"
+                            hover:bg-amber-300/70 dark:hover:bg-amber-500/25 inline-block"
                         >
                           {t("skills.health.remove")}
-                        </button>
+                        </Button>
                       </span>
                     )}
                   </div>
@@ -275,12 +275,12 @@ export function SkillsPage() {
               icon={<StackIcon className="w-8 h-8" />}
               title={t("skills.searchEmpty")}
               action={
-                <button
+                <Button variant="custom"
                   onClick={() => setQuery("")}
-                  className="cc-t text-[11.5px] text-blue-500 dark:text-blue-400 hover:underline"
+                  className="cc-t text-[11.5px] text-blue-500 dark:text-blue-400 hover:underline inline-block"
                 >
                   {t("sessions.filters.clear")}
-                </button>
+                </Button>
               }
             />
           ) : (
@@ -388,17 +388,17 @@ export function SkillsPage() {
                             : t("skills.attach.scopeWorkspace")}
                         </Badge>
                         <Tooltip content={t("skills.list.detach")} placement="left">
-                          <button
+                          <Button variant="icon"
                             onClick={() => handleDetach(selected, u.workspaceId, u.scope, u.tabId, u.cwd)}
                             aria-label={t("skills.list.detach")}
                             className="cc-t flex items-center justify-center w-5 h-5 rounded shrink-0
                               opacity-0 group-hover:opacity-100
                               text-gray-400 dark:text-white/35
                               hover:text-red-500 dark:hover:text-red-400
-                              hover:bg-gray-200 dark:hover:bg-white/10"
+                              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
                           >
                             <TrashIcon className="w-3 h-3" />
-                          </button>
+                          </Button>
                         </Tooltip>
                       </div>
                     ))}
@@ -419,28 +419,28 @@ export function SkillsPage() {
                 {t("skills.attach.action")}
               </Button>
               <Tooltip content={t("skills.detail.title")} placement="top">
-                <button
+                <Button variant="icon"
                   onClick={() => navigate(`/skills/${selected.id}`)}
                   aria-label={t("skills.detail.title")}
                   className="cc-t flex items-center justify-center w-7 h-7 rounded-md shrink-0
                     text-gray-400 dark:text-white/35
                     hover:text-gray-700 dark:hover:text-white
-                    hover:bg-gray-200 dark:hover:bg-white/10"
+                    hover:bg-gray-200 dark:hover:bg-white/10 p-0"
                 >
                   <EditIcon className="w-3.5 h-3.5" />
-                </button>
+                </Button>
               </Tooltip>
               <Tooltip content={t("skills.delete.confirm")} placement="top">
-                <button
+                <Button variant="icon"
                   onClick={() => setDeleteTarget(selected)}
                   aria-label={t("skills.delete.confirm")}
                   className="cc-t flex items-center justify-center w-7 h-7 rounded-md shrink-0
                     text-gray-400 dark:text-white/35
                     hover:text-red-500 dark:hover:text-red-400
-                    hover:bg-gray-200 dark:hover:bg-white/10"
+                    hover:bg-gray-200 dark:hover:bg-white/10 p-0"
                 >
                   <TrashIcon className="w-3.5 h-3.5" />
-                </button>
+                </Button>
               </Tooltip>
             </div>
           </>

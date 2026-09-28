@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AddIcon, TrashIcon, Input, Tooltip } from "neogestify-ui-components";
+import { Button, AddIcon, TrashIcon, Input, Tooltip } from "neogestify-ui-components";
 import { usePrelaunchStore } from "@/features/prelaunch/store";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { isPresetStep, stepCommand, stepLabel } from "@/features/prelaunch/types";
@@ -100,37 +100,37 @@ export function PrelaunchChain({ value, onChange, agentCommand }: PrelaunchChain
                 {/* Reordenar con flechas y no con drag: son dos o tres pasos, y el drag
                     obligaría a apuntar con precisión para algo que se hace una vez. */}
                 <div className="flex items-center gap-0.5 shrink-0">
-                  <button
+                  <Button variant="icon"
                     type="button"
                     onClick={() => move(i, i - 1)}
                     disabled={i === 0}
                     aria-label={t("prelaunch.moveUp")}
                     className="w-6 h-6 grid place-items-center rounded-md text-gray-400
                       hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/60
-                      dark:hover:bg-white/10 disabled:opacity-25 disabled:pointer-events-none"
+                      dark:hover:bg-white/10 disabled:opacity-25 disabled:pointer-events-none p-0"
                   >
                     ↑
-                  </button>
-                  <button
+                  </Button>
+                  <Button variant="icon"
                     type="button"
                     onClick={() => move(i, i + 1)}
                     disabled={i === value.length - 1}
                     aria-label={t("prelaunch.moveDown")}
                     className="w-6 h-6 grid place-items-center rounded-md text-gray-400
                       hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/60
-                      dark:hover:bg-white/10 disabled:opacity-25 disabled:pointer-events-none"
+                      dark:hover:bg-white/10 disabled:opacity-25 disabled:pointer-events-none p-0"
                   >
                     ↓
-                  </button>
-                  <button
+                  </Button>
+                  <Button variant="icon"
                     type="button"
                     onClick={() => removeAt(i)}
                     aria-label={t("btn.delete")}
                     className="w-6 h-6 grid place-items-center rounded-md text-gray-400
-                      hover:text-red-500 hover:bg-red-500/10"
+                      hover:text-red-500 hover:bg-red-500/10 p-0"
                   >
                     <TrashIcon className="w-3 h-3" />
-                  </button>
+                  </Button>
                 </div>
               </li>
             );
@@ -151,18 +151,18 @@ export function PrelaunchChain({ value, onChange, agentCommand }: PrelaunchChain
           placeholder={t("prelaunch.commandPlaceholder")}
           className="flex-1 font-mono text-xs"
         />
-        <button
+        <Button variant="icon"
           type="button"
           onClick={addDraft}
           disabled={!draft.trim()}
           className="shrink-0 px-2.5 rounded-lg border border-gray-200 dark:border-white/10
             text-gray-500 hover:text-gray-800 dark:hover:text-gray-100
             hover:border-gray-300 dark:hover:border-white/20
-            disabled:opacity-40 disabled:pointer-events-none"
+            disabled:opacity-40 disabled:pointer-events-none py-0 justify-center"
           aria-label={t("prelaunch.addCommand")}
         >
           <AddIcon className="w-3.5 h-3.5" />
-        </button>
+        </Button>
       </div>
 
       {available.length > 0 && (
@@ -172,16 +172,16 @@ export function PrelaunchChain({ value, onChange, agentCommand }: PrelaunchChain
           </span>
           {available.map((preset) => (
             <Tooltip key={preset.id} content={preset.command} placement="top">
-              <button
+              <Button variant="custom"
                 type="button"
                 onClick={() => add({ presetId: preset.id })}
                 className="px-2 py-0.5 rounded-full border border-dashed
                   border-gray-300 dark:border-white/15 text-[11px]
                   text-gray-600 dark:text-gray-300
-                  hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400"
+                  hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 inline-block"
               >
                 + {preset.name}
-              </button>
+              </Button>
             </Tooltip>
           ))}
         </div>

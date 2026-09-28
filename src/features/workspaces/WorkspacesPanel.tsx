@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
-  AddIcon, ArchiveIcon, BoxIcon, CloseIcon, TrashIcon, Tooltip,
+  Button, AddIcon, ArchiveIcon, BoxIcon, CloseIcon, TrashIcon, Tooltip,
 } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
@@ -26,7 +26,7 @@ function AgentRow({ agent, onClick, onContextMenu }: {
 }) {
   const Icon = agentIcon(agent.agentId, agent.agentLabel);
   return (
-    <button
+    <Button variant="custom"
       onClick={onClick}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(e); }}
       title={agent.title}
@@ -53,7 +53,7 @@ function AgentRow({ agent, onClick, onContextMenu }: {
       <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
         {elapsed(agent.openedAt)}
       </span>
-    </button>
+    </Button>
   );
 }
 
@@ -100,7 +100,7 @@ function WorkspaceItem({ ws, expanded, onActivate, onOpenAgent, onWorkspaceMenu,
 
   if (!expanded) {
     return (
-      <button
+      <Button variant="custom"
         onClick={onActivate}
         onContextMenu={(e) => { e.preventDefault(); onWorkspaceMenu(e, ws); }}
         title={ws.closed ? `${ws.cwd} — ${t("workspaces.saved", { n: ws.savedAgents })}` : ws.cwd}
@@ -120,7 +120,7 @@ function WorkspaceItem({ ws, expanded, onActivate, onOpenAgent, onWorkspaceMenu,
         <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
           {ws.closed ? ws.savedAgents : ws.agents.length}
         </span>
-      </button>
+      </Button>
     );
   }
 
@@ -327,15 +327,15 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
           </span>
         )}
         <Tooltip content={t("workspaces.new")} placement="bottom">
-          <button
+          <Button variant="icon"
             onClick={() => navigate("/")}
             className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
               text-gray-400 dark:text-white/35
               hover:text-gray-700 dark:hover:text-white
-              hover:bg-gray-200 dark:hover:bg-white/10"
+              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
           >
             <AddIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
 

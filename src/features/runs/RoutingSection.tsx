@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Select } from "neogestify-ui-components";
+import { Alert, Button } from "neogestify-ui-components";
 
 import { SettingsSection } from "@/features/settings/SettingsSection";
 
 import { getRoster, getTiers, setTiers } from "./ipc";
+import { ModelSearch } from "./ModelSearch";
 import {
-  addToTier, COMPLEXITIES, launchableAgents, moveEarlier, parseRefKey, refKey, removeFromTier,
+  addToTier, COMPLEXITIES, launchableAgents, moveEarlier, refKey, removeFromTier,
 } from "./routingView";
 import type { Complexity, ModelRef, Roster, Tiers } from "./types";
 
@@ -33,6 +34,8 @@ export function RoutingSection() {
   const [tiers, setLocal] = useState<Tiers | null>(null);
   const [roster, setRoster] = useState<Roster | null>(null);
   const [error, setError] = useState("");
+  /** El tramo con el buscador abierto para agregarle un modelo. */
+  const [adding, setAdding] = useState<Complexity | null>(null);
 
   useEffect(() => {
     getTiers().then(setLocal).catch((e) => setError(String(e)));
@@ -56,11 +59,6 @@ export function RoutingSection() {
   const agents = launchableAgents(roster);
   // Solo lo que hoy se puede correr. Las TUIs instaladas sin adaptador van aparte, dichas:
   // ofrecer sus 89 modelos para que el ruteo los descarte uno por uno sería ruido.
-  const options = agents.flatMap((a) =>
-    a.models
-      .filter((m) => !m.unavailable && m.toolcall !== false)
-      .map((m) => ({ value: refKey({ agentId: a.agentId, model: m.id }), label: `${a.label} · ${m.label}` }))
-  );
   const pending = roster?.agents.filter((a) => a.installed && !a.launchable) ?? [];
   const labelOf = (ref: ModelRef) => {
     const agent = roster?.agents.find((a) => a.agentId === ref.agentId);
@@ -108,16 +106,16 @@ export function RoutingSection() {
                       <span className="font-medium text-gray-800 dark:text-gray-200">{label.model}</span>
                       <span className="text-gray-400 dark:text-white/35">{label.agent}</span>
                       {i > 0 && (
-                        <button
+                        <Button variant="custom"
                           onClick={() => edit(c, moveEarlier(tiers[c], i))}
                           aria-label={t("settings.routing.earlier")}
                           title={t("settings.routing.earlier")}
                           className={CHIP_BTN}
                         >
                           ←
-                        </button>
+                        </Button>
                       )}
-                      <button
+                      <Button variant="custom"
                         onClick={() => edit(c, removeFromTier(tiers[c], i))}
                         disabled={tiers[c].length <= 1}
                         aria-label={t("settings.routing.remove")}
@@ -125,26 +123,39 @@ export function RoutingSection() {
                         className={CHIP_BTN}
                       >
                         ×
-                      </button>
+                      </Button>
                     </span>
                   );
                 })}
 
-                {options.length > 0 && (
-                  <div className="w-40 shrink-0">
-                    <Select
-                      size="sm"
-                      variant="minimal"
-                      aria-label={t("settings.routing.add")}
-                      value=""
-                      onChange={(e) => {
-                        const ref = parseRefKey(e.target.value);
-                        if (ref) edit(c, addToTier(tiers[c], ref));
+                {agents.length > 0 && (
+                  <Button variant="custom"
+                    onClick={() => setAdding(adding === c ? null : c)}
+                    aria-expanded={adding === c}
+                    className={`cc-t flex items-center gap-1 h-7 px-2 rounded-md text-[11px]
+                      border border-dashed border-gray-300 dark:border-white/15
+                      ${adding === c
+                        ? "text-blue-600 dark:text-blue-400 border-blue-400/60"
+                        : "text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white"}`}
+                  >
+                    + {t("settings.routing.add")}
+                  </Button>
+                )}
+                {/* Con buscador y no un `<select>`: con varias TUIs son decenas de modelos, y
+                    en la lista había que saber de antemano en cuál estaba el que se quería. */}
+                {adding === c && (
+                  <div className="w-full pt-1">
+                    <ModelSearch
+                      agents={agents}
+                      value={null}
+                      exclude={tiers[c].map((r) => ({ agentId: r.agentId, model: r.model }))}
+                      allowDefault={false}
+                      autoFocus
+                      onEscape={() => setAdding(null)}
+                      onChange={(pick) => {
+                        edit(c, addToTier(tiers[c], { agentId: pick.agentId, model: pick.model }));
+                        setAdding(null);
                       }}
-                      options={[
-                        { value: "", label: t("settings.routing.add") },
-                        ...options.filter((o) => !tiers[c].some((r) => refKey(r) === o.value)),
-                      ]}
                     />
                   </div>
                 )}
@@ -163,7 +174,7 @@ export function RoutingSection() {
   );
 }
 
-const CHIP_BTN = `cc-t flex items-center justify-center w-5 h-5 rounded text-[11px]
+const CHIP_BTN = `cc-t flex items-center justify-center gap-0 w-5 h-5 rounded text-[11px]
   text-gray-400 dark:text-white/40
   hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10
   disabled:opacity-30 disabled:hover:bg-transparent`;

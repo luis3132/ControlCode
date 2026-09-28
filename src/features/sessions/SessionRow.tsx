@@ -6,6 +6,7 @@ import {
   AlertaToast,
   ArrowRightIcon,
   Badge,
+  Button,
   ChevronDownIcon,
   DocumentIcon,
   StackIcon,
@@ -61,7 +62,7 @@ function RowAction({ label, onClick, danger, disabled, children }: {
 }) {
   return (
     <Tooltip content={label} placement="bottom">
-      <button
+      <Button variant="icon"
         onClick={(e) => { e.stopPropagation(); onClick(); }}
         disabled={disabled}
         aria-label={label}
@@ -71,10 +72,10 @@ function RowAction({ label, onClick, danger, disabled, children }: {
           disabled:opacity-40 disabled:hover:bg-transparent
           ${danger
             ? "hover:text-red-500 dark:hover:text-red-400"
-            : "hover:text-gray-700 dark:hover:text-white"}`}
+            : "hover:text-gray-700 dark:hover:text-white"} p-0`}
       >
         {children}
-      </button>
+      </Button>
     </Tooltip>
   );
 }

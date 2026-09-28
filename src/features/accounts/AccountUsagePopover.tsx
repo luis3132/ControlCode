@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Badge, Progress, Skeleton } from "neogestify-ui-components";
+import { Button, Alert, Badge, Progress } from "neogestify-ui-components";
 import { RefreshIcon } from "@/app/icons";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import {
-  WINDOW_SECS, agentAccountUsage, claudeLiveUsage, formatAgo, formatRemaining, formatTokens,
-  isUsageFresh, planLabel, totalOf, type AccountUsage, type LiveUsage,
+  agentAccountUsage, claudeLiveUsage, formatAgo, isUsageFresh, planLabel,
+  type AccountUsage, type LiveUsage,
 } from "./usage";
 import { accountEnv } from "./ipc";
 import type { AgentAccount } from "./types";
@@ -16,31 +16,14 @@ function realAccountId(account: AgentAccount): string | null {
   return account.id.startsWith("system:") ? null : account.id;
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <span className="text-[11px] text-gray-500 dark:text-gray-400">{label}</span>
-      <span className="text-[11.5px] font-mono tabular-nums text-gray-700 dark:text-gray-200">
-        {value}
-      </span>
-    </div>
-  );
-}
-
 /**
- * El consumo real de una cuenta, leído de los transcripts de su TUI.
- *
- * ## Lo que la barra NO dice, y por qué
- *
- * No hay porcentaje de cuota. Cuánto queda de la ventana del plan no está en ningún
- * archivo local ni hay API para preguntarlo, así que la barra mide lo único medible: qué
- * parte de lo que gastaste en la semana cayó en cada ventana. Sirve para ver si la tarde
- * viene cargada; no es un medidor de límite, y por eso la etiqueta no lo insinúa.
+ * La cuota del plan de una cuenta: cuánto queda de la ventana actual y de la semana, tal
+ * como lo informa la TUI. Solo eso — los tokens de los transcripts son consumo, no cuota,
+ * y al lado de las barras se confundían con ella.
  */
 export function AccountUsagePopover({ account }: { account: AgentAccount }) {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<AccountUsage | null>(null);
-  const [failed, setFailed] = useState(false);
   const [live, setLive] = useState<LiveUsage | null>(null);
   /** Sin nada que mostrar todavía. */
   const [asking, setAsking] = useState(false);
@@ -53,10 +36,10 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
   useEffect(() => {
     let stale = false;
     setUsage(null);
-    setFailed(false);
+    // Solo por el plan (el distintivo de arriba).
     agentAccountUsage(account.agentId, realAccountId(account))
       .then((u) => { if (!stale) setUsage(u); })
-      .catch(() => { if (!stale) setFailed(true); });
+      .catch(() => {});
     return () => { stale = true; };
   }, [account]);
 
@@ -102,17 +85,8 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
     return () => { stale = true; };
   }, [account, reload]);
 
-  const week = usage?.windows.find((w) => w.key === "7d");
-  const reference = week ? totalOf(week) : 0;
   const plan = planLabel(usage?.plan.tier ?? null);
-
-  // Cuándo se reabre la ventana. Manda lo que dijo el SERVIDOR si es de esta misma
-  // ventana; si no, el arranque deducido de las marcas de los mensajes.
   const now = Math.floor(Date.now() / 1000);
-  const serverFresh =
-    usage?.serverResetsAt != null && usage.serverResetsAt > now ? usage.serverResetsAt : null;
-  const resetsAt = serverFresh ?? usage?.windowResetsAt ?? null;
-  const startedAt = usage?.windowStartedAt ?? null;
 
   return (
     <div className="flex flex-col gap-3 w-72 p-3.5">
@@ -213,7 +187,7 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
                     {t("accounts.plan.asking")}
                   </span>
                 )}
-                <button
+                <Button variant="icon"
                   onClick={() => setReload((n) => n + 1)}
                   disabled={refreshing}
                   title={t("accounts.plan.refresh")}
@@ -221,10 +195,10 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
                     text-gray-400 dark:text-white/35
                     hover:text-gray-700 dark:hover:text-white
                     hover:bg-gray-200 dark:hover:bg-white/10
-                    disabled:opacity-40"
+                    disabled:opacity-40 p-0"
                 >
                   <RefreshIcon className="w-3.5 h-3.5" />
-                </button>
+                </Button>
               </div>
             </>
           ) : live ? (
@@ -233,69 +207,12 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
         </div>
       )}
 
-      {failed ? (
-        <Alert variant="danger">{t("accounts.usage.failed")}</Alert>
-      ) : !usage ? (
-        <Skeleton variant="text" lines={4} />
-      ) : !usage.available ? (
-        <Alert variant="neutral">{t("accounts.usage.unsupported")}</Alert>
-      ) : reference === 0 ? (
-        <p className="text-[11.5px] text-gray-400 dark:text-white/35">
-          {t("accounts.usage.none")}
+      {/* Las demás TUIs no dicen cuánto cupo queda. Lo que sí hay en disco (tokens de los
+          transcripts) no es la cuota, y mostrarlo acá se leía como si lo fuera. */}
+      {account.agentId !== "claude-code" && (
+        <p className="text-[11px] text-gray-400 dark:text-white/35">
+          {t("accounts.plan.unsupported")}
         </p>
-      ) : (
-        <>
-          {/* La ÚNICA barra con un denominador real: el tiempo de la ventana. Los cinco
-              minutos que pasaron son cinco minutos; el porcentaje de cupo consumido no se
-              puede saber desde acá y no se dibuja. */}
-          {startedAt && resetsAt ? (
-            <div className="flex flex-col gap-1">
-              <Progress
-                value={Math.min(WINDOW_SECS, now - startedAt)}
-                max={WINDOW_SECS}
-                size="sm"
-                variant={resetsAt - now < 1800 ? "warning" : "accent"}
-                label={
-                  <span className="text-[10.5px] text-gray-500 dark:text-gray-400">
-                    {t("accounts.usage.windowLeft", { time: formatRemaining(resetsAt - now) })}
-                  </span>
-                }
-              />
-              <span className="text-[10px] text-gray-400 dark:text-white/30">
-                {serverFresh
-                  ? t("accounts.usage.resetFromServer")
-                  : t("accounts.usage.resetDerived")}
-              </span>
-            </div>
-          ) : (
-            <p className="text-[11px] text-gray-400 dark:text-white/35">
-              {t("accounts.usage.windowClosed")}
-            </p>
-          )}
-
-          <div className="flex flex-col gap-1.5 pt-2.5 border-t border-gray-200 dark:border-white/8">
-            {usage.windows.map((w) => (
-              <Row
-                key={w.key}
-                label={t(`accounts.usage.window.${w.key}`)}
-                value={`${formatTokens(totalOf(w))} · ${w.sessions} ${t("accounts.usage.sessionsShort")}`}
-              />
-            ))}
-          </div>
-
-          {/* El desglose de la ventana en curso, que es la que importa ahora mismo. */}
-          {usage.windows[0] && (
-            <div className="flex flex-col gap-1 pt-2.5 border-t border-gray-200 dark:border-white/8">
-              <Row label={t("accounts.usage.input")} value={formatTokens(usage.windows[0].inputTokens)} />
-              <Row label={t("accounts.usage.output")} value={formatTokens(usage.windows[0].outputTokens)} />
-              <Row label={t("accounts.usage.cache")} value={formatTokens(usage.windows[0].cacheReadTokens)} />
-            </div>
-          )}
-
-          <p className="text-[10px] leading-relaxed text-gray-400 dark:text-white/30">
-            {t("accounts.usage.noQuota")}
-          </p>
-        </>
       )}
     </div>
   );

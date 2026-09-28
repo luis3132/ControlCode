@@ -504,3 +504,58 @@ async fn el_historial_muestra_varias_ramas_a_la_vez() {
     assert_eq!(borrada, solo);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ── publicar una rama ────────────────────────────────────────────
+
+#[test]
+fn seguir_a_una_rama_de_otro_nombre_no_es_estar_publicada() {
+    use super::remote::{is_published, publish_remote};
+    let remotes = parse_remotes("origin\thttps://github.com/a/b.git (fetch)\nfork\thttps://github.com/c/b.git (fetch)\n");
+    assert!(is_published(Some("origin/feat/x"), "feat/x", &remotes));
+    assert!(is_published(Some("fork/feat/x"), "feat/x", &remotes));
+    assert!(!is_published(Some("origin/master"), "feat/x", &remotes));
+    assert!(!is_published(None, "feat/x", &remotes));
+    // Se publica en el remoto con el que ya trabaja, aunque su upstream sea otra rama.
+    assert_eq!(publish_remote(Some("fork/main"), &remotes).unwrap().name, "fork");
+    assert_eq!(publish_remote(None, &remotes).unwrap().name, "origin");
+}
+
+/// Lo que pasó de verdad: `git switch -c feat origin/main` deja a `feat` siguiendo a
+/// `origin/main`, y `git push` se negaba. Tiene que publicarla como `origin/feat`.
+#[tokio::test(flavor = "multi_thread")]
+async fn publica_una_rama_creada_desde_una_remota() {
+    let origin = temp_repo("publicar-origen");
+    std::fs::write(origin.join("a"), "1").unwrap();
+    git_in(&origin, &["add", "-A"]);
+    git_in(&origin, &["commit", "-q", "-m", "base"]);
+    // Un remoto al que se puede subir: no bare, pero sin la rama que se sube en checkout.
+    git_in(&origin, &["config", "receive.denyCurrentBranch", "ignore"]);
+
+    let local = std::env::temp_dir().join(format!("cc-scm-publicar-local-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&local);
+    git_in(&origin, &["clone", "-q", &origin.to_string_lossy(), &local.to_string_lossy()]);
+    git_in(&local, &["config", "user.email", "test@controlcode.dev"]);
+    git_in(&local, &["config", "user.name", "Control Code"]);
+    git_in(&local, &["config", "commit.gpgsign", "false"]);
+    git_in(&local, &["switch", "-q", "-c", "feat/x", "origin/main"]);
+    std::fs::write(local.join("b"), "1").unwrap();
+    git_in(&local, &["add", "-A"]);
+    git_in(&local, &["commit", "-q", "-m", "feat"]);
+
+    let root = local.to_string_lossy().to_string();
+    let before = super::commands::scm_status(root.clone()).await.unwrap().unwrap();
+    assert_eq!(before.info.upstream.as_deref(), Some("origin/main"));
+    assert!(!before.published);
+
+    let out = super::commands::push(&root, &[]).unwrap();
+    assert!(out.starts_with("Published feat/x"), "{out}");
+
+    let after = super::commands::scm_status(root.clone()).await.unwrap().unwrap();
+    assert_eq!(after.info.upstream.as_deref(), Some("origin/feat/x"));
+    assert!(after.published);
+    // Y el siguiente push ya es uno común.
+    assert!(super::commands::push(&root, &[]).unwrap().starts_with("Pushed"));
+
+    std::fs::remove_dir_all(origin).ok();
+    std::fs::remove_dir_all(local).ok();
+}

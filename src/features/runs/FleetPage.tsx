@@ -161,7 +161,7 @@ export function FleetPage() {
 
         <div className="flex items-center gap-1 ml-2">
           {FLEET_GROUPS.map((g) => (
-            <button
+            <Button variant="custom"
               key={g}
               onClick={() => setGroup(group === g ? null : g)}
               disabled={counts[g] === 0}
@@ -173,7 +173,7 @@ export function FleetPage() {
             >
               {t(`fleet.group.${g}`)}
               <span className="tabular-nums opacity-70">{counts[g]}</span>
-            </button>
+            </Button>
           ))}
         </div>
 
@@ -181,7 +181,7 @@ export function FleetPage() {
 
         {/* Las reglas son de la carpeta en la que se lanza, la misma que usa "Nuevo agente". */}
         <Tooltip content={t("fleet.rules.title")} placement="bottom">
-          <button
+          <Button variant="icon"
             onClick={() => setRulesOpen(true)}
             disabled={!cwd}
             aria-label={t("fleet.rules.title")}
@@ -189,10 +189,10 @@ export function FleetPage() {
               text-gray-400 dark:text-white/35
               hover:text-gray-700 dark:hover:text-white
               hover:bg-gray-200 dark:hover:bg-white/10
-              disabled:opacity-40 disabled:hover:bg-transparent"
+              disabled:opacity-40 disabled:hover:bg-transparent p-0"
           >
             <ShieldIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
 
         <div className="flex items-center gap-1.5 px-2 h-7 rounded-lg shrink-0
@@ -276,7 +276,7 @@ export function FleetPage() {
               />
             ))}
 
-            <button
+            <Button variant="custom"
               onClick={() => setNewOpen(true)}
               disabled={!cwd}
               className="cc-t flex flex-col items-center justify-center gap-1 min-h-[10rem]
@@ -289,7 +289,7 @@ export function FleetPage() {
             >
               <AddIcon className="w-5 h-5" />
               <span className="text-[11.5px]">{t("fleet.new.card")}</span>
-            </button>
+            </Button>
           </div>
         )}
       </div>

@@ -204,6 +204,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let app = app.clone();
     let task_id = task.id.clone();
     let quota_key = super::quota::account_key(&task.agent_id, task.account_id.as_deref());
+    let imposed_session = session_id.clone();
 
     tokio::spawn(async move {
         let mut file = tokio::fs::File::create(&events_path).await.ok();
@@ -222,6 +223,14 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
                         // sepa cuánto le queda, y la consola no se entera.
                         AgentEvent::Quota { quota } => {
                             super::quota::record(&db, &quota_key, quota, crate::util::now_ts());
+                        }
+                        // La TUI dice cuál es su sesión y no es la que se le pasó: la
+                        // de verdad es la suya (las que no aceptan una de afuera).
+                        AgentEvent::Started { session_id: Some(ref real) } if *real != imposed_session => {
+                            if let Ok(conn) = db.lock() {
+                                let _ = store::set_session_id(&conn, &task_id, real);
+                            }
+                            emit_event(&app, &task_id, event);
                         }
                         AgentEvent::Finished { ref outcome } => {
                             emitted = Some(outcome.clone());

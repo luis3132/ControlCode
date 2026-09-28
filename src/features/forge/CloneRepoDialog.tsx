@@ -172,7 +172,7 @@ export function CloneRepoDialog({ onClose, onCloned }: {
               ) : filtered.length === 0 ? (
                 <p className="p-4 text-center text-[11.5px] text-gray-400 dark:text-white/30">{t("forge.clone.none")}</p>
               ) : filtered.map((r) => (
-                <button
+                <Button variant="custom"
                   key={r.fullName}
                   onClick={() => setPicked(r)}
                   className={`flex flex-col gap-0.5 w-full px-3 py-1.5 text-left
@@ -189,7 +189,7 @@ export function CloneRepoDialog({ onClose, onCloned }: {
                   {r.description && (
                     <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35">{r.description}</span>
                   )}
-                </button>
+                </Button>
               ))}
             </div>
           </div>

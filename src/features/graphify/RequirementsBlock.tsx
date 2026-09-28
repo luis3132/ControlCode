@@ -74,12 +74,12 @@ export function RequirementsBlock({ onRun, running }: {
                 text-gray-400 dark:text-white/35">
                 {item.version ?? t("settings.graphify.req.missing")}
               </span>
-              <button
+              <Button variant="custom"
                 onClick={() => openUrl(item.docsUrl)}
-                className="cc-t shrink-0 text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline"
+                className="cc-t shrink-0 text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline inline-block"
               >
                 {t("settings.graphify.req.docs")}
-              </button>
+              </Button>
             </div>
 
             {/* Ya instalado: el comando queda disponible igual (reinstalar, actualizar),
@@ -110,15 +110,15 @@ export function RequirementsBlock({ onRun, running }: {
                   {item.otherInstalls.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5">
                       {item.otherInstalls.map((alt) => (
-                        <button
+                        <Button variant="custom"
                           key={alt}
                           onClick={() => setCommands((prev) => ({ ...prev, [item.id]: alt }))}
                           className="cc-t px-2 py-0.5 rounded font-mono text-[10px]
                             bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40
-                            hover:bg-gray-200 dark:hover:bg-white/10"
+                            hover:bg-gray-200 dark:hover:bg-white/10 inline-block"
                         >
                           {alt}
-                        </button>
+                        </Button>
                       ))}
                     </div>
                   )}

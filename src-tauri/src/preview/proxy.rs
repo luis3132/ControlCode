@@ -37,7 +37,7 @@ use tokio::sync::Mutex;
 
 use super::cors::{
     check_preflight, check_response, fwd_location, needs_preflight, same_site, unsafe_headers, Credentials, Preflight,
-    CORS_HEADER, CRED_HEADER, FWD_PATH,
+    authored_headers, CORS_HEADER, CRED_HEADER, FWD_PATH, HEADERS_HEADER,
 };
 use super::log::{
     clip, Begin, CookieReport, ErrorKind, Finish, Head, Header, HeaderNote, NetPage, ProxyLog, RequestDetail,
@@ -689,12 +689,27 @@ async fn forward_foreign(req: Request<Incoming>, ctx: &Ctx, started: Instant) ->
     let method = req.method().clone();
 
     // Lo que manda la página, sin lo que agrega el camino (el proxy, el motor del webview).
+    // Sin la lista del runtime (uno viejo en caché), todo cuenta como de la página.
+    let authored = req.headers().get(HEADERS_HEADER).and_then(|v| v.to_str().ok()).map(authored_headers);
     let mut headers = reqwest::header::HeaderMap::new();
     let mut page_headers: Vec<(String, String)> = Vec::new();
     let mut shown = Vec::new();
     for (name, value) in req.headers() {
         let lower = name.as_str();
-        if skip_request_header(lower) || *name == COOKIE || *name == ORIGIN || lower == OWN_HEADER || lower == CRED_HEADER {
+        if skip_request_header(lower)
+            || *name == COOKIE
+            || *name == ORIGIN
+            || lower == OWN_HEADER
+            || lower == CRED_HEADER
+            || lower == HEADERS_HEADER
+        {
+            continue;
+        }
+        // Lo que puso el motor y no la página (la caché desactivada): viaja al servidor, como
+        // en un navegador, pero no entra en el preflight.
+        if authored.as_ref().is_some_and(|a| !a.contains(lower)) {
+            shown.push(Header::new(lower, String::from_utf8_lossy(value.as_bytes()).into_owned()));
+            headers.append(name.clone(), value.clone());
             continue;
         }
         // Lo que pone el motor del webview por su cuenta no es algo que la página pidió, y un

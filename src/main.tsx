@@ -7,6 +7,19 @@ import { loadAgentRegistry } from "@/features/agents/registry";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { renderingInfo } from "@/shared/ipc/settings";
 
+// El menú de click derecho del webview (Atrás, Recargar, Inspeccionar…) es del navegador,
+// no de la app: recargar tira las terminales vivas. Se deja solo donde se escribe texto,
+// porque ahí trae cortar, copiar y pegar y la app no tiene otro. Los menús propios (tabs,
+// árbol de archivos) llaman a `preventDefault` ellos mismos, así que esto no los toca.
+// La terminal cuenta como "no texto" aunque por dentro sea un `<textarea>`: xterm lo mueve
+// bajo el puntero al hacer click derecho, y el menú que saldría es el del navegador.
+document.addEventListener("contextmenu", (e) => {
+  const el = e.target instanceof Element ? e.target : null;
+  const editable = el?.closest("input, textarea, [contenteditable=''], [contenteditable='true']");
+  if (editable && !el?.closest(".xterm")) return;
+  e.preventDefault();
+});
+
 // El tema inicial (default "dark") ya lo resolvió y persistió el script inline de
 // index.html, que corre antes del primer pintado — repetirlo aquí llegaría tarde.
 

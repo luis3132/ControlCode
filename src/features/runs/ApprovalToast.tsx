@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
-import { CloseIcon } from "neogestify-ui-components";
+import { Button, CloseIcon } from "neogestify-ui-components";
 
 import { buildPreview } from "./PermissionCard";
 import { useRunsStore } from "./store";
@@ -103,15 +103,15 @@ export function ApprovalToast() {
             {task ? t("fleet.toast.task", { task: task.title, agent: task.agentId }) : t("fleet.toast.unknownTask")}
           </span>
         </div>
-        <button
+        <Button variant="icon"
           onClick={() => setDismissed(new Set(pending.map((a) => a.id)))}
           aria-label={t("btn.close")}
           title={t("fleet.toast.dismiss")}
           className="cc-t flex items-center justify-center w-6 h-6 rounded-md text-gray-400 dark:text-white/40
-            hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10"
+            hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10 p-0"
         >
           <CloseIcon className="w-3.5 h-3.5" />
-        </button>
+        </Button>
       </div>
 
       <div className="flex flex-col gap-1.5 px-4 pt-2.5">
@@ -144,28 +144,28 @@ export function ApprovalToast() {
       </div>
 
       <div className="flex items-center gap-1.5 px-4 py-3">
-        <button
+        <Button variant="custom"
           onClick={() => navigate("/fleet")}
-          className="mr-auto text-[11.5px] text-blue-600 dark:text-blue-400 hover:underline"
+          className="mr-auto text-[11.5px] text-blue-600 dark:text-blue-400 hover:underline inline-block"
         >
           {others > 0 ? t("fleet.toast.openMore", { count: others }) : t("fleet.toast.open")}
-        </button>
-        <button
+        </Button>
+        <Button variant="custom"
           onClick={() => void decide(false)}
           disabled={busy}
           className="cc-t h-7 px-3 rounded-md text-[11.5px] font-medium text-gray-600 dark:text-white/60
-            hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40"
+            hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 inline-block"
         >
           {t("fleet.permission.deny")}
-        </button>
-        <button
+        </Button>
+        <Button variant="custom"
           onClick={() => void decide(true)}
           disabled={busy}
           className="cc-t h-7 px-3 rounded-md text-[11.5px] font-semibold
-            bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40"
+            bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 inline-block"
         >
           {t("fleet.permission.allow")}
-        </button>
+        </Button>
       </div>
     </div>
   );

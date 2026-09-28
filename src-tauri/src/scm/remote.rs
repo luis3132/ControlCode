@@ -101,3 +101,23 @@ pub(crate) fn parse_remotes(raw: &str) -> Vec<Remote> {
         })
         .collect()
 }
+
+/// La rama `branch` está publicada: sigue a una rama del MISMO nombre en uno de sus
+/// remotos (`origin/feat/x` para `feat/x`).
+///
+/// Seguir a otra no cuenta. Pasa al crear una rama desde una remota (`git switch -c feat
+/// origin/main`): git le pone `origin/main` de upstream, `git push` se niega ("the upstream
+/// branch of your current branch does not match the name of your current branch") y la
+/// rama nunca se subió. Para el panel eso es una rama por publicar.
+pub(crate) fn is_published(upstream: Option<&str>, branch: &str, remotes: &[Remote]) -> bool {
+    upstream.is_some_and(|u| remotes.iter().any(|r| u == format!("{}/{branch}", r.name)))
+}
+
+/// Dónde publicar una rama: el remoto de su upstream si tiene uno (aunque sea de otra
+/// rama, ese es el remoto con el que trabaja), si no `origin`, si no el primero.
+pub(crate) fn publish_remote<'a>(upstream: Option<&str>, remotes: &'a [Remote]) -> Option<&'a Remote> {
+    upstream
+        .and_then(|u| remotes.iter().find(|r| u.starts_with(&format!("{}/", r.name))))
+        .or_else(|| remotes.iter().find(|r| r.name == "origin"))
+        .or_else(|| remotes.first())
+}

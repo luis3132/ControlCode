@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button, FolderIcon, Progress } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
+import { useSkillsStore } from "@/features/skills/store";
 import { AgentPickerStep } from "@/features/tabs/wizard/AgentPickerStep";
 import { AccountPickerStep, useAgentAccounts } from "@/features/tabs/wizard/AccountPickerStep";
 import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
@@ -25,6 +26,11 @@ interface NewAgentDialogProps {
     accountId?: string;
     prelaunch: PrelaunchStep[];
   }) => void;
+  /** Al duplicar una tab: sus skills vienen marcadas en cualquier TUI que se elija (las
+   *  que esa TUI soporta), y sus comandos previos también. */
+  initialSkillIds?: string[];
+  initialPrelaunch?: PrelaunchStep[];
+  title?: string;
 }
 
 type StepId = "agent" | "account" | "skills" | "prelaunch";
@@ -52,7 +58,9 @@ type StepId = "agent" | "account" | "skills" | "prelaunch";
  * es una carpeta. Por eso va arriba como contexto. Abrir otra es abrir otro workspace, y
  * eso vive en Home.
  */
-export function NewAgentDialog({ isOpen, cwd, onClose, onConfirm }: NewAgentDialogProps) {
+export function NewAgentDialog({
+  isOpen, cwd, onClose, onConfirm, initialSkillIds, initialPrelaunch, title,
+}: NewAgentDialogProps) {
   const { t } = useTranslation();
   const allAgents = useAvailableAgents();
   const [agent, setAgent] = useState<AgentInfo | null>(null);
@@ -70,7 +78,10 @@ export function NewAgentDialog({ isOpen, cwd, onClose, onConfirm }: NewAgentDial
   // Se limpia al cerrar, no al abrir: si se limpiara al abrir, la elección anterior
   // parpadearía un instante antes de desaparecer.
   useEffect(() => {
-    if (isOpen) return;
+    if (isOpen) {
+      if (initialPrelaunch) setPrelaunch(initialPrelaunch);
+      return;
+    }
     setAgent(null);
     setSkillIds([]);
     setAccountId(undefined);
@@ -115,7 +126,7 @@ export function NewAgentDialog({ isOpen, cwd, onClose, onConfirm }: NewAgentDial
   return (
     <AppDialog
       onClose={onClose}
-      title={t("newAgent.title")}
+      title={title ?? t("newAgent.title")}
       size="lg"
       closeOnBackdrop={false}
       footer={
@@ -182,8 +193,14 @@ export function NewAgentDialog({ isOpen, cwd, onClose, onConfirm }: NewAgentDial
               onSelect={(next) => {
                 setAgent(next);
                 // Las cuentas y las skills son por TUI: lo elegido para otra no aplica acá.
+                // Al duplicar, se arranca de las de la tab original que esta TUI soporta.
                 setAccountId(undefined);
-                setSkillIds([]);
+                const skills = useSkillsStore.getState().skills;
+                setSkillIds((initialSkillIds ?? []).filter((id) => {
+                  const skill = skills.find((x) => x.id === id);
+                  return skill !== undefined
+                    && (skill.compatibleAgents.length === 0 || skill.compatibleAgents.includes(next.id));
+                }));
                 // Un paso de una sola decisión se cierra al tomarla. A qué paso se salta
                 // se le pregunta al store y no al estado de arriba: ese todavía tiene las
                 // cuentas de la TUI anterior hasta el próximo render.

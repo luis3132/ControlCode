@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { CloseIcon, Modal } from "neogestify-ui-components";
+import { Button, CloseIcon, Modal } from "neogestify-ui-components";
 
 type DialogSize = "sm" | "md" | "lg" | "xl";
 
@@ -32,17 +32,17 @@ export function DialogHeader({ title, icon, onClose }: {
       </h2>
       {/* Cerrar está siempre, incluso cuando el diálogo no se cierra con Escape ni
           clickeando afuera: sin salida visible, un login a medias parece un cuelgue. */}
-      <button
+      <Button variant="icon"
         onClick={onClose}
         title={t("btn.close")}
         aria-label={t("btn.close")}
         className="cc-t flex items-center justify-center w-7 h-7 rounded-lg shrink-0
           text-gray-400 dark:text-white/35
           hover:text-gray-700 dark:hover:text-white
-          hover:bg-gray-200 dark:hover:bg-white/10"
+          hover:bg-gray-200 dark:hover:bg-white/10 p-0"
       >
         <CloseIcon className="w-3.5 h-3.5" />
-      </button>
+      </Button>
     </div>
   );
 }

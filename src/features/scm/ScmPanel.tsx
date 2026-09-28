@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   AddIcon, Alert, Button, ChevronDownIcon, ChevronRightIcon, CloudIcon, DocumentIcon, EmptyState, MinusIcon,
-  Skeleton, Tooltip,
+  Skeleton, TextArea, Tooltip,
 } from "neogestify-ui-components";
 
 import { BranchIcon, ExternalIcon, GithubIcon, GitlabIcon, PullIcon, PushIcon, UndoIcon } from "@/app/icons";
@@ -56,17 +56,17 @@ function IconAction({ label, onClick, children, disabled, danger }: {
 }) {
   return (
     <Tooltip content={label} placement="bottom">
-      <button
+      <Button variant="icon"
         onClick={(e) => { e.stopPropagation(); onClick(); }}
         disabled={disabled}
         aria-label={label}
         className={`cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
           text-gray-400 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10
           disabled:opacity-40 disabled:hover:bg-transparent
-          ${danger ? "hover:text-red-500 dark:hover:text-red-400" : "hover:text-gray-800 dark:hover:text-white"}`}
+          ${danger ? "hover:text-red-500 dark:hover:text-red-400" : "hover:text-gray-800 dark:hover:text-white"} p-0`}
       >
         {children}
-      </button>
+      </Button>
     </Tooltip>
   );
 }
@@ -331,7 +331,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
   return (
     <>
       <div className="relative flex items-center gap-1 h-8 shrink-0 pl-2 pr-1.5 bg-gray-100/60 dark:bg-white/2">
-        <button
+        <Button variant="custom"
           onClick={() => setBranchMenu((v) => !v)}
           disabled={!!busy}
           title={t("scm.branch.switch")}
@@ -343,39 +343,39 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
             {status.branch ?? (status.head ? t("scm.detached", { head: status.head }) : t("scm.noCommits"))}
           </span>
           <ChevronDownIcon className="w-2.5 h-2.5 shrink-0 text-gray-400" />
-        </button>
+        </Button>
         <div className="flex-1" />
         <IconAction label={t("scm.fetch")} disabled={!!busy || status.remotes.length === 0}
           onClick={() => run("fetch", () => scmFetch(status.root))}>
           <CloudIcon className="w-3.5 h-3.5" />
         </IconAction>
         <Tooltip content={t("scm.pull")} placement="bottom">
-          <button
+          <Button variant="icon"
             onClick={() => run("pull", () => scmPull(status.root))}
             disabled={!!busy || !status.upstream}
             aria-label={t("scm.pull")}
             className="cc-t flex items-center gap-0.5 h-5.5 px-1 rounded-md shrink-0
               text-gray-400 dark:text-white/40 hover:text-gray-800 dark:hover:text-white
-              hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent"
+              hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent py-0"
           >
             <PullIcon className="w-3.5 h-3.5" />
             {status.behind > 0 && <span className="text-[10px] tabular-nums">{status.behind}</span>}
-          </button>
+          </Button>
         </Tooltip>
-        <Tooltip content={status.upstream ? t("scm.push") : t("scm.publish")} placement="bottom">
-          <button
+        <Tooltip content={status.published ? t("scm.push") : t("scm.publish")} placement="bottom">
+          <Button variant="icon"
             onClick={() => run("push", () => scmPush(status.root))}
             disabled={!!busy || !status.branch || status.remotes.length === 0}
-            aria-label={status.upstream ? t("scm.push") : t("scm.publish")}
+            aria-label={status.published ? t("scm.push") : t("scm.publish")}
             className={`cc-t flex items-center gap-0.5 h-5.5 px-1 rounded-md shrink-0
               hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent
-              ${status.ahead > 0 || (!status.upstream && status.branch)
+              ${status.ahead > 0 || (!status.published && status.branch)
                 ? "text-blue-600 dark:text-blue-400"
-                : "text-gray-400 dark:text-white/40 hover:text-gray-800 dark:hover:text-white"}`}
+                : "text-gray-400 dark:text-white/40 hover:text-gray-800 dark:hover:text-white"} py-0`}
           >
             <PushIcon className="w-3.5 h-3.5" />
             {status.ahead > 0 && <span className="text-[10px] tabular-nums">{status.ahead}</span>}
-          </button>
+          </Button>
         </Tooltip>
 
         {branchMenu && (
@@ -429,7 +429,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
         )}
 
         <div className="flex flex-col gap-1.5 px-2.5 pt-2.5 pb-2">
-          <textarea
+          <TextArea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => {
@@ -446,11 +446,26 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
               focus:border-blue-500 dark:focus:border-blue-400
               text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/25"
           />
-          <Button size="sm" variant="primary" fullWidth disabled={!canCommit} onClick={commit}>
-            {busy === "commit"
-              ? t("scm.committing")
-              : stagedCount === 0 && totalChanges > 0 ? t("scm.commitAll") : t("scm.commit")}
-          </Button>
+          {/* Con el árbol limpio no hay nada que commitear, y lo que sigue es subir: publicar
+              la rama si nunca se subió, o mandar los commits que faltan. Es el botón de VS
+              Code, y sin él una rama nueva no tenía por dónde salir. */}
+          {totalChanges === 0 && status.branch && status.remotes.length > 0
+            && (!status.published || status.ahead > 0) ? (
+            <Button size="sm" variant="primary" fullWidth disabled={!!busy}
+              onClick={() => run("push", () => scmPush(status.root))}
+              className="flex items-center justify-center gap-1.5">
+              <PushIcon className="w-3.5 h-3.5" />
+              {busy === "push"
+                ? t("scm.pushing")
+                : !status.published ? t("scm.publish") : t("scm.pushCommits", { count: status.ahead })}
+            </Button>
+          ) : (
+            <Button size="sm" variant="primary" fullWidth disabled={!canCommit} onClick={commit}>
+              {busy === "commit"
+                ? t("scm.committing")
+                : stagedCount === 0 && totalChanges > 0 ? t("scm.commitAll") : t("scm.commit")}
+            </Button>
+          )}
         </div>
 
         {totalChanges === 0 ? (
@@ -491,7 +506,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
 
       <div className="shrink-0 border-t border-gray-200 dark:border-white/7">
         <div className="relative flex items-center h-7 pr-1.5 hover:bg-gray-200/50 dark:hover:bg-white/4">
-          <button
+          <Button variant="custom"
             onClick={() => setLogOpen((v) => !v)}
             className="flex flex-1 min-w-0 items-center gap-1 h-full pl-1.5 text-left"
           >
@@ -501,10 +516,10 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
             <span className="flex-1 truncate text-[10px] font-extrabold uppercase tracking-[0.09em] text-gray-500 dark:text-white/40">
               {t("scm.log")}
             </span>
-          </button>
+          </Button>
           {/* Qué ramas se ven: la actual, todas, o las que se elijan. */}
           <Tooltip content={t("scm.graph.refs.title")} placement="top">
-            <button
+            <Button variant="custom"
               onClick={() => { setLogOpen(true); setGraphMenu((v) => !v); }}
               aria-haspopup="menu"
               aria-expanded={graphMenu}
@@ -516,7 +531,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
               <BranchIcon className="w-3 h-3 shrink-0" />
               <span className="truncate">{graphLabel}</span>
               <ChevronDownIcon className="w-2 h-2 shrink-0 opacity-60" />
-            </button>
+            </Button>
           </Tooltip>
           {graphMenu && (
             <GraphBranchFilter
@@ -538,12 +553,12 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
                 <CommitGraph cwd={cwd} root={status.root} commits={log} onTag={(c) => setTagOn(c)} />
                 {/* Si vino lleno, puede haber más: se pide otro tramo. */}
                 {log.length >= logLimit && (
-                  <button
+                  <Button variant="custom"
                     onClick={() => setLogLimit((n) => n + LOG_PAGE)}
-                    className="w-full h-6 text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline"
+                    className="w-full h-6 text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline block"
                   >
                     {t("scm.graph.more")}
-                  </button>
+                  </Button>
                 )}
               </>
             )}

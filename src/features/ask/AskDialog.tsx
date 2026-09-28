@@ -90,17 +90,17 @@ export function AskDialog() {
         ) : (
           <div className="flex flex-col gap-1.5">
             {question.options.map((option) => (
-              <button
+              <Button variant="custom"
                 key={option}
                 onClick={() => answer(question.id, option)}
                 className="cc-t text-left px-3 py-2 rounded-lg text-[12.5px]
                   border border-gray-200 dark:border-white/10
                   text-gray-800 dark:text-gray-200
                   hover:bg-gray-100 dark:hover:bg-white/8
-                  hover:border-gray-300 dark:hover:border-white/20"
+                  hover:border-gray-300 dark:hover:border-white/20 inline-block"
               >
                 {option}
-              </button>
+              </Button>
             ))}
           </div>
         )}

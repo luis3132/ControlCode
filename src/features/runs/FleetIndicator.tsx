@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Button } from "neogestify-ui-components";
 
 import { fleetSummary } from "./fleetOrder";
 import { useRunsStore } from "./store";
@@ -28,7 +29,7 @@ export function FleetIndicator() {
   return (
     <>
       <span className="w-px h-3 bg-gray-300 dark:bg-white/10" />
-      <button
+      <Button variant="custom"
         onClick={() => navigate("/fleet")}
         title={t("fleet.indicator.hint", { usd: summary.spentUsd.toFixed(3) })}
         className="cc-t flex items-center gap-2 px-1.5 h-[18px] rounded
@@ -46,7 +47,7 @@ export function FleetIndicator() {
             {t("fleet.indicator.running", { n: summary.running })}
           </span>
         )}
-      </button>
+      </Button>
     </>
   );
 }

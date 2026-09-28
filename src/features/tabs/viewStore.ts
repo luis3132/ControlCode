@@ -6,6 +6,7 @@ import {
   type BrowserView, type DiffView, type FileView, type ViewOwner, type ViewTab,
 } from "@/features/tabs/viewTabs";
 import { isMarkdownPath, prefersMarkdownPreview } from "@/features/editor/markdown";
+import { isInside, remapPath } from "@/features/explorer/paths";
 
 interface ViewTabsState {
   views: ViewTab[];
@@ -27,6 +28,11 @@ interface ViewTabsState {
   showTerminal: () => void;
   closeView: (id: string) => void;
   updateView: (id: string, patch: Partial<Omit<FileView, "kind" | "id">> | Partial<Omit<BrowserView, "kind" | "id">>) => void;
+  /** Un archivo o carpeta cambió de lugar: las tabs de lo que estaba ahí lo siguen. */
+  retargetPath: (from: string, to: string) => void;
+  /** Se borró: se cierran las tabs de lo que había ahí, salvo las que tienen cambios sin
+   *  guardar — esos cambios solo existen en la tab. */
+  closePath: (path: string) => void;
   hydrate: (views: ViewTab[]) => void;
 }
 
@@ -96,6 +102,21 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
 
   updateView: (id, patch) =>
     set((s) => ({ views: s.views.map((v) => (v.id === id ? ({ ...v, ...patch } as ViewTab) : v)) })),
+
+  retargetPath: (from, to) =>
+    set((s) => ({
+      views: s.views.map((v) => {
+        if (v.kind !== "file") return v;
+        const path = remapPath(v.path, from, to);
+        return path === null ? v : { ...v, path, title: baseName(path) };
+      }),
+    })),
+
+  closePath: (path) => {
+    for (const v of get().views) {
+      if (v.kind === "file" && !v.dirty && isInside(v.path, path)) get().closeView(v.id);
+    }
+  },
 
   hydrate: (views) => set({ views, activeViewId: null }),
 }));

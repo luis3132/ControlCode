@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { SearchIcon, Tooltip } from "neogestify-ui-components";
+import { Button, SearchIcon, Tooltip } from "neogestify-ui-components";
 
 /** La fila de controles de arriba de cada pestaña del panel. */
 export function PanelToolbar({ children }: { children: ReactNode }) {
@@ -23,14 +23,15 @@ export function FilterChip({ active, onClick, children, tone }: {
       ? "bg-amber-500 text-white"
       : "bg-gray-800 text-white dark:bg-white dark:text-gray-900";
   return (
-    <button
+    <Button
+      variant="custom"
       onClick={onClick}
       aria-pressed={active}
       className={`cc-t shrink-0 flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-medium tabular-nums
         ${active ? activeTone : "text-gray-600 dark:text-white/55 hover:bg-gray-200 dark:hover:bg-white/10"}`}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -64,16 +65,17 @@ export function IconAction({ label, onClick, children, disabled }: {
 }) {
   return (
     <Tooltip content={label} placement="top">
-      <button
+      <Button
+        variant="icon"
         onClick={onClick}
         disabled={disabled}
         aria-label={label}
-        className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
+        className="cc-t flex items-center justify-center w-6 h-6 p-0 rounded-md shrink-0
           text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white
           hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-35 disabled:hover:bg-transparent"
       >
         {children}
-      </button>
+      </Button>
     </Tooltip>
   );
 }
@@ -85,16 +87,17 @@ export function TextAction({ onClick, children, disabled, danger }: {
   danger?: boolean;
 }) {
   return (
-    <button
+    <Button
+      variant="custom"
       onClick={onClick}
       disabled={disabled}
-      className={`cc-t shrink-0 h-6 px-2 rounded-md text-[11px] font-medium disabled:opacity-40 disabled:hover:bg-transparent
+      className={`cc-t inline-block shrink-0 h-6 px-2 rounded-md text-[11px] font-medium disabled:opacity-40 disabled:hover:bg-transparent
         ${danger
           ? "text-red-600 dark:text-red-400 hover:bg-red-500/10"
           : "text-gray-600 dark:text-white/55 hover:bg-gray-200 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white"}`}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 

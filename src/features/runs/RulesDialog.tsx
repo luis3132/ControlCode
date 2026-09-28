@@ -95,17 +95,17 @@ export function RulesDialog({ cwd, onClose }: { cwd: string; onClose: () => void
                   text-gray-800 dark:text-gray-200">
                   {rule.pattern}
                 </span>
-                <button
+                <Button variant="icon"
                   onClick={() => remove(rule.id)}
                   title={t("fleet.rules.delete")}
                   aria-label={t("fleet.rules.delete")}
                   className="cc-t flex items-center justify-center w-6 h-6 rounded shrink-0
                     text-gray-400 dark:text-white/30
                     hover:text-red-600 dark:hover:text-red-400
-                    hover:bg-red-500/10"
+                    hover:bg-red-500/10 p-0"
                 >
                   <TrashIcon className="w-3.5 h-3.5" />
-                </button>
+                </Button>
               </li>
             ))}
           </ol>
@@ -128,7 +128,7 @@ export function RulesDialog({ cwd, onClose }: { cwd: string; onClose: () => void
             <div className="flex shrink-0 rounded-lg overflow-hidden
               border border-gray-200 dark:border-white/10">
               {[true, false].map((value) => (
-                <button
+                <Button variant="custom"
                   key={String(value)}
                   onClick={() => setAllow(value)}
                   className={`cc-t px-2.5 h-8 text-[11px]
@@ -136,10 +136,10 @@ export function RulesDialog({ cwd, onClose }: { cwd: string; onClose: () => void
                       ? value
                         ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
                         : "bg-red-500/15 text-red-600 dark:text-red-300"
-                      : "text-gray-500 dark:text-white/45 hover:bg-gray-200 dark:hover:bg-white/8"}`}
+                      : "text-gray-500 dark:text-white/45 hover:bg-gray-200 dark:hover:bg-white/8"} inline-block`}
                 >
                   {value ? t("fleet.rules.allow") : t("fleet.rules.deny")}
-                </button>
+                </Button>
               ))}
             </div>
             <Button variant="primary" size="sm" disabled={busy || !pattern.trim()} onClick={add}>

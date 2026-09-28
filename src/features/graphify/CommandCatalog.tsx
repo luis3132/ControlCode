@@ -153,7 +153,7 @@ export function CommandCatalog({ cwd, onRun }: {
             return (
               <div key={command.id} className="flex flex-col rounded-lg overflow-hidden
                 bg-gray-100/70 dark:bg-white/4">
-                <button
+                <Button variant="custom"
                   onClick={() => open(command)}
                   className="cc-t flex items-center gap-2.5 w-full px-3 py-2 text-left
                     hover:bg-gray-100 dark:hover:bg-white/6"
@@ -173,7 +173,7 @@ export function CommandCatalog({ cwd, onRun }: {
                       {t("settings.graphify.inAssistant")}
                     </span>
                   )}
-                </button>
+                </Button>
 
                 {isOpen && (
                   <div className="flex flex-col gap-2 px-3 pb-3">
@@ -212,16 +212,16 @@ export function CommandCatalog({ cwd, onRun }: {
                     {command.flags.length > 0 && (
                       <div className="flex flex-wrap items-center gap-1.5">
                         {command.flags.map((flag) => (
-                          <button
+                          <Button variant="custom"
                             key={flag.id}
                             onClick={() => toggleFlag(command, flag.id)}
                             className={`cc-t px-2 py-0.5 rounded font-mono text-[10px]
                               ${choice.flags.includes(flag.id)
                                 ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-800 dark:text-white"
-                                : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10"}`}
+                                : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10"} inline-block`}
                           >
                             {flag.text.replace(/\{\w+\}/g, "…")}
-                          </button>
+                          </Button>
                         ))}
                       </div>
                     )}

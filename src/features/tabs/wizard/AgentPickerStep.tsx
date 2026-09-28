@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Button } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import type { AgentInfo } from "@/features/tabs/types";
@@ -39,7 +40,7 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
         const isSelected = agent.id === selected;
         const AgentIcon = agentIcon(agent.id, agent.command);
         return (
-          <button
+          <Button variant="custom"
             key={agent.id}
             type="button"
             onClick={() => onSelect(agent)}
@@ -87,7 +88,7 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
                 </span>
               )}
             </span>
-          </button>
+          </Button>
         );
       })}
     </div>

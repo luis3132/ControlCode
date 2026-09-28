@@ -1,6 +1,6 @@
 [package]
 name = "controlcode"
-version = "1.8.4"
+version = "1.8.6"
 description = "Control Code — AI coding agent command center"
 authors = ["luis3132"]
 edition = "2024"
@@ -84,6 +84,7 @@ tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "zip"] }
+trash = "5"
 
 # Señales POSIX: matar el GRUPO de procesos de una tab y no solo a su líder, para que no
 # queden huérfanos los procesos que el agente haya lanzado (ver terminal::pty_manager).
@@ -122,8 +123,8 @@ windows-sys = { version = "0.61", features = [
 ] }
 # Capturas del navegador (ver preview::snapshot): WebView2 entrega el PNG en un IStream.
 # Misma regla que arriba: las versiones que ya trae wry.
-webview2-com = "0.38"
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
+webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

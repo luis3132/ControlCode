@@ -2,11 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  ClockIcon,
-  EmptyState,
-  Kbd,
+  Button, ChevronDownIcon, ChevronRightIcon, ClockIcon, EmptyState, Kbd,
 } from "neogestify-ui-components";
 
 import { useSessionsStore } from "@/features/sessions/store";
@@ -163,12 +159,12 @@ export function SessionsPage() {
             title={t("sessions.noMatches")}
             action={
               hasActiveFilters(filters) ? (
-                <button
+                <Button variant="custom"
                   onClick={() => setFilters(EMPTY_FILTERS)}
-                  className="cc-t text-[11.5px] text-blue-500 dark:text-blue-400 hover:underline"
+                  className="cc-t text-[11.5px] text-blue-500 dark:text-blue-400 hover:underline inline-block"
                 >
                   {t("sessions.filters.clear")}
-                </button>
+                </Button>
               ) : undefined
             }
           />
@@ -191,7 +187,7 @@ export function SessionsPage() {
                 const isCollapsed = collapsed.has(ws.key);
                 return (
                   <div key={ws.key}>
-                    <button
+                    <Button variant="custom"
                       onClick={() => toggleGroup(ws.key)}
                       title={ws.cwd}
                       className="cc-t flex items-center gap-2 h-7 w-full px-4 text-left
@@ -219,7 +215,7 @@ export function SessionsPage() {
                       <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
                         {ws.sessions.length}
                       </span>
-                    </button>
+                    </Button>
 
                     {!isCollapsed && ws.sessions.map((entry) => (
                       <SessionRow

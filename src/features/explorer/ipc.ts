@@ -11,3 +11,13 @@ export function readDir(path: string): Promise<DirEntry[]> {
 export function repoInfo(path: string): Promise<RepoInfo> {
   return invoke<RepoInfo>("explorer_repo_info", { path });
 }
+
+/** Cada una devuelve la ruta que quedó: copiar o crear sobre un nombre ocupado no pisa,
+ *  y la ruta final solo la sabe Rust. */
+export const createFile = (dir: string, name: string) => invoke<string>("explorer_create_file", { dir, name });
+export const createDir = (dir: string, name: string) => invoke<string>("explorer_create_dir", { dir, name });
+export const renamePath = (path: string, name: string) => invoke<string>("explorer_rename", { path, name });
+export const copyPath = (path: string, dir: string) => invoke<string>("explorer_copy", { path, dir });
+export const movePath = (path: string, dir: string) => invoke<string>("explorer_move", { path, dir });
+/** A la papelera del sistema, no borrado definitivo. */
+export const trashPaths = (paths: string[]) => invoke<void>("explorer_trash", { paths });

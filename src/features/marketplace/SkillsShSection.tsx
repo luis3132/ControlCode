@@ -180,24 +180,24 @@ export function SkillsShSection() {
           {install.otherInstalls.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
               {install.otherInstalls.map((alt) => (
-                <button
+                <Button variant="custom"
                   key={alt}
                   onClick={() => setCommand(alt)}
                   className="cc-t max-w-full truncate px-2 py-0.5 rounded font-mono text-[10px]
                     bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40
-                    hover:bg-gray-200 dark:hover:bg-white/10"
+                    hover:bg-gray-200 dark:hover:bg-white/10 inline-block"
                   title={alt}
                 >
                   {alt}
-                </button>
+                </Button>
               ))}
             </div>
           )}
           <p className="text-[10.5px] leading-relaxed text-gray-500 dark:text-white/40">
             {t("settings.skillssh.afterInstall")}{" "}
-            <button onClick={() => openUrl(install.docsUrl)} className="cc-t text-blue-600 dark:text-blue-400 hover:underline">
+            <Button variant="custom" onClick={() => openUrl(install.docsUrl)} className="cc-t text-blue-600 dark:text-blue-400 hover:underline inline-block">
               {t("settings.skillssh.docs")}
-            </button>
+            </Button>
           </p>
         </div>
       )}

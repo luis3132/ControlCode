@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { EmptyState, UserIcon } from "neogestify-ui-components";
+import { Button, EmptyState, UserIcon } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { AgentAccountsPane } from "@/features/accounts/AgentAccountsPane";
@@ -32,7 +32,7 @@ function NavItem({ active, onClick, icon, label, count, title }: {
   title: string;
 }) {
   return (
-    <button
+    <Button variant="custom"
       onClick={onClick}
       // El número solo no dice qué es: al lado de un nombre puede leerse como una versión.
       title={title}
@@ -44,7 +44,7 @@ function NavItem({ active, onClick, icon, label, count, title }: {
       {icon}
       <span className="flex-1 min-w-0 truncate text-[11.5px]">{label}</span>
       <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/30">{count || ""}</span>
-    </button>
+    </Button>
   );
 }
 

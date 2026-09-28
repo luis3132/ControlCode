@@ -25,6 +25,9 @@ export interface ScmStatus {
   detached: boolean;
   initial: boolean;
   upstream: string | null;
+  /** Sigue a una rama del mismo nombre en un remoto. `false` = hay que publicarla (sin
+   *  upstream, o siguiendo a otra rama, como al crearla desde `origin/main`). */
+  published: boolean;
   ahead: number;
   behind: number;
   staged: ScmEntry[];

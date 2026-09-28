@@ -124,17 +124,17 @@ export function SettingsPage() {
         bg-gray-100/50 dark:bg-black/20">
         <div className="flex-1 min-h-0 cc-scroll p-1.5">
           {sections.map((s) => (
-            <button
+            <Button variant="custom"
               key={s.id}
               onClick={() => setSection(s.id)}
               className={`cc-t flex items-center w-full h-8 px-2.5 rounded-lg text-left
                 text-[11.5px]
                 ${s.id === section
                   ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-900 dark:text-white font-semibold"
-                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-white/6"}`}
+                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-white/6"} gap-0`}
             >
               <span className="truncate">{s.label}</span>
-            </button>
+            </Button>
           ))}
         </div>
       </nav>
@@ -233,28 +233,28 @@ export function SettingsPage() {
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <Tooltip content={t("btn.edit")} placement="left">
-                          <button
+                          <Button variant="icon"
                             onClick={() => setEditingId(agent.id)}
                             aria-label={t("btn.edit")}
                             className="cc-t flex items-center justify-center w-7 h-7 rounded-md
                               text-gray-400 dark:text-white/35
                               hover:text-gray-700 dark:hover:text-white
-                              hover:bg-gray-200 dark:hover:bg-white/10"
+                              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
                           >
                             <EditIcon className="w-3.5 h-3.5" />
-                          </button>
+                          </Button>
                         </Tooltip>
                         <Tooltip content={t("btn.delete")} placement="left">
-                          <button
+                          <Button variant="icon"
                             onClick={() => removeCustomAgent(agent.id)}
                             aria-label={t("btn.delete")}
                             className="cc-t flex items-center justify-center w-7 h-7 rounded-md
                               text-gray-400 dark:text-white/35
                               hover:text-red-500 dark:hover:text-red-400
-                              hover:bg-gray-200 dark:hover:bg-white/10"
+                              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
                           >
                             <TrashIcon className="w-3.5 h-3.5" />
-                          </button>
+                          </Button>
                         </Tooltip>
                       </div>
                     </div>

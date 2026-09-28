@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Switch, Tooltip } from "neogestify-ui-components";
+import { Button, Switch, Tooltip } from "neogestify-ui-components";
 import { EditIcon, TrashIcon, CloudIcon, FolderIcon, AnimateSpin, IconReset } from "neogestify-ui-components";
 import { RegistryProgressBar, useRegistryProgress } from "@/features/marketplace/RegistryProgress";
 import { useMarketplaceStore } from "@/features/marketplace/store";
@@ -80,14 +80,14 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
                   text-gray-800 dark:text-gray-100">
                   {r.name}
                 </span>
-                <button
+                <Button variant="icon"
                   onClick={() => { setNameDraft(r.name); setEditing(true); }}
                   title={t("marketplace.registries.rename")}
                   className="cc-t shrink-0 opacity-0 group-hover/name:opacity-100
-                    text-gray-400 hover:text-gray-700 dark:hover:text-white"
+                    text-gray-400 hover:text-gray-700 dark:hover:text-white rounded-md"
                 >
                   <EditIcon className="w-3 h-3" />
-                </button>
+                </Button>
               </>
             )}
             <span className="shrink-0 px-1.5 rounded-full font-mono text-[9.5px]
@@ -132,7 +132,7 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
             aria-label={r.enabled ? t("marketplace.registries.enabled") : t("marketplace.registries.disabled")}
           />
           <Tooltip content={t("marketplace.registries.refresh")} placement="bottom">
-            <button
+            <Button variant="icon"
               onClick={() => refreshRegistry(r.id)}
               disabled={refreshing}
               aria-label={t("marketplace.registries.refresh")}
@@ -140,22 +140,22 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
                 text-gray-400 dark:text-white/35
                 hover:text-gray-700 dark:hover:text-white
                 hover:bg-gray-200 dark:hover:bg-white/10
-                disabled:opacity-40 disabled:hover:bg-transparent"
+                disabled:opacity-40 disabled:hover:bg-transparent p-0"
             >
               {refreshing ? <AnimateSpin className="w-3.5 h-3.5" /> : <IconReset className="w-3.5 h-3.5" />}
-            </button>
+            </Button>
           </Tooltip>
           <Tooltip content={t("marketplace.registries.remove")} placement="bottom">
-            <button
+            <Button variant="icon"
               onClick={() => setConfirmRemove(true)}
               aria-label={t("marketplace.registries.remove")}
               className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
                 text-gray-400 dark:text-white/35
                 hover:text-red-500 dark:hover:text-red-400
-                hover:bg-gray-200 dark:hover:bg-white/10"
+                hover:bg-gray-200 dark:hover:bg-white/10 p-0"
             >
               <TrashIcon className="w-3.5 h-3.5" />
-            </button>
+            </Button>
           </Tooltip>
         </div>
       </div>

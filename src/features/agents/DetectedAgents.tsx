@@ -92,12 +92,12 @@ export function DetectedAgents() {
           instalaste tiene que estar en esta lista. */}
       {searchPath && (
         <div className="flex flex-col gap-1.5">
-          <button
+          <Button variant="custom"
             onClick={() => setShowPath((v) => !v)}
-            className="cc-t self-start text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline"
+            className="cc-t self-start text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline inline-block"
           >
             {showPath ? t("settings.tuis.path.hide") : t("settings.tuis.path.show")}
-          </button>
+          </Button>
 
           {(showPath || shellFailed) && (
             <p className="text-[10.5px] leading-relaxed text-gray-500 dark:text-white/40">

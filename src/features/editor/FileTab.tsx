@@ -87,9 +87,16 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
     setError(null);
   }, [view.path, setDirty]);
 
+  // Mover o renombrar el archivo desde el árbol cambia la ruta, no el contenido: con
+  // cambios sin guardar, releerlo los tiraría. Se sigue editando y se guarda en la nueva.
+  const loadedPath = useRef<string | null>(null);
   useEffect(() => {
+    inRepo.current = undefined;
+    const moved = loadedPath.current !== null && loadedPath.current !== view.path;
+    loadedPath.current = view.path;
+    if (moved && dirty.current) return;
     load(false).catch((e) => setError(String(e)));
-  }, [load]);
+  }, [load, view.path]);
 
   /** Relee la versión del índice. Cambia sin que el archivo cambie: preparar o descartar
    *  desde el panel, un commit de un agente. Por eso se relee junto con el vigilante. */
@@ -204,15 +211,16 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
           </Button>
         )}
         <Tooltip content={t("explorer.reveal")} placement="bottom">
-          <button
+          <Button
+            variant="icon"
             onClick={() => revealItemInDir(view.path).catch(console.error)}
             aria-label={t("explorer.reveal")}
-            className="cc-t flex items-center justify-center w-6 h-6 rounded-md
+            className="cc-t flex items-center justify-center w-6 h-6 p-0 rounded-md
               text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white
               hover:bg-gray-200 dark:hover:bg-white/10"
           >
             <FolderIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
 

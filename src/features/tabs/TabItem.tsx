@@ -1,5 +1,8 @@
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Button } from "neogestify-ui-components";
 
+import { useAccountsStore } from "@/features/accounts/store";
 import { agentIcon } from "@/features/agents/agentIcons";
 import type { AgentPaint } from "@/features/browser/agentPaint";
 import type { Tab } from "@/features/tabs/types";
@@ -31,6 +34,19 @@ export function TabItem({
   const [editValue, setEditValue] = useState(tab.title);
   const inputRef = useRef<HTMLInputElement>(null);
   const AgentIcon = agentIcon(tab.agentId, tab.command);
+  const { t } = useTranslation();
+  // Con qué cuenta corre, abajo del título. Con varias cuentas de la misma TUI abiertas,
+  // es lo único que distingue dos tabs que si no se ven iguales. Sin cuenta elegida corre
+  // con la del sistema, y se dice solo si esa TUI tiene otras: si no, no hay nada que
+  // distinguir.
+  const accounts = useAccountsStore((s) => s.accounts);
+  const account = useMemo(() => {
+    if (tab.accountId) {
+      const a = accounts.find((x) => x.id === tab.accountId);
+      return a ? { name: a.name, hint: a.label ?? a.name } : null;
+    }
+    return accounts.some((x) => x.agentId === tab.agentId) ? { name: null, hint: null } : null;
+  }, [accounts, tab.accountId, tab.agentId]);
 
   useEffect(() => {
     if (isEditing) inputRef.current?.select();
@@ -93,7 +109,15 @@ export function TabItem({
             text-gray-900 dark:text-white"
         />
       ) : (
-        <span className="text-xs truncate flex-1 min-w-0">{tab.title}</span>
+        <span className="flex flex-col flex-1 min-w-0 leading-tight">
+          <span className="text-xs truncate">{tab.title}</span>
+          {account && (
+            <span title={account.hint ?? undefined}
+              className="text-[9.5px] truncate text-gray-400 dark:text-white/35">
+              {account.name ?? t("accounts.system")}
+            </span>
+          )}
+        </span>
       )}
 
       {/* Sin PTY todavía = arrancando. Es lo único que se puede afirmar del estado. */}
@@ -104,7 +128,7 @@ export function TabItem({
       />
 
       {/* Botón cerrar — siempre visible pero sutil, hover lo destaca */}
-      <button
+      <Button variant="icon"
         onClick={(e) => {
           e.stopPropagation();
           onClose(e);
@@ -119,13 +143,13 @@ export function TabItem({
           hover:text-gray-700 dark:hover:text-white
           hover:bg-gray-200 dark:hover:bg-white/15
           transition-opacity duration-100
-        "
+         p-0"
       >
         <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
           <line x1="1" y1="1" x2="7" y2="7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           <line x1="7" y1="1" x2="1" y2="7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
-      </button>
+      </Button>
     </div>
   );
 }
