@@ -18,6 +18,7 @@ mod runs;
 mod scm;
 mod session;
 mod skills;
+pub mod ssh;
 mod sync;
 mod terminal;
 mod updates;

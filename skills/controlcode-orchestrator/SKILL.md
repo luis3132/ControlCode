@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.6.0
+version: 1.7.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -22,6 +22,7 @@ of asking the user to click through the UI.
 | Keep talking to an agent that's already open | [Holding a conversation](#holding-a-conversation-with-an-open-tab) |
 | Find, read or write skills | [Skills](#installing-skills) |
 | Check on background fleet tasks | [The fleet](#the-fleet-background-agents) |
+| Do something on another computer | [Other computers](#other-computers-over-ssh) |
 
 ## Before anything else
 
@@ -450,6 +451,24 @@ Each project has a browser inside the app, loaded through a local proxy, that th
 too. Agents drive it through the `browser_*` MCP tools (navigate, snapshot, click, type,
 console, network…). `ccode browser run --json-args '{"cwd":"...","request":{"op":"snapshot"}}'`
 is the same path, for when you don't have those tools.
+
+## Other computers over SSH
+
+The user can connect other machines in **Settings → Connections** (name, host, user, port,
+key, default folder). The app runs the system's own `ssh`, with the user's `~/.ssh/config`
+and keys, and only the connections marked *Agents can use it* are visible to you.
+
+- `ssh_hosts` (MCP) or `ccode ssh list` — which computers there are, by name.
+- `ssh_run` (MCP) or `ccode ssh run <name> "<command>" [--cwd <dir>] [--timeout 120]` —
+  runs the command there and returns exit code, stdout and stderr. It is non-interactive:
+  no password prompts, no TTY, so pass `-y` style flags and don't start editors or pagers.
+  Each call is a fresh shell; chain steps with `&&`.
+- `ssh_copy` (MCP) — `upload` or `download` files between this project and that machine.
+
+Every `ssh_run` and `ssh_copy` asks the user for approval. If a call fails with *not
+enabled for agents* or a host-key/permission error, relay the message: the fix (enable the
+connection, accept the fingerprint by opening a terminal on it, set up a key) is the
+user's.
 
 ## Working rules
 

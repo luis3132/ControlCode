@@ -281,3 +281,23 @@ fn la_ayuda_nombra_todos_los_grupos_que_la_app_atiende() {
     assert!(USAGE.contains("mcp --cwd"), "la ayuda no explica `ccode mcp`");
     assert!(USAGE.contains("mcp --task"));
 }
+
+/// `ccode ssh run servidor "df -h" --timeout 600`: conexión y comando sueltos, y la CLI
+/// espera lo que se pidió más el tiempo de conectarse, no los 30s de siempre.
+#[test]
+fn ssh_run_takes_host_and_command_loose_and_waits_as_asked() {
+    let v = parse("ssh.run", &["servidor", "df -h", "--timeout", "600", "--cwd", "/srv"]).unwrap();
+    assert_eq!(v["host"], "servidor");
+    assert_eq!(v["command"], "df -h");
+    assert_eq!(v["timeout"], 600);
+    assert_eq!(v["cwd"], "/srv");
+
+    assert!(read_timeout_for("ssh.run", &v) > Duration::from_secs(600));
+    assert!(read_timeout_for("ssh.run", &json!({})) > Duration::from_secs(120));
+    // Desde el MCP, el tope viaja dentro de los argumentos de la tool; copiar no tiene tope
+    // propio y espera el máximo.
+    let tool = json!({ "tool": "ssh_run", "args": { "timeout_s": 900 } });
+    assert!(read_timeout_for("ssh.tool", &tool) > Duration::from_secs(900));
+    let copying = json!({ "tool": "ssh_copy", "args": {} });
+    assert!(read_timeout_for("ssh.tool", &copying) > Duration::from_secs(1800));
+}

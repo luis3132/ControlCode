@@ -17,6 +17,7 @@ import { SkillsShSection } from "@/features/marketplace/SkillsShSection";
 import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection";
 import { RoutingSection } from "@/features/runs/RoutingSection";
 import { PrelaunchSection } from "@/features/prelaunch/PrelaunchSection";
+import { ConnectionsSection } from "@/features/connections/ConnectionsSection";
 import { TerminalSection } from "@/features/terminal/TerminalSection";
 import { ShortcutsSection } from "@/features/settings/ShortcutsSection";
 import { SyncSection } from "@/features/sync/SyncSection";
@@ -50,7 +51,7 @@ function AgentCapabilities({ agent }: { agent: CustomAgent }) {
 
 type SectionId =
   | "appearance" | "shortcuts" | "terminal" | "skillsDir" | "skillssh"
-  | "tuis" | "prelaunch" | "cli" | "graphify" | "orchestrator" | "routing" | "sync" | "updates";
+  | "tuis" | "prelaunch" | "connections" | "cli" | "graphify" | "orchestrator" | "routing" | "sync" | "updates";
 
 /**
  * El contenido de Configuración.
@@ -91,6 +92,7 @@ export function SettingsPage() {
       { id: "skillssh", label: t("settings.skillssh") },
       { id: "tuis", label: t("settings.tuis") },
       { id: "prelaunch", label: t("settings.prelaunch") },
+      { id: "connections", label: t("settings.connections") },
       { id: "cli", label: t("settings.cli") },
       { id: "graphify", label: t("settings.graphify") },
       { id: "orchestrator", label: t("settings.orchestrator") },
@@ -265,6 +267,7 @@ export function SettingsPage() {
 
         {section === "skillssh" && <SkillsShSection />}
         {section === "prelaunch" && <PrelaunchSection />}
+        {section === "connections" && <ConnectionsSection />}
         {section === "cli" && <CliInstallSection />}
         {section === "graphify" && <GraphifySection />}
         {section === "orchestrator" && <OrchestratorSection />}

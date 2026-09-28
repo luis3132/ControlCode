@@ -79,6 +79,12 @@ FLOTA (agentes headless, los de la consola)
   Sin --cwd ni --run-id actúa sobre el último run lanzado desde la carpeta
   donde corrés el comando.
 
+OTRAS COMPUTADORAS (SSH — se agregan en Configuración → Conexiones)
+  ssh list                                    Las conexiones que pueden usar los agentes
+  ssh run <conexión> \"<comando>\"             Corre el comando allá (sin interacción:
+          [--cwd <carpeta remota>]            nada de contraseñas, usa tu clave SSH)
+          [--timeout 120]                     y devuelve exitCode, stdout y stderr
+
 NAVEGADOR
   browser run --json-args '{\"cwd\":\"...\",     Una orden al navegador de un proyecto:
               \"request\":{\"op\":\"snapshot\"}}'   snapshot, click, type, resize, console…
@@ -260,6 +266,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "tab.output" | "tab.close" | "watch.add" | "watch.remove" => &["tab"],
         "tab.create" => &["cwd"],
         "workspace.open" => &["workspace"],
+        // `ccode ssh run servidor "df -h"`.
+        "ssh.run" => &["host", "command"],
         _ => &[],
     }
 }
@@ -431,6 +439,20 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         }
         // Validar un plan puede sondear el roster (lanzar `opencode models`) y crear worktrees.
         "run.plan" | "run.addTask" | "run.roster" => Duration::from_secs(120),
+        // Un comando en otra computadora: el tope que se pidió (o el de siempre), más el
+        // tiempo de conectarse. Copiar archivos no tiene tope propio: el máximo.
+        "ssh.run" | "ssh.tool" => {
+            let copying = args.get("tool").and_then(Value::as_str) == Some("ssh_copy");
+            let requested = args
+                .get("timeout")
+                .or_else(|| args.pointer("/args/timeout_s"))
+                .and_then(Value::as_f64)
+                .map(|s| s as u64)
+                .unwrap_or(controlcode_lib::ssh::DEFAULT_TIMEOUT_SECS)
+                .clamp(5, controlcode_lib::ssh::MAX_TIMEOUT_SECS);
+            let limit = if copying { controlcode_lib::ssh::MAX_TIMEOUT_SECS } else { requested };
+            Duration::from_secs(limit + 30)
+        }
         "run.approve" => {
             let requested = args
                 .get("timeout")

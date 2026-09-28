@@ -181,6 +181,11 @@ pub fn run() {
             crate::prelaunch::save_prelaunch_preset,
             crate::prelaunch::delete_prelaunch_preset,
             crate::prelaunch::resolve_prelaunch,
+            crate::ssh::list_ssh_connections,
+            crate::ssh::save_ssh_connection,
+            crate::ssh::delete_ssh_connection,
+            crate::ssh::test_ssh_connection,
+            crate::ssh::ssh_terminal_command,
             // Settings genéricos (key-value)
             crate::database::db_get_setting,
             crate::database::db_set_setting,

@@ -57,6 +57,11 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "browser.run" => browser_run(app, args),
         "user.ask" => user_ask(app, args),
         "forge.run" => crate::forge::tools::run(app, args),
+        // Otra computadora por SSH: `ssh.tool` lo manda el MCP de un agente; `ssh.list` y
+        // `ssh.run` son de la CLI.
+        "ssh.tool" => crate::ssh::tools::run(app, args),
+        "ssh.list" => crate::ssh::tools::cli_list(app),
+        "ssh.run" => crate::ssh::tools::cli_run(app, args),
         "mcp.cancel" => {
             if let Some(id) = args.get("callId").and_then(Value::as_str) {
                 crate::ipc::cancel::cancel(id);

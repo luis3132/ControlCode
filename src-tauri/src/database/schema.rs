@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 18;
+const SCHEMA_VERSION: i32 = 19;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -393,6 +393,24 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              name       TEXT NOT NULL UNIQUE,
              command    TEXT NOT NULL,
              created_at INTEGER NOT NULL
+         );
+
+         -- v19 — Conexiones SSH a otras computadoras (ver `ssh`). La conexión la hace el
+         -- `ssh` del sistema, así que acá no hay ni contraseñas ni claves: solo a dónde ir
+         -- y con qué archivo de clave, que ya vive en el disco del usuario. El nombre es
+         -- único porque es lo que el agente escribe en `ssh_run` y en `ccode ssh run`.
+         CREATE TABLE IF NOT EXISTS ssh_connections (
+             id            TEXT PRIMARY KEY,
+             name          TEXT NOT NULL UNIQUE,
+             host          TEXT NOT NULL,
+             user          TEXT,
+             port          INTEGER,
+             identity_file TEXT,
+             remote_dir    TEXT,
+             -- Si los agentes pueden verla y usarla. Una conexión se puede tener solo para
+             -- abrir terminales sin que ningún agente la alcance.
+             agent_access  INTEGER NOT NULL DEFAULT 1,
+             created_at    INTEGER NOT NULL
          );
 
          -- v11 — Agentes headless: los que corren sin terminal y sin que nadie los mire.

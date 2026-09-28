@@ -124,6 +124,12 @@ The status bar shows your accounts. For Claude Code, click one to see **the real
 
 Some agents need an environment before they're useful: `conda activate ml`, `nvm use`, `source .venv/bin/activate`. Attach a chain of commands to a tab and they run **in the same shell** that becomes the agent — the only place `conda activate` can work at all. Save the ones you repeat as named presets.
 
+### 🖧 Other computers, over SSH
+
+Add the machines you work with in **Settings → Connections** — a name, the host, user, port, an optional key and the folder to start in — as many as you have. Each one opens a terminal there in one click, and the ones you mark *Agents can use it* are handed to your agents as MCP tools: `ssh_hosts` lists them, `ssh_run` runs a command on one and returns its exit code and output, `ssh_copy` moves files between the project and that machine. So an agent on this computer can deploy, read logs or fix something on another one, directly.
+
+The connection is made by your system's own `ssh`, so your `~/.ssh/config`, `ssh-agent`, keys and `known_hosts` all apply, and the app stores no passwords. Agents connect non-interactively (they need a key; *Test* tells you what's missing), and every command they run on another computer asks for your approval.
+
 ### 📜 Every session, archived and searchable
 
 Close a tab and it's archived — along with the skills it had and the tabs that were open beside it.
@@ -342,6 +348,15 @@ Background agents, each in its own git worktree, shown in the fleet console. Wit
 |---|---|
 | `browser run --json-args '{"cwd":"...","request":{"op":"snapshot"}}'` | One order to a project's browser — the same path as the `browser_*` MCP tools |
 
+#### Other computers (SSH)
+
+Only the connections enabled for agents in Settings → Connections.
+
+| Command | Description |
+|---|---|
+| `ssh list` | The connections agents may use |
+| `ssh run <name> "<command>" [--cwd <dir>] [--timeout 120]` | Run it there, non-interactively; returns `exitCode`, `stdout` and `stderr` |
+
 #### Discovery
 
 | Command | Description |
@@ -411,6 +426,7 @@ The distinct codes matter for agents: `3` means *start the app and retry*, while
 │  ├─ accounts/     one agent home per account         │
 │  ├─ usage/        plan usage and token accounting    │
 │  ├─ prelaunch/    command chains before spawn        │
+│  ├─ ssh/          other computers: ssh, scp, tools   │
 │  ├─ orchestrator/ digest, watch, read cursors        │
 │  ├─ window/       native windows, saved layouts      │
 │  ├─ database/     SQLite schema + migrations         │
@@ -480,6 +496,7 @@ Inside your projects, Control Code only ever creates symlinks under the skills d
 | Skills directory | Where the global copy lives — `~/.controlcode/skills/` by default |
 | TUIs | Your own tools, registered as agents |
 | Prelaunch | Saved presets |
+| Connections | Other computers reachable over SSH: open a terminal there, and let agents use them |
 | CLI | Install or remove `ccode` |
 | Orchestrator | Ceiling of simultaneously watched tabs — 3 by default |
 
@@ -511,6 +528,7 @@ src/
     agents        detection, icons, custom TUIs
     accounts      accounts screen and plan usage
     prelaunch     command chains and presets
+    connections   SSH connections to other computers
     orchestrator  watch ceiling and usage indicator
     settings      the settings modal
       ipc.ts      the Tauri commands this feature calls
@@ -532,6 +550,7 @@ src-tauri/src/
   marketplace/    skill registries (GitHub / local / skills.sh), fetching and caching
   orchestrator/   output compression, watch mode, per-reader cursors, usage accounting
   prelaunch/      command chains that run before the agent
+  ssh/            connections to other computers: CRUD, running ssh/scp, the agents' ssh_* tools
   runs/           fleet supervisor, agent adapters, worktrees, permission broker and rules
   session/        session discovery, title generation, markdown export
   skills/         global install, symlink reconciliation, attach/detach, authoring, bundled skill

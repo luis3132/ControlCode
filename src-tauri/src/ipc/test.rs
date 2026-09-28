@@ -429,7 +429,10 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let git_read = super::mcp::git_read_tool_names();
     assert!(git_read.iter().all(|n| git.contains(n)), "{git_read:?}");
     assert!(!git_read.iter().any(|n| n.ends_with("git_push") || n.ends_with("_create")));
-    assert_eq!(browser.len() + orchestration.len() + git.len() + 1, offered.len());
+    // Las de otras computadoras por SSH: todas se ofrecen.
+    let ssh: Vec<String> = offered.iter().filter(|n| n.contains("__ssh_")).cloned().collect();
+    assert_eq!(ssh.len(), crate::ssh::tools::SSH_TOOLS.len());
+    assert_eq!(browser.len() + orchestration.len() + git.len() + ssh.len() + 1, offered.len());
 }
 
 /// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo
@@ -520,6 +523,20 @@ fn claude_y_opencode_aprueban_solas_las_mismas_tools() {
     }
     assert!(super::mcp::auto_approved("browser_click"));
     assert!(!super::mcp::auto_approved("git_push"));
+}
+
+/// Mirar qué computadoras hay no toca nada; correr o copiar algo en otra la aprueba la
+/// persona cada vez, y se anuncia como lo que es: algo que puede romper y que sale afuera.
+#[test]
+fn en_otra_computadora_solo_se_aprueba_solo_listar() {
+    assert!(super::mcp::auto_approved("ssh_hosts"));
+    for name in ["ssh_run", "ssh_copy"] {
+        assert!(!super::mcp::auto_approved(name), "{name}");
+        let a = super::mcp::annotations(name);
+        assert_eq!(a["readOnlyHint"], json!(false), "{name}");
+        assert_eq!(a["destructiveHint"], json!(true), "{name}");
+        assert_eq!(a["openWorldHint"], json!(true), "{name}");
+    }
 }
 
 /// Cada tool lleva sus anotaciones, y dicen la verdad: las de lectura no escriben, y
@@ -856,4 +873,22 @@ fn una_cancelacion_se_recuerda_por_su_id() {
     crate::ipc::cancel::cancel("c-1");
     assert!(crate::ipc::cancel::is_cancelled(Some("c-1")));
     assert!(!crate::ipc::cancel::is_cancelled(None), "un pedido de la CLI nunca está cancelado");
+}
+
+/// Un pedido para otra computadora viaja a la app con de dónde viene (la carpeta de la tab,
+/// para resolver rutas locales de `ssh_copy`), qué tool y sus argumentos; vuelve el texto.
+#[test]
+fn ssh_run_viaja_a_la_app_con_su_carpeta_y_vuelve_como_texto() {
+    let context = McpContext::Cwd { cwd: "/proyecto".into(), tab: Some("t1".into()) };
+    let args = json!({ "host": "servidor", "command": "df -h" });
+    let (responses, sent) = mcp_session(&context, &[call(7, "ssh_run", args.clone())], |_, _| {
+        Ok(json!({ "text": "exit code: 0\n--- stdout\nok" }))
+    });
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, "ssh.tool");
+    assert_eq!(
+        sent[0].1,
+        json!({ "cwd": "/proyecto", "tabId": "t1", "tool": "ssh_run", "args": args })
+    );
+    assert_eq!(responses[0]["result"]["content"][0]["text"], "exit code: 0\n--- stdout\nok");
 }
