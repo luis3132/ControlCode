@@ -130,6 +130,12 @@ Add the machines you work with in **Settings → Connections** — a name, the h
 
 The connection is made by your system's own `ssh`, so your `~/.ssh/config`, `ssh-agent`, keys and `known_hosts` all apply, and the app stores no passwords. Agents connect non-interactively (they need a key; *Test* tells you what's missing), and every command they run on another computer asks for your approval.
 
+### 📱 Your agents, from your phone
+
+The **Control Code app** (`mobile/`, iOS and Android) drives this computer from anywhere: watch any tab's terminal live, type to an agent or send it keys (Esc, Ctrl-C, arrows), launch a new agent in a recent folder with a first prompt, approve or deny what the fleet is waiting on, and answer agents' questions. When the app is closed, a push notification tells you an agent needs you.
+
+It goes through a **relay you host** (`relay/`, one small Rust binary or a Docker Compose file with TLS): the computer and the phone both connect out to it, so nothing has to be opened at home. Everything between them is **end-to-end encrypted** (NaCl `crypto_box`); the relay only forwards what it can't read. Pair a phone by scanning a one-time QR in **Settings → Mobile**, and unpair it there whenever you want.
+
 ### 📜 Every session, archived and searchable
 
 Close a tab and it's archived — along with the skills it had and the tabs that were open beside it.
@@ -427,6 +433,7 @@ The distinct codes matter for agents: `3` means *start the app and retry*, while
 │  ├─ usage/        plan usage and token accounting    │
 │  ├─ prelaunch/    command chains before spawn        │
 │  ├─ ssh/          other computers: ssh, scp, tools   │
+│  ├─ remote/       the phone, through the relay       │
 │  ├─ orchestrator/ digest, watch, read cursors        │
 │  ├─ window/       native windows, saved layouts      │
 │  ├─ database/     SQLite schema + migrations         │
@@ -472,7 +479,7 @@ Several instances can run at once (the app opened twice, a dev build next to the
 
 ### Where your data lives
 
-Everything is local. Nothing leaves your machine except the requests to skill registries you added, and whatever the agents and your own `git` do.
+Everything is local. Nothing leaves your machine except the requests to skill registries you added, whatever the agents and your own `git` do, and — only if you turn on **Settings → Mobile** — end-to-end encrypted messages to your own relay, plus a generic push notification ("an agent needs you") through Expo when your phone is away.
 
 ```
 ~/.controlcode/data.db       workspaces, tabs, skills, sessions, fleet tasks, permission rules, settings
@@ -482,6 +489,7 @@ Everything is local. Nothing leaves your machine except the requests to skill re
 ~/.controlcode/ipc.json      CLI handshake — port and token of the running app
 ~/.controlcode/ipc/<pid>.json the same, per running instance, for the tabs it launched
 <app data>/accounts/         one home directory per agent account, written by the agent itself
+<app data>/remote/desktop.key this computer's key for the phone, only when there's no system keyring
 ```
 
 Inside your projects, Control Code only ever creates symlinks under the skills directory its agent expects (`.claude/skills/`, `.agents/skills/`), and removes them when no agent needs them. Per-machine display preferences — terminal zoom, GPU rendering, open file and browser tabs — live in the app's local storage.
@@ -497,6 +505,7 @@ Inside your projects, Control Code only ever creates symlinks under the skills d
 | TUIs | Your own tools, registered as agents |
 | Prelaunch | Saved presets |
 | Connections | Other computers reachable over SSH: open a terminal there, and let agents use them |
+| Mobile | The relay to connect through, pairing a phone with a QR, paired phones |
 | CLI | Install or remove `ccode` |
 | Orchestrator | Ceiling of simultaneously watched tabs — 3 by default |
 
@@ -529,6 +538,7 @@ src/
     accounts      accounts screen and plan usage
     prelaunch     command chains and presets
     connections   SSH connections to other computers
+    remote        pairing phones and the relay connection
     orchestrator  watch ceiling and usage indicator
     settings      the settings modal
       ipc.ts      the Tauri commands this feature calls
@@ -550,6 +560,7 @@ src-tauri/src/
   marketplace/    skill registries (GitHub / local / skills.sh), fetching and caching
   orchestrator/   output compression, watch mode, per-reader cursors, usage accounting
   prelaunch/      command chains that run before the agent
+  remote/         remote control from the phone: relay connection, pairing, live tabs, push
   ssh/            connections to other computers: CRUD, running ssh/scp, the agents' ssh_* tools
   runs/           fleet supervisor, agent adapters, worktrees, permission broker and rules
   session/        session discovery, title generation, markdown export
@@ -558,6 +569,9 @@ src-tauri/src/
   util/           running helper processes with timeouts
   window/         native window management and saved layouts
 skills/           the orchestration skill shipped with the app
+relay/            the self-hosted relay between the app and the phone (Rust, Docker)
+mobile/           the phone app (React Native + Expo)
+docs/             the remote-control protocol
 plan.md           the original phased development plan
 ```
 

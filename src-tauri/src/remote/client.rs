@@ -58,6 +58,10 @@ lazy_static::lazy_static! {
     /// Los permisos que ya se avisaron: una notificación por pedido nuevo, no por cada
     /// cambio de la cola.
     static ref NOTIFIED: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
+    /// Los mensajes ya vistos. Vive fuera de la sesión a propósito: si se reiniciara en cada
+    /// reconexión, un relay malicioso podría cortar la conexión y reenviar enseguida un
+    /// `tab.send` que ya se ejecutó (escribir dos veces un comando en una terminal).
+    static ref GUARD: Mutex<ReplayGuard> = Mutex::new(ReplayGuard::default());
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -167,7 +171,6 @@ async fn session(url: &str, token: Option<String>, keys: &Keypair, host: &Arc<dy
     let _ = tx.send(ClientFrame::Watch { ids: host.paired() });
 
     let (mut sink, mut stream) = ws.split();
-    let mut guard = ReplayGuard::default();
     let mut ping = tokio::time::interval(PING_EVERY);
     let mut flush = tokio::time::interval(super::live::FLUSH_EVERY);
 
@@ -180,7 +183,11 @@ async fn session(url: &str, token: Option<String>, keys: &Keypair, host: &Arc<dy
             _ = ping.tick() => {
                 if let Err(e) = sink.send(Message::Ping(Vec::new().into())).await { break e.to_string() }
             }
-            _ = flush.tick() => super::live::flush(),
+            _ = flush.tick() => {
+                super::live::flush();
+                #[cfg(test)]
+                if FORCE_DROP.swap(false, std::sync::atomic::Ordering::SeqCst) { break "cortada por el test".to_string() }
+            }
             incoming = stream.next() => {
                 let raw = match incoming {
                     None => break "el relay cerró la conexión".to_string(),
@@ -190,7 +197,7 @@ async fn session(url: &str, token: Option<String>, keys: &Keypair, host: &Arc<dy
                     Some(Ok(_)) => continue,
                 };
                 match serde_json::from_str::<ServerFrame>(raw.as_str()) {
-                    Ok(ServerFrame::Msg { from, body }) => incoming_message(host, keys, &mut guard, from, &body),
+                    Ok(ServerFrame::Msg { from, body }) => incoming_message(host, keys, from, &body),
                     Ok(ServerFrame::Presence { id, online }) => {
                         if online { lock(&ONLINE).insert(id.clone()); } else { lock(&ONLINE).remove(&id); }
                         if !online { super::live::unsubscribe(&id, None); }
@@ -213,9 +220,9 @@ async fn session(url: &str, token: Option<String>, keys: &Keypair, host: &Arc<dy
 
 /// Un mensaje de un teléfono: se abre, se descarta si es viejo o repetido, y si es un
 /// pedido se atiende en un hilo de bloqueo (varios handlers esperan a la ventana).
-fn incoming_message(host: &Arc<dyn Host>, keys: &Keypair, guard: &mut ReplayGuard, from: String, body: &str) {
+fn incoming_message(host: &Arc<dyn Host>, keys: &Keypair, from: String, body: &str) {
     let Ok(msg) = Inner::open(body, &from, keys) else { return };
-    if guard.check(&msg, protocol::now_ms()).is_err() {
+    if lock(&GUARD).check(&msg, protocol::now_ms()).is_err() {
         return;
     }
     let Inner::Req { id, m, p, .. } = msg else { return };
@@ -233,6 +240,16 @@ fn incoming_message(host: &Arc<dyn Host>, keys: &Keypair, guard: &mut ReplayGuar
         send_inner(&from, &reply);
     });
 }
+
+/// Corta la sesión actual como lo haría el relay, para probar la reconexión.
+#[cfg(test)]
+pub fn drop_session_for_tests() {
+    *lock(&OUTBOX) = None;
+    FORCE_DROP.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(test)]
+static FORCE_DROP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Se conecta y reconecta hasta que la tarea se aborte.
 pub async fn run_forever(url: String, token: Option<String>, keys: Keypair, host: Arc<dyn Host>) {

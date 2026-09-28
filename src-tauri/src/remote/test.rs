@@ -184,6 +184,33 @@ async fn un_telefono_se_empareja_y_pide_por_el_relay() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(host.calls.lock().unwrap().len(), before);
 
+    // Ni siquiera después de una reconexión: el registro de lo visto no se reinicia.
+    let replay = Inner::req("tab.send", json!({}));
+    let replay_body = replay.seal(&pc.id(), &phone).unwrap();
+    send(&mut ws, &ClientFrame::Send { to: pc.id(), body: replay_body.clone() }).await;
+    let _ = response(&mut ws, &phone, &pc.id(), &replay).await;
+    let calls = host.calls.lock().unwrap().len();
+    // Simula lo que haría un relay malicioso: cortar la conexión del PC y reenviar.
+    super::client::drop_session_for_tests();
+    // Primero que se corte de verdad, después que vuelva y vea al teléfono.
+    for _ in 0..100 {
+        if super::client::status().state != "connected" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_ne!(super::client::status().state, "connected", "la sesión tendría que haberse cortado");
+    for _ in 0..200 {
+        if super::client::status().state == "connected" && super::client::online_ids().contains(&phone.id()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(super::client::online_ids().contains(&phone.id()), "el PC tendría que haber vuelto");
+    send(&mut ws, &ClientFrame::Send { to: pc.id(), body: replay_body }).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(host.calls.lock().unwrap().len(), calls, "un mensaje repetido tras reconectar tampoco se atiende");
+
     // Los eventos del PC le llegan.
     super::client::broadcast("approvals", json!({ "list": [] }));
     loop {
