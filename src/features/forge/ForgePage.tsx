@@ -233,6 +233,7 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
         <ItemDetailView
           key={`${section}-${item.number}`}
           cwd={cwd}
+          workspaces={repo.open}
           item={item}
           pr={section === "pulls"}
           onBack={() => setOpened((o) => ({ ...o, [section]: null }))}

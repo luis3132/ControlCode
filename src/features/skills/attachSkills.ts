@@ -41,3 +41,12 @@ export async function attachSkillsToTab(
 
   return errors;
 }
+
+/** Las skills montadas en una tab, por id. Lo que hereda del workspace no cuenta: eso se
+ *  lo pone `syncWorkspaceSkills` a cualquier tab nueva de esa carpeta. */
+export async function tabSkillIds(tabId: string): Promise<string[]> {
+  const skills = await ipc.listSkills();
+  return skills
+    .filter((s) => s.usedBy.some((use) => use.scope === "tab" && use.tabId === tabId))
+    .map((s) => s.id);
+}

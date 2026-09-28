@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ArrowLeftIcon, Badge, Button, Select, Skeleton, TextArea } from "neogestify-ui-components";
+import { AddIcon, ArrowLeftIcon, Badge, Button, Select, Skeleton, TextArea } from "neogestify-ui-components";
 
-import { BranchIcon, ExternalIcon, IssueIcon, PullRequestIcon } from "@/app/icons";
+import { BranchIcon, ExternalIcon, IssueIcon, PullRequestIcon, SendIcon } from "@/app/icons";
+import { agentIcon } from "@/features/agents/agentIcons";
+import { useTabsStore } from "@/features/tabs/store";
+import { openNewAgentWith } from "@/features/tabs/tabActions";
+import { SHELL_AGENT_ID } from "@/features/tabs/types";
+import { pasteIntoTab } from "@/features/terminal/terminalRegistry";
+import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
 import { Markdown } from "@/shared/ui/Markdown";
 import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
 
+import { itemPrompt } from "./agentPrompt";
 import { forgeCheckoutPull, forgeComment, forgeImage, forgeItem, forgeMergePull, resolveForgeImage } from "./ipc";
 import { forgeErrorOf, type ForgeItem, type ForgeItemDetail } from "./types";
 
@@ -23,8 +31,11 @@ function when(iso: string | null): string {
  * que se puede hacer sin salir de la app — comentar, traer el PR como rama local para
  * probarlo, fusionarlo.
  */
-export function ItemDetailView({ cwd, item, pr, onBack, onChanged }: {
+export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }: {
   cwd: string;
+  /** Las carpetas abiertas de este repo (checkout y worktrees): sus agentes son a los que
+   *  se le puede pasar el issue. */
+  workspaces: { cwd: string; branch: string | null }[];
   item: ForgeItem;
   pr: boolean;
   onBack: () => void;
@@ -38,6 +49,13 @@ export function ItemDetailView({ cwd, item, pr, onBack, onChanged }: {
   const [note, setNote] = useState("");
   const [merging, setMerging] = useState(false);
   const [method, setMethod] = useState<MergeMethod>("merge");
+  const [agentMenu, setAgentMenu] = useState<{ x: number; y: number } | null>(null);
+  const navigate = useNavigate();
+  const allTabs = useTabsStore((s) => s.tabs);
+  const agents = useMemo(
+    () => allTabs.filter((tab) => tab.agentId !== SHELL_AGENT_ID && workspaces.some((w) => w.cwd === tab.cwd)),
+    [allTabs, workspaces]
+  );
 
   const load = useCallback(async () => {
     try {
@@ -68,6 +86,48 @@ export function ItemDetailView({ cwd, item, pr, onBack, onChanged }: {
   );
   const Icon = pr ? PullRequestIcon : IssueIcon;
 
+  /** A un agente que ya está corriendo: se le escribe en su terminal y se va a verlo. */
+  const sendTo = (tabId: string) => {
+    if (!detail) return;
+    if (!pasteIntoTab(tabId, itemPrompt(detail, pr), true)) {
+      setError(t("forge.agent.notRunning"));
+      return;
+    }
+    useTabsStore.getState().activateTab(tabId);
+    navigate("/workspace");
+  };
+
+  /** A uno nuevo. En un PR, si su rama ya está abierta en un worktree, ahí: es donde se
+   *  trabaja ese PR. */
+  const sendToNew = () => {
+    if (!detail) return;
+    const home = (pr && workspaces.find((w) => w.branch && w.branch === detail.sourceBranch)?.cwd) || cwd;
+    openNewAgentWith({
+      cwd: home,
+      title: t(pr ? "forge.agent.newTitlePr" : "forge.agent.newTitleIssue", { n: item.number }),
+      prompt: itemPrompt(detail, pr),
+    });
+  };
+
+  const agentItems = (): ContextMenuItem[] => [
+    ...agents.map((tab) => {
+      const AgentIcon = agentIcon(tab.agentId, tab.command);
+      return {
+        key: tab.id,
+        label: tab.title,
+        icon: <AgentIcon className="w-4 h-4" />,
+        onSelect: () => sendTo(tab.id),
+      };
+    }),
+    {
+      key: "new",
+      label: t("forge.agent.new"),
+      icon: <AddIcon className="w-4 h-4" />,
+      separator: agents.length > 0,
+      onSelect: sendToNew,
+    },
+  ];
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* ── barra: volver, título, acciones ─────────────────────────── */}
@@ -82,6 +142,17 @@ export function ItemDetailView({ cwd, item, pr, onBack, onChanged }: {
           {t(pr ? "forge.pr.back" : "forge.issue.back")}
         </button>
         <div className="flex-1" />
+        {/* Pasarle el issue entero a un agente para que lo trabaje: a uno abierto en este
+            repo, o a uno nuevo. */}
+        <Button size="sm" variant="outline" disabled={!detail}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setAgentMenu({ x: r.left, y: r.bottom + 4 });
+          }}
+          className="flex items-center gap-1.5">
+          <SendIcon className="w-3 h-3" />
+          {t("forge.agent.send")}
+        </Button>
         <Button size="sm" variant="outline" onClick={() => openUrl(item.webUrl).catch(console.error)}
           className="flex items-center gap-1.5">
           <ExternalIcon className="w-3 h-3" />
@@ -213,6 +284,9 @@ export function ItemDetailView({ cwd, item, pr, onBack, onChanged }: {
           </div>
         </div>
       </div>
+      {agentMenu && (
+        <ContextMenu x={agentMenu.x} y={agentMenu.y} onClose={() => setAgentMenu(null)} items={agentItems()} />
+      )}
     </div>
   );
 }
