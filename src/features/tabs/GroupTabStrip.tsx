@@ -37,6 +37,7 @@ export function GroupTabStrip({ items, active, groupFocused, draggable }: {
   // El agente al que se le va a mandar lo marcado en un navegador: se prende con su
   // color mientras se lo elige, que es lo único que distingue tres «Claude Code».
   const highlighted = useAgentHighlight((s) => s.id);
+  const listed = useAgentHighlight((s) => s.ids);
 
   const byId = useMemo(() => new Map(tabs.map((tab) => [tab.id, tab])), [tabs]);
   const mine = useMemo(() => {
@@ -93,7 +94,7 @@ export function GroupTabStrip({ items, active, groupFocused, draggable }: {
               tabKey={key}
               className={faded}
               tab={tab}
-              paint={driving.has(tab.id) || highlighted === tab.id ? agentPaint(tab.id) : null}
+              paint={driving.has(tab.id) || highlighted === tab.id || listed.includes(tab.id) ? agentPaint(tab.id) : null}
               paintHint={
                 highlighted === tab.id
                   ? t("browser.sendTarget")

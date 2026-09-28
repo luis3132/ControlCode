@@ -12,8 +12,12 @@ import { create } from "zustand";
 interface AgentHighlight {
   /** La tab del agente señalado, o `null`. */
   id: string | null;
+  /** Varios pintados a la vez: mientras hay una lista de agentes para elegir, cada tab
+   *  se ve del color de su fila. */
+  ids: string[];
 }
 
-export const useAgentHighlight = create<AgentHighlight>(() => ({ id: null }));
+export const useAgentHighlight = create<AgentHighlight>(() => ({ id: null, ids: [] }));
 
 export const highlightAgent = (id: string | null) => useAgentHighlight.setState({ id });
+export const highlightAgents = (ids: string[]) => useAgentHighlight.setState({ ids });

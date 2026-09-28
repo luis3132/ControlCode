@@ -8,12 +8,17 @@ import {
   PasteIcon, Skeleton, Tooltip, TrashIcon,
 } from "neogestify-ui-components";
 
-import { DotsIcon, FilePlusIcon, FolderOpenIcon, FolderPlusIcon, RefreshIcon, ScissorsIcon } from "@/app/icons";
+import { DotsIcon, FilePlusIcon, FolderOpenIcon, FolderPlusIcon, RefreshIcon, ScissorsIcon, SendIcon } from "@/app/icons";
+import { highlightAgents } from "@/features/browser/agentHighlight";
+import { agentPaint } from "@/features/browser/agentPaint";
 import * as ipc from "@/features/explorer/ipc";
-import { canDrop, dirFor, isInside, parentDir, remapPath } from "@/features/explorer/paths";
+import { canDrop, dirFor, fileMention, isInside, parentDir, remapPath } from "@/features/explorer/paths";
 import { flattenTree, relativeTo, toggleExpanded } from "@/features/explorer/tree";
 import type { DirEntry, FileMark, RepoInfo } from "@/features/explorer/types";
+import { useTabsStore } from "@/features/tabs/store";
+import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { focusTab, pasteIntoTab } from "@/features/terminal/terminalRegistry";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
 
@@ -134,6 +139,13 @@ export function FilesView({ cwd, repo, title }: {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; entry: DirEntry | null } | null>(null);
+  /** El segundo menú de "Enviar a un agente": a cuál, con su color. */
+  const [sendMenu, setSendMenu] = useState<{ x: number; y: number; entry: DirEntry } | null>(null);
+  const allTabs = useTabsStore((s) => s.tabs);
+  const agents = useMemo(
+    () => allTabs.filter((tab) => tab.agentId !== SHELL_AGENT_ID && cwd !== null && isInside(tab.cwd, cwd)),
+    [allTabs, cwd]
+  );
   const [editing, setEditing] = useState<Editing | null>(null);
   const [deleting, setDeleting] = useState<DirEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -309,10 +321,49 @@ export function FilesView({ cwd, repo, title }: {
       pasteItem,
       { key: "copyPath", label: t("explorer.menu.copyPath"), separator: true, hint: IS_MAC ? "⌥⌘C" : "Shift+Alt+C", onSelect: () => copyText(entry.path) },
       { key: "copyRel", label: t("explorer.menu.copyRelativePath"), onSelect: () => copyText(relativeTo(cwd, entry.path) ?? entry.path) },
+      {
+        key: "send",
+        label: t("explorer.menu.sendTo"),
+        icon: <SendIcon className="w-4 h-4" />,
+        separator: true,
+        disabled: agents.length === 0,
+        onSelect: () => setSendMenu({ x: menu?.x ?? 0, y: menu?.y ?? 0, entry }),
+      },
       { key: "rename", label: t("explorer.menu.rename"), icon: <EditIcon className="w-4 h-4" />, hint: IS_MAC ? "↵" : "F2", separator: true, onSelect: () => setEditing({ kind: "rename", path: entry.path }) },
       { key: "delete", label: t("explorer.menu.delete"), icon: <TrashIcon className="w-4 h-4" />, hint: IS_MAC ? "⌘⌫" : "Supr", danger: true, onSelect: () => setDeleting(entry) },
     ];
   };
+
+  /** Se pega la mención en la entrada del agente, sin mandarla: lo que se quiere es
+   *  preguntarle algo sobre ese archivo, y la pregunta la escribe la persona. */
+  // Mientras está abierta la lista, cada tab de agente se pinta de su color: la fila y la
+  // tab se ven iguales, y "¿cuál es este Claude Code?" se contesta mirando arriba.
+  useEffect(() => {
+    if (!sendMenu) return;
+    highlightAgents(agents.map((tab) => tab.id));
+    return () => highlightAgents([]);
+  }, [sendMenu, agents]);
+
+  const sendTo = (tabId: string, entry: DirEntry) => {
+    const tab = useTabsStore.getState().tabs.find((x) => x.id === tabId);
+    if (!tab) return;
+    if (!pasteIntoTab(tabId, `${fileMention(entry.path, tab.cwd, entry.isDir)} `, false)) {
+      setError(t("forge.agent.notRunning"));
+      return;
+    }
+    useTabsStore.getState().activateTab(tabId);
+    useViewTabsStore.getState().showTerminal();
+    focusTab(tabId);
+  };
+
+  const sendItems = (entry: DirEntry): ContextMenuItem[] =>
+    agents.map((tab) => ({
+      key: tab.id,
+      label: tab.title,
+      // El mismo color que la tab del agente cuando maneja un navegador: se elige mirando.
+      icon: <span className={`m-auto w-2.5 h-2.5 rounded-full ${agentPaint(tab.id).strip}`} />,
+      onSelect: () => sendTo(tab.id, entry),
+    }));
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (editing || !cwd) return;
@@ -448,20 +499,20 @@ export function FilesView({ cwd, repo, title }: {
           { label: "explorer.refresh", Icon: RefreshIcon, onClick: refresh },
         ].map(({ label, Icon, onClick }) => (
           <Tooltip key={label} content={t(label)} placement="bottom">
-            <button
+            <Button variant="icon"
               onClick={onClick}
               disabled={!cwd}
               aria-label={t(label)}
               className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
                 text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white
-                hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40"
+                hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 p-0"
             >
               <Icon className="w-3.5 h-3.5" />
-            </button>
+            </Button>
           </Tooltip>
         ))}
         <Tooltip content={t("explorer.more")} placement="bottom">
-          <button
+          <Button variant="icon"
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
               setMenu({ x: r.left, y: r.bottom + 4, entry: selected ? entryOf(selected) : null });
@@ -470,10 +521,10 @@ export function FilesView({ cwd, repo, title }: {
             aria-label={t("explorer.more")}
             className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
               text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white
-              hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40"
+              hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 p-0"
           >
             <DotsIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
 
@@ -524,7 +575,7 @@ export function FilesView({ cwd, repo, title }: {
               const isCut = clipboard?.cut === true && isInside(entry.path, clipboard.path);
               return (
                 <div key={entry.path}>
-                  <button
+                  <Button variant="custom"
                     data-tree-path={entry.path}
                     data-tree-dir={entry.isDir ? "1" : "0"}
                     onClick={() => onRowClick(entry)}
@@ -572,7 +623,7 @@ export function FilesView({ cwd, repo, title }: {
                         {mark}
                       </span>
                     )}
-                  </button>
+                  </Button>
                   {creating?.dir === entry.path && isExpanded && createInput}
                 </div>
               );
@@ -586,14 +637,18 @@ export function FilesView({ cwd, repo, title }: {
           border-t border-red-200 dark:border-red-500/20
           bg-red-50 dark:bg-red-500/8 text-red-600 dark:text-red-400">
           <span className="flex-1 min-w-0 break-words">{error}</span>
-          <button onClick={() => setError(null)} className="shrink-0 opacity-70 hover:opacity-100">
+          <Button variant="custom" onClick={() => setError(null)} className="shrink-0 opacity-70 hover:opacity-100 inline-block">
             {t("btn.close")}
-          </button>
+          </Button>
         </div>
       )}
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={menuItems(menu.entry)} />
+      )}
+
+      {sendMenu && (
+        <ContextMenu x={sendMenu.x} y={sendMenu.y} onClose={() => setSendMenu(null)} items={sendItems(sendMenu.entry)} />
       )}
 
       {deleting && (

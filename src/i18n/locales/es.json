@@ -705,6 +705,7 @@
   "explorer.menu.paste": "Pegar",
   "explorer.menu.copyPath": "Copiar ruta",
   "explorer.menu.copyRelativePath": "Copiar ruta relativa",
+  "explorer.menu.sendTo": "Enviar a un agente…",
   "explorer.menu.rename": "Cambiar nombre",
   "explorer.menu.delete": "Eliminar",
   "explorer.delete.title": "¿Eliminar «{{name}}»?",
