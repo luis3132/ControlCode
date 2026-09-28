@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArrowLeftIcon, Badge, Button, Select, Skeleton, TextArea } from "neogestify-ui-components";
@@ -7,7 +7,7 @@ import { BranchIcon, ExternalIcon, IssueIcon, PullRequestIcon } from "@/app/icon
 import { Markdown } from "@/shared/ui/Markdown";
 import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
 
-import { forgeCheckoutPull, forgeComment, forgeItem, forgeMergePull } from "./ipc";
+import { forgeCheckoutPull, forgeComment, forgeImage, forgeItem, forgeMergePull, resolveForgeImage } from "./ipc";
 import { forgeErrorOf, type ForgeItem, type ForgeItemDetail } from "./types";
 
 type MergeMethod = "merge" | "squash" | "rebase";
@@ -62,6 +62,10 @@ export function ItemDetailView({ cwd, item, pr, onBack, onChanged }: {
   };
 
   const shown = detail ?? { ...item, body: null, thread: [] };
+  const loadImage = useMemo(
+    () => (src: string) => forgeImage(cwd, resolveForgeImage(src, item.webUrl)),
+    [cwd, item.webUrl]
+  );
   const Icon = pr ? PullRequestIcon : IssueIcon;
 
   return (
@@ -168,7 +172,7 @@ export function ItemDetailView({ cwd, item, pr, onBack, onChanged }: {
                   {[90, 70, 80].map((w, i) => <Skeleton key={i} variant="text" height={12} width={`${w}%`} />)}
                 </div>
               ) : shown.body ? (
-                <Markdown content={shown.body} />
+                <Markdown content={shown.body} loadImage={loadImage} />
               ) : (
                 <p className="text-gray-400 dark:text-white/35 italic">{t("forge.noDescription")}</p>
               )}
@@ -181,7 +185,7 @@ export function ItemDetailView({ cwd, item, pr, onBack, onChanged }: {
                 border-b border-gray-200 dark:border-white/8">
                 @{c.author ?? "?"}{c.createdAt && ` · ${when(c.createdAt)}`}
               </div>
-              <div className="px-4 py-3 text-[13px]"><Markdown content={c.body} /></div>
+              <div className="px-4 py-3 text-[13px]"><Markdown content={c.body} loadImage={loadImage} /></div>
             </div>
           ))}
 

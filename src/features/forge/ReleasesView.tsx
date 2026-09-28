@@ -9,7 +9,7 @@ import { elapsed } from "@/features/workspaces/useRepoInfo";
 
 import { CreateReleaseDialog } from "./CreateReleaseDialog";
 import { ForgeErrorView } from "./ForgeItemsView";
-import { forgeReleases } from "./ipc";
+import { forgeImage, forgeReleases, resolveForgeImage } from "./ipc";
 import { forgeErrorOf, type ForgeError, type Release, type RepoTarget } from "./types";
 
 function ReleaseBadges({ r }: { r: Release }) {
@@ -72,7 +72,7 @@ export function ReleasesView({ cwd, target }: { cwd: string; target: RepoTarget 
               {open.createdAt && <span>· {new Date(open.createdAt).toLocaleString()}</span>}
             </div>
             <div className="rounded-xl border border-gray-200 dark:border-white/8 px-4 py-3 text-[13px]">
-              {open.body ? <Markdown content={open.body} /> : (
+              {open.body ? <Markdown content={open.body} loadImage={(src) => forgeImage(cwd, resolveForgeImage(src, open.webUrl))} /> : (
                 <p className="text-gray-400 dark:text-white/35 italic">{t("forge.noDescription")}</p>
               )}
             </div>

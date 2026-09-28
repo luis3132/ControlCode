@@ -114,6 +114,7 @@ pub fn run() {
             crate::forge::forge_pulls,
             crate::forge::forge_issues,
             crate::forge::forge_item,
+            crate::forge::forge_image,
             crate::forge::forge_create_pull,
             crate::forge::forge_create_issue,
             crate::forge::forge_comment,

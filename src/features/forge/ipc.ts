@@ -54,3 +54,36 @@ export const forgeLabels = (cwd: string) => invoke<Label[]>("forge_labels", { cw
 export const forgeReleases = (cwd: string) => invoke<Release[]>("forge_releases", { cwd });
 export const forgeCreateRelease = (cwd: string, release: NewRelease) =>
   invoke<Release>("forge_create_release", { cwd, release });
+
+/** Las ya bajadas, por URL: volver a abrir el mismo issue no las pide de nuevo. Se guarda
+ *  la promesa para que dos comentarios con la misma captura hagan un solo pedido. */
+const imageCache = new Map<string, Promise<string>>();
+
+/**
+ * Dónde está de verdad una imagen de un PR o issue cuya página es `pageUrl`.
+ *
+ * GitLab escribe los adjuntos relativos al proyecto (`/uploads/…`), y la página es
+ * `https://host/grupo/repo/-/issues/3`: el proyecto es lo de antes de `/-/`. Todo lo demás
+ * relativo cuelga del host, que es como lo resolvería el navegador.
+ */
+export function resolveForgeImage(src: string, pageUrl: string): string {
+  if (/^https?:\/\//i.test(src)) return src;
+  if (src.startsWith("/uploads/") && pageUrl.includes("/-/")) return pageUrl.split("/-/")[0] + src;
+  try {
+    return new URL(src, pageUrl).toString();
+  } catch {
+    return src;
+  }
+}
+
+export function forgeImage(cwd: string, url: string): Promise<string> {
+  const key = `${cwd}\n${url}`;
+  let p = imageCache.get(key);
+  if (!p) {
+    p = invoke<string>("forge_image", { cwd, url });
+    // Un fallo no se recuerda: puede ser la red, y reabrir tiene que volver a intentar.
+    p.catch(() => imageCache.delete(key));
+    imageCache.set(key, p);
+  }
+  return p;
+}

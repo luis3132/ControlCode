@@ -261,6 +261,13 @@ pub async fn forge_item(app: AppHandle, cwd: String, number: u64, pr: bool) -> R
     api.item(&t.path, number, pr).await
 }
 
+/// Una imagen de un PR o issue de este repo, como `data:`. Ver `Api::image`.
+#[tauri::command]
+pub async fn forge_image(app: AppHandle, cwd: String, url: String) -> Result<String, ForgeError> {
+    let (_, api) = repo_api(&app, &cwd).await?;
+    api.image(&url).await
+}
+
 #[tauri::command]
 pub async fn forge_create_pull(app: AppHandle, cwd: String, pull: NewPull) -> Result<Item, ForgeError> {
     if pull.title.trim().is_empty() {

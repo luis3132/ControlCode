@@ -1,7 +1,55 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
+
+import { htmlImagesToMarkdown } from "./htmlImages";
+
+/** Trae una imagen y devuelve algo que un `<img>` puede mostrar (un `data:`). */
+export type ImageLoader = (src: string) => Promise<string>;
+
+/** Una imagen que se pide recién al dibujarse. Mientras llega, o si falla, queda el texto
+ *  alternativo — un hueco en blanco no dice que ahí había algo. */
+function LoadedImage({ src, alt, load }: { src: string; alt: string; load: ImageLoader }) {
+  const [data, setData] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  // Por ref: quien lo usa puede pasar una función nueva en cada render, y eso no es
+  // motivo para volver a pedir la misma imagen.
+  const loader = useRef(load);
+  loader.current = load;
+
+  useEffect(() => {
+    let stale = false;
+    setData(null);
+    setFailed(false);
+    loader.current(src)
+      .then((d) => { if (!stale) setData(d); })
+      .catch(() => { if (!stale) setFailed(true); });
+    return () => { stale = true; };
+  }, [src]);
+
+  if (!data) {
+    return (
+      <button
+        onClick={() => openUrl(src).catch(console.error)}
+        title={src}
+        className={`text-[11px] italic text-gray-400 dark:text-white/30 hover:underline
+          ${failed ? "" : "animate-pulse"}`}
+      >
+        🖼 {alt || src.split("/").pop()}
+      </button>
+    );
+  }
+  return (
+    <img
+      src={data}
+      alt={alt}
+      onClick={() => openUrl(src).catch(console.error)}
+      className="inline-block max-w-full h-auto my-1 rounded-md cursor-zoom-in
+        border border-gray-200 dark:border-white/10"
+    />
+  );
+}
 
 /**
  * Markdown renderizado, para leer una skill sin instalarla.
@@ -13,18 +61,19 @@ import { openUrl } from "@tauri-apps/plugin-opener";
  * confiable. Un `<script>` o un `<iframe>` dentro de un SKILL.md no tiene por qué poder
  * ejecutarse en la ventana de la app.
  *
- * Las imágenes tampoco se cargan: bajar una imagen remota le cuenta al servidor de turno
- * que abriste esa skill, y en una app de escritorio eso es filtrar tu IP por mirar un
- * catálogo. Se muestra el texto alternativo.
+ * Las imágenes no se cargan salvo que quien lo usa pase `loadImage`: bajar una imagen
+ * remota le cuenta al servidor de turno que abriste esa skill, y en una app de escritorio
+ * eso es filtrar tu IP por mirar un catálogo. Sin él se muestra el texto alternativo. Los
+ * PRs e issues sí lo pasan: son de tus repos, y las capturas son la mitad del reporte.
  *
  * Los enlaces abren en el navegador del sistema. Navegar DENTRO del webview reemplazaría
  * la app entera por una página web, sin forma de volver.
  */
-export function Markdown({ content }: { content: string }) {
+export function Markdown({ content, loadImage }: { content: string; loadImage?: ImageLoader }) {
   // El frontmatter no es prosa: sin sacarlo, los `---` se renderizan como una línea
   // horizontal y los campos como un párrafo suelto arriba de todo. Los datos que trae ya
   // se muestran aparte, en la cabecera.
-  const body = useMemo(() => stripFrontmatter(content), [content]);
+  const body = useMemo(() => htmlImagesToMarkdown(stripFrontmatter(content)), [content]);
 
   return (
     <div className="flex flex-col gap-3 text-[12.5px] leading-relaxed text-gray-700 dark:text-gray-300">
@@ -87,11 +136,13 @@ export function Markdown({ content }: { content: string }) {
               {children}
             </button>
           ),
-          img: ({ alt }) => (
+          img: ({ alt, src }) => (loadImage && typeof src === "string" && src ? (
+            <LoadedImage src={src} alt={alt ?? ""} load={loadImage} />
+          ) : (
             <span className="text-[11px] italic text-gray-400 dark:text-white/30">
               {alt ? `🖼 ${alt}` : null}
             </span>
-          ),
+          )),
         }}
       >
         {body}
