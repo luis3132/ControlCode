@@ -4,7 +4,7 @@
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Combobox, type ComboboxOption } from "neogestify-ui-components";
+import { Button, Combobox, TextArea, type ComboboxOption } from "neogestify-ui-components";
 
 import { Markdown } from "@/shared/ui/Markdown";
 import type { Branch } from "@/features/scm/types";
@@ -122,16 +122,16 @@ export function MarkdownField({ label, value, onChange, disabled, rows = 8, plac
   const minHeight = `${rows * 1.55 + 1.2}rem`;
 
   const tab = (on: boolean, text: string, onClick: () => void) => (
-    <button
+    <Button variant="custom"
       type="button"
       onClick={onClick}
       className={`cc-t px-2.5 h-6 rounded-md text-[11.5px] font-medium
         ${on
           ? "bg-white dark:bg-white/12 text-gray-900 dark:text-white shadow-sm"
-          : "text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/80"}`}
+          : "text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/80"} inline-block`}
     >
       {text}
-    </button>
+    </Button>
   );
 
   return (
@@ -155,7 +155,7 @@ export function MarkdownField({ label, value, onChange, disabled, rows = 8, plac
             : <p className="text-[12px] text-gray-400 dark:text-white/35">{t("forge.previewEmpty")}</p>}
         </div>
       ) : (
-        <textarea
+        <TextArea
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
@@ -181,15 +181,15 @@ export function FieldAction({ onClick, disabled, children, title }: {
   title?: string;
 }) {
   return (
-    <button
+    <Button variant="custom"
       type="button"
       onClick={onClick}
       disabled={disabled}
       title={title}
       className="cc-t max-w-[60%] truncate text-[11.5px] text-blue-600 dark:text-blue-400 hover:underline
-        disabled:opacity-50 disabled:no-underline"
+        disabled:opacity-50 disabled:no-underline inline-block"
     >
       {children}
-    </button>
+    </Button>
   );
 }

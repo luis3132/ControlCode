@@ -56,16 +56,16 @@ export function RegistriesPage() {
       <div className="flex items-center gap-3 h-[54px] shrink-0 pl-4 pr-14
         border-b border-gray-200 dark:border-white/8">
         <Tooltip content={t("marketplace.registries.backToMarketplace")} placement="bottom">
-          <button
+          <Button variant="icon"
             onClick={() => navigate("/marketplace")}
             aria-label={t("marketplace.registries.backToMarketplace")}
             className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
               text-gray-400 dark:text-white/35
               hover:text-gray-700 dark:hover:text-white
-              hover:bg-gray-200 dark:hover:bg-white/10"
+              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
           >
             <ArrowLeftIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
         <CloudIcon className="w-[15px] h-[15px] shrink-0 text-blue-500 dark:text-blue-400" />
         <span className="flex-1 min-w-0 truncate text-[13.5px] font-bold
@@ -74,7 +74,7 @@ export function RegistriesPage() {
         </span>
         {registries.length > 0 && (
           <Tooltip content={t("marketplace.refreshAll")} placement="bottom">
-            <button
+            <Button variant="icon"
               onClick={handleRefreshAll}
               disabled={refreshingAll}
               aria-label={t("marketplace.refreshAll")}
@@ -82,25 +82,25 @@ export function RegistriesPage() {
                 text-gray-400 dark:text-white/35
                 hover:text-gray-700 dark:hover:text-white
                 hover:bg-gray-200 dark:hover:bg-white/10
-                disabled:opacity-40 disabled:hover:bg-transparent"
+                disabled:opacity-40 disabled:hover:bg-transparent p-0"
             >
               {refreshingAll
                 ? <AnimateSpin className="w-3.5 h-3.5" />
                 : <IconReset className="w-3.5 h-3.5" />}
-            </button>
+            </Button>
           </Tooltip>
         )}
         <Tooltip content={t("marketplace.addRegistry")} placement="bottom">
-          <button
+          <Button variant="icon"
             onClick={() => setAddOpen(true)}
             aria-label={t("marketplace.addRegistry")}
             className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
               text-gray-400 dark:text-white/35
               hover:text-gray-700 dark:hover:text-white
-              hover:bg-gray-200 dark:hover:bg-white/10"
+              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
           >
             <AddIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
 

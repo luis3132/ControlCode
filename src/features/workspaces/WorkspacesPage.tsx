@@ -130,9 +130,9 @@ export function WorkspacesPage() {
                   </div>
                 ) : (
                   <>
-                    <button
+                    <Button variant="custom"
                       onClick={() => handleSelectWorkspace(ws)}
-                      className="flex flex-col min-w-0 text-left flex-1"
+                      className="flex flex-col min-w-0 text-left flex-1 gap-0 items-stretch"
                     >
                       <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">
                         {ws.name}
@@ -142,7 +142,7 @@ export function WorkspacesPage() {
                         {" · "}
                         {formatRelative(ws.lastActive, t)}
                       </span>
-                    </button>
+                    </Button>
                     <div className="flex items-center gap-1 shrink-0">
                       <Button variant="icon" onClick={() => startEdit(ws)} title={t("workspace.manage.rename")}>
                         <EditIcon className="w-4 h-4" />

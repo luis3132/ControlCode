@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDownIcon, ChevronRightIcon, DocumentIcon, Tooltip } from "neogestify-ui-components";
+import { Button, ChevronDownIcon, ChevronRightIcon, DocumentIcon, Input, Tooltip } from "neogestify-ui-components";
 
 import { DotsIcon } from "@/app/icons";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -17,7 +17,7 @@ function OptionToggle({ label, title, on, onToggle }: {
 }) {
   return (
     <Tooltip content={title} placement="bottom">
-      <button
+      <Button variant="custom"
         onClick={onToggle}
         aria-label={title}
         aria-pressed={on}
@@ -25,10 +25,10 @@ function OptionToggle({ label, title, on, onToggle }: {
           font-mono text-[10.5px] font-semibold
           ${on
             ? "bg-blue-500/15 text-blue-600 dark:bg-blue-400/20 dark:text-blue-300 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.45)]"
-            : "text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10"}`}
+            : "text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10"} gap-0`}
       >
         {label}
-      </button>
+      </Button>
     </Tooltip>
   );
 }
@@ -128,7 +128,7 @@ export function SearchPanel({ cwd }: { cwd: string | null }) {
                 : ""}
           </span>
           <Tooltip content={t("search.filters")} placement="left">
-            <button
+            <Button variant="icon"
               onClick={toggleFilters}
               aria-label={t("search.filters")}
               aria-pressed={showFilters}
@@ -136,10 +136,10 @@ export function SearchPanel({ cwd }: { cwd: string | null }) {
                 ${showFilters || options.include || options.exclude
                   ? "text-blue-600 dark:text-blue-400"
                   : "text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white"}
-                hover:bg-gray-200 dark:hover:bg-white/10`}
+                hover:bg-gray-200 dark:hover:bg-white/10 p-0`}
             >
               <DotsIcon className="w-3.5 h-3.5" />
-            </button>
+            </Button>
           </Tooltip>
         </div>
 
@@ -148,7 +148,8 @@ export function SearchPanel({ cwd }: { cwd: string | null }) {
             {(["include", "exclude"] as const).map((key) => (
               <label key={key} className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-gray-400 dark:text-white/35">{t(`search.${key}`)}</span>
-                <input
+                <Input
+                  size="sm"
                   value={options[key]}
                   onChange={(e) => setOption(key, e.target.value)}
                   placeholder={key === "include" ? "src/**, *.ts" : "*.test.ts, dist"}
@@ -178,7 +179,7 @@ export function SearchPanel({ cwd }: { cwd: string | null }) {
           const dir = slash > 0 ? file.rel.slice(0, slash) : "";
           return (
             <div key={file.path}>
-              <button
+              <Button variant="custom"
                 onClick={() => toggleFile(file.path)}
                 className="flex items-center gap-1.5 w-full h-[22px] pl-1.5 pr-2 text-left
                   hover:bg-gray-200/50 dark:hover:bg-white/4"
@@ -197,9 +198,9 @@ export function SearchPanel({ cwd }: { cwd: string | null }) {
                   bg-gray-200 text-gray-600 dark:bg-white/8 dark:text-gray-400">
                   {file.matches.length}
                 </span>
-              </button>
+              </Button>
               {open && file.matches.map((m, i) => (
-                <button
+                <Button variant="custom"
                   key={`${m.line}:${m.column}:${i}`}
                   onClick={() => openFile(cwd, file.path, { line: m.line, column: m.column })}
                   className="flex items-center gap-2 w-full h-[22px] pl-9 pr-2 text-left
@@ -209,7 +210,7 @@ export function SearchPanel({ cwd }: { cwd: string | null }) {
                     {m.line}
                   </span>
                   <Preview text={m.preview} start={m.start} end={m.end} />
-                </button>
+                </Button>
               ))}
             </div>
           );

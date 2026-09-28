@@ -69,16 +69,16 @@ function AccountRow({ account, onLogin, onDelete }: {
             : t("settings.accounts.login.btn")}
         </Button>
         <Tooltip content={t("settings.accounts.delete.action")} placement="left">
-          <button
+          <Button variant="icon"
             onClick={onDelete}
             aria-label={t("settings.accounts.delete.action")}
             className="cc-t flex items-center justify-center w-7 h-7 rounded-md shrink-0
               text-gray-400 dark:text-white/35
               hover:text-red-500 dark:hover:text-red-400
-              hover:bg-gray-200 dark:hover:bg-white/10"
+              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
           >
             <TrashIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
     </div>
@@ -124,7 +124,7 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
           {agent.envVar}
         </Badge>
         <Tooltip content={t("settings.accounts.add")} placement="bottom">
-          <button
+          <Button variant="icon"
             onClick={() => setAdding(true)}
             disabled={!agent.installed}
             aria-label={t("settings.accounts.add")}
@@ -132,10 +132,10 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
               text-gray-400 dark:text-white/35
               hover:text-gray-700 dark:hover:text-white
               hover:bg-gray-200 dark:hover:bg-white/10
-              disabled:opacity-40 disabled:hover:bg-transparent"
+              disabled:opacity-40 disabled:hover:bg-transparent p-0"
           >
             <AddIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
 

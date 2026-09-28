@@ -542,6 +542,14 @@ pub fn mark_worktree_removed(conn: &Connection, task_id: &str) -> Result<(), Str
     Ok(())
 }
 
+/// El id de sesión que dio la TUI, cuando no se le pudo imponer uno (OpenCode, Codex): es el
+/// que sirve para reabrir la tarea como tab.
+pub fn set_session_id(conn: &Connection, task_id: &str, session_id: &str) -> Result<(), String> {
+    conn.execute("UPDATE tasks SET session_id = ?1 WHERE id = ?2", rusqlite::params![session_id, task_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// La tarea arrancó: queda el id de sesión que se le impuso y dónde va su crudo.
 pub fn mark_running(
     conn: &Connection,

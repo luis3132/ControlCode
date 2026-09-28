@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BoxIcon, HomeIcon, SaveIcon, Tooltip } from "neogestify-ui-components";
+import { Button, BoxIcon, HomeIcon, SaveIcon, Tooltip } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
 import { PanelIcon } from "@/app/icons";
@@ -15,7 +15,7 @@ import { defaultWorkspaceHasContent } from "@/features/workspaces/ipc";
 
 function MenuItem({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
-    <button
+    <Button variant="custom"
       onClick={onClick}
       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left
         text-gray-700 dark:text-gray-200
@@ -23,7 +23,7 @@ function MenuItem({ icon, label, onClick }: { icon: React.ReactNode; label: stri
     >
       {icon}
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -87,16 +87,16 @@ export function SideHead({ width }: { width: number }) {
 
         {!collapsed && (
           <div className="relative min-w-0" data-tauri-drag-region="false" ref={menuRef}>
-            <button
+            <Button variant="custom"
               onClick={() => setMenuOpen((v) => !v)}
               className="text-[12.5px] font-bold tracking-tight truncate
                 bg-clip-text text-transparent
                 bg-linear-to-r from-blue-600 to-violet-600
                 dark:from-blue-400 dark:to-violet-400
-                hover:opacity-80 transition-opacity"
+                hover:opacity-80 transition-opacity inline-block"
             >
               Control Code
-            </button>
+            </Button>
 
             {menuOpen && (
               <div className="absolute top-full left-0 mt-1.5 w-56 py-1 z-100
@@ -127,16 +127,16 @@ export function SideHead({ width }: { width: number }) {
         {!collapsed && <div className="flex-1" />}
 
         <Tooltip content={collapsed ? t("panel.expand") : t("panel.collapse")} placement="right">
-          <button
+          <Button variant="icon"
             onClick={toggle}
             data-tauri-drag-region="false"
             className="cc-t flex items-center justify-center w-6.5 h-6.5 rounded-lg shrink-0
               text-gray-400 dark:text-white/35
               hover:text-gray-700 dark:hover:text-white
-              hover:bg-gray-200 dark:hover:bg-white/10"
+              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
           >
             <PanelIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
 

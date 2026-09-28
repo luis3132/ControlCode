@@ -56,3 +56,16 @@ export function remapPath(path: string, from: string, to: string): string | null
   const rest = path.slice(from.replace(/[\\/]+$/, "").length);
   return to.replace(/[\\/]+$/, "") + rest;
 }
+
+/**
+ * Cómo se le nombra un archivo o carpeta a un agente: `@ruta` relativa a su carpeta, que
+ * es la mención que entienden Claude Code, Codex, Gemini y OpenCode. Fuera de su carpeta va
+ * la absoluta. Una ruta con espacios cortaría la mención: va entre comillas, sin `@`.
+ */
+export function fileMention(path: string, agentCwd: string, isDir: boolean): string {
+  const rel = isInside(path, agentCwd)
+    ? comparablePath(path).slice(comparablePath(agentCwd).replace(/\/+$/, "").length + 1) || "."
+    : path;
+  const shown = isDir && !/[\\/]$/.test(rel) ? `${rel}/` : rel;
+  return /\s/.test(shown) ? `"${shown}"` : `@${shown}`;
+}

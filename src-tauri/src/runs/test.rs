@@ -2071,3 +2071,159 @@ fn el_tablero_nombra_las_tareas_por_su_key() {
     assert!(board.contains("- api [done] api · claude-code/default · $0.12\n    resultado: Endpoint listo"), "{board}");
     assert!(board.contains("- ui [pending] ui · claude-code/default · depende de api"), "{board}");
 }
+
+// ── Las demás TUIs ───────────────────────────────────────────────
+
+mod otras_tuis {
+    use super::super::adapters::normalize_tool;
+    use super::super::agents::{adapter_for, HeadlessAgent, LaunchCtx};
+    use super::super::types::AgentEvent;
+
+    fn ctx(schema: Option<&str>) -> LaunchCtx<'static> {
+        LaunchCtx {
+            session_id: "sess-1",
+            account_env: Default::default(),
+            mcp_config: None,
+            system_prompt: Some("Reglas del run".into()),
+            allowed_tools: vec![],
+            json_schema: schema.map(str::to_string),
+        }
+    }
+
+    fn run(agent: &dyn HeadlessAgent, lines: &str) -> Vec<AgentEvent> {
+        lines.lines().flat_map(|l| agent.parse_line(l)).collect()
+    }
+
+    #[test]
+    fn todas_las_tuis_tienen_adaptador() {
+        for id in ["claude-code", "opencode", "codex", "gemini-cli", "kimi-code"] {
+            assert!(adapter_for(id).is_some(), "falta {id}");
+        }
+        assert!(adapter_for("bash").is_none());
+    }
+
+    #[test]
+    fn las_herramientas_se_nombran_como_en_claude_code() {
+        let (name, input) = normalize_tool("write", &serde_json::json!({ "filePath": "/p/src/a.ts" }));
+        assert_eq!(name, "Write");
+        assert_eq!(input["file_path"], "/p/src/a.ts");
+        assert_eq!(normalize_tool("run_shell_command", &serde_json::json!({ "command": "ls" })).0, "Bash");
+        assert_eq!(normalize_tool("mi_tool", &serde_json::Value::Null).0, "mi_tool");
+    }
+
+    /// Una corrida real de `opencode run --format json` (1.18.32): escribe un archivo y
+    /// contesta. No hay un evento de cierre con el resultado: se arma al salir.
+    #[test]
+    fn opencode_lee_su_stream_real() {
+        let agent = adapter_for("opencode").unwrap();
+        let eventos = run(agent.as_ref(), include_str!("fixtures/opencode_stream.jsonl"));
+        assert!(matches!(&eventos[0], AgentEvent::Started { session_id: Some(s) } if s.starts_with("ses_")));
+        assert!(eventos.iter().any(|e| matches!(e, AgentEvent::Tool { label, .. } if label == "Write(proyecto/hola.txt)")));
+        assert!(eventos.iter().any(|e| matches!(e, AgentEvent::Text { text } if text == "DONE")));
+        let fin = agent.finish(None, 0);
+        assert!(fin.ok);
+        assert_eq!(fin.result.as_deref(), Some("DONE"));
+        // Los dos pasos, caché incluida.
+        assert_eq!(fin.tokens_in, Some(9066 + 1939 + 22 + 11130));
+        assert_eq!(fin.tokens_out, Some(88 + 3));
+    }
+
+    #[test]
+    fn opencode_un_error_de_la_api_es_el_motivo() {
+        let agent = adapter_for("opencode").unwrap();
+        run(agent.as_ref(), r#"{"type":"error","sessionID":"ses_1","error":{"name":"APIError","data":{"message":"sin crédito"}}}"#);
+        let fin = agent.finish(None, 1);
+        assert!(!fin.ok);
+        assert_eq!(fin.error.as_deref(), Some("sin crédito"));
+    }
+
+    #[test]
+    fn opencode_no_corre_comandos_sin_aprobar_y_el_pedido_lleva_las_reglas() {
+        let launch = adapter_for("opencode").unwrap().launch("hacé X", Some("opencode/big-pickle"), None, &ctx(Some("{}")));
+        assert_eq!(&launch.args[..3], ["run", "--format", "json"]);
+        let prompt = launch.args.last().unwrap();
+        assert!(prompt.starts_with("Reglas del run") && prompt.contains("hacé X") && prompt.contains("JSON Schema"));
+        let config: serde_json::Value = serde_json::from_str(&launch.env["OPENCODE_CONFIG_CONTENT"]).unwrap();
+        assert_eq!(config["permission"]["bash"], "ask");
+        assert_eq!(config["permission"]["edit"], "allow");
+    }
+
+    #[test]
+    fn codex_lee_su_jsonl() {
+        let agent = adapter_for("codex").unwrap();
+        let eventos = run(
+            agent.as_ref(),
+            r#"{"type":"thread.started","thread_id":"t-1"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"i1","type":"command_execution","command":"cargo test","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"i2","type":"file_change","changes":[{"path":"/p/src/lib.rs","kind":"update"}]}}
+{"type":"item.completed","item":{"id":"i3","type":"agent_message","text":"Listo."}}
+{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":800,"output_tokens":90}}"#,
+        );
+        assert_eq!(eventos[0], AgentEvent::Started { session_id: Some("t-1".into()) });
+        assert!(eventos.iter().any(|e| matches!(e, AgentEvent::Tool { label, .. } if label == "Bash(cargo test)")));
+        assert!(eventos.iter().any(|e| matches!(e, AgentEvent::Tool { label, .. } if label == "Edit(src/lib.rs)")));
+        let fin = agent.finish(None, 0);
+        assert!(fin.ok);
+        assert_eq!(fin.result.as_deref(), Some("Listo."));
+        assert_eq!((fin.tokens_in, fin.tokens_out), (Some(1200), Some(90)));
+    }
+
+    #[test]
+    fn codex_un_turno_fallido_es_el_motivo_y_el_schema_va_por_archivo() {
+        let agent = adapter_for("codex").unwrap();
+        run(agent.as_ref(), r#"{"type":"turn.failed","error":{"message":"sandbox denied"}}"#);
+        assert_eq!(agent.finish(None, 1).error.as_deref(), Some("sandbox denied"));
+
+        let launch = adapter_for("codex").unwrap().launch("x", None, None, &ctx(Some(r#"{"type":"object"}"#)));
+        let at = launch.args.iter().position(|a| a == "--output-schema").expect("schema por archivo");
+        let path = std::path::PathBuf::from(&launch.args[at + 1]);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), r#"{"type":"object"}"#);
+        let _ = std::fs::remove_file(path);
+        assert!(!launch.args.last().unwrap().contains("JSON Schema"), "si lo hace cumplir, no va en el pedido");
+    }
+
+    /// Con la forma de `StreamJsonFormatter` de `@google/gemini-cli` 0.59.
+    #[test]
+    fn gemini_junta_el_texto_de_a_pedazos() {
+        let agent = adapter_for("gemini-cli").unwrap();
+        let eventos = run(
+            agent.as_ref(),
+            r#"{"type":"init","timestamp":"t","session_id":"sess-1","model":"gemini-3"}
+{"type":"message","timestamp":"t","role":"user","content":"hacé X"}
+{"type":"message","timestamp":"t","role":"assistant","content":"Voy a ","delta":true}
+{"type":"message","timestamp":"t","role":"assistant","content":"leerlo.","delta":true}
+{"type":"tool_use","timestamp":"t","tool_name":"read_file","tool_id":"1","parameters":{"absolute_path":"/p/src/a.ts"}}
+{"type":"tool_result","timestamp":"t","tool_id":"1","status":"success","output":"..."}
+{"type":"message","timestamp":"t","role":"assistant","content":"Hecho.","delta":true}
+{"type":"result","timestamp":"t","status":"success","stats":{"total_tokens":150,"input_tokens":100,"output_tokens":50,"cached":0,"input":100,"duration_ms":10,"tool_calls":1}}"#,
+        );
+        assert_eq!(eventos[0], AgentEvent::Started { session_id: Some("sess-1".into()) });
+        assert!(eventos.iter().any(|e| matches!(e, AgentEvent::Text { text } if text == "Voy a leerlo.")));
+        assert!(eventos.iter().any(|e| matches!(e, AgentEvent::Tool { label, .. } if label == "Read(src/a.ts)")));
+        let Some(AgentEvent::Finished { outcome }) = eventos.last() else { panic!("sin cierre: {eventos:?}") };
+        assert!(outcome.ok);
+        assert_eq!(outcome.result.as_deref(), Some("Hecho."));
+        assert_eq!((outcome.tokens_in, outcome.tokens_out), (Some(100), Some(50)));
+
+        let launch = adapter_for("gemini-cli").unwrap().launch("x", None, None, &ctx(None));
+        let at = launch.args.iter().position(|a| a == "--session-id").unwrap();
+        assert_eq!(launch.args[at + 1], "sess-1");
+        assert!(launch.args.windows(2).any(|w| w == ["--approval-mode", "auto_edit"]));
+    }
+
+    #[test]
+    fn kimi_lee_mensajes_de_chat() {
+        let agent = adapter_for("kimi-code").unwrap();
+        let eventos = run(
+            agent.as_ref(),
+            r#"{"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"Shell","arguments":"{\"command\":\"ls -la\"}"}}]}
+{"role":"tool","tool_call_id":"c1","content":"total 0"}
+{"role":"assistant","content":[{"type":"text","text":"No hay nada."}]}"#,
+        );
+        assert_eq!(eventos[0], AgentEvent::Started { session_id: None });
+        assert!(eventos.iter().any(|e| matches!(e, AgentEvent::Tool { label, .. } if label == "Bash(ls -la)")));
+        let fin = agent.finish(None, 0);
+        assert_eq!(fin.result.as_deref(), Some("No hay nada."));
+    }
+}

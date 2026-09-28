@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { EmptyState, Skeleton } from "neogestify-ui-components";
+import { Button, EmptyState, Skeleton } from "neogestify-ui-components";
 
 import { IssueIcon, PullRequestIcon, TagIcon } from "@/app/icons";
 import { useShellGroups } from "@/app/shellContext";
@@ -44,7 +44,7 @@ function RepoRow({ repo, active, onClick }: { repo: OpenRepo; active: boolean; o
   const branches = [...new Set(repo.open.map((w) => w.branch).filter(Boolean))] as string[];
 
   return (
-    <button
+    <Button variant="custom"
       onClick={onClick}
       className={`cc-t flex items-start gap-2.5 w-full px-2.5 py-2 rounded-lg text-left
         ${active
@@ -69,7 +69,7 @@ function RepoRow({ repo, active, onClick }: { repo: OpenRepo; active: boolean; o
           <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30">{branches.join(" · ")}</span>
         )}
       </span>
-    </button>
+    </Button>
   );
 }
 
@@ -190,7 +190,7 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
           {(["pulls", "issues", "releases"] as Section[]).map((s) => {
             const Icon = s === "pulls" ? PullRequestIcon : s === "issues" ? IssueIcon : TagIcon;
             return (
-              <button
+              <Button variant="custom"
                 key={s}
                 onClick={() => setSection(s)}
                 className={`cc-t flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12.5px]
@@ -200,7 +200,7 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
               >
                 <Icon className="w-3.5 h-3.5" />
                 {t(`forge.page.${s}`)}
-              </button>
+              </Button>
             );
           })}
         </div>
@@ -214,7 +214,7 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
               reload();
             }}
             title={t("forge.pickAccount")}
-            className="h-7 px-2 rounded-lg text-[12px] outline-none bg-transparent
+            className="h-7 px-2 rounded-lg cursor-pointer text-[12px] outline-none bg-transparent
               text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-white/10"
           >
             {target.accounts.map((a) => <option key={a.id} value={a.id}>@{a.login}</option>)}

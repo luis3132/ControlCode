@@ -52,19 +52,19 @@ export function UpdateNotifier() {
           </span>
         </div>
         {phase !== "installing" && (
-          <button onClick={dismiss} aria-label={t("btn.close")}
+          <Button variant="icon" onClick={dismiss} aria-label={t("btn.close")}
             className="cc-t flex items-center justify-center w-6 h-6 rounded-md text-gray-400 dark:text-white/40
-              hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
+              hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10 p-0">
             <CloseIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         )}
       </div>
 
       {info.notes && (
         <div className="px-4 pt-2">
-          <button onClick={() => setNotesOpen((v) => !v)} className="text-[11.5px] text-blue-600 dark:text-blue-400 hover:underline">
+          <Button variant="custom" onClick={() => setNotesOpen((v) => !v)} className="text-[11.5px] text-blue-600 dark:text-blue-400 hover:underline inline-block">
             {notesOpen ? t("updates.hideNotes") : t("updates.showNotes")}
-          </button>
+          </Button>
           {notesOpen && (
             <div className="mt-2 max-h-64 cc-scroll rounded-lg border border-gray-200 dark:border-white/8 px-3 py-2 text-[12px]">
               <Markdown content={info.notes} />
@@ -91,9 +91,9 @@ export function UpdateNotifier() {
 
         <div className="flex flex-wrap items-center justify-end gap-2">
           {phase !== "installing" && phase !== "installed" && (
-            <button onClick={skip} className="mr-auto text-[11.5px] text-gray-500 dark:text-white/45 hover:underline">
+            <Button variant="custom" onClick={skip} className="mr-auto text-[11.5px] text-gray-500 dark:text-white/45 hover:underline inline-block">
               {t("updates.skip")}
-            </button>
+            </Button>
           )}
           <Button size="sm" variant="outline" onClick={() => openUrl(info.pageUrl).catch(console.error)}
             className="flex items-center gap-1">

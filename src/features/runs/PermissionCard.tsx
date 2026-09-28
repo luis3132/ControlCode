@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Kbd } from "neogestify-ui-components";
+import { Button, Kbd } from "neogestify-ui-components";
 
 import type { PendingApproval } from "./types";
 
@@ -160,7 +160,7 @@ export function PermissionCard({ approval, onDecide, focused }: {
             checked={remember}
             onChange={(e) => setRemember(e.target.checked)}
             disabled={busy}
-            className="shrink-0 accent-amber-600"
+            className="shrink-0 cursor-pointer accent-amber-600 disabled:cursor-default"
           />
           <span className="shrink-0 text-[10px] text-amber-800/80 dark:text-amber-300/70">
             <Kbd>r</Kbd> {t("fleet.permission.remember")}
@@ -175,16 +175,16 @@ export function PermissionCard({ approval, onDecide, focused }: {
       )}
 
       <div className="flex items-center gap-1.5">
-        <button onClick={() => decide(true)} disabled={busy} className={`${BTN}
+        <Button variant="custom" onClick={() => decide(true)} disabled={busy} className={`${BTN}
           bg-emerald-500/15 text-emerald-800 dark:text-emerald-300
-          hover:bg-emerald-500/25`}>
+          hover:bg-emerald-500/25 inline-block`}>
           <Kbd>y</Kbd> {t("fleet.permission.allow")}
-        </button>
-        <button onClick={() => decide(false)} disabled={busy} className={`${BTN}
+        </Button>
+        <Button variant="custom" onClick={() => decide(false)} disabled={busy} className={`${BTN}
           text-gray-600 dark:text-white/50
-          hover:bg-gray-200 dark:hover:bg-white/10`}>
+          hover:bg-gray-200 dark:hover:bg-white/10 inline-block`}>
           <Kbd>n</Kbd> {t("fleet.permission.deny")}
-        </button>
+        </Button>
         <div className="flex-1" />
         <BlockedFor since={approval.askedAt} />
       </div>

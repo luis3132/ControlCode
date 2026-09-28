@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { CloseIcon } from "neogestify-ui-components";
+import { Button, CloseIcon } from "neogestify-ui-components";
 
 import { hasOpenDialog } from "@/shared/ui/openDialog";
 import { useFocusInside } from "@/shared/ui/useFocusInside";
@@ -38,10 +38,11 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
 
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center p-6">
-      <button
+      <Button variant="custom"
         onClick={onClose}
         aria-label={t("btn.close")}
-        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/65"
+        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/65 block"
+        children={null}
       />
 
       <div ref={frameRef} tabIndex={-1} className="outline-none cc-rise relative flex flex-col w-full max-w-5xl h-full
@@ -50,17 +51,17 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
         border border-gray-200 dark:border-white/12
         shadow-2xl">
 
-        <button
+        <Button variant="icon"
           onClick={onClose}
           title={t("btn.close")}
           className="absolute top-3 right-3 z-10 flex items-center justify-center w-8 h-8 rounded-lg
             text-gray-400 dark:text-white/35
             bg-white/80 dark:bg-white/8
             hover:text-gray-700 dark:hover:text-white
-            hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+            hover:bg-gray-100 dark:hover:bg-white/10 transition-colors p-0"
         >
           <CloseIcon className="w-4 h-4" />
-        </button>
+        </Button>
 
         {/* Sin scroll propio: las rutas que se pintan acá son de alto completo y
             scrollean por dentro. Ver la nota equivalente en `AppShell`. */}

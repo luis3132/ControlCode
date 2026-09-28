@@ -132,7 +132,7 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
     <div className="flex flex-col flex-1 min-h-0">
       {/* ── barra: volver, título, acciones ─────────────────────────── */}
       <div className="flex items-center gap-2 h-11 shrink-0 px-4 border-b border-gray-200 dark:border-white/8">
-        <button
+        <Button variant="custom"
           onClick={onBack}
           className="cc-t flex items-center gap-1.5 h-7 px-2 -ml-2 rounded-md text-[12px]
             text-gray-500 dark:text-white/50 hover:text-gray-900 dark:hover:text-white
@@ -140,7 +140,7 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
         >
           <ArrowLeftIcon className="w-3.5 h-3.5" />
           {t(pr ? "forge.pr.back" : "forge.issue.back")}
-        </button>
+        </Button>
         <div className="flex-1" />
         {/* Pasarle el issue entero a un agente para que lo trabaje: a uno abierto en este
             repo, o a uno nuevo. */}

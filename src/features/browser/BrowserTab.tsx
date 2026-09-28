@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, TrashIcon } from "neogestify-ui-components";
+import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, TextArea, TrashIcon } from "neogestify-ui-components";
 
 import {
   BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
@@ -739,12 +739,12 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
                 ) : servers.length > 0 ? (
                   <div className="flex flex-wrap justify-center gap-1.5">
                     {servers.map((url) => (
-                      <button key={url} onClick={() => go(url)}
-                        className="cc-t px-3 h-7 rounded-full font-mono text-[11.5px]
+                      <Button variant="custom" key={url} onClick={() => go(url)}
+                        className="cc-t inline-block px-3 h-7 rounded-full font-mono text-[11.5px]
                           bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10
                           text-gray-700 dark:text-gray-300 hover:border-blue-500 dark:hover:border-blue-400">
                         {url.replace("http://", "")}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 ) : (
@@ -784,11 +784,11 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
               <span className="flex-1 min-w-0 truncate text-[11.5px] font-semibold text-gray-700 dark:text-gray-300">
                 {composerTitle}
               </span>
-              <button onClick={() => setComposerOpen(false)} aria-label={t("btn.close")}
-                className="cc-t flex items-center justify-center w-6 h-6 rounded-md
+              <Button variant="icon" onClick={() => setComposerOpen(false)} aria-label={t("btn.close")}
+                className="cc-t flex items-center justify-center w-6 h-6 p-0 rounded-md
                   text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
                 <CloseIcon className="w-3.5 h-3.5" />
-              </button>
+              </Button>
             </div>
 
             <div className={`flex-1 min-h-0 cc-scroll p-2.5 gap-1.5 ${compact && attachments > 0 ? "flex flex-row flex-wrap content-start" : "flex flex-col"}`}>
@@ -808,12 +808,12 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
                         <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-gray-500 dark:text-white/45" title={c.path}>
                           {c.url}
                         </span>
-                        <button onClick={() => setCaptures((prev) => prev.filter((x) => x.id !== c.id))}
+                        <Button variant="icon" onClick={() => setCaptures((prev) => prev.filter((x) => x.id !== c.id))}
                           aria-label={t("btn.delete")}
-                          className="cc-t flex items-center justify-center w-5 h-5 shrink-0 rounded
+                          className="cc-t flex items-center justify-center w-5 h-5 p-0 shrink-0 rounded
                             text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-white/10">
                           <TrashIcon className="w-3 h-3" />
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   ))}
@@ -827,12 +827,12 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
                           {`<${p.tag}>`}{p.component && <span className="text-blue-600 dark:text-blue-400"> {p.component.name}</span>}
                         </span>
                         <div className="flex-1" />
-                        <button onClick={() => setPicks((prev) => prev.filter((_, j) => j !== i))}
+                        <Button variant="icon" onClick={() => setPicks((prev) => prev.filter((_, j) => j !== i))}
                           aria-label={t("btn.delete")}
-                          className="cc-t hidden group-hover:flex items-center justify-center w-5 h-5 rounded
+                          className="cc-t hidden group-hover:flex items-center justify-center w-5 h-5 p-0 rounded
                             text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-white/10">
                           <TrashIcon className="w-3 h-3" />
-                        </button>
+                        </Button>
                       </div>
                       {p.text && <span className="truncate text-[11px] text-gray-500 dark:text-white/45">«{p.text}»</span>}
                       <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30" title={p.selector}>
@@ -848,12 +848,14 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
               {sent && (
                 <div className="flex items-center gap-2 text-[11px] text-emerald-700 dark:text-emerald-400">
                   <span className="flex-1 min-w-0 truncate">{t("browser.sent", { agent: sent.title })}</span>
-                  <button onClick={() => activateTab(sent.tabId)} className="shrink-0 underline underline-offset-2">
+                  <Button variant="custom" onClick={() => activateTab(sent.tabId)} className="inline-block shrink-0 underline underline-offset-2">
                     {t("browser.goToAgent")}
-                  </button>
+                  </Button>
                 </div>
               )}
-              <textarea
+              <TextArea
+                size="sm"
+                resize="none"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 onKeyDown={(e) => {

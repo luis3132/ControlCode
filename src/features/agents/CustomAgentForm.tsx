@@ -103,7 +103,7 @@ export function CustomAgentForm({ initial, onSubmit, onCancel }: CustomAgentForm
         </Field>
       </div>
 
-      <button
+      <Button variant="custom"
         type="button"
         onClick={() => setAdvancedOpen((v) => !v)}
         className="flex items-center gap-1.5 w-fit text-xs font-medium
@@ -114,7 +114,7 @@ export function CustomAgentForm({ initial, onSubmit, onCancel }: CustomAgentForm
           className={`w-3.5 h-3.5 transition-transform duration-200 ${advancedOpen ? "" : "-rotate-90"}`}
         />
         {t("settings.tuis.advanced")}
-      </button>
+      </Button>
 
       {advancedOpen && (
         <div className="flex flex-col gap-3 pl-4 border-l-2 border-gray-200 dark:border-white/10">

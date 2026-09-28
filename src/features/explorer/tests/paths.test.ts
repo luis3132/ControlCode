@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canDrop, dirFor, isInside, joinPath, parentDir, remapPath } from "../paths";
+import { canDrop, dirFor, fileMention, isInside, joinPath, parentDir, remapPath } from "../paths";
 
 describe("parentDir / joinPath", () => {
   it("respeta el separador de cada sistema", () => {
@@ -49,5 +49,19 @@ describe("remapPath", () => {
     expect(remapPath("/p/src/a.ts", "/p/src", "/p/lib/src")).toBe("/p/lib/src/a.ts");
     expect(remapPath("/p/src", "/p/src", "/p/app")).toBe("/p/app");
     expect(remapPath("/p/src2/a.ts", "/p/src", "/p/app")).toBeNull();
+  });
+});
+
+describe("fileMention", () => {
+  it("relativa a la carpeta del agente, con @", () => {
+    expect(fileMention("/p/src/a.ts", "/p", false)).toBe("@src/a.ts");
+    expect(fileMention("/p/src", "/p", true)).toBe("@src/");
+    expect(fileMention("/p", "/p", true)).toBe("@./");
+  });
+
+  it("afuera de su carpeta, la absoluta; con espacios, entre comillas", () => {
+    expect(fileMention("/otra/a.ts", "/p", false)).toBe("@/otra/a.ts");
+    expect(fileMention("/p/mis docs/a.md", "/p", false)).toBe('"mis docs/a.md"');
+    expect(fileMention("C:\\p\\src\\a.ts", "C:\\p", false)).toBe("@src/a.ts");
   });
 });

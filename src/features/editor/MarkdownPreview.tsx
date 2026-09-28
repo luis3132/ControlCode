@@ -201,19 +201,20 @@ function PreviewImage({ src, alt, node: _node, ...rest }: Props<"img">) {
   }, [env, source, remote]);
 
   const chip = (label: string, onClick?: () => void) => (
-    <button
-      type="button"
+    <Button
+      variant="custom"
       onClick={onClick}
       disabled={!onClick}
       title={onClick ? t("editor.preview.loadRemote") : source}
       className="inline-flex items-center gap-1 max-w-full px-1.5 py-0.5 mx-0.5 align-middle rounded
         text-[11px] leading-tight text-gray-500 dark:text-white/45
         bg-gray-100 dark:bg-white/6 border border-gray-200 dark:border-white/10
-        enabled:hover:text-gray-800 enabled:dark:hover:text-white"
+        enabled:hover:text-gray-800 enabled:dark:hover:text-white
+        disabled:opacity-100 disabled:cursor-default"
     >
       <span aria-hidden>🖼</span>
       <span className="truncate">{label}</span>
-    </button>
+    </Button>
   );
 
   if (!source) return alt ? chip(alt) : null;
@@ -283,18 +284,18 @@ function CodeBlock({ node }: Props<"pre">) {
             : text}
         </code>
       </pre>
-      <button
-        type="button"
+      <Button
+        variant="icon"
         onClick={() => navigator.clipboard.writeText(text).then(() => setCopied(true)).catch(console.error)}
         aria-label={t(copied ? "editor.preview.copied" : "editor.preview.copy")}
         title={t(copied ? "editor.preview.copied" : "editor.preview.copy")}
-        className="cc-t absolute top-2 right-2 flex items-center justify-center w-7 h-7 rounded-md
+        className="cc-t absolute top-2 right-2 flex items-center justify-center w-7 h-7 p-0 rounded-md
           opacity-0 group-hover:opacity-100 focus-visible:opacity-100
           text-gray-500 dark:text-white/50 hover:text-gray-900 dark:hover:text-white
           bg-white/90 dark:bg-[#0d1117]/90 border border-gray-200 dark:border-white/10"
       >
         {copied ? <CheckIcon className="w-3.5 h-3.5 text-emerald-500" /> : <CopyIcon className="w-3.5 h-3.5" />}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -324,7 +325,7 @@ const COMPONENTS: Components = {
   ),
   ol: ({ node: _n, ...p }) => <ol {...p} className="my-3 pl-6 space-y-1 list-decimal [&_ul]:my-1 [&_ol]:my-1"/>,
   li: ({ node: _n, ...p }) => <li {...p} className="pl-0.5 marker:text-gray-400 dark:marker:text-white/35"/>,
-  input: ({ node: _n, ...p }) => <input {...p} className="mr-2 align-middle accent-blue-600" />,
+  input: ({ node: _n, ...p }) => <input {...p} className="mr-2 align-middle cursor-pointer accent-blue-600 disabled:cursor-default" />,
   blockquote: ({ node: _n, ...p }) => (
     <blockquote {...p} className="my-4 pl-4 border-l-4 border-gray-300 dark:border-white/15 text-gray-500 dark:text-white/55"/>
   ),

@@ -56,20 +56,20 @@ export function TagsSection({ root, version, onCreate, onChanged }: {
   return (
     <div className="border-t border-gray-200 dark:border-white/7">
       <div className="group flex items-center gap-1 h-7 pl-1.5 pr-2">
-        <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1 flex-1 min-w-0 h-full text-left">
+        <Button variant="custom" onClick={() => setOpen((v) => !v)} className="flex items-center gap-1 flex-1 min-w-0 h-full text-left">
           <span className="w-3.5 shrink-0 text-gray-400 dark:text-white/30">
             {open ? <ChevronDownIcon className="w-2.5 h-2.5" /> : <ChevronRightIcon className="w-2.5 h-2.5" />}
           </span>
           <span className="flex-1 text-[10px] font-extrabold uppercase tracking-[0.09em] text-gray-500 dark:text-white/40">
             {t("scm.tags")}
           </span>
-        </button>
+        </Button>
         <Tooltip content={t("scm.tag.createHead")} placement="left">
-          <button onClick={onCreate} aria-label={t("scm.tag.createHead")}
+          <Button variant="icon" onClick={onCreate} aria-label={t("scm.tag.createHead")}
             className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md text-gray-400 dark:text-white/40
-              hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
+              hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10 p-0">
             <AddIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
 
@@ -93,18 +93,18 @@ export function TagsSection({ root, version, onCreate, onChanged }: {
               <span className="flex-1 min-w-0 truncate text-[10.5px] text-gray-400 dark:text-white/30">{tag.subject}</span>
               <span className="hidden group-hover:flex items-center gap-0.5">
                 <Tooltip content={t("scm.tag.pushOne")} placement="left">
-                  <button onClick={() => act(tag, "push")} disabled={!!busy} aria-label={t("scm.tag.pushOne")}
+                  <Button variant="icon" onClick={() => act(tag, "push")} disabled={!!busy} aria-label={t("scm.tag.pushOne")}
                     className="cc-t flex items-center justify-center w-5 h-5 rounded text-gray-400 dark:text-white/40
-                      hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40">
+                      hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 p-0">
                     <PushIcon className="w-3 h-3" />
-                  </button>
+                  </Button>
                 </Tooltip>
                 <Tooltip content={t("scm.tag.deleteLocal")} placement="left">
-                  <button onClick={() => setDeleting(tag)} disabled={!!busy} aria-label={t("scm.tag.deleteLocal")}
+                  <Button variant="icon" onClick={() => setDeleting(tag)} disabled={!!busy} aria-label={t("scm.tag.deleteLocal")}
                     className="cc-t flex items-center justify-center w-5 h-5 rounded text-gray-400 dark:text-white/40
-                      hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40">
+                      hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 p-0">
                     <TrashIcon className="w-3 h-3" />
-                  </button>
+                  </Button>
                 </Tooltip>
               </span>
               <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/30 group-hover:hidden">

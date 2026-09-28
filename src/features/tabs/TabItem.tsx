@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { agentIcon } from "@/features/agents/agentIcons";
@@ -127,7 +128,7 @@ export function TabItem({
       />
 
       {/* Botón cerrar — siempre visible pero sutil, hover lo destaca */}
-      <button
+      <Button variant="icon"
         onClick={(e) => {
           e.stopPropagation();
           onClose(e);
@@ -142,13 +143,13 @@ export function TabItem({
           hover:text-gray-700 dark:hover:text-white
           hover:bg-gray-200 dark:hover:bg-white/15
           transition-opacity duration-100
-        "
+         p-0"
       >
         <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
           <line x1="1" y1="1" x2="7" y2="7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           <line x1="7" y1="1" x2="1" y2="7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
-      </button>
+      </Button>
     </div>
   );
 }

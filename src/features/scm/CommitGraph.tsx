@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CloudIcon, DocumentIcon, Tooltip } from "neogestify-ui-components";
+import { Button, CloudIcon, DocumentIcon, Tooltip } from "neogestify-ui-components";
 
 import { BranchIcon, PullIcon, PushIcon, TagIcon } from "@/app/icons";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -137,7 +137,7 @@ export function CommitGraph({ cwd, root, commits, onTag }: {
         const tip = `${c.hash}\n${c.author} · ${new Date(c.time * 1000).toLocaleString()}\n\n${c.subject}`;
         return (
           <div key={c.hash}>
-            <button
+            <Button variant="custom"
               onClick={() => toggle(c)}
               title={tip}
               className={`group flex items-center gap-1.5 w-full pr-3 text-left
@@ -184,7 +184,7 @@ export function CommitGraph({ cwd, root, commits, onTag }: {
               <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/30">
                 {elapsed(c.time * 1000)}
               </span>
-            </button>
+            </Button>
 
             {isOpen && (
               <div className="flex">
@@ -200,7 +200,7 @@ export function CommitGraph({ cwd, root, commits, onTag }: {
                   ) : list.map((f) => {
                     const slash = f.path.lastIndexOf("/");
                     return (
-                      <button
+                      <Button variant="custom"
                         key={f.path}
                         onClick={() => openDiff(cwd, root, f.path, false, { hash: c.hash, short: c.short, origPath: f.origPath })}
                         title={f.origPath ? `${f.origPath} → ${f.path}` : f.path}
@@ -218,7 +218,7 @@ export function CommitGraph({ cwd, root, commits, onTag }: {
                         <span className={`shrink-0 w-3 font-mono text-[10px] text-center ${STATUS_CLASS[f.status] ?? ""}`}>
                           {f.status}
                         </span>
-                      </button>
+                      </Button>
                     );
                   })}
                 </div>

@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { DocumentIcon } from "neogestify-ui-components";
+import { Button, DocumentIcon } from "neogestify-ui-components";
 
 import { BranchIcon, GlobeIcon } from "@/app/icons";
 import type { AgentPaint } from "@/features/browser/agentPaint";
@@ -75,20 +75,20 @@ export function ViewTabItem({
       {dirty && (
         <span className="absolute right-3 w-2 h-2 rounded-full bg-gray-500 dark:bg-white/60 group-hover:opacity-0" />
       )}
-      <button
+      <Button variant="icon"
         onClick={(e) => { e.stopPropagation(); onClose(); }}
         onMouseDown={(e) => e.stopPropagation()}
         title={t("btn.close")}
         className={`shrink-0 flex items-center justify-center w-4 h-4 rounded
           text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-white
           hover:bg-gray-200 dark:hover:bg-white/15 transition-opacity duration-100
-          ${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"} ${dirty ? "opacity-0 group-hover:opacity-100" : ""}`}
+          ${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"} ${dirty ? "opacity-0 group-hover:opacity-100" : ""} p-0`}
       >
         <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
           <line x1="1" y1="1" x2="7" y2="7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           <line x1="7" y1="1" x2="1" y2="7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
-      </button>
+      </Button>
     </div>
   );
 }

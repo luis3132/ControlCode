@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Alert, Badge, CheckIcon, CloseIcon, CloudIcon, InfoIcon, Skeleton, StackIcon, Tooltip,
+  Alert, Badge, Button, CheckIcon, CloseIcon, CloudIcon, InfoIcon, Skeleton, StackIcon, Tooltip,
 } from "neogestify-ui-components";
 
 import { Markdown } from "@/shared/ui/Markdown";
@@ -208,7 +208,7 @@ export function SkillPalette({ target: initial, onClose }: {
       <button
         onClick={onClose}
         aria-label={t("btn.close")}
-        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/65"
+        className="cc-fade absolute inset-0 cursor-pointer bg-gray-900/45 dark:bg-black/65"
       />
 
       <div className="cc-rise relative flex w-full max-w-4xl h-[30rem]
@@ -249,24 +249,24 @@ export function SkillPalette({ target: initial, onClose }: {
                 ? t("skills.palette.note", { dir: target.cwd })
                 : t("skills.palette.noteTab")}
             >
-              <button className="cc-t flex items-center justify-center w-5 h-5 rounded shrink-0
+              <Button variant="icon" className="cc-t flex items-center justify-center w-5 h-5 rounded shrink-0
                 text-gray-400 dark:text-white/30
-                hover:text-gray-600 dark:hover:text-white/60">
+                hover:text-gray-600 dark:hover:text-white/60 p-0">
                 <InfoIcon className="w-3.5 h-3.5" />
-              </button>
+              </Button>
             </Tooltip>
 
             <Tooltip content={t("btn.close")} placement="bottom">
-              <button
+              <Button variant="icon"
                 onClick={onClose}
                 aria-label={t("btn.close")}
                 className="cc-t flex items-center justify-center w-7 h-7 rounded-lg shrink-0
                   text-gray-400 dark:text-white/35
                   hover:text-gray-700 dark:hover:text-white
-                  hover:bg-gray-100 dark:hover:bg-white/10"
+                  hover:bg-gray-100 dark:hover:bg-white/10 p-0"
               >
                 <CloseIcon className="w-4 h-4" />
-              </button>
+              </Button>
             </Tooltip>
           </div>
 

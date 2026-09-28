@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CloseIcon, Select, Tooltip } from "neogestify-ui-components";
+import { Button, CloseIcon, Select, Tooltip } from "neogestify-ui-components";
 
 import { RotateIcon } from "@/app/icons";
 
@@ -82,23 +82,23 @@ export function DeviceBar({ viewport, touch, onChange, onTouch, onClose }: {
       </div>
 
       <Tooltip content={t("browser.viewport.rotate")} placement="bottom">
-        <button onClick={() => set(rotate(viewport))} aria-label={t("browser.viewport.rotate")}
-          className="cc-t flex items-center justify-center w-7 h-7 rounded-md shrink-0
+        <Button variant="icon" onClick={() => set(rotate(viewport))} aria-label={t("browser.viewport.rotate")}
+          className="cc-t flex items-center justify-center w-7 h-7 p-0 rounded-md shrink-0
             text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10">
           <RotateIcon className="w-4 h-4" />
-        </button>
+        </Button>
       </Tooltip>
 
       {/* El táctil aparte del tamaño: lo más útil es prenderlo y apagarlo SIN mover el
           ancho, que es como se ve qué se rompe por el dedo y no por el espacio. */}
       <Tooltip content={t(touch ? "browser.viewport.touchOff" : "browser.viewport.touchOn")} placement="bottom">
-        <button onClick={() => onTouch(!touch)} aria-pressed={touch}
-          className={`cc-t h-6 px-2 rounded-md shrink-0 text-[10.5px] border
+        <Button variant="custom" onClick={() => onTouch(!touch)} aria-pressed={touch}
+          className={`cc-t inline-block h-6 px-2 rounded-md shrink-0 text-[10.5px] border
             ${touch
               ? "bg-blue-600 border-blue-600 text-white"
               : "border-gray-200 dark:border-white/10 text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/8"}`}>
           {t("browser.viewport.touch")}
-        </button>
+        </Button>
       </Tooltip>
 
       <div className="w-px h-5 shrink-0 bg-gray-200 dark:bg-white/10" />
@@ -109,16 +109,17 @@ export function DeviceBar({ viewport, touch, onChange, onTouch, onClose }: {
         border border-gray-200 dark:border-white/10 overflow-hidden">
         {BREAKPOINT_WIDTHS.map(([name, width]) => (
           <Tooltip key={name} content={t("browser.viewport.jumpTo", { name, width })} placement="bottom">
-            <button
+            <Button
+              variant="custom"
               onClick={() => set({ ...viewport, width })}
               aria-pressed={current === name}
-              className={`cc-t h-6 px-2 font-mono text-[10.5px] border-r last:border-r-0 border-gray-200 dark:border-white/10
+              className={`cc-t inline-block h-6 px-2 font-mono text-[10.5px] border-r last:border-r-0 border-gray-200 dark:border-white/10
                 ${current === name
                   ? "bg-blue-600 text-white"
                   : "text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/8 hover:text-gray-900 dark:hover:text-white"}`}
             >
               {name}
-            </button>
+            </Button>
           </Tooltip>
         ))}
       </div>
@@ -126,11 +127,11 @@ export function DeviceBar({ viewport, touch, onChange, onTouch, onClose }: {
       <div className="flex-1" />
 
       <Tooltip content={t("browser.viewport.exit")} placement="bottom">
-        <button onClick={onClose} aria-label={t("browser.viewport.exit")}
-          className="cc-t flex items-center justify-center w-7 h-7 rounded-md shrink-0
+        <Button variant="icon" onClick={onClose} aria-label={t("browser.viewport.exit")}
+          className="cc-t flex items-center justify-center w-7 h-7 p-0 rounded-md shrink-0
             text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
           <CloseIcon className="w-3.5 h-3.5" />
-        </button>
+        </Button>
       </Tooltip>
     </div>
   );

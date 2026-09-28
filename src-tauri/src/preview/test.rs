@@ -1120,6 +1120,35 @@ async fn la_pagina_llama_a_su_api_en_otro_origen_con_cors_y_cookies() {
         .unwrap();
     assert_eq!(put.status(), 200);
 
+    // Con la caché desactivada, el motor agrega `Cache-Control` y `Pragma` por su cuenta.
+    // Un navegador no pide preflight por eso: la API (que solo permite `content-type`) lo
+    // atiende igual, y la cabecera le llega.
+    let before = hits.load(Ordering::SeqCst);
+    let engine = own(c.put(fwd_url(&page.proxy_origin, &api("/me"))))
+        .header("x-controlcode-cred", "include")
+        .header("x-controlcode-headers", "content-type")
+        .header("content-type", "application/json")
+        .header("cache-control", "no-cache")
+        .header("pragma", "no-cache")
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(engine.status(), 200, "{:?}", engine.headers());
+    assert!(engine.headers().get("x-controlcode-cors").is_none());
+    assert_eq!(hits.load(Ordering::SeqCst), before + 1);
+    // La misma cabecera puesta por la página sí la tiene que autorizar el preflight.
+    let authored = own(c.put(fwd_url(&page.proxy_origin, &api("/me"))))
+        .header("x-controlcode-cred", "include")
+        .header("x-controlcode-headers", "content-type,cache-control")
+        .header("content-type", "application/json")
+        .header("cache-control", "no-cache")
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert!(authored.headers().get("x-controlcode-cors").is_some(), "{:?}", authored.headers());
+
     // Una redirección de la API vuelve a pasar por el proxy.
     let go = fwd(&page.proxy_origin, &api("/go"), "include").send().await.unwrap();
     assert_eq!(go.status(), 302);

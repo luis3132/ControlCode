@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { CloseIcon, Tooltip } from "neogestify-ui-components";
+import { Button, CloseIcon, Tooltip } from "neogestify-ui-components";
 
 import { AppDialog } from "@/shared/ui/AppDialog";
 
@@ -41,7 +41,7 @@ export function RunStrip({ summaries, selected, onSelect, onCancel }: {
           const on = s.run.id === selected;
           const pct = s.total > 0 ? Math.round((s.done / s.total) * 100) : 0;
           return (
-            <button
+            <Button variant="custom"
               key={s.run.id}
               onClick={() => onSelect(on ? null : s.run.id)}
               aria-pressed={on}
@@ -61,7 +61,7 @@ export function RunStrip({ summaries, selected, onSelect, onCancel }: {
                   <span className={`block h-full ${s.broken > 0 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} />
                 </span>
               )}
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -82,18 +82,18 @@ export function RunStrip({ summaries, selected, onSelect, onCancel }: {
             </span>
             <span>{t("fleet.runs.parallel", { n: current.run.maxParallel })}</span>
           </span>
-          <button onClick={() => setFactsOf(current.run.id)} className={ACTION}>{t("fleet.runs.facts")}</button>
+          <Button variant="custom" onClick={() => setFactsOf(current.run.id)} className={ACTION}>{t("fleet.runs.facts")}</Button>
           {current.run.status === "running" && (
             <Tooltip content={t("fleet.runs.cancelHint")} placement="bottom">
-              <button onClick={() => onCancel(current.run.id)} className={`${ACTION} text-red-600 dark:text-red-400`}>
+              <Button variant="custom" onClick={() => onCancel(current.run.id)} className={`${ACTION} text-red-600 dark:text-red-400`}>
                 {t("fleet.runs.cancel")}
-              </button>
+              </Button>
             </Tooltip>
           )}
-          <button onClick={() => onSelect(null)} aria-label={t("fleet.runs.all")}
-            className="cc-t flex items-center justify-center w-6 h-6 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
+          <Button variant="icon" onClick={() => onSelect(null)} aria-label={t("fleet.runs.all")}
+            className="cc-t flex items-center justify-center w-6 h-6 rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10 p-0">
             <CloseIcon className="w-3 h-3" />
-          </button>
+          </Button>
         </div>
       )}
 
@@ -143,5 +143,5 @@ function FactsDialog({ runId, onClose }: { runId: string; onClose: () => void })
   );
 }
 
-const ACTION = `cc-t shrink-0 px-2 h-6 rounded-md text-[11px] font-medium
+const ACTION = `cc-t inline-block shrink-0 px-2 h-6 rounded-md text-[11px] font-medium
   text-gray-600 dark:text-white/55 hover:bg-gray-200 dark:hover:bg-white/10`;

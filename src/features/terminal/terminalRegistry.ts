@@ -73,3 +73,8 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean): bool
   if (submit) setTimeout(() => term.input("\r"), 80);
   return true;
 }
+
+/** Le da el foco a la terminal de la tab, para seguir escribiendo en lo que se pegó. */
+export function focusTab(tabId: string): void {
+  terminals.get(tabId)?.focus();
+}

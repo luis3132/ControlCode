@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRightIcon, CloseIcon } from "neogestify-ui-components";
+import { Button, ChevronRightIcon, CloseIcon } from "neogestify-ui-components";
 
 import { formatBytes, formatClock } from "../debugLog";
 import {
@@ -25,13 +25,13 @@ function Section({ title, count, children }: { title: string; count?: number; ch
   const [open, setOpen] = useState(true);
   return (
     <section className="border-b border-gray-200 dark:border-white/7">
-      <button onClick={() => setOpen((v) => !v)} aria-expanded={open}
+      <Button variant="custom" onClick={() => setOpen((v) => !v)} aria-expanded={open}
         className="flex items-center gap-1.5 w-full h-7 px-2.5 text-left text-[11px] font-semibold
           text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/4">
         <ChevronRightIcon className={`w-3 h-3 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
         {title}
         {count !== undefined && <span className="font-normal tabular-nums text-gray-400 dark:text-white/35">{count}</span>}
-      </button>
+      </Button>
       {open && <div className="pb-2 px-2.5">{children}</div>}
     </section>
   );
@@ -195,13 +195,13 @@ export function RequestDetailPane({ detail, loading, onClose }: {
       <div role="tablist" className="flex items-center gap-0.5 h-8 shrink-0 px-1.5 border-b border-gray-200 dark:border-white/7 overflow-x-auto">
         <CloseButton onClose={onClose} />
         {tabs.map((id) => (
-          <button key={id} role="tab" aria-selected={current === id} onClick={() => setTab(id)}
-            className={`cc-t relative shrink-0 h-8 px-2 text-[11px] font-medium
+          <Button variant="custom" key={id} role="tab" aria-selected={current === id} onClick={() => setTab(id)}
+            className={`cc-t relative inline-block shrink-0 h-8 px-2 text-[11px] font-medium
               ${current === id
                 ? "text-gray-900 dark:text-white after:absolute after:inset-x-1.5 after:bottom-0 after:h-0.5 after:rounded-full after:bg-blue-500"
                 : "text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white"}`}>
             {t(`browser.debug.network.tab.${id}`)}
-          </button>
+          </Button>
         ))}
         <div className="flex-1" />
         <TextAction onClick={() => copy("curl", curlCommand(detail))}>
@@ -304,11 +304,11 @@ export function RequestDetailPane({ detail, loading, onClose }: {
 function CloseButton({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   return (
-    <button onClick={onClose} aria-label={t("browser.debug.network.detailClose")}
-      className="cc-t flex items-center justify-center w-6 h-6 shrink-0 rounded-md
+    <Button variant="icon" onClick={onClose} aria-label={t("browser.debug.network.detailClose")}
+      className="cc-t flex items-center justify-center w-6 h-6 p-0 shrink-0 rounded-md
         text-gray-400 dark:text-white/35 hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
       <CloseIcon className="w-3.5 h-3.5" />
-    </button>
+    </Button>
   );
 }
 

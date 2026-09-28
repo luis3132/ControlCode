@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "neogestify-ui-components";
 
 import type { Tab } from "@/features/tabs/types";
 
@@ -52,8 +53,8 @@ export function AgentPicker({ agents, value, onChange, compact }: {
 
   return (
     <div ref={box} className="relative min-w-0">
-      <button
-        type="button"
+      <Button
+        variant="custom"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -69,7 +70,7 @@ export function AgentPicker({ agents, value, onChange, compact }: {
         <svg width="10" height="6" viewBox="0 0 10 6" fill="none" className="shrink-0 ml-auto opacity-60">
           <path d="M1 1l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-      </button>
+      </Button>
 
       {open && rect && (
         // `fixed`: el panel del mensaje scrollea y es bajito; una lista `absolute` quedaría
@@ -88,7 +89,8 @@ export function AgentPicker({ agents, value, onChange, compact }: {
           }}
         >
           {agents.map((tab, i) => (
-            <button
+            <Button
+              variant="custom"
               key={tab.id}
               role="option"
               aria-selected={tab.id === value}
@@ -103,7 +105,7 @@ export function AgentPicker({ agents, value, onChange, compact }: {
                   : "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/8"}`}
             >
               <AgentRow tab={tab} index={i} />
-            </button>
+            </Button>
           ))}
         </div>
       )}

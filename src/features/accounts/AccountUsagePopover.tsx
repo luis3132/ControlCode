@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Badge, Progress } from "neogestify-ui-components";
+import { Button, Alert, Badge, Progress } from "neogestify-ui-components";
 import { RefreshIcon } from "@/app/icons";
 
 import { agentIcon } from "@/features/agents/agentIcons";
@@ -187,7 +187,7 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
                     {t("accounts.plan.asking")}
                   </span>
                 )}
-                <button
+                <Button variant="icon"
                   onClick={() => setReload((n) => n + 1)}
                   disabled={refreshing}
                   title={t("accounts.plan.refresh")}
@@ -195,10 +195,10 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
                     text-gray-400 dark:text-white/35
                     hover:text-gray-700 dark:hover:text-white
                     hover:bg-gray-200 dark:hover:bg-white/10
-                    disabled:opacity-40"
+                    disabled:opacity-40 p-0"
                 >
                   <RefreshIcon className="w-3.5 h-3.5" />
-                </button>
+                </Button>
               </div>
             </>
           ) : live ? (

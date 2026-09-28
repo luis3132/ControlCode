@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
+import { Button } from "neogestify-ui-components";
 import { orchestratorStats, resetOrchestratorUsage, type OrchestratorStats } from "./ipc";
 
 /** A partir de acá el chip avisa en ámbar: el orquestador ya lleva consumido más contexto
@@ -72,7 +73,7 @@ export function OrchestratorIndicator() {
     .join("\n");
 
   return (
-    <button
+    <Button variant="custom"
       title={tooltip}
       onClick={() => resetOrchestratorUsage().catch(console.error)}
       className={`flex items-center gap-1.5 h-6 px-2 rounded-full text-[11px] font-medium
@@ -91,6 +92,6 @@ export function OrchestratorIndicator() {
         </span>
       )}
       <span className="tabular-nums">~{formatTokens(stats.estimatedTokens)}</span>
-    </button>
+    </Button>
   );
 }

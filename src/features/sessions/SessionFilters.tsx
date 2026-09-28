@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { CloseIcon, Select } from "neogestify-ui-components";
+import { Button, CloseIcon, Select } from "neogestify-ui-components";
 
 import type { SessionHistoryEntry } from "@/features/sessions/types";
 
@@ -109,7 +109,7 @@ export function SessionFilters({ entries, value, onChange, resultCount }: Sessio
           <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
             {t("sessions.filters.results", { count: resultCount })}
           </span>
-          <button
+          <Button variant="custom"
             onClick={() => onChange(EMPTY_FILTERS)}
             className="cc-t flex items-center gap-1 shrink-0 px-1.5 h-5.5 rounded-md
               text-[10.5px] text-gray-500 dark:text-white/45
@@ -118,7 +118,7 @@ export function SessionFilters({ entries, value, onChange, resultCount }: Sessio
           >
             <CloseIcon className="w-3 h-3" />
             {t("sessions.filters.clear")}
-          </button>
+          </Button>
         </>
       )}
     </div>

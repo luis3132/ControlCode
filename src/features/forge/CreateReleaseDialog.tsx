@@ -109,7 +109,7 @@ export function CreateReleaseDialog({ cwd, target, kind, onClose, onCreated }: {
   };
 
   const chip = (value: string, hint: string) => (
-    <button
+    <Button variant="custom"
       key={value}
       type="button"
       onClick={() => setTag(value)}
@@ -121,7 +121,7 @@ export function CreateReleaseDialog({ cwd, target, kind, onClose, onCreated }: {
     >
       <span className="font-mono">{value}</span>
       <span className="text-[10.5px] opacity-60">{hint}</span>
-    </button>
+    </Button>
   );
 
   return (

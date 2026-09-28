@@ -104,7 +104,7 @@ function TargetRow({ target, selected, state, onSelect }: {
   }[state];
 
   return (
-    <button
+    <Button variant="custom"
       onClick={onSelect}
       className={`cc-t flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-left
         ${selected
@@ -124,7 +124,7 @@ function TargetRow({ target, selected, state, onSelect }: {
           {target.installedVersion ? `${badge.text} · ${target.installedVersion}` : badge.text}
         </span>
       )}
-    </button>
+    </Button>
   );
 }
 
@@ -282,16 +282,16 @@ export function GraphifySection() {
             Python y uv no hay CLI, sin CLI no hay skill, y sin skill no hay comandos. */}
         <div className="flex items-center gap-1.5">
           {(["requirements", "install", "commands"] as View[]).map((value) => (
-            <button
+            <Button variant="custom"
               key={value}
               onClick={() => setView(value)}
               className={`cc-t px-2.5 py-1 rounded-lg text-[11.5px]
                 ${view === value
                   ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-900 dark:text-white font-semibold"
-                  : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10"}`}
+                  : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10"} inline-block`}
             >
               {t(`settings.graphify.view.${value}`)}
-            </button>
+            </Button>
           ))}
         </div>
 
@@ -320,32 +320,32 @@ export function GraphifySection() {
               Python administrado `pip` falla y hace falta pipx. */}
           <div className="flex flex-wrap items-center gap-1.5">
             {(plan?.cliAlternatives ?? []).map((alt) => (
-              <button
+              <Button variant="custom"
                 key={alt}
                 onClick={() => setCommand("cli", alt)}
                 className={`cc-t px-2 py-0.5 rounded font-mono text-[10px]
                   ${commands.cli === alt
                     ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-800 dark:text-white"
-                    : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10"}`}
+                    : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10"} inline-block`}
               >
                 {alt}
-              </button>
+              </Button>
             ))}
           </div>
           {/* Los extras del README: cada uno agrega un formato o un backend. Van entre
               comillas en el comando porque zsh trata los corchetes como un glob. */}
           <div className="flex flex-wrap items-center gap-1">
             {(plan?.extras ?? []).map((extra) => (
-              <button
+              <Button variant="custom"
                 key={extra}
                 onClick={() => toggleExtra(extra)}
                 className={`cc-t px-1.5 py-0.5 rounded text-[10px]
                   ${extras.includes(extra)
                     ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-800 dark:text-white"
-                    : "bg-gray-100 dark:bg-white/5 text-gray-400 dark:text-white/35 hover:bg-gray-200 dark:hover:bg-white/10"}`}
+                    : "bg-gray-100 dark:bg-white/5 text-gray-400 dark:text-white/35 hover:bg-gray-200 dark:hover:bg-white/10"} inline-block`}
               >
                 {extra}
-              </button>
+              </Button>
             ))}
           </div>
         </Step>
@@ -362,17 +362,17 @@ export function GraphifySection() {
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-1.5">
               {(["global", "project"] as GraphifyScope[]).map((value) => (
-                <button
+                <Button variant="custom"
                   key={value}
                   onClick={() => chooseScope(value)}
                   disabled={value === "project" && !cwd}
                   className={`cc-t px-2.5 py-1 rounded-lg text-[11px] disabled:opacity-40
                     ${scope === value
                       ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-900 dark:text-white font-semibold"
-                      : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10"}`}
+                      : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10"} inline-block`}
                 >
                   {t(`settings.graphify.scope.${value}`)}
-                </button>
+                </Button>
               ))}
               {scope === "project" && cwd && (
                 <span className="flex items-center gap-1 min-w-0 text-[10.5px]

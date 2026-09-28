@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, AnimateSpin, Button, SegmentedControl, Select } from "neogestify-ui-components";
+import {
+  Alert, AnimateSpin, Button, Checkbox, Input, SegmentedControl, TextArea,
+} from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
+import { ModelSearch } from "@/features/runs/ModelSearch";
 import { repoInfo } from "@/features/explorer/ipc";
 import { AccountPickerStep, AUTO_ACCOUNT } from "@/features/tabs/wizard/AccountPickerStep";
 import { AppDialog } from "@/shared/ui/AppDialog";
@@ -187,30 +190,14 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
           </p>
         )}
 
-        {agents.length > 1 && (
-          <Field group label={t("fleet.new.agent")}>
-            <div className="flex gap-1.5">
-              {agents.map((a) => (
-                <button
-                  key={a.agentId}
-                  onClick={() => { setAgentId(a.agentId); setAccountId(AUTO_ACCOUNT); }}
-                  className={`cc-t px-2 h-7 rounded-lg text-[11.5px]
-                    ${a.agentId === agentId
-                      ? "bg-blue-500/15 text-blue-700 dark:text-blue-300"
-                      : "text-gray-600 dark:text-white/50 hover:bg-gray-200 dark:hover:bg-white/8"}`}
-                >
-                  {a.label}
-                </button>
-              ))}
-            </div>
-          </Field>
-        )}
 
         <Field
           label={kind === "orchestrate" ? t("fleet.orchestrate.objective") : t("fleet.new.prompt")}
           hint={kind === "orchestrate" ? t("fleet.orchestrate.objectiveHint") : t("fleet.new.promptHint")}
         >
-          <textarea
+          <TextArea
+            size="sm"
+            resize="none"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             rows={kind === "orchestrate" ? 6 : 5}
@@ -226,7 +213,8 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
 
         {kind === "task" && (
           <Field label={t("fleet.new.name")} hint={t("fleet.new.nameHint")}>
-            <input
+            <Input
+              size="sm"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className={INPUT}
@@ -251,7 +239,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
           label={kind === "orchestrate" ? t("fleet.orchestrate.leadModel") : t("fleet.new.model")}
           hint={mode === "fixed" ? undefined : t("fleet.new.modelHint")}
         >
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-2">
             <SegmentedControl
               size="sm"
               aria-label={t("fleet.new.model")}
@@ -262,14 +250,16 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
                 { value: "fixed", label: t("fleet.new.fixedModel") },
               ]}
             />
-            {mode === "fixed" && models.length > 0 && (
-              <Select
-                size="sm"
-                variant="outline"
-                aria-label={t("fleet.new.fixedModel")}
-                value={fixedModel}
-                onChange={(e) => setFixedModel(e.target.value)}
-                options={models.map((m) => ({ value: m.id, label: m.label }))}
+            {mode === "fixed" && (
+              <ModelSearch
+                agents={agents}
+                value={{ agentId, model: fixedModel }}
+                onChange={(pick) => {
+                  // Otra TUI tiene otras cuentas: la elegida ya no aplica.
+                  if (pick.agentId !== agentId) setAccountId(AUTO_ACCOUNT);
+                  setAgentId(pick.agentId);
+                  setFixedModel(pick.model);
+                }}
               />
             )}
           </div>
@@ -290,7 +280,8 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
             label={kind === "orchestrate" ? t("fleet.orchestrate.budget") : t("fleet.new.budget")}
             hint={t("fleet.new.budgetHint")}
           >
-            <input
+            <Input
+              size="sm"
               value={budget}
               onChange={(e) => setBudget(e.target.value)}
               inputMode="decimal"
@@ -303,24 +294,14 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
         <RoutePreview roster={roster} assignment={assignment} error={routeError} />
 
         {kind === "task" && <div className="flex flex-col gap-1.5">
-          <label className={`flex items-start gap-2 select-none
-            ${isRepo ? "cursor-pointer" : "opacity-50 cursor-not-allowed"}`}>
-            <input
-              type="checkbox"
-              checked={Boolean(isRepo) && isolate}
-              disabled={!isRepo}
-              onChange={(e) => setIsolate(e.target.checked)}
-              className="mt-0.5 shrink-0"
-            />
-            <span className="flex flex-col gap-0.5">
-              <span className="text-[11.5px] font-semibold text-gray-700 dark:text-gray-300">
-                {t("fleet.new.isolate")}
-              </span>
-              <span className="text-[10.5px] leading-relaxed text-gray-400 dark:text-white/35">
-                {isRepo === false ? t("fleet.new.isolateNoRepo") : t("fleet.new.isolateHint")}
-              </span>
-            </span>
-          </label>
+          <Checkbox
+            size="sm"
+            checked={Boolean(isRepo) && isolate}
+            disabled={!isRepo}
+            onChange={setIsolate}
+            label={t("fleet.new.isolate")}
+            description={isRepo === false ? t("fleet.new.isolateNoRepo") : t("fleet.new.isolateHint")}
+          />
           {/* Se avisa ANTES de lanzar, no después: enterarse de que dos agentes se pisaron
               los archivos recién al ver el resultado es enterarse tarde. */}
           {busyInFolder > 0 && !(isRepo && isolate) && (

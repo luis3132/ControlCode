@@ -141,7 +141,7 @@ function LabelChip({ label, on, onClick, disabled }: {
 }) {
   const color = label.color && /^[0-9a-f]{6}$/i.test(label.color) ? `#${label.color}` : null;
   return (
-    <button
+    <Button variant="custom"
       type="button"
       onClick={onClick}
       disabled={disabled}
@@ -156,6 +156,6 @@ function LabelChip({ label, on, onClick, disabled }: {
       <span className="w-2 h-2 rounded-full shrink-0 bg-gray-400" style={color ? { backgroundColor: color } : undefined} />
       {label.name}
       {on && <span aria-hidden className="text-[10px] opacity-60">✕</span>}
-    </button>
+    </Button>
   );
 }

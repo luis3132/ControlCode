@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Button } from "neogestify-ui-components";
 
 export interface ContextMenuItem {
   key: string;
@@ -119,7 +120,7 @@ export function ContextMenu({ x, y, items, onClose }: {
       {items.map((item) => (
         <div key={item.key}>
           {item.separator && <div className="my-1 h-px bg-gray-200 dark:bg-white/10" />}
-          <button
+          <Button variant="custom"
             disabled={item.disabled}
             onClick={() => { item.onSelect(); onClose(); }}
             className={`cc-t w-full flex items-center gap-2.5 px-3 py-2 text-left
@@ -133,7 +134,7 @@ export function ContextMenu({ x, y, items, onClose }: {
             {item.hint && (
               <span className="shrink-0 pl-4 text-[10.5px] text-gray-400 dark:text-white/35">{item.hint}</span>
             )}
-          </button>
+          </Button>
         </div>
       ))}
     </div>,

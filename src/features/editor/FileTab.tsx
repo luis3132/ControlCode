@@ -211,15 +211,16 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
           </Button>
         )}
         <Tooltip content={t("explorer.reveal")} placement="bottom">
-          <button
+          <Button
+            variant="icon"
             onClick={() => revealItemInDir(view.path).catch(console.error)}
             aria-label={t("explorer.reveal")}
-            className="cc-t flex items-center justify-center w-6 h-6 rounded-md
+            className="cc-t flex items-center justify-center w-6 h-6 p-0 rounded-md
               text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white
               hover:bg-gray-200 dark:hover:bg-white/10"
           >
             <FolderIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Button } from "neogestify-ui-components";
 
 import { htmlImagesToMarkdown } from "./htmlImages";
 
@@ -30,14 +31,14 @@ function LoadedImage({ src, alt, load }: { src: string; alt: string; load: Image
 
   if (!data) {
     return (
-      <button
+      <Button variant="custom"
         onClick={() => openUrl(src).catch(console.error)}
         title={src}
         className={`text-[11px] italic text-gray-400 dark:text-white/30 hover:underline
-          ${failed ? "" : "animate-pulse"}`}
+          ${failed ? "" : "animate-pulse"} inline-block`}
       >
         🖼 {alt || src.split("/").pop()}
-      </button>
+      </Button>
     );
   }
   return (
@@ -129,12 +130,12 @@ export function Markdown({ content, loadImage }: { content: string; loadImage?: 
           ),
           td: (p) => <td className="px-2 py-1 border-b border-gray-100 dark:border-white/5" {...p} />,
           a: ({ href, children }) => (
-            <button
+            <Button variant="custom"
               onClick={() => { if (href) openUrl(href).catch(console.error); }}
-              className="text-blue-600 dark:text-blue-400 hover:underline text-left"
+              className="text-blue-600 dark:text-blue-400 hover:underline text-left inline-block"
             >
               {children}
-            </button>
+            </Button>
           ),
           img: ({ alt, src }) => (loadImage && typeof src === "string" && src ? (
             <LoadedImage src={src} alt={alt ?? ""} load={loadImage} />
