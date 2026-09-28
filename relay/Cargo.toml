@@ -1,0 +1,40 @@
+[package]
+name = "controlcode-relay"
+version = "0.1.0"
+description = "Relay auto-alojado entre Control Code y su app móvil: reenvía mensajes cifrados de punta a punta"
+authors = ["luis3132"]
+edition = "2024"
+license = "Apache-2.0"
+
+# La biblioteca trae el protocolo y el cifrado, que Control Code también usa (sin el
+# servidor: `default-features = false`). Así el formato de los mensajes vive en un solo
+# lugar y no puede desincronizarse entre las dos puntas.
+[lib]
+name = "controlcode_relay"
+path = "src/lib.rs"
+
+[[bin]]
+name = "controlcode-relay"
+path = "src/main.rs"
+required-features = ["server"]
+
+[features]
+default = ["server"]
+server = ["dep:axum", "dep:tokio", "dep:futures-util"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+crypto_box = "0.9"
+rand_core = { version = "0.6", features = ["getrandom"] }
+uuid = { version = "1", features = ["v4"] }
+
+axum = { version = "0.8", features = ["ws"], optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
+futures-util = { version = "0.3", optional = true }
+
+[dev-dependencies]
+tokio-tungstenite = "0.26"
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"

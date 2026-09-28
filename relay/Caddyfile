@@ -1,0 +1,4 @@
+# Cambiá el dominio por el tuyo. Caddy saca y renueva el certificado solo.
+relay.tudominio.com {
+	reverse_proxy relay:8787
+}

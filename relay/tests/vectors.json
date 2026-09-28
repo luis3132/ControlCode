@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "message": "",
+      "nonce": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJ",
+      "sealed": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJoDYkcIylFTRlaiF9HcHprQ"
+    },
+    {
+      "message": "hola",
+      "nonce": "CgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoK",
+      "sealed": "CgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKsU4_Y5OpIY4qByR3EL_PnkxDnqA"
+    },
+    {
+      "message": "{\"k\":\"req\",\"id\":\"1\",\"ts\":0,\"m\":\"state\",\"p\":{}}",
+      "nonce": "CwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsL",
+      "sealed": "CwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLcR-0rAorz3xM-RDWXuBkWHiCt2ajivIPZn4fA5h8q9GD3kbtV5hfDMfzScjbG1ikAWnN-DTUTwW-Go38RUE"
+    }
+  ],
+  "comment": "sealed = nonce ‖ crypto_box(message, nonce, recipient.public, sender.secret); base64url sin padding",
+  "recipient": {
+    "public": "zo060cy2M-x7cMF4FKXHbs0CloUFDTRHRboFhw5YfVk",
+    "secret": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"
+  },
+  "sender": {
+    "public": "pOCSkrZRwni5dyxWn1-puxPZBrRqtoyd-dwrRAn4ogk",
+    "secret": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
+  }
+}

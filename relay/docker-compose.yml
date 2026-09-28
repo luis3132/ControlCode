@@ -1,0 +1,30 @@
+# Relay + Caddy (TLS automático con Let's Encrypt).
+#
+# 1. Apuntá un dominio (ej. relay.tudominio.com) a este servidor.
+# 2. Poné ese dominio en Caddyfile y un token largo en .env (CC_RELAY_TOKEN=...).
+# 3. docker compose up -d
+#
+# En Control Code: Configuración → Móvil → wss://relay.tudominio.com y el mismo token.
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    environment:
+      CC_RELAY_TOKEN: ${CC_RELAY_TOKEN:?definí CC_RELAY_TOKEN en .env}
+    expose:
+      - "8787"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - relay
+
+volumes:
+  caddy_data:
