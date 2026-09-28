@@ -186,6 +186,13 @@ pub fn run() {
             crate::ssh::delete_ssh_connection,
             crate::ssh::test_ssh_connection,
             crate::ssh::ssh_terminal_command,
+            crate::remote::remote_get_config,
+            crate::remote::remote_save_config,
+            crate::remote::remote_status,
+            crate::remote::remote_start_pairing,
+            crate::remote::remote_cancel_pairing,
+            crate::remote::remote_devices,
+            crate::remote::remote_remove_device,
             // Settings genéricos (key-value)
             crate::database::db_get_setting,
             crate::database::db_set_setting,
@@ -331,6 +338,8 @@ pub fn run() {
             // Servidor IPC de la CLI `controlcode` (Fase 8). Va después de restaurar las
             // ventanas: varios comandos necesitan que exista al menos una para responder.
             crate::ipc::start(app.handle().clone());
+            // Control remoto desde el teléfono: si está activado, se conecta al relay.
+            crate::remote::start(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())

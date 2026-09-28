@@ -166,7 +166,9 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
   const owner = ownerOf(args);
 
   const answer = await new Promise<string | null>((resolve) => {
-    const id = crypto.randomUUID();
+    // El id lo pone el backend: con ese mismo la contesta el teléfono (ver `remote`), y
+    // el aviso de "ya la contestaron allá" tiene que encontrar esta tarjeta.
+    const id = str(args, "askId") ?? crypto.randomUUID();
     let done = false;
     const once = (value: string | null) => {
       if (done) return;
@@ -212,7 +214,18 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
 /** Engancha esta ventana al puente. Devuelve la función para desengancharla. */
 export function initCliBridge(): () => void {
   let unlisten: UnlistenFn | undefined;
+  let unlistenAsk: UnlistenFn | undefined;
   let disposed = false;
+
+  // Una pregunta que se contestó desde el teléfono: la tarjeta de acá ya no tiene nada que
+  // hacer. Cerrarla con `null` es inofensivo — el backend ya tiene su respuesta y la de
+  // acá llega tarde y se descarta.
+  listen<{ askId: string }>("cc-ask-resolved", (event) => {
+    useAskStore.getState().answer(event.payload.askId, null);
+  }).then((fn) => {
+    if (disposed) fn();
+    else unlistenAsk = fn;
+  });
 
   listen<BridgeRequest>("cc-cli-request", async (event) => {
     const { requestId, targetLabel, command, args } = event.payload;
@@ -238,5 +251,6 @@ export function initCliBridge(): () => void {
   return () => {
     disposed = true;
     unlisten?.();
+    unlistenAsk?.();
   };
 }

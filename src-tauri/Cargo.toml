@@ -77,6 +77,11 @@ futures-util = "0.3"
 # Las imágenes de las tabs de archivo viajan como data URL: sin esto habría que abrirle al
 # webview el protocolo de assets sobre todo el disco. Ya venía en el árbol.
 base64 = "0.22"
+# Control remoto desde el móvil: el protocolo y el cifrado son los del relay (una sola
+# fuente para las dos puntas), el WebSocket hacia el relay y el QR de emparejamiento.
+controlcode-relay = { path = "../relay", default-features = false }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "zip"] }
 
@@ -122,3 +127,5 @@ windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+# El relay entero (con servidor) para probar el control remoto contra uno de verdad.
+controlcode-relay = { path = "../relay" }

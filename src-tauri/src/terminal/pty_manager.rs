@@ -278,6 +278,8 @@ pub async fn pty_create(
                     // Modo push del orquestador (Fase 9): si nadie observa esta tab, esto
                     // es una lectura atómica y vuelve.
                     crate::orchestrator::watch::observe(id, &buf[..n]);
+                    // Y al teléfono que esté mirando esta tab, si hay alguno.
+                    crate::remote::live::on_pty_data(id, &buf[..n]);
                     let data = String::from_utf8_lossy(&buf[..n]).to_string();
                     app_clone.emit(&event_name, PtyDataPayload { data }).ok();
                 }
@@ -292,6 +294,7 @@ pub async fn pty_create(
             .and_then(|mut session| session.killer.wait().ok())
             .map_or(0, |status| status.exit_code() as i32);
         crate::orchestrator::watch::note_exit(id, code);
+        crate::remote::live::on_pty_exit(id, code);
         app_clone.emit(&exit_event, PtyExitPayload { code }).ok();
         buffers().remove(&id);
     });

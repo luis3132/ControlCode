@@ -39,7 +39,10 @@ pub const APPROVALS_CHANGED: &str = "cc-task-approvals";
 /// Avisa que la cola de permisos cambió. Se manda el estado entero y no el delta porque
 /// son unos pocos pedidos y así una ventana que se perdió un evento se recupera sola.
 pub fn notify_approvals(app: &AppHandle) {
-    let _ = app.emit(APPROVALS_CHANGED, super::broker::pending());
+    let pending = super::broker::pending();
+    // El teléfono también: la cola le llega cifrada, y una notificación si no está mirando.
+    crate::remote::on_approvals_changed(app, &pending);
+    let _ = app.emit(APPROVALS_CHANGED, pending);
 }
 
 /// Nombre del grupo de contención. No se cruza con los ids de PTY porque va por otro

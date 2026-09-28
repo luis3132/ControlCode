@@ -19,3 +19,5 @@ mod server;
 mod test;
 
 pub use server::{cleanup, export_instance_env, start};
+/// El teléfono (ver `remote`) pide lo mismo que la CLI, por el mismo camino.
+pub(crate) use commands::{dispatch, pty_id_for_tab};

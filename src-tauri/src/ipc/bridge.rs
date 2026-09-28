@@ -79,11 +79,26 @@ pub fn ask_frontend_within(
     window: Option<&str>,
     timeout: Duration,
 ) -> Result<Value, String> {
+    ask_frontend_observed(app, command, args, window, timeout, |_| {})
+}
+
+/// Igual, avisando el id de correlación apenas la request sale. Es lo que deja que la
+/// respuesta llegue de otro lado que la ventana: una pregunta de un agente la puede
+/// contestar el teléfono (ver `remote`), con [`respond`].
+pub fn ask_frontend_observed(
+    app: &AppHandle,
+    command: &str,
+    args: &Value,
+    window: Option<&str>,
+    timeout: Duration,
+    on_sent: impl FnOnce(&str),
+) -> Result<Value, String> {
     let target_label = resolve_target(app, window)?;
     let request_id = Uuid::new_v4().to_string();
     let (tx, rx) = channel();
 
     PENDING.lock().map_err(|e| e.to_string())?.insert(request_id.clone(), tx);
+    on_sent(&request_id);
 
     let payload = BridgeRequest {
         request_id: request_id.clone(),
@@ -115,19 +130,19 @@ pub fn cli_respond(
     data: Option<Value>,
     error: Option<String>,
 ) -> Result<(), String> {
-    let sender = PENDING.lock().map_err(|e| e.to_string())?.get(&request_id).cloned();
-    let Some(sender) = sender else {
-        // Llegó tarde (ya venció el timeout) o duplicada: se ignora en silencio, no es un
-        // error del frontend.
-        return Ok(());
-    };
-
     let payload = match error {
         Some(msg) => serde_json::json!({ "__error": msg }),
         None => data.unwrap_or(Value::Null),
     };
-    let _ = sender.send(payload);
+    respond(&request_id, payload);
     Ok(())
+}
+
+/// Contesta una request en vuelo. `false` si ya no espera nadie: llegó tarde (venció el
+/// timeout) o ya la contestó otro — la primera respuesta es la que vale.
+pub fn respond(request_id: &str, payload: Value) -> bool {
+    let sender = PENDING.lock().ok().and_then(|p| p.get(request_id).cloned());
+    sender.is_some_and(|s| s.send(payload).is_ok())
 }
 
 /// Desarma la convención de `__error` que usa `cli_respond` para transportar fallos.

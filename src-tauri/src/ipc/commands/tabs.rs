@@ -51,7 +51,7 @@ pub(super) fn tab_list(app: &AppHandle) -> Result<Value, String> {
 ///
 /// `window` importa: cada ventana solo conoce SUS tabs. Sin pasarlo, una tab creada con
 /// `--window` se buscaba siempre en la primera ventana y "no existía".
-pub(super) fn pty_id_for_tab(app: &AppHandle, tab_id: &str, window: Option<&str>) -> Result<u32, String> {
+pub(crate) fn pty_id_for_tab(app: &AppHandle, tab_id: &str, window: Option<&str>) -> Result<u32, String> {
     let raw = ask_frontend(app, "tab.ptyId", &json!({ "tabId": tab_id }), window)?;
     let value = unwrap_frontend_result(raw)?;
     value

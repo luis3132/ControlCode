@@ -13,6 +13,7 @@ pub mod ipc;
 mod marketplace;
 mod orchestrator;
 mod prelaunch;
+mod remote;
 mod preview;
 mod runs;
 mod scm;

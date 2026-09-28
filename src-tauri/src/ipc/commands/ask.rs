@@ -12,7 +12,8 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use tauri::AppHandle;
 
-use crate::ipc::bridge::{ask_frontend_within, unwrap_frontend_result};
+use crate::ipc::bridge::{ask_frontend_observed, unwrap_frontend_result};
+use crate::remote::asks::{self, PendingAsk};
 
 /// Cuánto espera una pregunta. Largo como el de los permisos y por lo mismo: del otro lado
 /// hay alguien que puede estar en otra cosa, y cortar a los treinta segundos convertiría
@@ -51,22 +52,38 @@ pub(super) fn user_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
         .unwrap_or(ASK_TIMEOUT_SECS)
         .clamp(30, ASK_TIMEOUT_SECS);
 
-    let raw = ask_frontend_within(
+    // La pregunta queda anotada mientras espera: así la ve también el teléfono (ver
+    // `remote`), y la puede contestar desde ahí. La primera respuesta que llegue gana.
+    let pending = PendingAsk {
+        id: uuid::Uuid::new_v4().to_string(),
+        question: question.to_string(),
+        options: options.clone(),
+        placeholder: args.get("placeholder").and_then(Value::as_str).map(str::to_string),
+        task_id: args.get("taskId").and_then(Value::as_str).map(str::to_string),
+        tab_id: args.get("tabId").and_then(Value::as_str).map(str::to_string),
+        cwd: args.get("cwd").and_then(Value::as_str).map(str::to_string),
+    };
+    let ask_id = pending.id.clone();
+
+    let raw = ask_frontend_observed(
         app,
         "user.ask",
         &json!({
+            "askId": ask_id,
             "question": question,
             "options": options,
-            "placeholder": args.get("placeholder").and_then(Value::as_str),
+            "placeholder": pending.placeholder,
             // Quién pregunta, para que la tarjeta lo diga: con varios agentes corriendo,
             // "¿cuál de todos me está preguntando esto?" no puede quedar sin respuesta.
-            "taskId": args.get("taskId").and_then(Value::as_str),
-            "tabId": args.get("tabId").and_then(Value::as_str),
-            "cwd": args.get("cwd").and_then(Value::as_str),
+            "taskId": pending.task_id,
+            "tabId": pending.tab_id,
+            "cwd": pending.cwd,
         }),
         None,
         // Margen sobre lo que espera el frontend: si vence allá, vence allá y contesta.
         Duration::from_secs(timeout + 30),
-    )?;
-    unwrap_frontend_result(raw)
+        |request_id| asks::register(app, request_id, pending),
+    );
+    asks::unregister(app, &ask_id);
+    unwrap_frontend_result(raw?)
 }

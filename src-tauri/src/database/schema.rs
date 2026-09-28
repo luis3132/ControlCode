@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 19;
+const SCHEMA_VERSION: i32 = 20;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -411,6 +411,18 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              -- abrir terminales sin que ningún agente la alcance.
              agent_access  INTEGER NOT NULL DEFAULT 1,
              created_at    INTEGER NOT NULL
+         );
+
+         -- v20 — Teléfonos emparejados para el control remoto (ver `remote`). El id es la
+         -- clave pública del dispositivo: es con lo que se presenta ante el relay y lo
+         -- único que hace falta para cifrarle. `push_token` es el de Expo, si dio permiso.
+         CREATE TABLE IF NOT EXISTS remote_devices (
+             id         TEXT PRIMARY KEY,
+             name       TEXT NOT NULL,
+             platform   TEXT,
+             push_token TEXT,
+             paired_at  INTEGER NOT NULL,
+             last_seen  INTEGER
          );
 
          -- v11 — Agentes headless: los que corren sin terminal y sin que nadie los mire.
