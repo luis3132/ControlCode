@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Input } from "neogestify-ui-components";
-import { CloudIcon, FolderIcon, HomeIcon, ArrowRightIcon } from "neogestify-ui-components";
+import { CloudIcon, FolderIcon, ArrowRightIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
@@ -18,7 +18,6 @@ import { AccountPickerStep } from "@/features/tabs/wizard/AccountPickerStep";
 import { AgentPickerStep } from "@/features/tabs/wizard/AgentPickerStep";
 import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
-import { homeDir } from "@/shared/ipc/window";
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
 import { CloneRepoDialog } from "@/features/forge/CloneRepoDialog";
 
@@ -58,12 +57,6 @@ export function HomePage() {
   const handleSelectWorkspace = async (ws: WorkspaceSummary) => {
     const focused = await focusIfOpen(ws.id);
     if (!focused) setOpenTarget(ws);
-  };
-
-  const handleHome = async () => {
-    const home = await homeDir();
-    setSelectedCwd(home);
-    setPathError("");
   };
 
   const handleExplorer = async () => {
@@ -122,11 +115,6 @@ export function HomePage() {
             </span>
 
             <div className="flex gap-2">
-              <Button variant="outline" onClick={handleHome}
-                className="flex items-center gap-1.5 text-xs! h-8! px-3!">
-                <HomeIcon className="w-3.5 h-3.5" />
-                {t("btn.home")}
-              </Button>
               <Button variant="outline" onClick={handleExplorer}
                 className="flex items-center gap-1.5 text-xs! h-8! px-3!">
                 <FolderIcon className="w-3.5 h-3.5" />

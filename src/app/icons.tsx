@@ -324,3 +324,34 @@ export function TagIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Tijera: cortar, en el menú del árbol de archivos. */
+export function ScissorsIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <circle cx="6" cy="6" r="2.6" />
+      <circle cx="6" cy="18" r="2.6" />
+      <path d="M8.1 7.6L20 18M8.1 16.4L20 6" />
+    </svg>
+  );
+}
+
+/** Carpeta con un más: nueva carpeta. */
+export function FolderPlusIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+      <path d="M12 10.5v5M9.5 13h5" />
+    </svg>
+  );
+}
+
+/** Hoja con un más: nuevo archivo. */
+export function FilePlusIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z" />
+      <path d="M14 3v5h5M12 11.5v5M9.5 14h5" />
+    </svg>
+  );
+}

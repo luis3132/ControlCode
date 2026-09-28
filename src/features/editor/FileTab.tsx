@@ -87,9 +87,16 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
     setError(null);
   }, [view.path, setDirty]);
 
+  // Mover o renombrar el archivo desde el árbol cambia la ruta, no el contenido: con
+  // cambios sin guardar, releerlo los tiraría. Se sigue editando y se guarda en la nueva.
+  const loadedPath = useRef<string | null>(null);
   useEffect(() => {
+    inRepo.current = undefined;
+    const moved = loadedPath.current !== null && loadedPath.current !== view.path;
+    loadedPath.current = view.path;
+    if (moved && dirty.current) return;
     load(false).catch((e) => setError(String(e)));
-  }, [load]);
+  }, [load, view.path]);
 
   /** Relee la versión del índice. Cambia sin que el archivo cambie: preparar o descartar
    *  desde el panel, un commit de un agente. Por eso se relee junto con el vigilante. */

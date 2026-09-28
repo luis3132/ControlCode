@@ -10,8 +10,53 @@ import type { Terminal } from "@xterm/xterm";
  */
 const terminals = new Map<string, Terminal>();
 
+/** Mensajes para agentes que todavía no terminaron de arrancar. */
+const queued = new Map<string, string>();
+
+/** Cuánto tiene que estar callada la terminal para dar por hecho que la TUI ya arrancó y
+ *  espera que le escriban. Los comandos previos y el arranque imprimen en ráfagas. */
+const SETTLE_MS = 2500;
+/** Si nunca llega a quedarse quieta (una TUI con reloj en pantalla), se manda igual. */
+const GIVE_UP_MS = 45_000;
+
+/** Espera a que la TUI termine de arrancar y le manda `text`. */
+function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
+  let timer: number | undefined;
+  let sawOutput = false;
+  const send = () => {
+    sub.dispose();
+    window.clearTimeout(timer);
+    window.clearTimeout(giveUp);
+    if (terminals.get(tabId) !== term) return;
+    queued.delete(tabId);
+    pasteIntoTab(tabId, text, true);
+  };
+  const sub = term.onWriteParsed(() => {
+    sawOutput = true;
+    window.clearTimeout(timer);
+    timer = window.setTimeout(send, SETTLE_MS);
+  });
+  const giveUp = window.setTimeout(() => { if (sawOutput) send(); else sub.dispose(); }, GIVE_UP_MS);
+}
+
+/**
+ * Deja un mensaje para el agente de `tabId`, que se envía cuando su TUI termina de
+ * arrancar. Es para una tab recién abierta: pegar antes le escribiría al shell de los
+ * comandos previos, o a una TUI que todavía no dibujó su entrada y lo tira.
+ *
+ * Ninguna de las TUIs tiene un flag común para "arrancá con este mensaje", así que se
+ * espera a que la terminal se quede quieta, que es cuando la persona empezaría a escribir.
+ */
+export function sendWhenReady(tabId: string, text: string): void {
+  queued.set(tabId, text);
+  const term = terminals.get(tabId);
+  if (term) sendWhenSettled(tabId, term, text);
+}
+
 export function registerTerminal(tabId: string, term: Terminal): () => void {
   terminals.set(tabId, term);
+  const pending = queued.get(tabId);
+  if (pending !== undefined) sendWhenSettled(tabId, term, pending);
   return () => {
     if (terminals.get(tabId) === term) terminals.delete(tabId);
   };

@@ -1,18 +1,23 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { create } from "zustand";
-import { BoxIcon, Button, CloseIcon, IconReset } from "neogestify-ui-components";
+import { BoxIcon, Button, CloseIcon, CopyIcon, IconReset } from "neogestify-ui-components";
 
 import { SplitDownIcon, SplitRightIcon } from "@/app/icons";
 import { refreshSessionTitle } from "@/features/sessions/sessionTitle";
-import { attachSkillsToTab } from "@/features/skills/attachSkills";
+import type { PrelaunchStep } from "@/features/prelaunch/types";
+import { attachSkillsToTab, tabSkillIds } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { SkillPalette, type SkillScopeTarget } from "@/features/skills/SkillPalette";
+import { useSkillsStore } from "@/features/skills/store";
 import { currentLayout, splitGroup } from "@/features/tabs/layout/layoutStore";
 import { groupOf, isAgentKey, keyId, type SplitSide } from "@/features/tabs/layout/layoutTree";
 import { useTabsStore } from "@/features/tabs/store";
+import { SHELL_AGENT_ID, type AgentInfo, type Tab } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
+import { sendWhenReady } from "@/features/terminal/terminalRegistry";
+import i18n from "@/i18n";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 
@@ -28,6 +33,10 @@ interface TabActionsState {
   closingDirty: string | null;
   skillTarget: SkillScopeTarget | null;
   wizardOpen: boolean;
+  /** El asistente abierto para algo concreto y no desde el "+": duplicar una tab (arranca
+   *  con sus skills y comandos previos) o trabajar un issue (el agente nuevo recibe
+   *  `prompt` apenas arranca). */
+  wizardFor: WizardFor | null;
 }
 
 const useTabActions = create<TabActionsState>(() => ({
@@ -35,7 +44,19 @@ const useTabActions = create<TabActionsState>(() => ({
   closingDirty: null,
   skillTarget: null,
   wizardOpen: false,
+  wizardFor: null,
 }));
+
+interface WizardFor {
+  cwd: string;
+  title: string;
+  skillIds?: string[];
+  prelaunch?: PrelaunchStep[];
+  prompt?: string;
+}
+
+/** Abre el asistente de agente nuevo en `cwd`; lo que se elija arranca con `prompt`. */
+export const openNewAgentWith = (wizardFor: WizardFor) => useTabActions.setState({ wizardFor });
 
 export const openTabMenu = (key: string, x: number, y: number) => useTabActions.setState({ menu: { key, x, y } });
 export const openNewAgentWizard = () => useTabActions.setState({ wizardOpen: true });
@@ -59,6 +80,30 @@ export async function requestCloseItem(key: string): Promise<void> {
   else closeView(keyId(key));
 }
 
+/**
+ * Otra tab como `tab`: misma carpeta, misma TUI, misma cuenta, mismos comandos previos y
+ * las mismas skills. La conversación no: arranca una nueva — para seguir la misma está
+ * Sesiones, y dos procesos escribiendo el mismo transcript lo corromperían.
+ */
+async function duplicateTab(tab: Tab): Promise<void> {
+  const { workspaceId, addTab } = useTabsStore.getState();
+  const skillIds = await tabSkillIds(tab.id).catch(() => []);
+  const agent: AgentInfo = { id: tab.agentId, label: tab.agentLabel, command: tab.command, available: true };
+  const tabId = addTab({ cwd: tab.cwd, agent, accountId: tab.accountId, prelaunch: tab.prelaunch });
+  registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, skillIds));
+}
+
+async function duplicateWithOtherAgent(tab: Tab): Promise<void> {
+  const [skillIds] = await Promise.all([
+    tabSkillIds(tab.id).catch(() => []),
+    // El asistente filtra por las skills que soporta cada TUI: necesita el catálogo.
+    useSkillsStore.getState().loadSkills().catch(() => {}),
+  ]);
+  useTabActions.setState({
+    wizardFor: { cwd: tab.cwd, skillIds, prelaunch: tab.prelaunch, title: i18n.t("tabs.duplicateOtherTitle") },
+  });
+}
+
 /** Divide el grupo de `key` llevándola al grupo nuevo. */
 export function splitWithItem(key: string, side: SplitSide): void {
   const layout = currentLayout();
@@ -69,7 +114,7 @@ export function splitWithItem(key: string, side: SplitSide): void {
 export function TabDialogs() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { menu, closingDirty, skillTarget, wizardOpen } = useTabActions();
+  const { menu, closingDirty, skillTarget, wizardOpen, wizardFor } = useTabActions();
   const tabs = useTabsStore((s) => s.tabs);
   const activeTab = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId));
   const workspaceId = useTabsStore((s) => s.workspaceId);
@@ -104,8 +149,23 @@ export function TabDialogs() {
         icon: <IconReset className="w-4 h-4" />,
         onSelect: () => restartAgent(tab.id),
       },
-      ...split,
-      { key: "close", label: t("tabs.close"), icon: <CloseIcon className="w-4 h-4" />, danger: true, onSelect: () => requestCloseItem(menu.key) },
+      // La terminal pelada no tiene skills ni TUI que cambiar: duplicarla es abrir otra.
+      {
+        key: "duplicate",
+        label: tab.agentId === SHELL_AGENT_ID ? t("tabs.duplicateShell") : t("tabs.duplicate"),
+        icon: <CopyIcon className="w-4 h-4" />,
+        separator: true,
+        onSelect: () => { duplicateTab(tab).catch(console.error); navigate("/workspace"); },
+      },
+      ...(tab.agentId === SHELL_AGENT_ID ? [] : [{
+        key: "duplicateOther",
+        label: t("tabs.duplicateOther"),
+        icon: <CopyIcon className="w-4 h-4" />,
+        onSelect: () => { duplicateWithOtherAgent(tab).catch(console.error); },
+      }]),
+      { ...split[0], separator: true },
+      split[1],
+      { key: "close", label: t("tabs.close"), icon: <CloseIcon className="w-4 h-4" />, danger: true, separator: true, onSelect: () => requestCloseItem(menu.key) },
     ];
   };
 
@@ -143,11 +203,15 @@ export function TabDialogs() {
       {skillTarget && <SkillPalette target={skillTarget} onClose={() => close({ skillTarget: null })} />}
 
       <NewAgentDialog
-        isOpen={wizardOpen && activeTab !== undefined}
-        cwd={activeTab?.cwd ?? ""}
-        onClose={() => close({ wizardOpen: false })}
+        isOpen={(wizardOpen && activeTab !== undefined) || wizardFor !== null}
+        cwd={wizardFor?.cwd ?? activeTab?.cwd ?? ""}
+        title={wizardFor?.title}
+        initialSkillIds={wizardFor?.skillIds}
+        initialPrelaunch={wizardFor?.prelaunch}
+        onClose={() => close({ wizardOpen: false, wizardFor: null })}
         onConfirm={({ agent, skillIds, accountId, prelaunch }) => {
-          const cwd = activeTab?.cwd;
+          const cwd = wizardFor?.cwd ?? activeTab?.cwd;
+          const prompt = wizardFor?.prompt;
           if (!cwd) return;
           const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch });
           navigate("/workspace");
@@ -156,6 +220,7 @@ export function TabDialogs() {
           // el agente arranque (varias TUIs solo escanean su carpeta al boot) —
           // Terminal.tsx espera esta promesa antes de invocar pty_create.
           registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, skillIds));
+          if (prompt) sendWhenReady(tabId, prompt);
         }}
       />
     </>

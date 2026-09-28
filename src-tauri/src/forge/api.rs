@@ -409,6 +409,63 @@ impl Api {
         })
     }
 
+    /// Una imagen de la descripción o de un comentario, lista para un `<img>`.
+    ///
+    /// La trae Rust y no el webview por las privadas: en un repo privado los adjuntos
+    /// (`github.com/user-attachments/…`, `/uploads/…` de GitLab y Gitea) piden la sesión
+    /// de la cuenta, y el token vive acá. Se manda SOLO a los hosts de esa forja: una
+    /// imagen de cualquier otro lado se pide sin credenciales, y reqwest las saca solo al
+    /// redirigir a otro host (los adjuntos de GitHub terminan en S3).
+    pub async fn image(&self, url: &str) -> Result<String, ForgeError> {
+        const MAX: usize = 20 * 1024 * 1024;
+        let parsed = reqwest::Url::parse(url).map_err(|e| ForgeError::Api(format!("URL inválida: {e}")))?;
+        if !matches!(parsed.scheme(), "https" | "http") {
+            return Err(ForgeError::Api("solo imágenes http(s)".into()));
+        }
+        let host = parsed.host_str().unwrap_or_default().to_string();
+        let api_host = reqwest::Url::parse(&self.base).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+        let web_host = api_host.strip_prefix("api.").unwrap_or(&api_host).to_string();
+        let own = host == api_host
+            || host == web_host
+            || (self.kind == ForgeKind::Github && host.ends_with(".githubusercontent.com"));
+
+        let fetch = |auth: bool| {
+            let mut req = self.http.get(parsed.clone());
+            if auth {
+                req = match self.kind {
+                    ForgeKind::Gitea => req.header("Authorization", format!("token {}", self.token)),
+                    _ => req.bearer_auth(&self.token),
+                };
+            }
+            req.send()
+        };
+        let mut res = fetch(own).await.map_err(|e| ForgeError::Api(format!("no se pudo bajar la imagen: {e}")))?;
+        // Hay hosts que con un token de API contestan 4xx a una URL web que anónima sí
+        // sirven (la imagen es pública): se prueba una vez sin él.
+        if own && res.status().is_client_error() {
+            res = fetch(false).await.map_err(|e| ForgeError::Api(format!("no se pudo bajar la imagen: {e}")))?;
+        }
+        if !res.status().is_success() {
+            return Err(ForgeError::Api(format!("HTTP {} al bajar la imagen", res.status().as_u16())));
+        }
+        let mime = res
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.split(';').next().unwrap_or("").trim().to_string())
+            .unwrap_or_default();
+        // Un login de la forja devuelve HTML con 200: eso no es una imagen.
+        if !mime.starts_with("image/") {
+            return Err(ForgeError::Api(format!("no es una imagen ({mime})")));
+        }
+        let bytes = res.bytes().await.map_err(|e| ForgeError::Api(format!("no se pudo bajar la imagen: {e}")))?;
+        if bytes.len() > MAX {
+            return Err(ForgeError::Api("la imagen es demasiado grande".into()));
+        }
+        use base64::Engine;
+        Ok(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes)))
+    }
+
     async fn get(&self, path: &str) -> Result<Value, ForgeError> {
         self.call(Method::GET, path, None).await
     }

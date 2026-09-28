@@ -257,3 +257,98 @@ fn un_binario_no_se_abre_como_texto() {
     assert!(matches!(explorer_read_file(path).unwrap(), FileContent::Binary { .. }));
     std::fs::remove_dir_all(dir).ok();
 }
+
+mod ops {
+    use std::fs;
+
+    use super::super::ops::*;
+
+    /// Una carpeta propia por test, que se borra al soltarla.
+    struct Tmp(std::path::PathBuf);
+    impl Tmp {
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+    impl Drop for Tmp {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn tmp() -> Tmp {
+        let p = std::env::temp_dir().join(format!("cc-ops-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&p).unwrap();
+        Tmp(p)
+    }
+
+    fn s(p: &std::path::Path) -> String {
+        p.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn copiar_en_la_misma_carpeta_elige_un_nombre_libre() {
+        let d = tmp();
+        fs::write(d.path().join("a.ts"), "x").unwrap();
+        let src = s(&d.path().join("a.ts"));
+        let one = explorer_copy(src.clone(), s(d.path())).unwrap();
+        let two = explorer_copy(src, s(d.path())).unwrap();
+        assert!(one.ends_with("a copy.ts"), "{one}");
+        assert!(two.ends_with("a copy 2.ts"), "{two}");
+    }
+
+    #[test]
+    fn las_carpetas_y_los_ocultos_llevan_el_sufijo_al_final() {
+        let d = tmp();
+        fs::create_dir(d.path().join("v1.2")).unwrap();
+        fs::write(d.path().join(".env"), "").unwrap();
+        assert!(free_name(d.path(), "v1.2", true).ends_with("v1.2 copy"));
+        assert!(free_name(d.path(), ".env", false).ends_with(".env copy"));
+    }
+
+    #[test]
+    fn copia_carpetas_enteras_y_no_adentro_de_si_mismas() {
+        let d = tmp();
+        let src = d.path().join("src");
+        fs::create_dir_all(src.join("deep")).unwrap();
+        fs::write(src.join("deep/f.txt"), "hola").unwrap();
+        let dst = d.path().join("dst");
+        fs::create_dir(&dst).unwrap();
+
+        let copied = explorer_copy(s(&src), s(&dst)).unwrap();
+        assert_eq!(fs::read_to_string(std::path::Path::new(&copied).join("deep/f.txt")).unwrap(), "hola");
+        assert!(explorer_copy(s(&src), s(&src.join("deep"))).is_err());
+    }
+
+    #[test]
+    fn mover_no_pisa_y_no_se_mete_en_si_mismo() {
+        let d = tmp();
+        let a = d.path().join("a");
+        let b = d.path().join("b");
+        fs::create_dir_all(a.join("inner")).unwrap();
+        fs::create_dir(&b).unwrap();
+        fs::write(a.join("f.txt"), "1").unwrap();
+        fs::write(b.join("f.txt"), "2").unwrap();
+
+        assert!(explorer_move(s(&a.join("f.txt")), s(&b)).is_err());
+        assert_eq!(fs::read_to_string(b.join("f.txt")).unwrap(), "2");
+        assert!(explorer_move(s(&a), s(&a.join("inner"))).is_err());
+
+        let moved = explorer_move(s(&a), s(&b)).unwrap();
+        assert!(std::path::Path::new(&moved).join("f.txt").is_file());
+        assert!(!a.exists());
+    }
+
+    #[test]
+    fn crear_y_renombrar_no_pisan_ni_escapan() {
+        let d = tmp();
+        let dir = s(d.path());
+        let f = explorer_create_file(dir.clone(), "x.md".into()).unwrap();
+        assert!(explorer_create_file(dir.clone(), "x.md".into()).is_err());
+        assert!(explorer_create_dir(dir.clone(), "../fuera".into()).is_err());
+        explorer_create_dir(dir.clone(), "y".into()).unwrap();
+        assert!(explorer_rename(f.clone(), "y".into()).is_err());
+        let renamed = explorer_rename(f, "z.md".into()).unwrap();
+        assert!(renamed.ends_with("z.md") && std::path::Path::new(&renamed).is_file());
+    }
+}

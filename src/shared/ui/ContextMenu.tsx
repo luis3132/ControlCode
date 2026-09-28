@@ -6,6 +6,12 @@ export interface ContextMenuItem {
   label: string;
   icon?: React.ReactNode;
   danger?: boolean;
+  /** Se ve pero no se puede elegir (pegar sin nada copiado). */
+  disabled?: boolean;
+  /** Una línea arriba: separa grupos de acciones. */
+  separator?: boolean;
+  /** El atajo que hace lo mismo, a la derecha. Solo informa. */
+  hint?: string;
   onSelect: () => void;
 }
 
@@ -111,17 +117,24 @@ export function ContextMenu({ x, y, items, onClose }: {
         text-xs select-none"
     >
       {items.map((item) => (
-        <button
-          key={item.key}
-          onClick={() => { item.onSelect(); onClose(); }}
-          className={`cc-t w-full flex items-center gap-2.5 px-3 py-2 text-left
-            ${item.danger
-              ? "text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10"
-              : "hover:bg-gray-100 dark:hover:bg-white/10"}`}
-        >
-          {item.icon && <span className="shrink-0 flex w-4 h-4">{item.icon}</span>}
-          <span className="truncate">{item.label}</span>
-        </button>
+        <div key={item.key}>
+          {item.separator && <div className="my-1 h-px bg-gray-200 dark:bg-white/10" />}
+          <button
+            disabled={item.disabled}
+            onClick={() => { item.onSelect(); onClose(); }}
+            className={`cc-t w-full flex items-center gap-2.5 px-3 py-2 text-left
+              disabled:opacity-40 disabled:pointer-events-none
+              ${item.danger
+                ? "text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10"
+                : "hover:bg-gray-100 dark:hover:bg-white/10"}`}
+          >
+            {item.icon && <span className="shrink-0 flex w-4 h-4">{item.icon}</span>}
+            <span className="flex-1 truncate">{item.label}</span>
+            {item.hint && (
+              <span className="shrink-0 pl-4 text-[10.5px] text-gray-400 dark:text-white/35">{item.hint}</span>
+            )}
+          </button>
+        </div>
       ))}
     </div>,
     document.body
