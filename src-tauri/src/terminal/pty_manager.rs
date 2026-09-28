@@ -361,10 +361,21 @@ pub async fn pty_resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
         session
             .master
             .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
-            .map_err(|e| format!("Resize error: {e}"))
+            .map_err(|e| format!("Resize error: {e}"))?;
+        drop(registry);
+        // El teléfono que la esté mirando dibuja con el mismo tamaño: una TUI posiciona el
+        // cursor por columnas, y con otro ancho se vería desarmada.
+        crate::remote::live::on_pty_resize(id, cols, rows);
+        Ok(())
     } else {
         Err(format!("PTY session {id} not found"))
     }
+}
+
+/// Columnas y filas actuales de un PTY vivo.
+pub fn size_of(id: u32) -> Option<(u16, u16)> {
+    let size = registry().get(&id)?.master.get_size().ok()?;
+    Some((size.cols, size.rows))
 }
 
 /// Termina el proceso del PTY y limpia la sesión.

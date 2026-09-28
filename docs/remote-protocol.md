@@ -100,7 +100,7 @@ secreto prueba ante el PC que quien escribe es quien escaneó el QR.
 | Método | Parámetros | Respuesta |
 |---|---|---|
 | `state` | — | `{ name, version, tabs: Tab[], approvals: Approval[], asks: Ask[] }` |
-| `tab.attach` | `tabId` | `{ scrollback: string, running: bool }` y después eventos `tab.data` |
+| `tab.attach` | `tabId` | `{ scrollback, running, cols, rows }` y después eventos `tab.data` |
 | `tab.detach` | `tabId` | `{}` |
 | `tab.send` | `tabId, text, enter?` (default `true`) | `{}` — escribe y confirma, como `ccode tab send` |
 | `tab.keys` | `tabId, data` | `{}` — bytes crudos (Ctrl-C = `\u0003`, Esc = `\u001b`, flechas…) |
@@ -125,6 +125,7 @@ preguntando algo (`ask_user`).
 |---|---|
 | `tab.data` | `{ tabId, data }` — salida nueva de una tab a la que el móvil está enganchado |
 | `tab.exit` | `{ tabId, code }` |
+| `tab.resize` | `{ tabId, cols, rows }` — la terminal del PC cambió de tamaño |
 | `approvals` | `{ list: Approval[] }` — cada vez que cambia la cola |
 | `asks` | `{ list: Ask[] }` — cada vez que cambia |
 

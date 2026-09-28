@@ -1,0 +1,29 @@
+name: mobile
+
+on:
+  push:
+    paths: ["mobile/**", "relay/**", ".github/workflows/mobile.yml"]
+  pull_request:
+    paths: ["mobile/**", "relay/**", ".github/workflows/mobile.yml"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: relay
+      # El relay y el PC de prueba en Rust: los tests de protocolo corren contra ellos.
+      - run: cargo build --release --locked && cargo build --release --locked --example echo_desktop
+        working-directory: relay
+      - run: bun install --frozen-lockfile
+        working-directory: mobile
+      - run: bun run typecheck
+        working-directory: mobile
+      - run: bun run lint
+        working-directory: mobile
+      - run: bun test
+        working-directory: mobile

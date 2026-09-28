@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "Control Code",
+    "slug": "controlcode",
+    "scheme": "controlcode",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0d1117",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.luis3132.controlcode"
+    },
+    "android": {
+      "package": "com.luis3132.controlcode",
+      "adaptiveIcon": {
+        "backgroundColor": "#0d1117",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Control Code usa la cámara para leer el código QR con el que se empareja con tu computadora.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      "expo-notifications",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

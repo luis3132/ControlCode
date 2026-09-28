@@ -117,8 +117,14 @@ pub fn handle(app: &AppHandle, from: &str, method: &str, p: &Value) -> Result<Va
             let tab_id = str_arg(p, "tabId")?;
             let pty = crate::ipc::pty_id_for_tab(app, tab_id, None)?;
             let scrollback = crate::terminal::scrollback_of(pty).map(|(s, _)| s).unwrap_or_default();
+            let (cols, rows) = crate::terminal::size_of(pty).unwrap_or((80, 24));
             live::subscribe(pty, from, tab_id);
-            Ok(json!({ "scrollback": tail(&scrollback, ATTACH_SCROLLBACK), "running": true }))
+            Ok(json!({
+                "scrollback": tail(&scrollback, ATTACH_SCROLLBACK),
+                "running": true,
+                "cols": cols,
+                "rows": rows,
+            }))
         }
         "tab.detach" => {
             live::unsubscribe(from, Some(str_arg(p, "tabId")?));

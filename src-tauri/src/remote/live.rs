@@ -109,6 +109,18 @@ pub fn on_pty_exit(pty: u32, code: i32) {
     }
 }
 
+pub fn on_pty_resize(pty: u32, cols: u16, rows: u16) {
+    if !ANY.load(Ordering::Acquire) {
+        return;
+    }
+    // Lo que ya se escribió con el tamaño anterior sale antes del cambio.
+    flush();
+    let targets = subs().get(&pty).cloned().unwrap_or_default();
+    for sub in targets {
+        super::client::send_event(&sub.device, "tab.resize", json!({ "tabId": sub.tab_id, "cols": cols, "rows": rows }));
+    }
+}
+
 /// Parte bytes en texto sin cortar un carácter por la mitad: lo que queda incompleto al
 /// final vuelve para el próximo envío (el resto del carácter llega en la próxima lectura).
 pub fn take_text(buf: &mut Vec<u8>) -> String {
