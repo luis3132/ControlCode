@@ -10,6 +10,7 @@
 //! tabs interactivas y no se toca — acá no hace falta comprimir nada.
 
 mod activity;
+mod adapters;
 mod agents;
 mod broker;
 mod context;

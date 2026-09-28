@@ -2,7 +2,7 @@
  * Cómo se muestra el ruteo: las piezas puras que usan el diálogo de lanzar y los tramos de
  * Ajustes. Sin React, para poder probarlas.
  */
-import type { Assignment, Complexity, ModelRef, Quota, Roster, RosterAgent } from "./types";
+import type { Assignment, Complexity, ModelRef, Quota, Roster, RosterAgent, RosterModel } from "./types";
 
 export const COMPLEXITIES: Complexity[] = ["trivial", "standard", "hard"];
 
@@ -77,4 +77,41 @@ export function moveEarlier(list: ModelRef[], index: number): ModelRef[] {
 export function removeFromTier(list: ModelRef[], index: number): ModelRef[] {
   if (list.length <= 1) return list;
   return list.filter((_, i) => i !== index);
+}
+
+/** Un grupo del buscador de modelos: una TUI y lo suyo que coincide. `models` vacío con
+ *  `byDefault` = la app no conoce sus modelos y se ofrece "el suyo por defecto". */
+export interface ModelGroup {
+  agent: RosterAgent;
+  models: RosterModel[];
+  byDefault: boolean;
+}
+
+/** Sin mayúsculas ni acentos: "codex" encuentra "Códex" y "SONNET" encuentra "Sonnet". */
+function fold(text: string): string {
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+/**
+ * Los modelos de todas las TUIs que coinciden con lo escrito, agrupados por TUI.
+ *
+ * Cada palabra tiene que aparecer en algún lado —el nombre de la TUI, el del modelo o su
+ * id—, en cualquier orden: "opencode sonnet" deja los Sonnet de OpenCode, y "pickle" el
+ * modelo sin importar de quién es. Los que no pueden trabajar como agente no se ofrecen.
+ */
+export function searchModels(agents: RosterAgent[], query: string): ModelGroup[] {
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  const matches = (...fields: string[]) => {
+    const hay = fold(fields.join(" "));
+    return words.every((w) => hay.includes(w));
+  };
+  return agents
+    .map((agent) => {
+      const usable = agent.models.filter((m) => !m.unavailable && m.toolcall !== false);
+      if (usable.length === 0) {
+        return { agent, models: [], byDefault: matches(agent.label, agent.agentId) };
+      }
+      return { agent, models: usable.filter((m) => matches(agent.label, m.label, m.id)), byDefault: false };
+    })
+    .filter((g) => g.byDefault || g.models.length > 0);
 }

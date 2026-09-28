@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   addToTier, describeAssignment, fiveHourPercent, launchableAgents, moveEarlier, parseRefKey, refKey,
-  removeFromTier,
+  removeFromTier, searchModels,
 } from "../routingView";
-import type { Assignment, ModelRef, Quota, Roster, RosterAccount } from "../types";
+import type { Assignment, ModelRef, Quota, Roster, RosterAccount, RosterAgent, RosterModel } from "../types";
 
 const quota = (utilization: number, resetsAt: number | null): Quota => ({
   fiveHour: { utilization, resetsAt },
@@ -98,5 +98,40 @@ describe("tramos", () => {
   it("quitar nunca deja el tramo vacío", () => {
     expect(removeFromTier([haiku, local], 0)).toEqual([local]);
     expect(removeFromTier([haiku], 0)).toEqual([haiku]);
+  });
+});
+
+describe("searchModels", () => {
+  const model = (id: string, label = id, extra: Partial<RosterModel> = {}): RosterModel => ({
+    id, label, toolcall: true, local: false, costIn: null, costOut: null, context: null, unavailable: null, ...extra,
+  });
+  const agent = (agentId: string, label: string, models: RosterModel[]): RosterAgent => ({
+    agentId, label, installed: true, launchable: true, unavailable: null, models, accounts: [],
+  });
+  const agents = [
+    agent("claude-code", "Claude Code", [model("haiku", "Haiku"), model("sonnet", "Sonnet"), model("opus", "Opus")]),
+    agent("opencode", "OpenCode", [
+      model("opencode/claude-sonnet-5"),
+      model("opencode/big-pickle"),
+      model("ollama/qwen", "qwen", { toolcall: false }),
+    ]),
+    agent("codex", "Códex", []),
+  ];
+  const ids = (q: string) => searchModels(agents, q).map((g) => [g.agent.agentId, g.byDefault ? "*" : g.models.map((m) => m.id).join(",")]);
+
+  it("sin buscar, todo lo que puede trabajar como agente", () => {
+    expect(ids("")).toEqual([
+      ["claude-code", "haiku,sonnet,opus"],
+      ["opencode", "opencode/claude-sonnet-5,opencode/big-pickle"],
+      ["codex", "*"],
+    ]);
+  });
+
+  it("cada palabra en cualquier campo, sin mayúsculas ni acentos", () => {
+    expect(ids("SONNET")).toEqual([["claude-code", "sonnet"], ["opencode", "opencode/claude-sonnet-5"]]);
+    expect(ids("opencode sonnet")).toEqual([["opencode", "opencode/claude-sonnet-5"]]);
+    expect(ids("codex")).toEqual([["codex", "*"]]);
+    expect(ids("pickle")).toEqual([["opencode", "opencode/big-pickle"]]);
+    expect(ids("qwen")).toEqual([]);
   });
 });
