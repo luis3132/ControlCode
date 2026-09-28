@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { TrashIcon } from "neogestify-ui-components";
+import { Button, TrashIcon } from "neogestify-ui-components";
 
 import { RefreshIcon } from "@/app/icons";
 
@@ -146,12 +146,12 @@ export function StorageView({ channel, proxyOrigin, docId }: {
                   {c.sent
                     ? <Flag tone="ok">{t("browser.debug.storage.sent")}</Flag>
                     : <Flag tone="warn">{t("browser.debug.storage.notSent")}</Flag>}
-                  <button onClick={() => void act(() => channel.run({ op: "cookies", action: "delete", name: c.name, path: c.path ?? undefined }))}
+                  <Button variant="icon" onClick={() => void act(() => channel.run({ op: "cookies", action: "delete", name: c.name, path: c.path ?? undefined }))}
                     aria-label={t("btn.delete")}
-                    className="cc-t opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center w-5 h-5 rounded
+                    className="cc-t opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center w-5 h-5 p-0 rounded
                       text-gray-400 hover:text-red-500 hover:bg-gray-200 dark:hover:bg-white/10">
                     <TrashIcon className="w-3 h-3" />
-                  </button>
+                  </Button>
                 </div>
               ))}
             </Section>
@@ -220,11 +220,11 @@ function StorageSection({ area, items, onRemove, onClear, onAdd }: {
         <div key={item.key} className="group flex items-start gap-2 px-3 py-1 border-t border-gray-100 dark:border-white/5">
           <span className="shrink-0 w-[30%] truncate font-mono text-[11.5px] font-semibold text-gray-800 dark:text-gray-100" title={item.key}>{item.key}</span>
           <span className="flex-1 min-w-0 line-clamp-2 break-all font-mono text-[11px] text-gray-500 dark:text-white/45" title={item.value}>{item.value}</span>
-          <button onClick={() => onRemove(item.key)} aria-label={t("btn.delete")}
-            className="cc-t opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center w-5 h-5 rounded
+          <Button variant="icon" onClick={() => onRemove(item.key)} aria-label={t("btn.delete")}
+            className="cc-t opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center w-5 h-5 p-0 rounded
               text-gray-400 hover:text-red-500 hover:bg-gray-200 dark:hover:bg-white/10">
             <TrashIcon className="w-3 h-3" />
-          </button>
+          </Button>
         </div>
       ))}
       {list && (
@@ -242,11 +242,11 @@ function StorageSection({ area, items, onRemove, onClear, onAdd }: {
             className="w-[30%] h-6 px-2 rounded-md outline-none font-mono text-[11px] bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 focus:border-blue-500 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/25" />
           <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={t("browser.debug.storage.value")} spellCheck={false}
             className="flex-1 min-w-0 h-6 px-2 rounded-md outline-none font-mono text-[11px] bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 focus:border-blue-500 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/25" />
-          <button type="submit" disabled={!key.trim()}
-            className="cc-t shrink-0 h-6 px-2 rounded-md text-[11px] font-medium text-gray-600 dark:text-white/55
+          <Button variant="custom" type="submit" disabled={!key.trim()}
+            className="cc-t inline-block shrink-0 h-6 px-2 rounded-md text-[11px] font-medium text-gray-600 dark:text-white/55
               hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent">
             {t("browser.debug.storage.add")}
-          </button>
+          </Button>
         </form>
       )}
     </Section>

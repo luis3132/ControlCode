@@ -154,16 +154,17 @@ function ColorSwatch({ id, value, selected, onSelect }: {
   const { t } = useTranslation();
   const label = t(`browser.annotate.color.${id}`);
   return (
-    <button
+    <Button
+      variant="icon"
       onClick={onSelect}
       aria-label={label}
       aria-pressed={selected}
       title={label}
-      className={`cc-t flex items-center justify-center w-7 h-7 shrink-0 rounded-full
+      className={`cc-t flex items-center justify-center w-7 h-7 p-0 shrink-0 rounded-full
         ${selected ? "ring-2 ring-blue-500 dark:ring-blue-400" : "hover:bg-gray-200 dark:hover:bg-white/10"}`}
     >
       <span className="w-4 h-4 rounded-full border border-black/20 dark:border-white/25" style={{ background: value }} />
-    </button>
+    </Button>
   );
 }
 
@@ -175,16 +176,17 @@ function SizeButton({ size, label, selected, onClick }: {
 }) {
   const dot = 3 + SIZES.indexOf(size) * 3;
   return (
-    <button
+    <Button
+      variant="icon"
       onClick={onClick}
       aria-label={label}
       aria-pressed={selected}
       title={label}
-      className={`cc-t flex items-center justify-center w-7 h-7 shrink-0 rounded-lg
+      className={`cc-t flex items-center justify-center w-7 h-7 p-0 shrink-0 rounded-lg
         ${selected ? "bg-blue-500/15 dark:bg-blue-400/20" : "hover:bg-gray-200 dark:hover:bg-white/10"}`}
     >
       <span className="rounded-full bg-gray-700 dark:bg-gray-200" style={{ width: dot, height: dot }} />
-    </button>
+    </Button>
   );
 }
 

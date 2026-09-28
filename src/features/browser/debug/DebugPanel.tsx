@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
-import { CloseIcon } from "neogestify-ui-components";
+import { Button, CloseIcon } from "neogestify-ui-components";
 
 import { currentCounts, EMPTY_LOG } from "../debugLog";
 import { useDebugStore } from "../debugStore";
@@ -73,7 +73,8 @@ export function DebugPanel({ viewId, channel, proxyOrigin, targetOrigin, docId, 
 
       <div role="tablist" className="flex items-center gap-0.5 h-8 shrink-0 px-1.5 border-b border-gray-200 dark:border-white/7">
         {TABS.map((id) => (
-          <button
+          <Button
+            variant="custom"
             key={id}
             role="tab"
             aria-selected={tab === id}
@@ -94,14 +95,14 @@ export function DebugPanel({ viewId, channel, proxyOrigin, targetOrigin, docId, 
                 {counts.warnings}
               </span>
             )}
-          </button>
+          </Button>
         ))}
         <div className="flex-1" />
-        <button onClick={onClose} aria-label={t("btn.close")}
-          className="cc-t flex items-center justify-center w-6 h-6 rounded-md
+        <Button variant="icon" onClick={onClose} aria-label={t("btn.close")}
+          className="cc-t flex items-center justify-center w-6 h-6 p-0 rounded-md
             text-gray-400 dark:text-white/35 hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
           <CloseIcon className="w-3.5 h-3.5" />
-        </button>
+        </Button>
       </div>
 
       <div className="flex-1 min-h-0">

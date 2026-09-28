@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { DocumentIcon, SearchIcon, Tooltip } from "neogestify-ui-components";
+import { Button, DocumentIcon, SearchIcon, Tooltip } from "neogestify-ui-components";
 
 import { useUiStore, type ExplorerView } from "@/app/uiStore";
 import { BranchIcon, PanelIcon } from "@/app/icons";
@@ -30,7 +30,7 @@ function SectionButton({ view, Icon, label, active, changes, placement }: {
 
   return (
     <Tooltip content={t(label)} placement={placement}>
-      <button
+      <Button variant="icon"
         // Con el panel abierto, volver a apretar la sección que ya se ve lo pliega: es el
         // gesto de cualquier barra de actividades, y ahorra ir a buscar el otro botón.
         onClick={() => (active && !collapsed ? toggle() : openExplorer(view))}
@@ -39,7 +39,7 @@ function SectionButton({ view, Icon, label, active, changes, placement }: {
         className={`cc-t relative flex items-center justify-center w-8 h-8 rounded-lg shrink-0
           ${active && !collapsed
             ? "bg-blue-500/12 dark:bg-blue-400/13 text-blue-600 dark:text-blue-400"
-            : "text-gray-500 dark:text-white/40 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200/60 dark:hover:bg-white/8"}`}
+            : "text-gray-500 dark:text-white/40 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200/60 dark:hover:bg-white/8"} p-0`}
       >
         <Icon className="w-4 h-4" />
         {view === "scm" && changes > 0 && (
@@ -48,7 +48,7 @@ function SectionButton({ view, Icon, label, active, changes, placement }: {
             {changes > 99 ? "99+" : changes}
           </span>
         )}
-      </button>
+      </Button>
     </Tooltip>
   );
 }
@@ -99,13 +99,13 @@ export function ExplorerPanel({ cwd, repo, title }: {
         ))}
         <div className="flex-1" />
         <Tooltip content={t("panel.collapse")} placement="left">
-          <button onClick={toggle} aria-label={t("panel.collapse")}
+          <Button variant="icon" onClick={toggle} aria-label={t("panel.collapse")}
             className="cc-t flex items-center justify-center w-7 h-7 rounded-lg shrink-0
               text-gray-400 dark:text-white/35
               hover:text-gray-700 dark:hover:text-white
-              hover:bg-gray-200/60 dark:hover:bg-white/8">
+              hover:bg-gray-200/60 dark:hover:bg-white/8 p-0">
             <PanelIcon className="w-[15px] h-[15px]" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
 

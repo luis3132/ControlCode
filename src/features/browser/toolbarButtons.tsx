@@ -1,4 +1,4 @@
-import { Tooltip } from "neogestify-ui-components";
+import { Button, Tooltip } from "neogestify-ui-components";
 
 /**
  * Un botón de ícono de la barra del navegador. `plain`: con el rótulo nativo del sistema en
@@ -14,7 +14,8 @@ export function ToolButton({ label, onClick, disabled, active, plain, children }
   children: React.ReactNode;
 }) {
   const button = (
-    <button
+    <Button
+      variant="icon"
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
@@ -23,14 +24,14 @@ export function ToolButton({ label, onClick, disabled, active, plain, children }
       // Contraste de texto, no de adorno: estos son los controles con los que se usa la
       // tab. Con el gris al 45% sobre el fondo oscuro, y encima atenuados al 35% mientras
       // la página no cargó, prácticamente no se veían.
-      className={`cc-t relative flex items-center justify-center w-8 h-8 rounded-lg shrink-0
-        disabled:text-gray-400 dark:disabled:text-white/30 disabled:hover:bg-transparent
+      className={`cc-t relative flex items-center justify-center w-8 h-8 p-0 rounded-lg shrink-0
+        disabled:opacity-100 disabled:cursor-default disabled:text-gray-400 dark:disabled:text-white/30 disabled:hover:bg-transparent
         ${active
           ? "bg-blue-500/15 text-blue-600 dark:bg-blue-400/20 dark:text-blue-300"
           : "text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10"}`}
     >
       {children}
-    </button>
+    </Button>
   );
   return plain ? button : <Tooltip content={label} placement="bottom">{button}</Tooltip>;
 }
@@ -47,7 +48,8 @@ export function ActionButton({ hint, onClick, disabled, active, plain, children 
   children: React.ReactNode;
 }) {
   const button = (
-    <button
+    <Button
+      variant="custom"
       onClick={onClick}
       disabled={disabled}
       aria-pressed={active}
@@ -59,7 +61,7 @@ export function ActionButton({ hint, onClick, disabled, active, plain, children 
           : "border-gray-300 dark:border-white/15 text-gray-800 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-white/10"}`}
     >
       {children}
-    </button>
+    </Button>
   );
   return plain ? button : <Tooltip content={hint} placement="bottom">{button}</Tooltip>;
 }

@@ -39,15 +39,15 @@ function GitAccountRow({ account, onRemove }: { account: GitAccount; onRemove: (
         </Tooltip>
       )}
       <Tooltip content={t("forge.signOut")} placement="left">
-        <button
+        <Button variant="icon"
           onClick={onRemove}
           aria-label={t("forge.signOut")}
           className="cc-t flex items-center justify-center w-7 h-7 rounded-md shrink-0
             text-gray-400 dark:text-white/35 hover:text-red-500 dark:hover:text-red-400
-            hover:bg-gray-200 dark:hover:bg-white/10"
+            hover:bg-gray-200 dark:hover:bg-white/10 p-0"
         >
           <TrashIcon className="w-3.5 h-3.5" />
-        </button>
+        </Button>
       </Tooltip>
     </div>
   );
@@ -85,15 +85,15 @@ export function GitAccountsPane({ kind }: { kind: ForgeKind }) {
           {t("forge.accountsOf", { provider: label })}
         </span>
         <Tooltip content={t("forge.add.action")} placement="bottom">
-          <button
+          <Button variant="icon"
             onClick={() => setAdding(true)}
             aria-label={t("forge.add.action")}
             className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
               text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white
-              hover:bg-gray-200 dark:hover:bg-white/10"
+              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
           >
             <AddIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
 

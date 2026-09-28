@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Button } from "neogestify-ui-components";
 import type { WorkspaceSummary } from "@/features/workspaces/types";
 
 interface WorkspaceListProps {
@@ -36,17 +37,17 @@ export function WorkspaceList({ workspaces, onSelect }: WorkspaceListProps) {
           text-gray-400 dark:text-gray-500">
           {t("home.recent.title")}
         </span>
-        <button
+        <Button variant="custom"
           onClick={() => navigate("/workspaces")}
-          className="text-[11px] font-medium text-blue-500 dark:text-blue-400 hover:underline"
+          className="text-[11px] font-medium text-blue-500 dark:text-blue-400 hover:underline inline-block"
         >
           {t("workspace.manage.link")}
-        </button>
+        </Button>
       </div>
 
       <div className="flex flex-col gap-1.5">
         {workspaces.map((ws) => (
-          <button
+          <Button variant="custom"
             key={ws.id}
             onClick={() => onSelect(ws)}
             className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border text-left
@@ -65,7 +66,7 @@ export function WorkspaceList({ workspaces, onSelect }: WorkspaceListProps) {
             <span className="text-[11px] text-gray-400 dark:text-gray-500 shrink-0">
               {formatRelative(ws.lastActive, t)}
             </span>
-          </button>
+          </Button>
         ))}
       </div>
     </div>

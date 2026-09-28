@@ -85,24 +85,24 @@ export function ForgeItemsView({ cwd, target, what, branch, filter, onFilter, on
     <>
       <div className="flex items-center gap-1 h-11 shrink-0 px-4 border-b border-gray-200 dark:border-white/8">
         {filters.map((f) => (
-          <button
+          <Button variant="custom"
             key={f}
             onClick={() => onFilter(f)}
             className={`cc-t h-7 px-2.5 rounded-lg text-[12px]
               ${filter === f
                 ? "bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white font-semibold"
-                : "text-gray-500 dark:text-white/45 hover:bg-gray-200/60 dark:hover:bg-white/6"}`}
+                : "text-gray-500 dark:text-white/45 hover:bg-gray-200/60 dark:hover:bg-white/6"} inline-block`}
           >
             {t(`forge.filter.${f}`)}
-          </button>
+          </Button>
         ))}
         <div className="flex-1" />
         <Tooltip content={t("forge.refresh")} placement="bottom">
-          <button onClick={() => { setItems(null); load(); }} aria-label={t("forge.refresh")}
+          <Button variant="icon" onClick={() => { setItems(null); load(); }} aria-label={t("forge.refresh")}
             className="cc-t flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 dark:text-white/40
-              hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
+              hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10 p-0">
             <RefreshIcon className="w-4 h-4" />
-          </button>
+          </Button>
         </Tooltip>
         <Button size="sm" variant="primary" onClick={() => setCreating(true)} className="flex items-center gap-1">
           <AddIcon className="w-3.5 h-3.5" />
@@ -124,7 +124,7 @@ export function ForgeItemsView({ cwd, target, what, branch, filter, onFilter, on
             title={t(pr ? "forge.pr.none" : "forge.issue.none")}
           />
         ) : items.map((item) => (
-          <button
+          <Button variant="custom"
             key={item.number}
             onClick={() => onOpen(item)}
             className="flex items-start gap-3 w-full px-4 py-2.5 text-left
@@ -154,7 +154,7 @@ export function ForgeItemsView({ cwd, target, what, branch, filter, onFilter, on
                 {t("forge.comments", { count: item.comments })}
               </span>
             )}
-          </button>
+          </Button>
         ))}
       </div>
 

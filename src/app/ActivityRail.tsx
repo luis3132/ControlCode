@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Badge, BoxIcon, ClockIcon, CloudIcon, GearIcon, NetworkIcon, StackIcon, Tooltip, UserIcon } from "neogestify-ui-components";
+import { Button, Badge, BoxIcon, ClockIcon, CloudIcon, GearIcon, NetworkIcon, StackIcon, Tooltip, UserIcon } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
 import { shortcutForPath } from "@/app/shortcuts";
@@ -27,12 +27,12 @@ function RailButton({
 }) {
   return (
     <Tooltip content={withShortcut(label, path)} placement="right" delay={400}>
-    <button
+    <Button variant="icon"
       onClick={onClick}
       className={`cc-t relative flex items-center justify-center w-9 h-9 rounded-[9px] shrink-0
         ${active
           ? "text-gray-900 dark:text-white bg-gray-200/70 dark:bg-white/7"
-          : "text-gray-400 dark:text-white/40 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200/60 dark:hover:bg-white/6"}`}
+          : "text-gray-400 dark:text-white/40 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200/60 dark:hover:bg-white/6"} p-0`}
     >
       {/* El acento va contra el borde exterior de la ventana, como en cualquier riel. */}
       {active && (
@@ -52,7 +52,7 @@ function RailButton({
           {badge}
         </Badge>
       )}
-    </button>
+    </Button>
     </Tooltip>
   );
 }

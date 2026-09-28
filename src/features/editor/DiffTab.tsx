@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
 import { EditorView, lineNumbers } from "@codemirror/view";
 import { MergeView } from "@codemirror/merge";
-import { Alert, DocumentIcon, Tooltip, useTheme } from "neogestify-ui-components";
+import { Alert, Button, DocumentIcon, Tooltip, useTheme } from "neogestify-ui-components";
 
 import { RefreshIcon } from "@/app/icons";
 import { scmFileAt } from "@/features/scm/ipc";
@@ -149,18 +149,18 @@ export function DiffTab({ view, active }: { view: DiffView; active: boolean }) {
         </span>
         <div className="flex-1" />
         <Tooltip content={t("explorer.refresh")} placement="bottom">
-          <button onClick={load} aria-label={t("explorer.refresh")}
-            className="cc-t flex items-center justify-center w-6 h-6 rounded-md
+          <Button variant="icon" onClick={load} aria-label={t("explorer.refresh")}
+            className="cc-t flex items-center justify-center w-6 h-6 p-0 rounded-md
               text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
             <RefreshIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
         <Tooltip content={t("scm.openFile")} placement="bottom">
-          <button onClick={() => openFile(view.cwd, abs)} aria-label={t("scm.openFile")}
-            className="cc-t flex items-center justify-center w-6 h-6 rounded-md
+          <Button variant="icon" onClick={() => openFile(view.cwd, abs)} aria-label={t("scm.openFile")}
+            className="cc-t flex items-center justify-center w-6 h-6 p-0 rounded-md
               text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
             <DocumentIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
       {error && <div className="shrink-0 px-4 pt-3"><Alert variant="danger">{error}</Alert></div>}

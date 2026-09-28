@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckIcon, CloudIcon } from "neogestify-ui-components";
+import { Button, CheckIcon, CloudIcon } from "neogestify-ui-components";
 
 import { BranchIcon } from "@/app/icons";
 
@@ -126,7 +126,7 @@ export function GraphBranchFilter({ root, value, onChange, onClose }: {
   const mode = (key: "current" | "all", label: string, hint: string) => {
     const on = value === key;
     return (
-      <button
+      <Button variant="custom"
         onClick={() => onChange(key)}
         className={`flex items-center gap-2 w-full h-8 px-3 text-left hover:bg-gray-100 dark:hover:bg-white/5
           ${on ? "text-gray-900 dark:text-white" : "text-gray-700 dark:text-gray-300"}`}
@@ -137,7 +137,7 @@ export function GraphBranchFilter({ root, value, onChange, onClose }: {
         </span>
         <span className="flex-1 min-w-0 truncate text-[11.5px] font-medium">{label}</span>
         <span className="shrink-0 text-[10px] text-gray-400 dark:text-white/30">{hint}</span>
-      </button>
+      </Button>
     );
   };
 
@@ -171,7 +171,7 @@ export function GraphBranchFilter({ root, value, onChange, onClose }: {
         ) : shown.map((b) => {
           const on = selected.has(fullRef(b));
           return (
-            <button
+            <Button variant="custom"
               key={fullRef(b)}
               onClick={() => toggle(b)}
               role="menuitemcheckbox"
@@ -192,7 +192,7 @@ export function GraphBranchFilter({ root, value, onChange, onClose }: {
               {b.current && (
                 <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400">{t("scm.graph.refs.here")}</span>
               )}
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -201,10 +201,10 @@ export function GraphBranchFilter({ root, value, onChange, onClose }: {
           <span className="flex-1 text-[10.5px] text-gray-500 dark:text-white/40">
             {t("scm.graph.refs.count", { count: value.length })}
           </span>
-          <button onClick={() => onChange("current")}
-            className="text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline">
+          <Button variant="custom" onClick={() => onChange("current")}
+            className="text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline inline-block">
             {t("scm.graph.refs.reset")}
-          </button>
+          </Button>
         </div>
       )}
     </div>

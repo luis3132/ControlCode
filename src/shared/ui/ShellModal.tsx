@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { CloseIcon } from "neogestify-ui-components";
+import { Button, CloseIcon } from "neogestify-ui-components";
 
 import { hasOpenDialog } from "@/shared/ui/openDialog";
 import { useFocusInside } from "@/shared/ui/useFocusInside";
@@ -46,10 +46,11 @@ export function ShellModal({ title, icon, width = "max-w-4xl", onClose, children
 
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center p-8">
-      <button
+      <Button variant="custom"
         onClick={onClose}
         aria-label={t("btn.close")}
-        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/65"
+        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/65 block"
+        children={null}
       />
 
       <div ref={frameRef} tabIndex={-1} className={`outline-none cc-rise relative flex flex-col w-full ${width} h-full max-h-[42rem]
@@ -65,17 +66,17 @@ export function ShellModal({ title, icon, width = "max-w-4xl", onClose, children
             text-gray-900 dark:text-white">
             {title}
           </h2>
-          <button
+          <Button variant="icon"
             onClick={onClose}
             title={t("btn.close")}
             aria-label={t("btn.close")}
             className="cc-t flex items-center justify-center w-7 h-7 rounded-lg shrink-0
               text-gray-400 dark:text-white/35
               hover:text-gray-700 dark:hover:text-white
-              hover:bg-gray-200 dark:hover:bg-white/10"
+              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
           >
             <CloseIcon className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
 
         <div className="flex-1 min-h-0 flex">{children}</div>

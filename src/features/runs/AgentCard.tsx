@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Tooltip } from "neogestify-ui-components";
+import { Button, Tooltip } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 
@@ -201,10 +201,10 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
         <div className="flex-1" />
 
         {live ? (
-          <button onClick={onCancel} className={ACTION}>{t("fleet.card.stop")}</button>
+          <Button variant="custom" onClick={onCancel} className={ACTION}>{t("fleet.card.stop")}</Button>
         ) : (
           task.result && (
-            <button onClick={onShowResult} className={ACTION}>{t("fleet.card.result")}</button>
+            <Button variant="custom" onClick={onShowResult} className={ACTION}>{t("fleet.card.result")}</Button>
           )
         )}
         {/* Pasarla a otro agente: la para, la devuelve a la cola con otro modelo y le cuenta
@@ -213,16 +213,16 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
             resultado para revisar, y "pasársela a otro" sería relanzarla a escondidas. */}
         {live && (
           <Tooltip content={t("fleet.card.rerouteHint")} placement="top">
-            <button onClick={onReroute} className={ACTION}>{t("fleet.card.reroute")}</button>
+            <Button variant="custom" onClick={onReroute} className={ACTION}>{t("fleet.card.reroute")}</Button>
           </Tooltip>
         )}
         {/* Solo con la tarea terminada, nunca sola: al terminar, el resultado ESTÁ en el
             worktree, y descartarlo ahí sería borrar lo que el usuario todavía no revisó. */}
         {!live && task.worktreePath && !task.worktreeRemoved && (
           <Tooltip content={t("fleet.card.discardHint")} placement="top">
-            <button onClick={onDiscardWorktree} className={ACTION}>
+            <Button variant="custom" onClick={onDiscardWorktree} className={ACTION}>
               {t("fleet.card.discard")}
-            </button>
+            </Button>
           </Tooltip>
         )}
         {/* Abrir en una terminal es lo que una CLI no puede ofrecer: la app le impuso el id
@@ -233,9 +233,9 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
           content={live ? t("fleet.card.takeOverHint") : t("fleet.card.openPaneHint")}
           placement="top"
         >
-          <button onClick={onOpenPane} disabled={!task.sessionId || task.worktreeRemoved} className={ACTION}>
+          <Button variant="custom" onClick={onOpenPane} disabled={!task.sessionId || task.worktreeRemoved} className={ACTION}>
             {live ? t("fleet.card.takeOver") : t("fleet.card.openPane")}
-          </button>
+          </Button>
         </Tooltip>
       </div>
     </div>
@@ -266,7 +266,7 @@ function RoutedModel({ task }: { task: Task }) {
   );
 }
 
-const ACTION = `cc-t shrink-0 px-1.5 h-5 rounded text-[10px]
+const ACTION = `cc-t inline-block shrink-0 px-1.5 h-5 rounded text-[10px]
   text-gray-500 dark:text-white/45
   hover:text-gray-900 dark:hover:text-white
   hover:bg-gray-200 dark:hover:bg-white/10

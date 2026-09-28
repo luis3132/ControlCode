@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { systemAccounts } from "@/features/accounts/usage";
@@ -60,7 +61,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
       {shown.map((account) => {
         const Icon = agentIcon(account.agentId, account.agentId);
         return (
-          <button
+          <Button variant="custom"
             key={account.id}
             onClick={() => setOpen((current) => (current === account.id ? null : account.id))}
             title={account.label ?? account.name}
@@ -75,7 +76,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
             </span>
             <span className={`w-1.5 h-1.5 rounded-full shrink-0
               ${account.loggedIn ? "bg-emerald-500" : "bg-gray-400 dark:bg-white/25"}`} />
-          </button>
+          </Button>
         );
       })}
 

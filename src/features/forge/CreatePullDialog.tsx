@@ -148,7 +148,7 @@ export function CreatePullDialog({ cwd, target, branch, onClose, onCreated }: {
           <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
             <BranchPicker label={t("forge.pr.base")} branches={branches ?? []} value={base} onChange={setBase}
               disabled={!!busy || loadingBranches} />
-            <button
+            <Button variant="icon"
               type="button"
               onClick={swap}
               disabled={!!busy || !head || !base}
@@ -156,10 +156,10 @@ export function CreatePullDialog({ cwd, target, branch, onClose, onCreated }: {
               aria-label={t("forge.pr.swap")}
               className="cc-t mb-1 flex items-center justify-center w-8 h-8 rounded-lg text-[15px]
                 text-gray-400 dark:text-white/40 hover:text-gray-800 dark:hover:text-white
-                hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40"
+                hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 p-0"
             >
               ←
-            </button>
+            </Button>
             <BranchPicker label={t("forge.pr.head")} branches={branches ?? []} value={head} onChange={setHead}
               disabled={!!busy || loadingBranches} error={same ? t("forge.pr.sameBranch") : undefined} />
           </div>

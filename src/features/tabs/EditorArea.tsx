@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } f
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AddIcon, CloseIcon } from "neogestify-ui-components";
+import { Button, AddIcon, CloseIcon } from "neogestify-ui-components";
 
 import { GlobeIcon, SplitDownIcon, SplitRightIcon } from "@/app/icons";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
@@ -259,29 +259,29 @@ function GroupView({ group, focused, divided }: { group: GroupNode; focused: boo
 
 function GroupButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button
+    <Button variant="icon"
       onClick={onClick}
       title={label}
       aria-label={label}
       className="flex items-center justify-center w-6 h-6 rounded-md
         text-gray-400 dark:text-white/30 hover:text-gray-700 dark:hover:text-white/80
-        hover:bg-gray-200 dark:hover:bg-white/10 transition-colors duration-150"
+        hover:bg-gray-200 dark:hover:bg-white/10 transition-colors duration-150 p-0"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
 function EmptyAction({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
-    <button
+    <Button variant="custom"
       onClick={onClick}
       className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs
         border border-gray-200 dark:border-white/10 text-gray-600 dark:text-white/60
         hover:bg-gray-100 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white transition-colors duration-150"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 

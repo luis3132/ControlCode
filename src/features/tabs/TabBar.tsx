@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AddIcon } from "neogestify-ui-components";
+import { Button, AddIcon } from "neogestify-ui-components";
 
 import { WindowLights } from "@/app/WindowLights";
 import { GlobeIcon, SplitRightIcon } from "@/app/icons";
@@ -81,18 +81,18 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
           />
         )}
 
-        <button
+        <Button variant="icon"
           // Sin workspace abierto no hay carpeta donde abrir un agente: eso es empezar uno
           // nuevo, y eso vive en Home.
           onClick={() => (activeTab ? openNewAgentWizard() : navigate("/"))}
           title={t("tabs.new")}
           data-tauri-drag-region="false"
-          className={`${BAR_BUTTON} w-9`}
+          className={`${BAR_BUTTON} w-9 p-0 rounded-none`}
         >
           <AddIcon className="w-5 h-5" />
-        </button>
+        </Button>
         {activeTab && (
-          <button
+          <Button variant="icon"
             // Un navegador es del workspace: se abre al lado de sus agentes, para probar lo
             // que están construyendo.
             onClick={() => {
@@ -101,23 +101,23 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
             }}
             title={t("tabs.newBrowser")}
             data-tauri-drag-region="false"
-            className={`${BAR_BUTTON} w-8`}
+            className={`${BAR_BUTTON} w-8 p-0 rounded-none`}
           >
             <GlobeIcon className="w-4 h-4" />
-          </button>
+          </Button>
         )}
         {only && (
-          <button
+          <Button variant="icon"
             onClick={(e) => {
               splitGroup(only.id, e.altKey ? "down" : "right", only.active);
               navigate("/workspace");
             }}
             title={t("tabs.split.button")}
             data-tauri-drag-region="false"
-            className={`${BAR_BUTTON} w-8`}
+            className={`${BAR_BUTTON} w-8 p-0 rounded-none`}
           >
             <SplitRightIcon className="w-4 h-4" />
-          </button>
+          </Button>
         )}
 
         {/* El resto de la franja es para arrastrar la ventana. */}

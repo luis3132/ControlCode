@@ -190,7 +190,7 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
               <p className="text-[11.5px] text-gray-500 dark:text-white/50">
                 {t("forge.add.enterCode", { host: host.trim() })}
               </p>
-              <button
+              <Button variant="custom"
                 onClick={() => navigator.clipboard.writeText(device.userCode).then(() => setCopied(true)).catch(console.error)}
                 title={t("forge.add.copyCode")}
                 className="cc-t flex items-center gap-2 px-4 py-2 rounded-xl font-mono text-2xl font-bold tracking-[0.2em]
@@ -198,7 +198,7 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
               >
                 {device.userCode}
                 <CopyIcon className="w-4 h-4 opacity-50" />
-              </button>
+              </Button>
               <span className="text-[10.5px] text-gray-400 dark:text-white/35">
                 {copied ? t("forge.add.copied") : t("forge.add.copyCode")}
               </span>
@@ -249,13 +249,13 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
               helperText={TOKEN_SCOPES[kind] ? t("forge.add.scopes", { scopes: TOKEN_SCOPES[kind] }) : undefined}
             />
             {tokenUrl && (
-              <button
+              <Button variant="custom"
                 onClick={() => openUrl(tokenUrl).catch(console.error)}
                 className="self-start flex items-center gap-1 text-[11.5px] text-blue-600 dark:text-blue-400 hover:underline"
               >
                 <ExternalIcon className="w-3 h-3" />
                 {t("forge.add.createToken", { host: host.trim() })}
-              </button>
+              </Button>
             )}
           </>
         )}

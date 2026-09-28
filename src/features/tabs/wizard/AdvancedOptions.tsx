@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDownIcon } from "neogestify-ui-components";
+import { Button, ChevronDownIcon } from "neogestify-ui-components";
 import { PrelaunchChain } from "@/features/prelaunch/PrelaunchChain";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 
@@ -28,7 +28,7 @@ export function AdvancedOptions({
 
   return (
     <div className="flex flex-col gap-3">
-      <button
+      <Button variant="custom"
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 self-start text-[11px] font-semibold
@@ -45,7 +45,7 @@ export function AdvancedOptions({
             {t("prelaunch.stepCount", { count: prelaunch.length })}
           </span>
         )}
-      </button>
+      </Button>
 
       {open && (
         <div className="flex flex-col gap-2 pl-5">

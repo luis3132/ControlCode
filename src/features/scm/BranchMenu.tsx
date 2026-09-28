@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AddIcon, CheckIcon, CloudIcon } from "neogestify-ui-components";
+import { AddIcon, Button, CheckIcon, CloudIcon } from "neogestify-ui-components";
 
 import { BranchIcon } from "@/app/icons";
 
@@ -76,7 +76,7 @@ export function BranchMenu({ root, onPick, onClose }: {
       />
       <div className="flex-1 min-h-0 cc-scroll py-1">
         {canCreate && (
-          <button
+          <Button variant="custom"
             onClick={() => onPick(name, true, false)}
             className="flex items-center gap-2 w-full h-7 px-3 text-left hover:bg-gray-100 dark:hover:bg-white/5"
           >
@@ -84,12 +84,12 @@ export function BranchMenu({ root, onPick, onClose }: {
             <span className="truncate text-[11.5px] text-gray-700 dark:text-gray-300">
               {t("scm.branch.create", { name })}
             </span>
-          </button>
+          </Button>
         )}
         {branches === null ? (
           <p className="px-3 py-3 text-[11px] text-gray-400 dark:text-white/30">{t("scm.loading")}</p>
         ) : shown.map((b) => (
-          <button
+          <Button variant="custom"
             key={`${b.remote ? "r" : "l"}:${b.name}`}
             onClick={() => onPick(b.name, false, b.remote)}
             disabled={b.current}
@@ -110,7 +110,7 @@ export function BranchMenu({ root, onPick, onClose }: {
                 {b.upstream}
               </span>
             )}
-          </button>
+          </Button>
         ))}
       </div>
     </div>

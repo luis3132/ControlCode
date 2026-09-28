@@ -130,25 +130,25 @@ export function PrelaunchSection() {
 
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100
                   focus-within:opacity-100 transition-opacity shrink-0">
-                  <button
+                  <Button variant="icon"
                     type="button"
                     onClick={() => setEditingId(preset.id)}
                     aria-label={t("btn.edit")}
                     className="w-7 h-7 grid place-items-center rounded-lg text-gray-400
                       hover:text-gray-700 dark:hover:text-gray-200
-                      hover:bg-gray-200/60 dark:hover:bg-white/10"
+                      hover:bg-gray-200/60 dark:hover:bg-white/10 p-0"
                   >
                     <EditIcon className="w-3.5 h-3.5" />
-                  </button>
-                  <button
+                  </Button>
+                  <Button variant="icon"
                     type="button"
                     onClick={() => remove(preset.id).catch(console.error)}
                     aria-label={t("btn.delete")}
                     className="w-7 h-7 grid place-items-center rounded-lg text-gray-400
-                      hover:text-red-500 hover:bg-red-500/10"
+                      hover:text-red-500 hover:bg-red-500/10 p-0"
                   >
                     <TrashIcon className="w-3.5 h-3.5" />
-                  </button>
+                  </Button>
                 </div>
               </div>
             )

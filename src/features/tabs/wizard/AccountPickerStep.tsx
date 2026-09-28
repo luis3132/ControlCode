@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "neogestify-ui-components";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 
@@ -105,7 +106,7 @@ export function AccountPickerStep({ agentId, value, onChange, showLabel = true, 
         {options.map((option) => {
           const isSelected = option.id === value;
           return (
-            <button
+            <Button variant="custom"
               key={option.id ?? "system"}
               type="button"
               onClick={() => onChange(option.id)}
@@ -130,7 +131,7 @@ export function AccountPickerStep({ agentId, value, onChange, showLabel = true, 
                   : "text-gray-400 dark:text-white/35"}`}>
                 {option.hint}
               </span>
-            </button>
+            </Button>
           );
         })}
       </div>

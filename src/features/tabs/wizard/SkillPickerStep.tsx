@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Badge, CheckIcon, Input, SearchIcon, StackIcon } from "neogestify-ui-components";
+import { Button, Badge, CheckIcon, Input, SearchIcon, StackIcon } from "neogestify-ui-components";
 import { useSkillsStore } from "@/features/skills/store";
 import type { SkillSummary } from "@/features/skills/types";
 
@@ -39,7 +39,7 @@ function SkillRow({ skill, checked, onToggle }: {
 }) {
   const { t } = useTranslation();
   return (
-    <button
+    <Button variant="custom"
       type="button"
       onClick={onToggle}
       aria-pressed={checked}
@@ -69,7 +69,7 @@ function SkillRow({ skill, checked, onToggle }: {
           {t("wizard.step3.chosen")}
         </Badge>
       )}
-    </button>
+    </Button>
   );
 }
 

@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AnimateSpin, CloudIcon, FolderIcon, GearIcon, IconReset, Tooltip } from "neogestify-ui-components";
+import { AnimateSpin, Button, CloudIcon, FolderIcon, GearIcon, IconReset, Tooltip } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
 import { PanelIcon } from "@/app/icons";
@@ -45,7 +45,7 @@ export function RegistryFilterSidebar({
     }`;
 
   /** Botón de icono del encabezado, igual que el del resto de los paneles. */
-  const headBtn = `cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
+  const headBtn = `cc-t flex items-center justify-center w-5.5 h-5.5 p-0 rounded-md shrink-0
     text-gray-400 dark:text-white/35
     hover:text-gray-700 dark:hover:text-white
     hover:bg-gray-200 dark:hover:bg-white/10`;
@@ -58,31 +58,31 @@ export function RegistryFilterSidebar({
         border-r border-gray-200 dark:border-white/8
         bg-gray-100/50 dark:bg-black/20">
         <Tooltip content={t("marketplace.registries.expand")} placement="right">
-          <button
+          <Button variant="icon"
             onClick={toggle}
             aria-label={t("marketplace.registries.expand")}
             className="cc-t relative flex items-center justify-center w-8 h-8 rounded-lg
               text-gray-500 dark:text-white/40
               hover:text-gray-900 dark:hover:text-white
-              hover:bg-gray-200/60 dark:hover:bg-white/8"
+              hover:bg-gray-200/60 dark:hover:bg-white/8 p-0"
           >
             <PanelIcon className="w-4 h-4" />
             {selected !== null && (
               <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-violet-500" />
             )}
-          </button>
+          </Button>
         </Tooltip>
         <Tooltip content={t("marketplace.manageRegistries")} placement="right">
-          <button
+          <Button variant="icon"
             onClick={() => navigate("/marketplace/registries")}
             aria-label={t("marketplace.manageRegistries")}
             className="cc-t flex items-center justify-center w-8 h-8 rounded-lg
               text-gray-500 dark:text-white/40
               hover:text-gray-900 dark:hover:text-white
-              hover:bg-gray-200/60 dark:hover:bg-white/8"
+              hover:bg-gray-200/60 dark:hover:bg-white/8 p-0"
           >
             <GearIcon className="w-4 h-4" />
-          </button>
+          </Button>
         </Tooltip>
       </aside>
     );
@@ -100,18 +100,18 @@ export function RegistryFilterSidebar({
           {t("marketplace.registries")}
         </span>
         <Tooltip content={t("marketplace.manageRegistries")} placement="bottom">
-          <button
+          <Button variant="icon"
             onClick={() => navigate("/marketplace/registries")}
             aria-label={t("marketplace.manageRegistries")}
             className={headBtn}
           >
             <GearIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
         <Tooltip content={t("marketplace.registries.collapse")} placement="bottom">
-          <button onClick={toggle} aria-label={t("marketplace.registries.collapse")} className={headBtn}>
+          <Button variant="icon" onClick={toggle} aria-label={t("marketplace.registries.collapse")} className={headBtn}>
             <PanelIcon className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </Tooltip>
       </div>
 
@@ -123,7 +123,7 @@ export function RegistryFilterSidebar({
         ) : (
           <ul className="flex flex-col gap-0.5">
             <li>
-              <button
+              <Button variant="custom"
                 onClick={() => onSelect(null)}
                 className={`flex items-center justify-between gap-2 w-full h-7 px-2 rounded-lg
                   text-[11.5px] ${itemClass(selected === null)}`}
@@ -132,14 +132,14 @@ export function RegistryFilterSidebar({
                 <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/30">
                   {totalCount}
                 </span>
-              </button>
+              </Button>
             </li>
 
             {registries.map((r) => {
               const refreshing = refreshingId === r.id;
               return (
                 <li key={r.id} className="group flex items-center gap-0.5">
-                  <button
+                  <Button variant="custom"
                     onClick={() => onSelect(r.id)}
                     // Su conteo es el de la última búsqueda, no su tamaño: sin esto, un 0
                     // al lado de skills.sh se lee como repositorio roto.
@@ -158,11 +158,11 @@ export function RegistryFilterSidebar({
                     <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/30">
                       {countByRegistry.get(r.id) ?? 0}
                     </span>
-                  </button>
+                  </Button>
                   {/* Refrescar acá mismo: si un repo se ve desactualizado mientras navegás
                       sus skills, no tiene sentido mandarte a otra pantalla. */}
                   <Tooltip content={t("marketplace.registries.refresh")} placement="right">
-                    <button
+                    <Button variant="icon"
                       disabled={refreshing}
                       onClick={() => onRefresh(r.id)}
                       aria-label={t("marketplace.registries.refresh")}
@@ -170,12 +170,12 @@ export function RegistryFilterSidebar({
                         opacity-0 group-hover:opacity-100 disabled:opacity-100
                         text-gray-400 dark:text-white/35
                         hover:text-gray-700 dark:hover:text-white
-                        hover:bg-gray-200 dark:hover:bg-white/10"
+                        hover:bg-gray-200 dark:hover:bg-white/10 p-0"
                     >
                       {refreshing
                         ? <AnimateSpin className="w-3 h-3" />
                         : <IconReset className="w-3 h-3" />}
-                    </button>
+                    </Button>
                   </Tooltip>
                 </li>
               );
