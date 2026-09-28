@@ -6,6 +6,7 @@
 
 mod files;
 mod git;
+mod ops;
 mod search;
 mod tree;
 #[cfg(test)]
@@ -13,5 +14,6 @@ mod test;
 
 pub use files::*;
 pub use git::*;
+pub use ops::*;
 pub use search::*;
 pub use tree::*;

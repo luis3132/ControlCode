@@ -68,6 +68,12 @@ pub fn run() {
             crate::explorer::explorer_read_dir,
             crate::explorer::explorer_repo_info,
             crate::explorer::explorer_search,
+            crate::explorer::explorer_create_file,
+            crate::explorer::explorer_create_dir,
+            crate::explorer::explorer_rename,
+            crate::explorer::explorer_copy,
+            crate::explorer::explorer_move,
+            crate::explorer::explorer_trash,
             // Tabs de archivo
             crate::explorer::explorer_read_file,
             crate::explorer::explorer_write_file,
