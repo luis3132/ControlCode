@@ -32,6 +32,24 @@ pub(crate) const FWD_PATH: &str = "/__controlcode__/fwd";
 /// puede deducir: es una opción del `fetch` (o el `withCredentials` de un XHR).
 pub(crate) const CRED_HEADER: &str = "x-controlcode-cred";
 
+/// Las cabeceras que puso la página, por nombre y separadas por coma. Lo demás que llegue
+/// lo agregó el motor del webview por su cuenta: `Cache-Control: no-cache` y `Pragma:
+/// no-cache` con la caché desactivada, por ejemplo. Un navegador las pone en la capa de
+/// red, después del chequeo de CORS, así que no piden preflight; contándolas como de la
+/// página, el proxy pedía uno que el servidor rechazaba con toda razón.
+pub(crate) const HEADERS_HEADER: &str = "x-controlcode-headers";
+
+/// Los nombres que trae `HEADERS_HEADER`, en minúsculas. `Content-Type` siempre cuenta
+/// como de la página: si no la puso ella, sale del cuerpo que mandó, y para CORS es igual.
+pub(crate) fn authored_headers(value: &str) -> std::collections::HashSet<String> {
+    value
+        .split(',')
+        .map(|n| n.trim().to_ascii_lowercase())
+        .filter(|n| !n.is_empty())
+        .chain(std::iter::once("content-type".to_string()))
+        .collect()
+}
+
 /// En la respuesta a un pedido que CORS no dejó pasar: el motivo, para la consola.
 pub(crate) const CORS_HEADER: &str = "x-controlcode-cors";
 
