@@ -12,13 +12,13 @@ import { DotsIcon, FilePlusIcon, FolderOpenIcon, FolderPlusIcon, RefreshIcon, Sc
 import { highlightAgents } from "@/features/browser/agentHighlight";
 import { agentPaint } from "@/features/browser/agentPaint";
 import * as ipc from "@/features/explorer/ipc";
-import { canDrop, dirFor, fileMention, isInside, parentDir, remapPath } from "@/features/explorer/paths";
+import { canDrop, dirFor, isInside, parentDir, remapPath } from "@/features/explorer/paths";
 import { flattenTree, relativeTo, toggleExpanded } from "@/features/explorer/tree";
 import type { DirEntry, FileMark, RepoInfo } from "@/features/explorer/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import { focusTab, pasteIntoTab } from "@/features/terminal/terminalRegistry";
+import { dropFilesOnTab, setFileDropTarget, terminalTabAt } from "@/features/terminal/fileDrop";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
 
@@ -55,6 +55,8 @@ interface Drag {
   /** La carpeta donde caería. `null` = afuera del árbol, o un lugar que no vale. */
   target: string | null;
   copy: boolean;
+  /** Afuera del árbol, sobre la terminal de un agente: se le menciona en vez de moverlo. */
+  terminal: string | null;
 }
 
 /** Copiar al arrastrar: Alt en macOS, Ctrl en el resto — lo mismo que VS Code y que el
@@ -345,15 +347,7 @@ export function FilesView({ cwd, repo, title }: {
   }, [sendMenu, agents]);
 
   const sendTo = (tabId: string, entry: DirEntry) => {
-    const tab = useTabsStore.getState().tabs.find((x) => x.id === tabId);
-    if (!tab) return;
-    if (!pasteIntoTab(tabId, `${fileMention(entry.path, tab.cwd, entry.isDir)} `, false)) {
-      setError(t("forge.agent.notRunning"));
-      return;
-    }
-    useTabsStore.getState().activateTab(tabId);
-    useViewTabsStore.getState().showTerminal();
-    focusTab(tabId);
+    if (!dropFilesOnTab(tabId, [{ path: entry.path, isDir: entry.isDir }])) setError(t("forge.agent.notRunning"));
   };
 
   const sendItems = (entry: DirEntry): ContextMenuItem[] =>
@@ -423,6 +417,8 @@ export function FilesView({ cwd, repo, title }: {
       const copy = wantsCopy(ev);
       const hit = dropDirAt(ev.clientX, ev.clientY);
       const target = hit && canDrop(entry.path, hit.dir, copy) ? hit.dir : null;
+      const terminal = hit ? null : terminalTabAt(ev.clientX, ev.clientY);
+      setFileDropTarget(terminal);
 
       // Quedarse sobre una carpeta cerrada la abre: si no, soltar en una subcarpeta que no
       // se ve obligaría a abrirla antes de empezar a arrastrar.
@@ -432,7 +428,7 @@ export function FilesView({ cwd, repo, title }: {
         if (over) hoverTimer.current = { dir: over, id: window.setTimeout(() => expand(over), HOVER_EXPAND_MS) };
       }
 
-      last = { path: entry.path, name: entry.name, x: ev.clientX, y: ev.clientY, target, copy };
+      last = { path: entry.path, name: entry.name, x: ev.clientX, y: ev.clientY, target, copy, terminal };
       setDrag(last);
     };
 
@@ -441,12 +437,19 @@ export function FilesView({ cwd, repo, title }: {
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       clearHover();
+      setFileDropTarget(null);
       if (!dragging) return;
       justDragged.current = true;
       // Si el `click` no llega (se soltó fuera de la fila), que no quede armado.
       window.setTimeout(() => { justDragged.current = false; }, 0);
       setDrag(null);
       const done = last;
+      if (ev.type !== "pointercancel" && done?.terminal) {
+        if (!dropFilesOnTab(done.terminal, [{ path: done.path, isDir: entry.isDir }])) {
+          setError(t("forge.agent.notRunning"));
+        }
+        return;
+      }
       if (ev.type === "pointercancel" || !done?.target) return;
       const dir = done.target;
       const copy = wantsCopy(ev);
@@ -685,7 +688,8 @@ export function FilesView({ cwd, repo, title }: {
             text-gray-700 dark:text-gray-200"
         >
           {drag.copy && drag.target && <span className="font-bold text-emerald-500">+</span>}
-          <span className={drag.target ? "" : "opacity-50"}>{drag.name}</span>
+          {drag.terminal && <span className="font-bold text-blue-500">@</span>}
+          <span className={drag.target || drag.terminal ? "" : "opacity-50"}>{drag.name}</span>
         </div>,
         document.body
       )}

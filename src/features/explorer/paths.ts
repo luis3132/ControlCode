@@ -58,14 +58,46 @@ export function remapPath(path: string, from: string, to: string): string | null
 }
 
 /**
+ * `path` vista desde `from`, con `/` y `..` si hace falta: `../otro/a.ts`. `"."` si son la
+ * misma. `null` si no hay camino relativo: en Windows, otra unidad (`D:` desde `C:`).
+ */
+export function relativePath(from: string, path: string): string | null {
+  const split = (p: string) => comparablePath(p).split("/").filter(Boolean);
+  const a = split(from);
+  const b = split(path);
+  // La unidad de Windows es la raíz: entre dos distintas no se puede subir y bajar.
+  const drive = (parts: string[]) => (/^[a-z]:$/.test(parts[0] ?? "") ? parts[0] : "");
+  if (drive(a) !== drive(b)) return null;
+  let common = 0;
+  while (common < a.length && common < b.length && a[common] === b[common]) common++;
+  const rel = [...Array(a.length - common).fill(".."), ...b.slice(common)].join("/");
+  return rel || ".";
+}
+
+/**
  * Cómo se le nombra un archivo o carpeta a un agente: `@ruta` relativa a su carpeta, que
- * es la mención que entienden Claude Code, Codex, Gemini y OpenCode. Fuera de su carpeta va
- * la absoluta. Una ruta con espacios cortaría la mención: va entre comillas, sin `@`.
+ * es la mención que entienden Claude Code, Codex, Gemini y OpenCode. Afuera de su carpeta
+ * también va relativa (`@../otro/a.ts`), igual que la escribiría uno; la absoluta queda solo
+ * para lo que no tiene camino relativo (otra unidad en Windows). Siempre `@ruta`, sin
+ * comillas, aunque tenga espacios: es la forma que escribe uno y la que esperan las TUIs.
  */
 export function fileMention(path: string, agentCwd: string, isDir: boolean): string {
-  const rel = isInside(path, agentCwd)
-    ? comparablePath(path).slice(comparablePath(agentCwd).replace(/\/+$/, "").length + 1) || "."
-    : path;
-  const shown = isDir && !/[\\/]$/.test(rel) ? `${rel}/` : rel;
-  return /\s/.test(shown) ? `"${shown}"` : `@${shown}`;
+  const rel = relativePath(agentCwd, path) ?? path;
+  return `@${isDir && !/[\\/]$/.test(rel) ? `${rel}/` : rel}`;
+}
+
+/** Una ruta lista para un shell: entre comillas simples si hace falta (las de adentro se
+ *  cierran y se escapan, `'\''`), tal cual si no tiene nada que el shell interprete. */
+export function shellQuote(path: string): string {
+  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Lo que se escribe en una terminal al soltarle archivos: a un agente, sus menciones
+ * (`@src/a.ts`); a un shell pelado, las rutas absolutas citadas, que es lo que haría
+ * cualquier terminal. Con un espacio al final, para seguir escribiendo la pregunta.
+ */
+export function dropText(files: { path: string; isDir: boolean }[], cwd: string, isShell: boolean): string {
+  const parts = files.map((f) => (isShell ? shellQuote(f.path) : fileMention(f.path, cwd, f.isDir)));
+  return parts.length ? `${parts.join(" ")} ` : "";
 }

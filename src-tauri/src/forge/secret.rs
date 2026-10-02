@@ -111,6 +111,16 @@ pub fn load(data_dir: &Path, id: &str) -> Result<Secret, String> {
     Ok(secret)
 }
 
+/// Lo que hay en el llavero AHORA, sin pasar por la copia en memoria (que queda al día).
+///
+/// La copia en memoria es de esta instancia: si otra Control Code abierta renovó el token,
+/// el llavero tiene el par nuevo y acá sigue el viejo — y el refresh token viejo ya no sirve
+/// (GitHub y GitLab lo rotan en cada renovación). Antes de renovar se mira acá.
+pub fn load_fresh(data_dir: &Path, id: &str) -> Result<Secret, String> {
+    CACHE.lock().unwrap().remove(id);
+    load(data_dir, id)
+}
+
 /// Dónde está guardado, sin leerlo. Para mostrarlo en la cuenta.
 pub fn storage_of(data_dir: &Path, id: &str) -> Storage {
     if file_path(data_dir, id).exists() {

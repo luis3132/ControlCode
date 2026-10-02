@@ -1,7 +1,12 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabsStore } from "@/features/tabs/store";
-import { ptyAttach } from "@/features/terminal/ipc";
+import { ptyAttach, ptyCwd } from "@/features/terminal/ipc";
+import { rememberShellCwd } from "@/features/terminal/shellCwd";
+import { SHELL_AGENT_ID } from "@/features/tabs/types";
+import { discoverSessionId } from "@/features/sessions/ipc";
+import { isResumable } from "@/features/sessions/agentResume";
+import { LOOKBACK_S } from "@/features/terminal/sessionDiscovery";
 import { saveWindowState } from "./ipc";
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -115,6 +120,14 @@ async function saveNow(
     }))
   );
 
+  // La carpeta de cada terminal pelada, para volver ahí al reabrir (ver `shellCwd.ts`). En
+  // Linux y macOS se le pregunta al sistema; en Windows ya la avisó el propio PowerShell.
+  await Promise.all(
+    tabs
+      .filter((t) => t.agentId === SHELL_AGENT_ID && t.ptyId != null)
+      .map((t) => ptyCwd(t.ptyId!).then((path) => { if (path) rememberShellCwd(t.id, path); }, () => {}))
+  );
+
   // Podar entradas de PTYs que ya no pertenecen a ninguna tab de esta ventana (cerradas,
   // transferidas a otra ventana) — el Map, si no, crece sin límite durante toda la sesión.
   const liveIds = new Set(tabs.map((t) => t.ptyId).filter((id): id is number => id != null));
@@ -198,9 +211,37 @@ export async function saveForClose(progress: SaveProgress): Promise<void> {
   // y pisar a este.
   await saveChain;
   frozen = true;
+  await lastChanceSessions();
   const run = () => saveNow({ refreshScrollback: true }, progress);
   saveChain = saveChain.then(run, run);
   await saveChain;
+}
+
+/** Cuánto se le da, como mucho, al último intento de descubrir sesiones al cerrar. */
+const LAST_CHANCE_MS = 3_000;
+
+/**
+ * Antes de guardar por última vez, las tabs de agente que todavía no saben su sesión la
+ * buscan una vez más. Sin id, al reabrir la app el agente arranca de cero aunque haya una
+ * conversación entera en disco. Con tope de tiempo: cerrar no puede quedar esperando.
+ */
+async function lastChanceSessions(): Promise<void> {
+  const { tabs, setSessionId } = useTabsStore.getState();
+  const pending = tabs.filter((t) => !t.sessionId && t.agentId !== SHELL_AGENT_ID && isResumable(t.agentId));
+  if (pending.length === 0) return;
+  const lookups = Promise.all(
+    pending.map((t) =>
+      discoverSessionId({
+        agentId: t.agentId,
+        cwd: t.cwd,
+        startedAfter: t.openedAt - LOOKBACK_S,
+        accountId: t.accountId ?? null,
+      })
+        .then((id) => { if (id) setSessionId(t.id, id); })
+        .catch(() => {})
+    )
+  );
+  await Promise.race([lookups, new Promise((resolve) => setTimeout(resolve, LAST_CHANCE_MS))]);
 }
 
 const HYDRATION_TIMEOUT_MS = 5_000;

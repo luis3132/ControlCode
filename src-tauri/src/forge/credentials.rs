@@ -30,25 +30,100 @@ pub(super) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + '
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())
 }
 
-/// El token de la cuenta, renovado si venció (o está por vencer).
+/// Vence en menos de un minuto (o ya venció): hay que renovarlo antes de usarlo.
+pub(super) fn expiring(secret: &Secret, now: i64) -> bool {
+    secret.expires_at.is_some_and(|at| at - 60 < now)
+}
+
+/// Una renovación a la vez en esta instancia: dos pedidos que encuentran el token vencido a
+/// la vez renovarían los dos con el mismo refresh token, y el segundo fallaría (ya rotó).
+static REFRESHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Cuánto se espera, y cuántas veces, a que otra instancia termine de guardar el token que
+/// acaba de renovar con el mismo refresh token.
+const RETRY_AFTER: [std::time::Duration; 2] =
+    [std::time::Duration::from_millis(400), std::time::Duration::from_millis(1500)];
+
+/// Cómo se consigue un token usable, sin llavero ni red (se pasan), para poder probarlo.
+///
+/// Con varias Control Code abiertas el llavero es uno solo pero cada una tiene su copia en
+/// memoria, y el refresh token rota en cada renovación: renovar con la copia propia, si otra
+/// instancia ya renovó, da "la sesión venció" aunque la sesión esté perfecta. Por eso:
+///
+/// 1. Con el token vigente, se usa.
+/// 2. Vencido, se relee el llavero: si otra instancia ya lo renovó, ese sirve.
+/// 3. Si no, se renueva. Si falla, se relee un par de veces: otra instancia pudo haber
+///    renovado en el mismo momento, ganó, y su par es el válido.
+///
+/// Devuelve el token y, si hubo que renovar, el secreto nuevo a guardar.
+pub(super) async fn resolve_token<RF, R, NF, N>(
+    cached: Secret,
+    now: i64,
+    reload: R,
+    refresh: N,
+    retry_after: &[std::time::Duration],
+) -> Result<(String, Option<Secret>), String>
+where
+    R: Fn() -> RF,
+    RF: std::future::Future<Output = Result<Secret, String>>,
+    N: FnOnce(String) -> NF,
+    NF: std::future::Future<Output = Result<Secret, String>>,
+{
+    if !expiring(&cached, now) {
+        return Ok((cached.access_token, None));
+    }
+    let stored = reload().await.unwrap_or(cached);
+    if !expiring(&stored, now) {
+        return Ok((stored.access_token, None));
+    }
+    // Sin con qué renovar (un token personal): se usa el que hay, y que el host diga.
+    let Some(refresh_token) = stored.refresh_token.clone() else {
+        return Ok((stored.access_token, None));
+    };
+    match refresh(refresh_token.clone()).await {
+        Ok(fresh) => Ok((fresh.access_token.clone(), Some(fresh))),
+        Err(e) => {
+            for wait in retry_after {
+                tokio::time::sleep(*wait).await;
+                if let Ok(again) = reload().await
+                    && again.refresh_token.as_deref() != Some(refresh_token.as_str())
+                    && !expiring(&again, now)
+                {
+                    return Ok((again.access_token, None));
+                }
+            }
+            Err(e)
+        }
+    }
+}
+
+/// El token de la cuenta, renovado si venció (o está por vencer). Ver [`resolve_token`].
 pub(super) async fn token(app: &tauri::AppHandle, account: &GitAccount) -> Result<String, ForgeError> {
     let dir = data_dir(app)?;
     let id = account.id.clone();
     let load_dir = dir.clone();
-    let secret: Secret = blocking(move || secret::load(&load_dir, &id))
+    let cached: Secret = blocking(move || secret::load(&load_dir, &id))
         .await?
         .map_err(ForgeError::Auth)?;
-    let expiring = secret.expires_at.is_some_and(|at| at - 60 < now_ts());
-    match (&secret.refresh_token, expiring) {
-        (Some(refresh), true) => {
-            let fresh = oauth::refresh(account.kind, &account.host, refresh).await.map_err(ForgeError::Auth)?;
-            let token = fresh.access_token.clone();
-            let id = account.id.clone();
-            blocking(move || secret::save(&dir, &id, &fresh)).await??;
-            Ok(token)
-        }
-        _ => Ok(secret.access_token),
+    if !expiring(&cached, now_ts()) {
+        return Ok(cached.access_token);
     }
+
+    let _one_at_a_time = REFRESHING.lock().await;
+    let reload = || {
+        let (dir, id) = (dir.clone(), account.id.clone());
+        async move { blocking(move || secret::load_fresh(&dir, &id)).await? }
+    };
+    let (kind, host) = (account.kind, account.host.clone());
+    let refresh = |token: String| async move { oauth::refresh(kind, &host, &token).await };
+    let (token, fresh) = resolve_token(cached, now_ts(), reload, refresh, &RETRY_AFTER)
+        .await
+        .map_err(ForgeError::Auth)?;
+    if let Some(fresh) = fresh {
+        let id = account.id.clone();
+        blocking(move || secret::save(&dir, &id, &fresh)).await??;
+    }
+    Ok(token)
 }
 
 /// Qué repo es y con qué cuenta se trabaja en él.

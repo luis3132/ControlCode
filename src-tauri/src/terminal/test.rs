@@ -362,3 +362,38 @@ fn el_comando_se_parte_respetando_las_comillas() {
     assert_eq!(split_command("agente --flag \"\""), vec!["agente", "--flag", ""]);
     assert!(split_command("   ").is_empty());
 }
+
+mod shell {
+    use super::super::shell::{encoded_command, process_cwd, resolve, SHELL_COMMAND};
+
+    #[test]
+    fn solo_la_terminal_pelada_cambia_de_comando() {
+        assert_eq!(resolve("claude --resume x"), "claude --resume x");
+        #[cfg(not(windows))]
+        assert_eq!(resolve(SHELL_COMMAND), "bash");
+        #[cfg(windows)]
+        assert!(resolve(SHELL_COMMAND).contains("-EncodedCommand"));
+    }
+
+    /// `-EncodedCommand` es UTF-16LE en base64: "a" es `61 00`.
+    #[test]
+    fn el_script_de_powershell_va_en_utf16le() {
+        assert_eq!(encoded_command("a"), "YQA=");
+        assert_eq!(encoded_command("dir"), "ZABpAHIA");
+    }
+
+    /// La carpeta de un proceso de verdad que hizo `cd`.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn la_carpeta_actual_de_un_proceso() {
+        let dir = std::env::temp_dir().canonicalize().unwrap();
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "sleep 5"])
+            .current_dir(&dir)
+            .spawn()
+            .unwrap();
+        let cwd = process_cwd(child.id());
+        let _ = child.kill();
+        assert_eq!(cwd.map(std::path::PathBuf::from).map(|p| p.canonicalize().unwrap()), Some(dir));
+    }
+}

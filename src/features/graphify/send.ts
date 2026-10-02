@@ -17,7 +17,7 @@ import { useTabsStore } from "@/features/tabs/store";
 /** La TUI de emergencia: una terminal pelada, que es donde corre un comando del sistema. */
 const SHELL_AGENT: AgentInfo = {
   id: "bash",
-  label: "Terminal (bash)",
+  label: "Terminal",
   command: "bash",
   available: true,
 };
