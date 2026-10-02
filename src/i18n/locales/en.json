@@ -95,6 +95,7 @@
   "sidebar.settings": "Settings",
   "tabs.new": "New terminal",
   "terminal.empty": "Open a project from Home to get started",
+  "terminal.dropHint": "Drop to mention it to the agent",
   "terminal.status.connecting": "connecting",
   "terminal.status.exited": "exited",
   "terminal.exitCode": "[Process exited with code {{code}}]",

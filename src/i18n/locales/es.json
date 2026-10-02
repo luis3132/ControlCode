@@ -95,6 +95,7 @@
   "sidebar.settings": "Configuración",
   "tabs.new": "Nueva terminal",
   "terminal.empty": "Abre un proyecto desde Home para empezar",
+  "terminal.dropHint": "Soltá para mencionarlo al agente",
   "terminal.status.connecting": "conectando",
   "terminal.status.exited": "terminado",
   "terminal.exitCode": "[Proceso terminado con código {{code}}]",

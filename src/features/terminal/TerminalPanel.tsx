@@ -1,4 +1,5 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import { Terminal } from "@/features/terminal/Terminal";
@@ -6,6 +7,10 @@ import { useTabsStore } from "@/features/tabs/store";
 import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
 import { buildResumeCommand, isResumable } from "@/features/sessions/agentResume";
+import { readDir } from "@/features/explorer/ipc";
+import {
+  dropFilesOnTab, setFileDropTarget, terminalTabAt, TERMINAL_TAB_ATTR, useFileDropTarget,
+} from "@/features/terminal/fileDrop";
 
 export function TerminalPanel() {
   const { t } = useTranslation();
@@ -22,6 +27,51 @@ export function TerminalPanel() {
   // Una oculta se queda con el último lugar que tuvo: cambiarle el tamaño sin que se vea le
   // mandaría a su TUI un resize para nada, y otro al volver a mostrarse.
   const lastRect = useRef(new Map<string, Rect | null>());
+  const dropTarget = useFileDropTarget((s) => s.tabId);
+
+  // Archivos soltados desde el gestor de archivos del sistema. El webview no los ve como
+  // un drop de HTML: Tauri se queda con el arrastre de la ventana (en Windows, siempre) y
+  // avisa con las rutas y la posición, en píxeles físicos.
+  useEffect(() => {
+    if (!onWorkspace) return;
+    const at = (p: { x: number; y: number }) =>
+      terminalTabAt(p.x / window.devicePixelRatio, p.y / window.devicePixelRatio);
+    const unlisten = getCurrentWebview().onDragDropEvent(({ payload }) => {
+      if (payload.type === "leave") {
+        setFileDropTarget(null);
+        return;
+      }
+      const tabId = at(payload.position);
+      if (payload.type !== "drop") {
+        setFileDropTarget(tabId);
+        return;
+      }
+      setFileDropTarget(null);
+      if (!tabId || payload.paths.length === 0) return;
+      // Si es carpeta no viene dicho: se pregunta, para que la mención termine en `/`.
+      Promise.all(payload.paths.map((path) => readDir(path).then(() => true, () => false)))
+        .then((dirs) => dropFilesOnTab(tabId, payload.paths.map((path, i) => ({ path, isDir: dirs[i] }))))
+        .catch(console.error);
+    });
+    // Si además el webview recibe el drop (según el sistema, le llega igual), lo suelta en
+    // el textarea de xterm como texto: la ruta del gestor de archivos, citada
+    // (`'/home/…/a.ts'`). Sobre una terminal no se deja: lo que se escribe es la mención.
+    const swallow = (e: DragEvent) => {
+      const types = Array.from(e.dataTransfer?.types ?? []);
+      if (!types.includes("Files") && !types.includes("text/uri-list")) return;
+      if (!(e.target instanceof Element) || !e.target.closest(`[${TERMINAL_TAB_ATTR}]`)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener("dragover", swallow, true);
+    window.addEventListener("drop", swallow, true);
+    return () => {
+      unlisten.then((stop) => stop()).catch(() => {});
+      window.removeEventListener("dragover", swallow, true);
+      window.removeEventListener("drop", swallow, true);
+      setFileDropTarget(null);
+    };
+  }, [onWorkspace]);
 
   return (
     // h-full en lugar de flex-1: el padre es position:absolute;inset:0 (no flex),
@@ -46,8 +96,18 @@ export function TerminalPanel() {
               pointerEvents: shown ? "auto" : "none",
               zIndex: shown ? 1 : 0,
             }}
+            {...{ [TERMINAL_TAB_ATTR]: tab.id }}
             onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
           >
+            {dropTarget === tab.id && (
+              <div className="absolute inset-1 z-10 pointer-events-none flex items-end justify-center pb-6
+                rounded-lg border-2 border-dashed border-blue-500/70 bg-blue-500/8">
+                <span className="px-3 py-1.5 rounded-md text-[12px] font-medium shadow-lg
+                  bg-blue-600 text-white">
+                  {t("terminal.dropHint")}
+                </span>
+              </div>
+            )}
             <Terminal
               // El nonce en la key: reiniciar el agente desmonta esta terminal (lo que mata
               // su proceso) y monta otra, que relanza con `--resume`.

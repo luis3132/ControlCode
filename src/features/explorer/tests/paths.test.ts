@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canDrop, dirFor, fileMention, isInside, joinPath, parentDir, remapPath } from "../paths";
+import { canDrop, dirFor, dropText, fileMention, isInside, joinPath, parentDir, relativePath, remapPath } from "../paths";
 
 describe("parentDir / joinPath", () => {
   it("respeta el separador de cada sistema", () => {
@@ -59,9 +59,34 @@ describe("fileMention", () => {
     expect(fileMention("/p", "/p", true)).toBe("@./");
   });
 
-  it("afuera de su carpeta, la absoluta; con espacios, entre comillas", () => {
-    expect(fileMention("/otra/a.ts", "/p", false)).toBe("@/otra/a.ts");
-    expect(fileMention("/p/mis docs/a.md", "/p", false)).toBe('"mis docs/a.md"');
+  it("afuera de su carpeta, relativa con ..; absoluta solo en otra unidad; nunca entre comillas", () => {
+    expect(fileMention("/otra/a.ts", "/p", false)).toBe("@../otra/a.ts");
+    expect(fileMention("/home/u/proyectos/lib/x.rs", "/home/u/proyectos/app/src", false)).toBe("@../../lib/x.rs");
+    expect(fileMention("/home/u/proyectos", "/home/u/proyectos/app", true)).toBe("@../");
+    expect(fileMention("D:\\datos\\a.csv", "C:\\p", false)).toBe("@D:\\datos\\a.csv");
+    expect(fileMention("/p/mis docs/a.md", "/p", false)).toBe("@mis docs/a.md");
     expect(fileMention("C:\\p\\src\\a.ts", "C:\\p", false)).toBe("@src/a.ts");
+  });
+});
+
+describe("dropText", () => {
+  it("a un agente, menciones; a un shell, rutas citadas", () => {
+    const files = [{ path: "/p/src/a.ts", isDir: false }, { path: "/p/mis docs", isDir: true }];
+    expect(dropText(files, "/p", false)).toBe("@src/a.ts @mis docs/ ");
+    expect(dropText(files, "/p", true)).toBe("/p/src/a.ts '/p/mis docs' ");
+    expect(dropText([{ path: "/p/it's.md", isDir: false }], "/p", true)).toBe("'/p/it'\\''s.md' ");
+    expect(dropText([], "/p", false)).toBe("");
+  });
+});
+
+describe("relativePath", () => {
+  it("sube con .. hasta lo común y baja", () => {
+    expect(relativePath("/p/app", "/p/app/src/a.ts")).toBe("src/a.ts");
+    expect(relativePath("/p/app", "/p/lib/b.ts")).toBe("../lib/b.ts");
+    expect(relativePath("/p/app/src", "/p/app")).toBe("..");
+    expect(relativePath("/p/app", "/p/app")).toBe(".");
+    expect(relativePath("/p/app2", "/p/app/a.ts")).toBe("../app/a.ts");
+    expect(relativePath("C:\\p\\app", "c:/p/lib/b.ts")).toBe("../lib/b.ts");
+    expect(relativePath("C:\\p", "D:\\q")).toBeNull();
   });
 });
