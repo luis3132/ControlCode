@@ -24,3 +24,5 @@ export const ptyResize = (id: number, cols: number, rows: number) =>
   invoke<void>("pty_resize", { id, cols, rows });
 
 export const ptyKill = (id: number) => invoke<void>("pty_kill", { id });
+/** La carpeta donde está parado ahora el shell. `null` = no se sabe desde afuera (Windows). */
+export const ptyCwd = (id: number) => invoke<string | null>("pty_cwd", { id });

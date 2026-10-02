@@ -24,6 +24,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Copiar y pegar en la terminal (ver `terminalKeys.ts`): leer el portapapeles desde el
+        // webview no es fiable en los tres motores, y en macOS pregunta cada vez.
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(crate::updates::plugin())
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
@@ -33,6 +36,7 @@ pub fn run() {
             crate::terminal::pty_write,
             crate::terminal::pty_resize,
             crate::terminal::pty_kill,
+            crate::terminal::pty_cwd,
             // Persistencia SQLite — workspaces (layouts guardados de ventanas/tabs)
             crate::database::db_list_workspaces,
             crate::database::db_save_workspace,

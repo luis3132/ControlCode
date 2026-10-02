@@ -137,3 +137,65 @@ describe("tecla muerta", () => {
     expect(handler(down("𝒂"))).toBe(false);
   });
 });
+
+describe("copiar y pegar", () => {
+  const clipboard = (isMac: boolean, selected: boolean) => ({
+    isMac,
+    hasSelection: () => selected,
+    copy: vi.fn(),
+    paste: vi.fn(),
+  });
+
+  it("Ctrl+C con selección copia y la quita; sin selección es ^C", () => {
+    const withSel = clipboard(false, true);
+    const ctrlC = down("c", { ctrlKey: true });
+    expect(createTerminalKeyHandler(() => {}, withSel)(ctrlC)).toBe(false);
+    expect(withSel.copy).toHaveBeenCalledWith(true);
+    expect(ctrlC.preventDefault).toHaveBeenCalled();
+
+    const noSel = clipboard(false, false);
+    expect(createTerminalKeyHandler(() => {}, noSel)(down("c", { ctrlKey: true }))).toBe(true);
+    expect(noSel.copy).not.toHaveBeenCalled();
+  });
+
+  it("Ctrl+Shift+C copia sin quitar la selección y Ctrl+Shift+V pega", () => {
+    const clip = clipboard(false, true);
+    const handler = createTerminalKeyHandler(() => {}, clip);
+    expect(handler(down("C", { ctrlKey: true, shiftKey: true }))).toBe(false);
+    expect(clip.copy).toHaveBeenCalledWith(false);
+    expect(handler(down("V", { ctrlKey: true, shiftKey: true }))).toBe(false);
+    expect(clip.paste).toHaveBeenCalled();
+  });
+
+  it("Ctrl+Insert copia y Shift+Insert pega", () => {
+    const clip = clipboard(false, true);
+    const handler = createTerminalKeyHandler(() => {}, clip);
+    expect(handler(down("Insert", { ctrlKey: true }))).toBe(false);
+    expect(handler(down("Insert", { shiftKey: true }))).toBe(false);
+    expect(clip.copy).toHaveBeenCalled();
+    expect(clip.paste).toHaveBeenCalled();
+  });
+
+  it("Ctrl+V lo sigue manejando la TUI (Claude Code pega imágenes con él)", () => {
+    const clip = clipboard(false, true);
+    expect(createTerminalKeyHandler(() => {}, clip)(down("v", { ctrlKey: true }))).toBe(true);
+    expect(clip.paste).not.toHaveBeenCalled();
+  });
+
+  it("en macOS es ⌘C / ⌘V, y Ctrl+C sigue siendo ^C aunque haya selección", () => {
+    const clip = clipboard(true, true);
+    const handler = createTerminalKeyHandler(() => {}, clip);
+    expect(handler(down("c", { metaKey: true }))).toBe(false);
+    expect(handler(down("v", { metaKey: true }))).toBe(false);
+    expect(clip.copy).toHaveBeenCalledWith(false);
+    expect(clip.paste).toHaveBeenCalled();
+    expect(handler(down("c", { ctrlKey: true }))).toBe(true);
+  });
+
+  it("copiar sin nada seleccionado no hace nada pero no le llega a la TUI", () => {
+    const clip = clipboard(false, false);
+    const e = down("C", { ctrlKey: true, shiftKey: true });
+    expect(createTerminalKeyHandler(() => {}, clip)(e)).toBe(false);
+    expect(clip.copy).not.toHaveBeenCalled();
+  });
+});

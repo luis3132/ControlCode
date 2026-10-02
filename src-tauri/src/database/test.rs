@@ -961,3 +961,37 @@ fn migrar_a_v15_agrega_el_ruteo_sin_tocar_las_tareas() {
     assert_eq!(model, "opus", "la tarea que ya estaba sigue igual");
     assert_eq!((complexity, routed_by, note), (None, None, None));
 }
+
+/// Varias Control Code abiertas comparten `data.db`. Arrancando a la vez (una se reinicia
+/// tras actualizar con otra abierta) y escribiendo a la vez, ninguna puede fallar con
+/// "database is locked" ni aplicar dos veces la misma migración.
+#[test]
+fn varias_instancias_arrancan_y_escriben_la_misma_base_a_la_vez() {
+    let dir = std::env::temp_dir().join(format!("cc-db-multi-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("data.db");
+
+    let handles: Vec<_> = (0..6)
+        .map(|i| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let db = super::connection::init_db_at(&path).expect("arranca");
+                let conn = db.lock().unwrap();
+                conn.execute_batch("CREATE TABLE IF NOT EXISTS pruebas (n INTEGER)").unwrap();
+                for k in 0..50 {
+                    conn.execute("INSERT INTO pruebas (n) VALUES (?1)", [i * 1000 + k]).expect("escribe sin 'locked'");
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().expect("ningún hilo falló");
+    }
+
+    let conn = Connection::open(&path).unwrap();
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM pruebas", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 300);
+    let mode: String = conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
+    assert_eq!(mode, "wal");
+    std::fs::remove_dir_all(dir).ok();
+}

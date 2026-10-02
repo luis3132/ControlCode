@@ -41,9 +41,14 @@ export const useAgentsStore = create<AgentsState>()((set, get) => ({
   loaded: false,
 
   loadCustomAgents: async () => {
-    if (!get().loaded) await migrateLegacyAgents();
-    const customAgents = await ipc.listCustomAgents();
-    set({ customAgents, loaded: true });
+    try {
+      if (!get().loaded) await migrateLegacyAgents();
+      set({ customAgents: await ipc.listCustomAgents() });
+    } finally {
+      // Cargado aunque haya fallado: las terminales de TUIs custom esperan esto para
+      // lanzarse (ver `TerminalPanel`), y no pueden quedarse esperando para siempre.
+      set({ loaded: true });
+    }
   },
 
   saveCustomAgent: async (agent) => {

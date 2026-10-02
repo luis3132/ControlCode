@@ -8,12 +8,19 @@ import { discoverSessionId } from "@/features/sessions/ipc";
  * cada intento sale a disco: codex/gemini-cli/kimi-code leen la metadata de las sesiones
  * candidatas y opencode levanta un proceso (~0.9s). Repetir eso cada 3s indefinidamente
  * durante toda la vida de una tab que jamás llega a resolverse (agente sin sesión, cwd sin
- * permisos, etc.) es I/O desperdiciado sin límite: de ahí el backoff y el tope de intentos.
+ * permisos, etc.) es I/O desperdiciado: de ahí el backoff.
+ *
+ * Pero no se rinde. Antes cortaba a la media hora, y una tab abierta que esperó más que
+ * eso su primer mensaje (Claude Code recién crea el transcript ahí) se quedaba sin sesión
+ * para siempre: al reabrir la app arrancaba de cero. Pasado el tramo rápido sigue, muy de
+ * vez en cuando, mientras la tab esté viva.
  */
 const INITIAL_MS = 3000;
 const MAX_INTERVAL_MS = 30_000;
-/** Con el backoff, cubre ~35 minutos antes de rendirse. */
-const MAX_ATTEMPTS = 60;
+/** Cuántos intentos con el backoff normal (~26 minutos). */
+const FAST_ATTEMPTS = 60;
+/** Después, uno cada tanto: lo justo para enterarse cuando por fin aparezca. */
+const SLOW_INTERVAL_MS = 120_000;
 
 /**
  * Margen de seguridad hacia atrás para el piso temporal: los timestamps de archivo tienen
@@ -58,8 +65,10 @@ export function startSessionDiscovery(opts: DiscoveryOptions): () => void {
     } catch {
       // ignorar, se reintenta
     }
-    if (!cancelled && attempts < MAX_ATTEMPTS) {
-      const delay = Math.min(INITIAL_MS * 2 ** Math.floor(attempts / 3), MAX_INTERVAL_MS);
+    if (!cancelled) {
+      const delay = attempts < FAST_ATTEMPTS
+        ? Math.min(INITIAL_MS * 2 ** Math.floor(attempts / 3), MAX_INTERVAL_MS)
+        : SLOW_INTERVAL_MS;
       timer = setTimeout(attempt, delay);
     }
   };

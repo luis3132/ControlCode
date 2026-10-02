@@ -221,7 +221,9 @@ pub async fn pty_create(
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-    let mut cmd = build_launch(&command, &prelaunch.unwrap_or_default());
+    // La terminal pelada se resuelve acá y no en el catálogo: así también una tab guardada
+    // con `bash` abre PowerShell en Windows (ver `shell::resolve`).
+    let mut cmd = build_launch(&super::shell::resolve(&command), &prelaunch.unwrap_or_default());
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
@@ -404,6 +406,15 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
 /// En Windows hay además una segunda red que NO depende de que esto llegue a correr: el
 /// job tiene `KILL_ON_JOB_CLOSE`, así que un cierre forzado desde el Administrador de
 /// tareas igual se lleva todo cuando el kernel cierra los handles del proceso muerto.
+/// La carpeta donde está parado ahora el shell de la tab, para volver ahí al reabrir la
+/// app. `None` = no se puede saber desde afuera (Windows: la informa el propio PowerShell
+/// por OSC 9;9, ver `shell::POWERSHELL_INTEGRATION`).
+#[tauri::command]
+pub fn pty_cwd(id: u32) -> Option<String> {
+    let pid = registry().get(&id).and_then(|s| s.killer.process_id())?;
+    super::shell::process_cwd(pid)
+}
+
 pub fn kill_all_sessions() {
     let sessions: Vec<PtySession> = registry().drain().map(|(_, s)| s).collect();
     for mut session in sessions {

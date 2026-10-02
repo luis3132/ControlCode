@@ -1,6 +1,6 @@
 [package]
 name = "controlcode"
-version = "1.8.6"
+version = "1.8.8"
 description = "Control Code — AI coding agent command center"
 authors = ["luis3132"]
 edition = "2024"
@@ -85,6 +85,7 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "zip"] }
 trash = "5"
+tauri-plugin-clipboard-manager = "2"
 
 # Señales POSIX: matar el GRUPO de procesos de una tab y no solo a su líder, para que no
 # queden huérfanos los procesos que el agente haya lanzado (ver terminal::pty_manager).

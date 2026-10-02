@@ -69,13 +69,23 @@ describe("startSessionDiscovery", () => {
     expect(discover.mock.calls.length - antes).toBeLessThan(trasNueveSegundos);
   });
 
-  it("se rinde tras el tope de intentos en vez de sondear para siempre", async () => {
+  /// Antes se rendía a los ~26 minutos y una tab que tardó más en recibir su primer
+  /// mensaje quedaba sin sesión para siempre (al reabrir, arrancaba de cero). Ahora sigue,
+  /// cada 2 minutos.
+  it("pasado el tramo rápido sigue buscando, de a poco", async () => {
     discover.mockResolvedValue(null);
-    startSessionDiscovery({ ...OPTS, onFound: vi.fn() });
+    const onFound = vi.fn();
+    startSessionDiscovery({ ...OPTS, onFound });
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    const afterAnHour = discover.mock.calls.length;
+    expect(afterAnHour).toBeGreaterThan(60);
+    // De a uno cada 2 minutos: no martilla.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(discover.mock.calls.length).toBe(afterAnHour + 1);
 
-    // Muy por encima de la ventana que cubre el backoff (~35 minutos).
-    await vi.advanceTimersByTimeAsync(4 * 3600 * 1000);
-    expect(discover.mock.calls.length).toBeLessThanOrEqual(60);
+    discover.mockResolvedValue("sess-tarde");
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(onFound).toHaveBeenCalledExactlyOnceWith("sess-tarde");
   });
 
   it("un error no corta el sondeo: se reintenta", async () => {
