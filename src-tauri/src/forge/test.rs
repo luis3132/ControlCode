@@ -302,3 +302,118 @@ fn las_etiquetas_se_leen_igual_de_cualquier_host() {
     assert_eq!(gl.description, None);
     assert!(label_from(&serde_json::json!({ "color": "fff" })).is_none());
 }
+
+// ── Varias Control Code abiertas con la misma cuenta ─────────────
+
+mod renovar_con_varias_instancias {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use super::super::credentials::resolve_token;
+    use super::super::secret::Secret;
+
+    const NOW: i64 = 1_000_000;
+
+    fn secret(access: &str, refresh: &str, expires_at: i64) -> Secret {
+        Secret { access_token: access.into(), refresh_token: Some(refresh.into()), expires_at: Some(expires_at) }
+    }
+
+    /// El llavero compartido entre instancias, y cuántas veces se renovó contra el host.
+    struct World {
+        keyring: Mutex<Secret>,
+        refreshes: AtomicUsize,
+    }
+
+    async fn run(world: Arc<World>, cached: Secret) -> Result<(String, Option<Secret>), String> {
+        let w = world.clone();
+        let reload = move || {
+            let w = w.clone();
+            async move { Ok(w.keyring.lock().unwrap().clone()) }
+        };
+        let w = world.clone();
+        let refresh = move |token: String| async move {
+            w.refreshes.fetch_add(1, Ordering::SeqCst);
+            // El host acepta solo el refresh token vigente, y lo rota.
+            let mut k = w.keyring.lock().unwrap();
+            if k.refresh_token.as_deref() != Some(token.as_str()) {
+                return Err("La sesión venció; volvé a iniciar sesión".to_string());
+            }
+            *k = secret("nuevo", "r2", NOW + 3600);
+            Ok(k.clone())
+        };
+        resolve_token(cached, NOW, reload, refresh, &[std::time::Duration::from_millis(1)]).await
+    }
+
+    #[tokio::test]
+    async fn vigente_se_usa_sin_tocar_el_llavero() {
+        let world = Arc::new(World { keyring: Mutex::new(secret("a", "r1", NOW + 3600)), refreshes: AtomicUsize::new(0) });
+        let (token, fresh) = run(world.clone(), secret("a", "r1", NOW + 3600)).await.unwrap();
+        assert_eq!((token.as_str(), fresh.is_none()), ("a", true));
+        assert_eq!(world.refreshes.load(Ordering::SeqCst), 0);
+    }
+
+    /// Lo que pasaba: otra instancia ya renovó (el llavero tiene r2) y esta todavía tiene
+    /// r1 en memoria. Renovar con r1 fallaba con "la sesión venció".
+    #[tokio::test]
+    async fn si_otra_instancia_ya_renovo_se_usa_lo_suyo() {
+        let world = Arc::new(World { keyring: Mutex::new(secret("nuevo", "r2", NOW + 3600)), refreshes: AtomicUsize::new(0) });
+        let (token, fresh) = run(world.clone(), secret("viejo", "r1", NOW - 10)).await.unwrap();
+        assert_eq!(token, "nuevo");
+        assert!(fresh.is_none(), "no hay nada nuevo que guardar");
+        assert_eq!(world.refreshes.load(Ordering::SeqCst), 0, "ni se le preguntó al host");
+    }
+
+    #[tokio::test]
+    async fn vencido_en_todos_lados_se_renueva_y_se_guarda() {
+        let world = Arc::new(World { keyring: Mutex::new(secret("viejo", "r1", NOW - 10)), refreshes: AtomicUsize::new(0) });
+        let (token, fresh) = run(world.clone(), secret("viejo", "r1", NOW - 10)).await.unwrap();
+        assert_eq!(token, "nuevo");
+        assert_eq!(fresh.and_then(|f| f.refresh_token).as_deref(), Some("r2"));
+    }
+
+    /// Las dos renovaron a la vez y ganó la otra: el host rechaza el refresh token de esta,
+    /// pero en el llavero ya está el par bueno.
+    #[tokio::test]
+    async fn si_otra_gano_la_carrera_se_toma_su_token() {
+        let world = Arc::new(World { keyring: Mutex::new(secret("viejo", "r1", NOW - 10)), refreshes: AtomicUsize::new(0) });
+        let w = world.clone();
+        let reload = {
+            let w = w.clone();
+            let calls = Arc::new(AtomicUsize::new(0));
+            move || {
+                let (w, calls) = (w.clone(), calls.clone());
+                async move {
+                    // La primera lectura es antes de que la otra guarde; las siguientes, después.
+                    if calls.fetch_add(1, Ordering::SeqCst) > 0 {
+                        *w.keyring.lock().unwrap() = secret("de-la-otra", "r9", NOW + 3600);
+                    }
+                    Ok(w.keyring.lock().unwrap().clone())
+                }
+            }
+        };
+        let refresh = |_token: String| async { Err::<Secret, _>("La sesión venció".to_string()) };
+        let (token, fresh) =
+            resolve_token(secret("viejo", "r1", NOW - 10), NOW, reload, refresh, &[std::time::Duration::from_millis(1)])
+                .await
+                .unwrap();
+        assert_eq!(token, "de-la-otra");
+        assert!(fresh.is_none());
+    }
+
+    #[tokio::test]
+    async fn si_de_verdad_vencio_se_dice() {
+        let world = Arc::new(World { keyring: Mutex::new(secret("viejo", "rX", NOW - 10)), refreshes: AtomicUsize::new(0) });
+        // El host no acepta rX (fue revocado) y nadie más renovó.
+        *world.keyring.lock().unwrap() = secret("viejo", "rX", NOW - 10);
+        let w = world.clone();
+        let reload = move || {
+            let w = w.clone();
+            async move { Ok(w.keyring.lock().unwrap().clone()) }
+        };
+        let refresh = |_t: String| async { Err::<Secret, _>("La sesión venció; volvé a iniciar sesión".to_string()) };
+        let err = resolve_token(secret("viejo", "rX", NOW - 10), NOW, reload, refresh, &[std::time::Duration::from_millis(1)])
+            .await
+            .unwrap_err();
+        assert!(err.contains("venció"));
+    }
+}
