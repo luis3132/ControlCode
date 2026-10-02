@@ -46,6 +46,18 @@ import { keyName } from "@/shared/keyboard";
  *
  * Lo que compone por IME (macOS, y Linux cuando el IME resuelve la tecla muerta) llega
  * marcado como composición y lo resuelve xterm por su lado.
+ *
+ * ## Copiar y pegar
+ *
+ * xterm no trae atajos de portapapeles, y el webview tampoco ayuda: Ctrl+C le llega al
+ * proceso como `^C` y Ctrl+Shift+C no hace nada. Los de siempre en una terminal:
+ *
+ * - Ctrl+Shift+C / Ctrl+Insert copian (⌘C en macOS). Ctrl+Shift+V / Shift+Insert pegan
+ *   (⌘V en macOS).
+ * - Ctrl+C **con texto seleccionado** copia y quita la selección, como Windows Terminal y
+ *   VS Code. Sin selección sigue siendo `^C`: interrumpir no puede depender de nada más.
+ * - Ctrl+V NO se toca: Claude Code lo usa para pegar una imagen del portapapeles, y la
+ *   TUI lo maneja ella.
  */
 
 /** Las teclas que pueden ir entre la tecla muerta y la letra sin romper la composición:
@@ -64,17 +76,66 @@ type KeyLike = Pick<
 /** Cómo entregarle a xterm un keydown corregido. */
 export type Redispatch = (init: KeyboardEventInit) => void;
 
+/** El portapapeles de la terminal, inyectado para poder probarlo sin xterm. */
+export interface TerminalClipboard {
+  hasSelection: () => boolean;
+  /** Copia lo seleccionado. Con `clear`, además quita la selección. */
+  copy: (clear: boolean) => void;
+  paste: () => void;
+  isMac: boolean;
+}
+
+/** Lo que el atajo hace con el portapapeles, si es uno de ellos. */
+export function clipboardAction(
+  event: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">,
+  isMac: boolean,
+  hasSelection: boolean,
+): "copy" | "copyAndClear" | "paste" | null {
+  if (event.altKey) return null;
+  const letter = event.key.length === 1 ? event.key.toLowerCase() : "";
+  if (isMac) {
+    if (!event.metaKey || event.ctrlKey) return null;
+    if (letter === "c") return "copy";
+    if (letter === "v") return "paste";
+    return null;
+  }
+  if (event.ctrlKey && !event.metaKey) {
+    if (event.shiftKey && letter === "c") return "copy";
+    if (event.shiftKey && letter === "v") return "paste";
+    if (!event.shiftKey && event.key === "Insert") return "copy";
+    if (!event.shiftKey && letter === "c" && hasSelection) return "copyAndClear";
+    return null;
+  }
+  if (event.shiftKey && !event.metaKey && event.key === "Insert") return "paste";
+  return null;
+}
+
 /**
  * Decide, evento por evento, si xterm procesa la tecla (`true`) o no (`false`). Es la
  * forma que espera `attachCustomKeyEventHandler`.
  */
-export function createTerminalKeyHandler(redispatch: Redispatch): (event: KeyLike) => boolean {
+export function createTerminalKeyHandler(
+  redispatch: Redispatch,
+  clipboard?: TerminalClipboard,
+): (event: KeyLike) => boolean {
   let deadPending = false;
 
   return (event) => {
     // El soltar de una tecla que xterm no vio apretarse tampoco le sirve.
     if (event.type === "keyup") return !COMPOSE_KEYS.has(event.key);
     if (event.type !== "keydown") return true;
+
+    const action = clipboard && !event.isComposing
+      ? clipboardAction(event, clipboard.isMac, clipboard.hasSelection())
+      : null;
+    if (clipboard && action) {
+      // Cancelado siempre: el webview no tiene que hacer su propia versión del atajo, y
+      // xterm no tiene que mandarle nada al proceso.
+      event.preventDefault();
+      if (action === "paste") clipboard.paste();
+      else if (clipboard.hasSelection()) clipboard.copy(action === "copyAndClear");
+      return false;
+    }
 
     if (keyName(event) === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault();
@@ -105,11 +166,11 @@ export function createTerminalKeyHandler(redispatch: Redispatch): (event: KeyLik
   };
 }
 
-export function installTerminalKeyHandler(term: Terminal): void {
+export function installTerminalKeyHandler(term: Terminal, clipboard?: TerminalClipboard): void {
   // xterm escucha el keydown en su textarea: el evento corregido entra por el mismo lugar
   // que uno de verdad. `keyCode` va porque sin protocolo de Kitty xterm reconoce Tab por él.
   const redispatch: Redispatch = (init) => {
     term.textarea?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
   };
-  term.attachCustomKeyEventHandler(createTerminalKeyHandler(redispatch));
+  term.attachCustomKeyEventHandler(createTerminalKeyHandler(redispatch, clipboard));
 }

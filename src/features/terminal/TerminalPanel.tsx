@@ -7,6 +7,8 @@ import { useTabsStore } from "@/features/tabs/store";
 import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
 import { buildResumeCommand, isResumable } from "@/features/sessions/agentResume";
+import { agentDef } from "@/features/agents/registry";
+import { useAgentsStore } from "@/features/agents/store";
 import { readDir } from "@/features/explorer/ipc";
 import {
   dropFilesOnTab, setFileDropTarget, terminalTabAt, TERMINAL_TAB_ATTR, useFileDropTarget,
@@ -28,6 +30,10 @@ export function TerminalPanel() {
   // mandaría a su TUI un resize para nada, y otro al volver a mostrarse.
   const lastRect = useRef(new Map<string, Rect | null>());
   const dropTarget = useFileDropTarget((s) => s.tabId);
+  // Las TUIs custom se cargan después del primer render. Una terminal que se monta antes
+  // arma su comando sin saber cómo reanudarla y arranca una sesión nueva (el comando se
+  // fija al montar): se espera a conocerlas.
+  const customLoaded = useAgentsStore((s) => s.loaded);
 
   // Archivos soltados desde el gestor de archivos del sistema. El webview no los ve como
   // un drop de HTML: Tauri se queda con el arrastre de la ventana (en Windows, siempre) y
@@ -108,7 +114,7 @@ export function TerminalPanel() {
                 </span>
               </div>
             )}
-            <Terminal
+            {(customLoaded || agentDef(tab.agentId)) && <Terminal
               // El nonce en la key: reiniciar el agente desmonta esta terminal (lo que mata
               // su proceso) y monta otra, que relanza con `--resume`.
               key={`${tab.id}:${tab.restartNonce ?? 0}`}
@@ -126,7 +132,7 @@ export function TerminalPanel() {
               knownSessionId={tab.sessionId}
               onReady={(ptyId) => setPtyId(tab.id, ptyId)}
               onSessionDiscovered={(sessionId) => setSessionId(tab.id, sessionId)}
-            />
+            />}
           </div>
         );
       })}

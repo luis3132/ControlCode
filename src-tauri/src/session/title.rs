@@ -31,6 +31,24 @@ pub(super) fn mtime_secs(path: &Path) -> Option<i64> {
     Some(modified.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64)
 }
 
+/// La misma carpeta escrita de dos formas. En Windows las TUIs la guardan como les llega
+/// (`c:\x`, `C:/x`, `\\?\C:\x`, con o sin barra final) y la app la tiene de otra: comparadas
+/// tal cual no coincidían, y Codex, Gemini, OpenCode y Kimi no encontraban la sesión.
+pub(crate) fn same_dir(a: &str, b: &str) -> bool {
+    normalize_dir(a, cfg!(windows)) == normalize_dir(b, cfg!(windows))
+}
+
+/// La forma comparable de una carpeta. `windows` va aparte para poder probar las reglas de
+/// Windows en cualquier sistema.
+pub(crate) fn normalize_dir(path: &str, windows: bool) -> String {
+    if !windows {
+        let trimmed = path.trim_end_matches('/');
+        return if trimmed.is_empty() { "/".to_string() } else { trimmed.to_string() };
+    }
+    let p = path.strip_prefix(r"\\?\").or_else(|| path.strip_prefix("//?/")).unwrap_or(path);
+    p.replace('/', "\\").trim_end_matches('\\').to_lowercase()
+}
+
 pub(super) fn collect_files(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
@@ -217,8 +235,19 @@ pub(super) fn claude_session_file(
             return Some(direct);
         }
     }
-    let mut files = Vec::new();
-    collect_files(&dir, "jsonl", &mut files);
+    // Solo el primer nivel: las sesiones son `<proyecto>/<uuid>.jsonl`. Claude Code guarda
+    // además los transcripts de sus subagentes en `<uuid>/subagents/agent-*.jsonl`, y si uno
+    // de esos era el más nuevo la tab quedaba con `agent-…` como sesión: al reabrir la app,
+    // `claude --resume agent-…` no encuentra nada y arranca de cero.
+    let files: Vec<PathBuf> = fs::read_dir(&dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "jsonl"))
+                .collect()
+        })
+        .unwrap_or_default();
     newest_matching(&files, after, None)
 }
 
@@ -284,7 +313,7 @@ pub(super) fn gemini_project_dir(home: &Path, cwd: &str) -> Option<PathBuf> {
         if let Ok(v) = serde_json::from_str::<Value>(&raw) {
             if let Some(projects) = v.get("projects").and_then(|p| p.as_object()) {
                 if let Some(slug) =
-                    projects.iter().find(|(k, _)| Path::new(k.as_str()) == Path::new(cwd))
+                    projects.iter().find(|(k, _)| same_dir(k, cwd))
                         .and_then(|(_, v)| v.as_str())
                 {
                     let dir = tmp.join(slug);
@@ -301,7 +330,7 @@ pub(super) fn gemini_project_dir(home: &Path, cwd: &str) -> Option<PathBuf> {
     let entries = fs::read_dir(&tmp).ok()?;
     entries.flatten().map(|e| e.path()).find(|dir| {
         fs::read_to_string(dir.join(".project_root"))
-            .is_ok_and(|owner| Path::new(owner.trim()) == Path::new(cwd))
+            .is_ok_and(|owner| same_dir(owner.trim(), cwd))
     })
 }
 
@@ -466,7 +495,7 @@ pub(super) fn codex_session_file(cwd: &str, after: Option<i64>, profile: Option<
 pub(super) fn codex_session_file_in(root: &Path, cwd: &str, after: Option<i64>) -> Option<PathBuf> {
     let files = codex_rollouts_in(root);
     if let Some(found) =
-        newest_where(&files, after, |p| codex_meta(p).is_some_and(|m| m.cwd == Path::new(cwd)))
+        newest_where(&files, after, |p| codex_meta(p).is_some_and(|m| same_dir(&m.cwd.to_string_lossy(), cwd)))
     {
         return Some(found);
     }
@@ -633,7 +662,7 @@ pub(super) fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<Openco
     };
 
     let total = sessions.len();
-    sessions.retain(|s| Path::new(&s.directory) == Path::new(cwd));
+    sessions.retain(|s| same_dir(&s.directory, cwd));
     if sessions.is_empty() && total > 0 {
         eprintln!(
             "[opencode] {total} sesión(es) devueltas pero ninguna con directory == {cwd}"
@@ -755,7 +784,7 @@ pub(super) fn kimi_session_dir_in(root: &Path, cwd: Option<&str>, after: Option<
     let matches_cwd = |state_path: &Path| -> bool {
         let Some(cwd) = cwd else { return true };
         match kimi_state(state_path.parent().unwrap_or(state_path)).as_ref().and_then(kimi_declared_cwd) {
-            Some(declared) => declared == Path::new(cwd),
+            Some(declared) => same_dir(&declared.to_string_lossy(), cwd),
             // Sin cwd declarado no se puede descartar: se acepta y decide `after`.
             None => true,
         }

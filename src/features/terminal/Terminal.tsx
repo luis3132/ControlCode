@@ -16,6 +16,11 @@ import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
 import { installTuiScrollRail } from "@/features/terminal/tuiScrollRail";
 import { registerTerminal } from "@/features/terminal/terminalRegistry";
 import { installTerminalKeyHandler } from "@/features/terminal/terminalKeys";
+import { IS_MAC, terminalClipboard } from "@/features/terminal/terminalClipboard";
+import { parseCwdOsc, rememberShellCwd, shellCwdOf } from "@/features/terminal/shellCwd";
+import { SHELL_AGENT_ID } from "@/features/tabs/types";
+import { readDir } from "@/features/explorer/ipc";
+import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { isLocalUrl } from "@/features/tabs/viewTabs";
@@ -106,6 +111,8 @@ export function Terminal({
   const ptyIdRef = useRef<number | null>(null);
   const termRef = useRef<XTerm | null>(null);
   const { t } = useTranslation();
+  /** El menú del click derecho: copiar, pegar, seleccionar todo, limpiar. */
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [status, setStatus] = useState<TerminalStatus>("connecting");
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -179,6 +186,10 @@ export function Terminal({
       // La barra de 1px desaparecía entre el antialiasing de las letras vecinas.
       cursorWidth: 2,
       scrollback: 5000,
+      // Con una TUI que captura el mouse (Claude Code, OpenCode), arrastrar le manda el
+      // mouse a ella y no selecciona: se selecciona con Shift+arrastrar, y en macOS también
+      // con ⌥+arrastrar, que es la costumbre de Terminal.app e iTerm.
+      macOptionClickForcesSelection: true,
       // `allowTransparency` estaba en true y era la causa del texto borroso: apaga el
       // camino rápido de fondo opaco y obliga a compositar cada celda, lo que se lleva
       // puesto el antialiasing de subpíxel. No servía para nada — los dos temas de la
@@ -228,7 +239,18 @@ export function Terminal({
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
     // Tab que no se escapa de la terminal, AltGr y los acentos (ver terminalKeys.ts).
-    installTerminalKeyHandler(term);
+    installTerminalKeyHandler(term, terminalClipboard(term));
+    // La terminal pelada avisa a qué carpeta se mueve (ver `shellCwd.ts`): es la que se
+    // retoma al reabrir la app. Se devuelve `false` para que xterm siga con lo suyo.
+    if (tabId && (agentId ?? SHELL_AGENT_ID) === SHELL_AGENT_ID) {
+      for (const ident of [7, 9]) {
+        term.parser.registerOscHandler(ident, (data) => {
+          const path = parseCwdOsc(ident, data);
+          if (path) rememberShellCwd(tabId, path);
+          return false;
+        });
+      }
+    }
     term.open(containerRef.current);
     termRef.current = term;
     const unregister = tabId ? registerTerminal(tabId, term) : undefined;
@@ -339,7 +361,13 @@ export function Terminal({
           return;
         }
 
-        if (initialScrollback) term.write(initialScrollback);
+        if (initialScrollback) {
+          term.write(initialScrollback);
+          // Lo de arriba es de la sesión anterior; lo de abajo, un proceso nuevo. Sin la
+          // raya se lee como si la terminal siguiera viva y "hubiera perdido" lo demás.
+          const when = new Date().toLocaleString();
+          term.write(`\r\n\x1b[0m\x1b[2m── ${t("terminal.restored", { when })} ──\x1b[0m\r\n`);
+        }
 
         // Si el wizard dejó un setup de skills pendiente para esta tab (symlinks
         // todavía escribiéndose en su cwd), esperarlo antes de lanzar el proceso — si
@@ -367,7 +395,10 @@ export function Terminal({
         await fitOnce();
         if (cancelled) return;
 
-        const resolvedCwd: string = cwd ?? (await homeDir());
+        // La terminal pelada vuelve a la carpeta donde quedó, si todavía existe.
+        const remembered = tabId && (agentId ?? SHELL_AGENT_ID) === SHELL_AGENT_ID ? shellCwdOf(tabId) : null;
+        const stillThere = remembered ? await readDir(remembered).then(() => true, () => false) : false;
+        const resolvedCwd: string = (stillThere ? remembered : null) ?? cwd ?? (await homeDir());
         const startedAfter = Math.floor(Date.now() / 1000) - LOOKBACK_S;
 
         // Si esta tab corre con una cuenta alternativa, sus variables se piden ahora: la
@@ -569,6 +600,19 @@ export function Terminal({
     return () => cancelAnimationFrame(frame);
   }, [isActive]);
 
+  const menuItems = (): ContextMenuItem[] => {
+    const term = termRef.current;
+    if (!term) return [];
+    const clip = terminalClipboard(term);
+    const mod = IS_MAC ? "⌘" : "Ctrl+Shift+";
+    return [
+      { key: "copy", label: t("terminal.menu.copy"), hint: `${mod}C`, disabled: !term.hasSelection(), onSelect: () => clip.copy(false) },
+      { key: "paste", label: t("terminal.menu.paste"), hint: `${mod}V`, onSelect: () => { clip.paste(); term.focus(); } },
+      { key: "selectAll", label: t("terminal.menu.selectAll"), separator: true, onSelect: () => term.selectAll() },
+      { key: "clear", label: t("terminal.menu.clear"), onSelect: () => { term.clear(); term.focus(); } },
+    ];
+  };
+
   return (
     // El fondo va en el envoltorio de afuera: fit() calcula filas y columnas enteras, así
     // que casi siempre sobran unos píxeles abajo y a la derecha que no llegan a una celda.
@@ -576,7 +620,14 @@ export function Terminal({
     <div
       className="relative flex flex-col h-full w-full"
       style={{ background: TERMINAL_THEMES[theme].background }}
+      // El menú del navegador no se muestra sobre la terminal (ver main.tsx): este es el
+      // suyo, y es el único camino al portapapeles con el mouse.
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY });
+      }}
     >
+      {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={menuItems()} />}
       <StatusBadge status={status} isDark={isDark} />
 
       {/* El margen alrededor del texto, en un envoltorio propio y NO en el contenedor de

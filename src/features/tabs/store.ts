@@ -52,7 +52,7 @@ export const useTabsStore = create<TabsState>((set) => ({
   tabs: [],
   activeTabId: null,
   // bash siempre disponible como fallback mientras detect_agents carga
-  detectedAgents: [{ id: "bash", label: "Terminal (bash)", command: "bash", available: true }],
+  detectedAgents: [{ id: "bash", label: "Terminal", command: "bash", available: true }],
   workspaceId: DEFAULT_WORKSPACE_ID,
   hydrated: false,
 

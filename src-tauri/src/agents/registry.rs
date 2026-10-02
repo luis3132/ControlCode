@@ -241,7 +241,9 @@ pub const AGENTS: &[AgentDef] = &[
         // en la tabla porque el resto de la app la trata como un agente más (tiene id,
         // icono y tabs), pero no gestiona skills ni cuentas ni sesiones.
         id: "bash",
-        label: "Terminal (bash)",
+        // El id y el comando quedan `bash` en todos lados (es lo que se guarda en cada tab);
+        // en Windows lo que corre es PowerShell (ver `terminal::shell::resolve`).
+        label: if cfg!(windows) { "Terminal (PowerShell)" } else { "Terminal (bash)" },
         command: "bash",
         version_flag: "--version",
         skills_dir: None,

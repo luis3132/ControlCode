@@ -521,3 +521,35 @@ fn gemini_title_prefers_the_summary() {
     assert_eq!(result.title, "Arreglo del login");
     assert_eq!(result.source, "summary");
 }
+
+/// Lo que pasaba de verdad (visto en `~/.claude/projects/...`): Claude Code guarda los
+/// transcripts de sus subagentes en `<uuid>/subagents/agent-*.jsonl`. Si uno de esos era
+/// el más nuevo, la tab quedaba con `agent-…` como sesión y `--resume` no la encontraba.
+#[test]
+fn claude_no_toma_el_transcript_de_un_subagente_como_la_sesion() {
+    let tmp = TempDir::new();
+    let cwd = "/home/u/proj";
+    let real = tmp.write("projects/-home-u-proj/1f0e2d3c-aaaa-bbbb-cccc-000000000001.jsonl", "{}\n");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    tmp.write(
+        "projects/-home-u-proj/1f0e2d3c-aaaa-bbbb-cccc-000000000001/subagents/agent-a399.jsonl",
+        "{}\n",
+    );
+    let found = claude_session_file(cwd, None, None, Some(&tmp.0)).expect("encuentra la sesión");
+    assert_eq!(found, real);
+}
+
+/// En Windows la misma carpeta llega escrita de varias formas según quién la guardó: la
+/// app, la TUI, el prefijo de ruta larga. Comparadas tal cual, Codex, Gemini, OpenCode y
+/// Kimi no encontraban la sesión y al reabrir arrancaban de cero.
+#[test]
+fn la_misma_carpeta_en_windows_aunque_este_escrita_distinto() {
+    let n = |p: &str| normalize_dir(p, true);
+    assert_eq!(n(r"C:\Users\u\proj"), n("c:/users/u/proj/"));
+    assert_eq!(n(r"\\?\C:\Users\u\proj"), n(r"C:\Users\u\proj"));
+    assert_ne!(n(r"C:\Users\u\proj"), n(r"C:\Users\u\proj2"));
+    // En Linux/macOS las mayúsculas sí importan; la barra final no.
+    assert_eq!(normalize_dir("/home/u/proj/", false), normalize_dir("/home/u/proj", false));
+    assert_ne!(normalize_dir("/home/u/Proj", false), normalize_dir("/home/u/proj", false));
+    assert_eq!(normalize_dir("/", false), "/");
+}
