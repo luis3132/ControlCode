@@ -429,7 +429,34 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let git_read = super::mcp::git_read_tool_names();
     assert!(git_read.iter().all(|n| git.contains(n)), "{git_read:?}");
     assert!(!git_read.iter().any(|n| n.ends_with("git_push") || n.ends_with("_create")));
-    assert_eq!(browser.len() + orchestration.len() + git.len() + 1, offered.len());
+    // Las de subprocesos: todas se ofrecen; se aprueban solas las que solo miran.
+    let process = super::mcp::process_tool_names();
+    assert!(process.iter().all(|n| offered.contains(n)), "{process:?}");
+    let process_read = super::mcp::process_read_tool_names();
+    assert!(process_read.iter().all(|n| process.contains(n)));
+    assert!(!process_read.iter().any(|n| n.ends_with("_start") || n.ends_with("_stop") || n.ends_with("_send")));
+    assert_eq!(browser.len() + orchestration.len() + git.len() + process.len() + 1, offered.len());
+}
+
+/// Las tools de subprocesos le piden a la app `proc.<acción>` con quién pide y sus
+/// argumentos, y le devuelven al agente el texto de la respuesta.
+#[test]
+fn las_tools_de_subprocesos_piden_su_accion_con_quien_pide() {
+    let call = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "process_start", "arguments": { "command": "npm run dev", "wait_for": "ready" } } });
+    let (out, seen) = mcp_session(&McpContext::Cwd { cwd: "/p".into(), tab: Some("t9".into()) }, &[call], |_, _| {
+        Ok(json!({ "text": "Ready." }))
+    });
+    assert_eq!(seen[0].0, "proc.start");
+    assert_eq!(seen[0].1["cwd"], "/p");
+    assert_eq!(seen[0].1["tabId"], "t9");
+    assert_eq!(seen[0].1["args"]["command"], "npm run dev");
+    assert_eq!(out[0]["result"]["content"][0]["text"], "Ready.");
+    // Mirar no pide permiso; lanzar, escribir y parar sí, y parar se marca destructivo.
+    assert!(super::mcp::auto_approved("process_output") && super::mcp::auto_approved("process_list"));
+    assert!(!super::mcp::auto_approved("process_start") && !super::mcp::auto_approved("process_send"));
+    assert_eq!(super::mcp::annotations("process_stop")["destructiveHint"], true);
+    assert_eq!(super::mcp::annotations("process_wait")["readOnlyHint"], true);
 }
 
 /// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo

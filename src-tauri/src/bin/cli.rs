@@ -123,7 +123,8 @@ SERVIDOR MCP (no lo escribís vos: lo lanza la app)
   A diferencia del resto, esto NO devuelve una línea JSON: se queda tomado de stdin
   y stdout hablando JSON-RPC con el agente que lo lanzó. Es el servidor `controlcode`
   que le da sus herramientas: el navegador del proyecto, la orquestación de la flota,
-  la cuenta de git del usuario (PRs, issues, push/pull), preguntarle algo al usuario,
+  la cuenta de git del usuario (PRs, issues, push/pull), los subprocesos (servidores y
+  compilaciones que la app corre por el agente), preguntarle algo al usuario,
   y —solo con --task— el permiso de cada acción.
 
   La app se lo agrega sola al comando de cada tab de Claude Code, con un
@@ -467,8 +468,13 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         "run.plan" | "run.addTask" | "run.roster" => Duration::from_secs(120),
         // Esperar a un subproceso: lo pedido (con los mismos topes que el backend) y margen.
         "proc.wait" | "proc.start" => {
-            let asked = args.get("timeoutSecs").and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok()));
-            let default = if command == "proc.wait" { 120 } else if args.get("waitFor").is_some() { 60 } else { 5 };
+            // Desde el MCP los parámetros vienen bajo `args`, con los nombres de la tool.
+            let p = args.get("args").filter(|a| a.is_object()).unwrap_or(args);
+            let asked = ["timeoutSecs", "timeout_s"]
+                .iter()
+                .find_map(|k| p.get(*k).and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok())));
+            let waits = p.get("waitFor").or_else(|| p.get("wait_for")).is_some();
+            let default = if command == "proc.wait" { 120 } else if waits { 60 } else { 5 };
             Duration::from_secs(asked.unwrap_or(default).min(1800) + 20)
         }
         // Parar espera unos segundos a que se vaya por las buenas.

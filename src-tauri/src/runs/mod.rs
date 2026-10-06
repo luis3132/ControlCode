@@ -215,7 +215,9 @@ pub async fn run_start_orchestration(
     let extras = supervisor::LaunchExtras {
         prompt: None,
         system_prompt: Some(context::LEAD_SYSTEM_PROMPT.to_string()),
-        allowed_tools: orchestration_tool_names(&[Read, Note, Spawn]),
+        // El líder maneja el run entero, subprocesos incluidos (levantar el servidor contra
+        // el que prueban los demás).
+        allowed_tools: [orchestration_tool_names(&[Read, Note, Spawn]), crate::ipc::mcp::process_tool_names()].concat(),
     };
     if let Err(e) = supervisor::start(&app, task.clone(), extras) {
         let conn = db.lock().map_err(|err| err.to_string())?;
@@ -266,6 +268,8 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
         use crate::ipc::mcp::{orchestration_tool_name, orchestration_tool_names, OrchestrationPower::*};
         let mut allowed = orchestration_tool_names(&[Read, Note]);
         allowed.push(orchestration_tool_name(crate::ipc::mcp::ASK_TOOL));
+        // Mirar subprocesos y leer sus logs, sí; lanzarlos o pararlos lo aprueba la persona.
+        allowed.extend(crate::ipc::mcp::process_read_tool_names());
         if can_delegate {
             allowed.push(orchestration_tool_name("task_add"));
         }
