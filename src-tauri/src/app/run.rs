@@ -69,19 +69,20 @@ pub fn run() {
             crate::window::confirm_exit_all,
             crate::window::close_window_saved,
             // Explorador de archivos del workspace (panel derecho)
-            crate::explorer::explorer_read_dir,
-            crate::explorer::explorer_repo_info,
+            crate::explorer::commands::explorer_read_dir,
+            crate::explorer::commands::explorer_repo_info,
             crate::explorer::explorer_search,
-            crate::explorer::explorer_create_file,
-            crate::explorer::explorer_create_dir,
-            crate::explorer::explorer_rename,
-            crate::explorer::explorer_copy,
-            crate::explorer::explorer_move,
-            crate::explorer::explorer_trash,
+            crate::explorer::watch::explorer_watch,
+            crate::explorer::commands::explorer_create_file,
+            crate::explorer::commands::explorer_create_dir,
+            crate::explorer::commands::explorer_rename,
+            crate::explorer::commands::explorer_copy,
+            crate::explorer::commands::explorer_move,
+            crate::explorer::commands::explorer_trash,
             // Tabs de archivo
-            crate::explorer::explorer_read_file,
-            crate::explorer::explorer_write_file,
-            crate::explorer::explorer_file_stat,
+            crate::explorer::commands::explorer_read_file,
+            crate::explorer::commands::explorer_write_file,
+            crate::explorer::commands::explorer_file_stat,
             // Control de versiones (panel derecho)
             crate::scm::scm_status,
             crate::scm::scm_init,
@@ -291,6 +292,8 @@ pub fn run() {
             // una sola.
             tauri::WindowEvent::Destroyed => {
                 let _ = window.app_handle().emit("cc-workspace-changed", ());
+                // Su panel ya no va a pedir dejar de vigilar: se suelta acá.
+                crate::explorer::watch::forget_window(window.label());
             }
             tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
                 let _ = window.emit("cc-window-bounds-changed", ());

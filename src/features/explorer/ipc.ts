@@ -12,6 +12,20 @@ export function repoInfo(path: string): Promise<RepoInfo> {
   return invoke<RepoInfo>("explorer_repo_info", { path });
 }
 
+/** Lo que vigila el panel de esta ventana: las carpetas abiertas (cada una sin recursión)
+ *  y el directorio de git. Rust avisa con `explorer-changed`. Vacío = dejar de vigilar. */
+export function watchDirs(dirs: string[], gitDir: string | null): Promise<void> {
+  return invoke<void>("explorer_watch", { dirs, gitDir });
+}
+
+/** Una tanda de cambios en las carpetas vigiladas. */
+export interface ExplorerChanged {
+  /** La ventana cuyo panel los pidió: el evento llega a todas. */
+  window: string;
+  dirs: string[];
+  git: boolean;
+}
+
 /** Cada una devuelve la ruta que quedó: copiar o crear sobre un nombre ocupado no pisa,
  *  y la ruta final solo la sabe Rust. */
 export const createFile = (dir: string, name: string) => invoke<string>("explorer_create_file", { dir, name });

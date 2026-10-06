@@ -37,7 +37,6 @@ pub(crate) fn sort_entries(entries: &mut [DirEntry]) {
 
 /// Un solo nivel de `path`. No recursa: el panel expande a demanda, y un proyecto con
 /// `node_modules` haría que una lectura recursiva tarde segundos y devuelva megabytes.
-#[tauri::command]
 pub fn explorer_read_dir(path: String) -> Result<Vec<DirEntry>, String> {
     let dir = Path::new(&path);
     if !dir.is_dir() {

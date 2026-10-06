@@ -13,6 +13,9 @@ export type FileMark = "U" | "A" | "M" | "D" | "?";
 export interface RepoInfo {
   /** `null` = la carpeta no está en ningún repo; el árbol se muestra sin marcas. */
   root: string | null;
+  /** El directorio de git (`.git`, o `.git/worktrees/x`). Lo vigila el panel para
+   *  refrescar las marcas cuando alguien hace `add` o `commit`. */
+  gitDir?: string | null;
   branch: string | null;
   /** Un worktree enlazado, no el checkout principal. */
   isWorktree: boolean;

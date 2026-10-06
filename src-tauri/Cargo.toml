@@ -81,6 +81,9 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "async-
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "zip"] }
 trash = "5"
 tauri-plugin-clipboard-manager = "2"
+# El árbol de archivos se entera de lo que crean o borran los agentes (inotify, FSEvents,
+# ReadDirectoryChangesW). Ver explorer::watch.
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 
 # Señales POSIX: matar el GRUPO de procesos de una tab y no solo a su líder, para que no
 # queden huérfanos los procesos que el agente haya lanzado (ver terminal::pty_manager).
