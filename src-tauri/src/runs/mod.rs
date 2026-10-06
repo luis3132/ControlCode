@@ -29,6 +29,7 @@ mod worktrees;
 mod test;
 
 pub use store::sweep_orphans;
+pub use supervisor::kill_all_tasks;
 pub use types::{Fact, Run, Task};
 
 use std::time::Duration;

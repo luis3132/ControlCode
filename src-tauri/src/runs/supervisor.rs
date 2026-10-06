@@ -42,8 +42,8 @@ pub fn notify_approvals(app: &AppHandle) {
     let _ = app.emit(APPROVALS_CHANGED, super::broker::pending());
 }
 
-/// Nombre del grupo de contención. No se cruza con los ids de PTY porque va por otro
-/// contador y el nombre del cgroup los distingue igual; solo sirve para leerlo.
+/// Número del grupo de contención, solo para leerlo: el nombre del cgroup lo hace único
+/// `containment` (antes chocaba con el de las tabs, que también empiezan en 1).
 static GROUP_SEQ: AtomicU32 = AtomicU32::new(1);
 
 lazy_static::lazy_static! {
@@ -59,6 +59,17 @@ fn live() -> std::sync::MutexGuard<'static, HashMap<String, ProcessGroup>> {
     // Igual que en el resto del crate: un panic aislado no debe dejar inutilizable al
     // registro entero.
     LIVE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Mata todas las tareas vivas y su descendencia. Se llama al salir de la app, junto con
+/// las terminales: `LIVE` es un `lazy_static` y Rust no corre su `Drop` al terminar, así
+/// que sin esto en Linux y macOS los agentes de la flota (y lo que hubieran lanzado)
+/// quedaban huérfanos. En Windows los cubría igual el Job Object.
+pub fn kill_all_tasks() {
+    let groups: Vec<ProcessGroup> = live().drain().map(|(_, g)| g).collect();
+    for mut group in groups {
+        group.kill_all();
+    }
 }
 
 #[derive(serde::Serialize, Clone)]

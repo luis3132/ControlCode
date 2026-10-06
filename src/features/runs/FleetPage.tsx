@@ -33,7 +33,6 @@ export function FleetPage() {
 
   const allTasks = useRunsStore((s) => s.tasks);
   const runs = useRunsStore((s) => s.runs);
-  const activity = useRunsStore((s) => s.activity);
   const startTask = useRunsStore((s) => s.startTask);
   const startOrchestration = useRunsStore((s) => s.startOrchestration);
   const cancelRun = useRunsStore((s) => s.cancelRun);
@@ -260,7 +259,6 @@ export function FleetPage() {
               <AgentCard
                 key={task.id}
                 task={task}
-                activity={activity[task.id] ?? []}
                 waiting={task.status === "pending" ? waitingOn(task, allTasks) : undefined}
                 approval={byTask.get(task.id)}
                 focused={task.id === focusedId}

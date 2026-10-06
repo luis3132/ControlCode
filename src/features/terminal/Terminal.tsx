@@ -335,10 +335,17 @@ export function Terminal({
       try {
         if (attachPtyId != null) {
           // Reconectar a un PTY que ya está vivo en otra ventana: nada de spawnear de nuevo.
-          const buffered = await ptyAttach(attachPtyId);
+          const { data: buffered, exitCode } = await ptyAttach(attachPtyId);
           ptyIdRef.current = attachPtyId;
           await fitOnce();
           if (buffered) term.write(buffered);
+          // El proceso terminó mientras esta terminal no estaba montada (hibernada): se
+          // muestra cómo terminó, como si hubiera estado mirando.
+          if (exitCode !== null) {
+            setStatus("exited");
+            term.write(`\r\n\x1b[90m${t("terminal.exitCode", { code: exitCode })}\x1b[0m\r\n`);
+            return;
+          }
           setStatus("running");
           onReady?.(attachPtyId);
 

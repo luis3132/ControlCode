@@ -270,7 +270,9 @@ fn wait_until_quiet(
 
     while std::time::Instant::now() < deadline {
         std::thread::sleep(POLL);
-        let Some(total) = crate::terminal::output_total(pty_id) else {
+        // El buffer sobrevive al proceso (ver `PtyBuffer::exit_code`): que haya salida no
+        // dice que siga vivo.
+        let Some(total) = crate::terminal::output_total(pty_id).filter(|_| crate::terminal::is_running(pty_id)) else {
             return false;
         };
 

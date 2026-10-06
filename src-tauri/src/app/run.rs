@@ -33,6 +33,7 @@ pub fn run() {
             // Terminal embebida (PTY)
             crate::terminal::pty_create,
             crate::terminal::pty_attach,
+            crate::terminal::pty_output_totals,
             crate::terminal::pty_write,
             crate::terminal::pty_resize,
             crate::terminal::pty_kill,
@@ -357,6 +358,7 @@ pub fn run() {
                 // `lazy_static` y Rust no corre destructores de estáticos al salir, así
                 // que el `Drop` que limpia cada grupo hay que dispararlo a mano.
                 crate::terminal::kill_all_sessions();
+                crate::runs::kill_all_tasks();
             }
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 let windows = app_handle.webview_windows();

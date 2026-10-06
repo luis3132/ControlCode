@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabsStore } from "@/features/tabs/store";
-import { ptyAttach, ptyCwd } from "@/features/terminal/ipc";
+import { ptyAttach, ptyCwd, ptyOutputTotals } from "@/features/terminal/ipc";
 import { rememberShellCwd } from "@/features/terminal/shellCwd";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { discoverSessionId } from "@/features/sessions/ipc";
@@ -11,6 +11,9 @@ import { saveWindowState } from "./ipc";
 
 const SAVE_DEBOUNCE_MS = 400;
 const SCROLLBACK_REFRESH_MS = 20_000;
+/** Con la ventana oculta o minimizada el refresco periódico se espacia: nadie está
+ *  mirando, y lo único que protege es lo que se perdería si la app se cae. */
+const HIDDEN_REFRESH_MS = 120_000;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let initialized = false;
 
@@ -22,6 +25,13 @@ let initialized = false;
 // para sobrevivir a un crash, no en cada cambio de metadata, así que se cachea por ptyId
 // y solo se refresca en el ciclo periódico de 20s (o si todavía no hay nada cacheado).
 const scrollbackCache = new Map<number, string>();
+/** Cuánto había escrito cada PTY cuando se cacheó su scrollback. Si no cambió, el cache
+ *  sigue siendo el scrollback de ahora y no hace falta copiarlo de nuevo: antes cada
+ *  refresco de 20 s copiaba hasta 3 MB por tab por IPC aunque la terminal estuviera quieta. */
+const scrollbackTotals = new Map<number, number>();
+/** Lo último que se escribió en la base, para no reescribir lo mismo cada 20 s. */
+let lastSaved: { tabs: unknown; workspaceId: unknown } | null = null;
+let lastPeriodicAt = 0;
 
 // `saveNow` es async (espera bounds + scrollback de cada PTY vía IPC) y se dispara desde
 // dos fuentes independientes (debounce de 400ms y el refresco periódico de 20s) — sin
@@ -38,20 +48,29 @@ let saveChain: Promise<void> = Promise.resolve();
  *  existe y pisaría con `null` el que se acaba de guardar. */
 let frozen = false;
 
-function enqueueSave(opts?: { refreshScrollback: boolean }) {
+function enqueueSave(opts?: SaveOptions) {
   if (frozen) return;
   const run = () => saveNow(opts);
   saveChain = saveChain.then(run, run);
 }
 
-async function fetchScrollback(ptyId: number | null): Promise<string | null> {
+interface SaveOptions {
+  refreshScrollback: boolean;
+  /** El refresco periódico: si nada cambió desde el último guardado, no escribe. */
+  periodic?: boolean;
+}
+
+async function fetchScrollback(ptyId: number | null, total?: number): Promise<string | null> {
   if (ptyId == null) return null;
   try {
-    const data = await ptyAttach(ptyId);
+    const { data } = await ptyAttach(ptyId);
     scrollbackCache.set(ptyId, data);
+    if (total !== undefined) scrollbackTotals.set(ptyId, total);
+    else scrollbackTotals.delete(ptyId);
     return data;
   } catch {
     scrollbackCache.delete(ptyId); // el proceso ya no existe
+    scrollbackTotals.delete(ptyId);
     return null;
   }
 }
@@ -76,12 +95,28 @@ export type SaveStep =
   | { kind: "write" };
 
 async function saveNow(
-  opts: { refreshScrollback: boolean } = { refreshScrollback: false },
+  opts: SaveOptions = { refreshScrollback: false },
   progress?: SaveProgress,
 ) {
   const win = getCurrentWindow();
   const { tabs, workspaceId, hydrated } = useTabsStore.getState();
-  const resolveScrollback = opts.refreshScrollback ? fetchScrollback : cachedOrFetchScrollback;
+
+  // Refrescar es pedir el scrollback de las tabs que escribieron algo desde la última vez;
+  // las quietas siguen con el que ya se tenía.
+  let resolveScrollback = cachedOrFetchScrollback;
+  let anyOutput = false;
+  if (opts.refreshScrollback) {
+    const ids = tabs.map((t) => t.ptyId).filter((id): id is number => id != null);
+    const totals = ids.length ? await ptyOutputTotals(ids).catch(() => ({} as Record<string, number>)) : {};
+    const stale = (id: number) => {
+      const total = totals[String(id)];
+      return total === undefined || !scrollbackCache.has(id) || scrollbackTotals.get(id) !== total;
+    };
+    anyOutput = ids.some(stale);
+    resolveScrollback = (ptyId) =>
+      ptyId != null && stale(ptyId) ? fetchScrollback(ptyId, totals[String(ptyId)]) : cachedOrFetchScrollback(ptyId);
+  }
+  if (opts.periodic && !anyOutput && lastSaved?.tabs === tabs && lastSaved.workspaceId === workspaceId) return;
   // Posición + una lectura de scrollback por tab + la escritura en la base. Los pasos son
   // los reales: cada uno avisa cuando TERMINA, no cuando empieza.
   const total = tabs.length + 2;
@@ -132,7 +167,10 @@ async function saveNow(
   // transferidas a otra ventana) — el Map, si no, crece sin límite durante toda la sesión.
   const liveIds = new Set(tabs.map((t) => t.ptyId).filter((id): id is number => id != null));
   for (const cachedId of scrollbackCache.keys()) {
-    if (!liveIds.has(cachedId)) scrollbackCache.delete(cachedId);
+    if (!liveIds.has(cachedId)) {
+      scrollbackCache.delete(cachedId);
+      scrollbackTotals.delete(cachedId);
+    }
   }
 
   await saveWindowState({
@@ -148,7 +186,7 @@ async function saveNow(
     // único que autoriza al backend a dar por cerradas las que falten. Ver
     // `WindowStatePayload::authoritative`.
     authoritative: hydrated,
-  }).catch(console.error);
+  }).then(() => { lastSaved = { tabs, workspaceId }; }, console.error);
   step({ kind: "write" });
 }
 
@@ -292,7 +330,11 @@ export function initTabsPersistence() {
   // Refresco periódico del scrollback (aunque no cambie nada en el array de tabs,
   // el contenido de la terminal sí cambia) para no perder mucho si la app se cae.
   setInterval(() => {
-    if (useTabsStore.getState().hydrated) enqueueSave({ refreshScrollback: true });
+    if (!useTabsStore.getState().hydrated) return;
+    const now = Date.now();
+    if (document.visibilityState === "hidden" && now - lastPeriodicAt < HIDDEN_REFRESH_MS) return;
+    lastPeriodicAt = now;
+    enqueueSave({ refreshScrollback: true, periodic: true });
   }, SCROLLBACK_REFRESH_MS);
 
   // Sin listener de onCloseRequested a propósito: en Tauri 2, registrar uno

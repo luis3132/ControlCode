@@ -64,6 +64,7 @@ pub(super) fn cleanup_on_signals() {
         while unsafe { libc::read(read_fd, buf.as_mut_ptr() as *mut libc::c_void, 1) } <= 0 {}
 
         crate::terminal::kill_all_sessions();
+        crate::runs::kill_all_tasks();
         crate::ipc::cleanup();
         // Código de salida convencional para una muerte por señal, para que quien mandó el
         // kill vea lo que espera.
