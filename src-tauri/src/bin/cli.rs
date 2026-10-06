@@ -45,6 +45,22 @@ TABS
                                               así se sigue la conversación con
                                               una tab que ya está abierta
 
+SUBPROCESOS (servidores, watchers y compilaciones que la app corre por vos)
+  proc start \"npm run dev\" [--name web]       Lo lanza en la carpeta donde corrés esto
+             [--cwd <ruta>] [--wait-for <regex>] (--wait-for: espera a que la salida
+             [--timeout-secs 60]                coincida, p. ej. \"ready|listening\")
+  proc list [--all]                           Los de este workspace (--all: todos), con
+                                              estado, CPU, memoria y errores sin leer
+  proc output <id> [--lines 40] [--grep <re>] Sus logs: por defecto, lo NUEVO desde la
+             [--errors]                       lectura anterior; --errors: solo errores
+  proc wait <id> [--until exit|pattern|idle]  Espera a que termine, a que diga algo
+             [--pattern <re>] [--timeout-secs 120] (--pattern) o a que se calle
+  proc send <id> \"texto\" [--no-enter]         Le escribe, como en su terminal
+  proc stop <id> [--force]                    Ctrl-C y, si no se va, lo mata con todo
+  proc restart <id>                           Lo vuelve a lanzar igual
+
+  Se ven y se manejan en la sección Subprocesos de la app.
+
 OBSERVAR TABS (modo push — evita el polling)
   watch add <id> [--idle 20]                  Empieza a observar una tab
   watch remove <id>                           Deja de observarla
@@ -194,6 +210,10 @@ fn main() -> ExitCode {
         }
     };
 
+    // Un subproceso es del workspace desde el que se pide: el de la carpeta donde se
+    // escribió el comando, salvo que se diga otra con --cwd.
+    let parsed = with_caller_cwd(&command, parsed);
+
     match send(&command, parsed) {
         Ok(response) => {
             let body = if response.ok {
@@ -231,6 +251,16 @@ impl CliError {
     }
 }
 
+fn with_caller_cwd(command: &str, mut args: Value) -> Value {
+    if command.starts_with("proc.")
+        && args.get("cwd").is_none()
+        && let Ok(dir) = std::env::current_dir()
+    {
+        args["cwd"] = json!(dir.to_string_lossy());
+    }
+    args
+}
+
 /// Grupos que se escriben solos porque tienen una sola acción útil.
 fn shortcut(word: &str) -> Option<&'static str> {
     match word {
@@ -260,6 +290,10 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "tab.output" | "tab.close" | "watch.add" | "watch.remove" => &["tab"],
         "tab.create" => &["cwd"],
         "workspace.open" => &["workspace"],
+        // `ccode proc start "npm run dev"`, `ccode proc output p3`, `ccode proc send p3 "y"`.
+        "proc.start" => &["command"],
+        "proc.send" => &["id", "text"],
+        "proc.output" | "proc.wait" | "proc.stop" | "proc.restart" => &["id"],
         _ => &[],
     }
 }
@@ -431,6 +465,14 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         }
         // Validar un plan puede sondear el roster (lanzar `opencode models`) y crear worktrees.
         "run.plan" | "run.addTask" | "run.roster" => Duration::from_secs(120),
+        // Esperar a un subproceso: lo pedido (con los mismos topes que el backend) y margen.
+        "proc.wait" | "proc.start" => {
+            let asked = args.get("timeoutSecs").and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok()));
+            let default = if command == "proc.wait" { 120 } else if args.get("waitFor").is_some() { 60 } else { 5 };
+            Duration::from_secs(asked.unwrap_or(default).min(1800) + 20)
+        }
+        // Parar espera unos segundos a que se vaya por las buenas.
+        "proc.stop" | "proc.restart" => Duration::from_secs(45),
         "run.approve" => {
             let requested = args
                 .get("timeout")

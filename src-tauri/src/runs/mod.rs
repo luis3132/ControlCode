@@ -30,6 +30,15 @@ mod test;
 
 pub use store::sweep_orphans;
 pub use supervisor::kill_all_tasks;
+
+/// Las carpetas de una tarea: la del workspace (la del run) y en la que trabaja (su
+/// worktree, o la del proyecto si no tiene). Lo usan los subprocesos que lanza una tarea.
+pub fn task_folders(conn: &rusqlite::Connection, task_id: &str) -> Result<(String, String), String> {
+    let task = store::task_by_id(conn, task_id)?.ok_or_else(|| format!("no hay ninguna tarea {task_id}"))?;
+    let run = store::run_by_id(conn, &task.run_id)?.ok_or("la tarea no tiene run")?;
+    let cwd = task.worktree_path.clone().filter(|_| !task.worktree_removed).unwrap_or(task.cwd);
+    Ok((run.cwd, cwd))
+}
 pub use types::{Fact, Run, Task};
 
 use std::time::Duration;

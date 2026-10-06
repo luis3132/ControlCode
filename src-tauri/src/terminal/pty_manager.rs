@@ -279,7 +279,7 @@ pub struct SpawnOptions<'a> {
 /// No depende de que haya una terminal dibujándolo: lo usan las tabs (`pty_create`) y los
 /// subprocesos que lanza el backend (`procs`), que se miran solo cuando alguien abre su
 /// sección.
-pub fn spawn(app: &AppHandle, opts: SpawnOptions<'_>) -> Result<u32, String> {
+pub fn spawn<R: tauri::Runtime>(app: &AppHandle<R>, opts: SpawnOptions<'_>) -> Result<u32, String> {
     let pty_system = native_pty_system();
     let size = PtySize { rows: opts.rows, cols: opts.cols, pixel_width: 0, pixel_height: 0 };
 
@@ -386,7 +386,7 @@ pub fn spawn(app: &AppHandle, opts: SpawnOptions<'_>) -> Result<u32, String> {
 
 /// Junta lo que el lector fue dejando y lo manda al frontend, cortando siempre en un
 /// borde de carácter UTF-8.
-fn emit_loop(app: &AppHandle, event_name: &str, rx: &std::sync::mpsc::Receiver<Vec<u8>>) {
+fn emit_loop<R: tauri::Runtime>(app: &AppHandle<R>, event_name: &str, rx: &std::sync::mpsc::Receiver<Vec<u8>>) {
     let mut pending: Vec<u8> = Vec::new();
     let mut end: u64 = 0;
     while let Ok(chunk) = rx.recv() {
@@ -525,6 +525,14 @@ pub async fn pty_resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
 /// Termina el proceso del PTY y limpia la sesión.
 #[tauri::command]
 pub async fn pty_kill(id: u32) -> Result<(), String> {
+    let result = terminate(id);
+    release(id);
+    result
+}
+
+/// Mata el proceso del PTY y toda su descendencia, pero conserva su salida: un subproceso
+/// detenido sigue mostrando sus logs hasta que se lo limpia (`release`).
+pub fn terminate(id: u32) -> Result<(), String> {
     if let Some(mut session) = registry().remove(&id) {
         // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
         // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los
@@ -535,8 +543,24 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
         // señal, no espera a que el proceso muera de verdad.
         let _ = session.killer.wait();
     }
-    buffers().remove(&id);
     Ok(())
+}
+
+/// Suelta el scrollback de un PTY que ya no se va a mirar.
+pub fn release(id: u32) {
+    buffers().remove(&id);
+}
+
+/// El pid del proceso que lanzó el PTY, mientras corre.
+pub fn process_id(id: u32) -> Option<u32> {
+    registry().get(&id).and_then(|s| s.killer.process_id())
+}
+
+/// Cómo se lanza un comando escrito por una persona o un agente (`npm run dev`,
+/// `cd api && cargo run`): por el shell, con sus pipes, `&&` y variables. En unix es el
+/// shell de login del usuario, para que esté el `PATH` de nvm, cargo o pyenv.
+pub fn shell_launch(script: &str) -> CommandBuilder {
+    shell_running(script.to_string())
 }
 
 /// Mata todas las sesiones vivas y su descendencia. Se llama al salir de la app.

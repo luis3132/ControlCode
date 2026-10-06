@@ -34,6 +34,13 @@ pub fn run() {
             crate::terminal::pty_create,
             crate::terminal::pty_attach,
             crate::terminal::pty_output_totals,
+            // Subprocesos: los procesos largos que corren los agentes
+            crate::procs::procs_list,
+            crate::procs::procs_start,
+            crate::procs::procs_stop,
+            crate::procs::procs_restart,
+            crate::procs::procs_clear,
+            crate::procs::procs_usage,
             crate::terminal::pty_write,
             crate::terminal::pty_resize,
             crate::terminal::pty_kill,
@@ -340,6 +347,8 @@ pub fn run() {
 
             // Servidor IPC de la CLI `controlcode` (Fase 8). Va después de restaurar las
             // ventanas: varios comandos necesitan que exista al menos una para responder.
+            // Los subprocesos se enteran de cuándo termina cada PTY, haya o no ventana.
+            crate::procs::init(app.handle());
             crate::ipc::start(app.handle().clone());
             Ok(())
         })

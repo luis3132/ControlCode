@@ -74,6 +74,15 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "run.cancelTask" => run_orchestrate(app, "run.cancelTask", args),
         "run.rerouteTask" => run_orchestrate(app, "run.rerouteTask", args),
         "app.status" => app_status(app),
+        // Subprocesos: los procesos largos que un agente (o la CLI) le pide a la app que
+        // corra por él. Cada uno ve los de su workspace.
+        "proc.start" => crate::procs::handle(app, command, args),
+        "proc.list" => crate::procs::handle(app, command, args),
+        "proc.output" => crate::procs::handle(app, command, args),
+        "proc.wait" => crate::procs::handle(app, command, args),
+        "proc.send" => crate::procs::handle(app, command, args),
+        "proc.stop" => crate::procs::handle(app, command, args),
+        "proc.restart" => crate::procs::handle(app, command, args),
         other => Err(format!("Comando desconocido: {other}")),
     };
 
