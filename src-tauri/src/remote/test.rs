@@ -39,6 +39,24 @@ fn emparejar_y_olvidar_un_telefono() {
     assert_eq!(devices::list(&db).unwrap().len(), 1);
 }
 
+/// Emparejar no traba la base: el nombre del equipo se leía con la base ya bloqueada, y el
+/// hilo quedaba esperándose a sí mismo (el teléfono veía "no contestó a tiempo"). Corre en
+/// otro hilo para que, si se cuelga, el test falle en vez de colgar la suite.
+#[test]
+fn emparejar_no_traba_la_base() {
+    let db: crate::database::DbConnection = Arc::new(Mutex::new(crate::database::test_db()));
+    crate::database::set_setting(&db, "remote.name", "fedora").unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let shared = db.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(handlers::register_device(&shared, "k1", &json!({ "name": "Pixel", "platform": "android" })));
+    });
+    let (name, ids) = rx.recv_timeout(Duration::from_secs(5)).expect("se colgó: la base quedó bloqueada").unwrap();
+    assert_eq!(name, "fedora");
+    assert_eq!(ids, vec!["k1".to_string()]);
+    assert!(db.try_lock().is_ok(), "la base quedó libre");
+}
+
 /// El secreto del QR sirve una sola vez, y solo el último que se mostró.
 #[test]
 fn el_qr_es_de_un_solo_uso() {

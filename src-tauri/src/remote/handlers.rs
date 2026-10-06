@@ -79,29 +79,39 @@ fn folders(app: &AppHandle) -> Result<Vec<String>, String> {
     Ok(rows.filter_map(Result::ok).filter(|c| !c.is_empty()).collect())
 }
 
+/// Guarda el teléfono que se acaba de emparejar. Devuelve el nombre de este equipo (para
+/// mostrarlo en el teléfono) y las claves de todos los emparejados (para vigilar su
+/// presencia).
+///
+/// El nombre se lee después de soltar la base: `config::load` la vuelve a bloquear, y
+/// leerlo con el lock tomado colgaba el hilo para siempre (el teléfono veía "no contestó a
+/// tiempo" y la base quedaba trabada para toda la app).
+pub(super) fn register_device(db: &DbConnection, from: &str, p: &Value) -> Result<(String, Vec<String>), String> {
+    let ids: Vec<String> = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        devices::upsert(
+            &conn,
+            from,
+            p.get("name").and_then(Value::as_str).unwrap_or("Teléfono"),
+            p.get("platform").and_then(Value::as_str),
+            p.get("pushToken").and_then(Value::as_str),
+        )?;
+        devices::list(&conn)?.into_iter().map(|d| d.id).collect()
+    };
+    Ok((super::config::load(db).name, ids))
+}
+
 pub fn handle(app: &AppHandle, from: &str, method: &str, p: &Value) -> Result<Value, String> {
     match method {
         "pair" => {
             if !pairing::consume(str_arg(p, "secret")?) {
                 return Err("El código venció o ya se usó. Generá uno nuevo en Control Code.".into());
             }
-            let db = db(app)?;
-            let (config, ids) = {
-                let conn = db.lock().map_err(|e| e.to_string())?;
-                devices::upsert(
-                    &conn,
-                    from,
-                    p.get("name").and_then(Value::as_str).unwrap_or("Teléfono"),
-                    p.get("platform").and_then(Value::as_str),
-                    p.get("pushToken").and_then(Value::as_str),
-                )?;
-                let ids: Vec<String> = devices::list(&conn)?.into_iter().map(|d| d.id).collect();
-                (super::config::load(&db), ids)
-            };
+            let (name, ids) = register_device(db(app)?.inner(), from, p)?;
             super::client::rewatch(ids);
             let _ = app.emit("remote-devices", json!({}));
             let _ = app.emit("remote-paired", json!({ "id": from }));
-            Ok(json!({ "name": config.name }))
+            Ok(json!({ "name": name }))
         }
         "state" => {
             let name = super::config::load(db(app)?.inner()).name;
