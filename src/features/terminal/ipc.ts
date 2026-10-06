@@ -18,7 +18,7 @@ export const ptyCreate = (args: PtyCreateArgs) => invoke<number>("pty_create", {
 /** Scrollback acumulado de un PTY — reconectarse a él no lo reinicia. `exitCode` no es
  *  `null` si el proceso ya terminó (su buffer vive hasta que se cierra la tab). */
 export const ptyAttach = (id: number) =>
-  invoke<{ data: string; exitCode: number | null }>("pty_attach", { id });
+  invoke<{ data: string; total: number; exitCode: number | null }>("pty_attach", { id });
 
 /** Cuánto escribió en total cada PTY, sin copiar nada. Las claves llegan como texto. */
 export const ptyOutputTotals = (ids: number[]) =>

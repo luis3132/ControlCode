@@ -10,6 +10,20 @@ import type { Terminal } from "@xterm/xterm";
  */
 const terminals = new Map<string, Terminal>();
 
+/** Las terminales que ya están conectadas a su PTY: antes de eso, lo que se pegue no
+ *  llega a ningún proceso (xterm lo manda por `onData` y todavía no hay a quién). */
+const attached = new Set<string>();
+
+/** Lo que se pegó a una terminal que todavía no podía recibirlo (hibernada, o recién
+ *  montada y conectándose): sale cuando se conecta. */
+const pendingPastes = new Map<string, { text: string; submit: boolean }[]>();
+
+/** Despierta una tab hibernada. Lo instala `TerminalPanel`, que es quien las monta. */
+let waker: ((tabId: string) => boolean) | null = null;
+export function setTerminalWaker(fn: ((tabId: string) => boolean) | null) {
+  waker = fn;
+}
+
 /** Mensajes para agentes que todavía no terminaron de arrancar. */
 const queued = new Map<string, string>();
 
@@ -58,15 +72,34 @@ export function registerTerminal(tabId: string, term: Terminal): () => void {
   const pending = queued.get(tabId);
   if (pending !== undefined) sendWhenSettled(tabId, term, pending);
   return () => {
-    if (terminals.get(tabId) === term) terminals.delete(tabId);
+    if (terminals.get(tabId) === term) {
+      terminals.delete(tabId);
+      attached.delete(tabId);
+    }
   };
+}
+
+/** La terminal de la tab ya está conectada a su PTY: sale lo que se le pegó mientras tanto. */
+export function terminalAttached(tabId: string): void {
+  attached.add(tabId);
+  const pending = pendingPastes.get(tabId);
+  pendingPastes.delete(tabId);
+  pending?.forEach(({ text, submit }) => pasteIntoTab(tabId, text, submit));
 }
 
 /** Pega `text` en la terminal de la tab y, con `submit`, lo manda. `false` si la tab no
  *  tiene una terminal viva. */
 export function pasteIntoTab(tabId: string, text: string, submit: boolean): boolean {
   const term = terminals.get(tabId);
-  if (!term) return false;
+  if (!term || !attached.has(tabId)) {
+    // Hibernada: se despierta y lo pegado sale apenas se reconecta. Montada pero todavía
+    // conectándose: espera lo mismo.
+    if (term || waker?.(tabId)) {
+      pendingPastes.set(tabId, [...(pendingPastes.get(tabId) ?? []), { text, submit }]);
+      return true;
+    }
+    return false;
+  }
   term.paste(text);
   // El Enter va aparte y un momento después: algunas TUIs todavía están procesando el
   // pegado cuando llega, y lo toman como parte de él en vez de como "enviar".

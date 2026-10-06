@@ -29,6 +29,7 @@ import {
 import { callerOf, clip, displayPath, formatConsoleArgs, formatValue, toTransferable } from "./serialize";
 import {
   installCookieJar, installScrollbars, installStorageSync, JAR_HEADER, OWN_HEADER, takeNatives,
+  pauseStoragePoll,
 } from "./siteState";
 import { isTouch, sendTouch, setTouch } from "./touch";
 import { CORS_HEADER, CRED_HEADER, HEADERS_HEADER, corsMessage, routeRequest, type Routed } from "./route";
@@ -1547,6 +1548,7 @@ declare global {
     // dibujando algo que no se ve.
     if (message.type === "view:shown" || message.type === "view:hidden") {
       cursor.setWatched(message.type === "view:shown");
+      pauseStoragePoll(message.type === "view:hidden");
       return;
     }
     if (message.type === "net:on" || message.type === "net:off") {

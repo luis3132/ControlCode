@@ -74,7 +74,9 @@ const bare = (c: PendingCapture): AnnotatedCapture => ({ id: c.id, path: c.path,
  * Y cuando lo que hay que mostrar es cómo se VE, se anota encima: la página se congela en
  * una foto, se dibuja sobre ella, y la foto con los dibujos va en el mismo mensaje.
  */
-export function BrowserTab({ view, active }: { view: BrowserView; active: boolean }) {
+/** `active`: tiene el foco (recibe el teclado). `shown`: se ve, con foco o sin él (con la
+ *  pantalla dividida se ven varias). Lo que pausa el trabajo de fondo es no verse. */
+export function BrowserTab({ view, active, shown = active }: { view: BrowserView; active: boolean; shown?: boolean }) {
   const { t } = useTranslation();
   const updateView = useViewTabsStore((s) => s.updateView);
   const tabs = useTabsStore((s) => s.tabs);
@@ -393,10 +395,12 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
 
   // La página necesita saber si alguien la está mirando: con la tab en segundo plano, el
   // puntero del agente no se anima (nadie lo vería) y cada acción sale más rápido.
+  // Es "se ve" y no "tiene el foco": en la pantalla dividida, la de al lado se ve aunque
+  // el teclado esté en otra. Oculta, además, la página deja de sondear su storage.
   useEffect(() => {
     if (!target) return;
-    postToPage(active ? "view:shown" : "view:hidden");
-  }, [active, target, postToPage]);
+    postToPage(shown ? "view:shown" : "view:hidden");
+  }, [shown, target, postToPage]);
 
   // Esc también cancela con el foco afuera de la página (en la barra, por ejemplo).
   useEffect(() => {
@@ -753,7 +757,9 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
               </div>
             </div>
           )}
-          {debugOpen && target && (
+          {/* Oculta, el depurador se desmonta: sus pestañas de red y rendimiento sondean cada
+              uno o dos segundos. La red vive en el proxy y se relee al volver. */}
+          {debugOpen && target && shown && (
             <DebugPanel
               viewId={view.id}
               channel={channel}

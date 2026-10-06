@@ -68,6 +68,11 @@ fn buffers() -> MutexGuard<'static, HashMap<u32, PtyBuffer>> {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PtyDataPayload {
     pub data: String,
+    /// Cuántos bytes había escrito el proceso al terminar este tramo (la misma cuenta que
+    /// `PtyAttach::total`). Una terminal que se reconecta copia el scrollback y descarta
+    /// los eventos que ya venían en esa copia: sin esto, lo que llegaba entre la copia y
+    /// el listener se perdía, o se escribía dos veces.
+    pub end: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -383,6 +388,7 @@ pub fn spawn(app: &AppHandle, opts: SpawnOptions<'_>) -> Result<u32, String> {
 /// borde de carácter UTF-8.
 fn emit_loop(app: &AppHandle, event_name: &str, rx: &std::sync::mpsc::Receiver<Vec<u8>>) {
     let mut pending: Vec<u8> = Vec::new();
+    let mut end: u64 = 0;
     while let Ok(chunk) = rx.recv() {
         pending.extend_from_slice(&chunk);
         while pending.len() < MAX_EVENT_BYTES {
@@ -397,12 +403,14 @@ fn emit_loop(app: &AppHandle, event_name: &str, rx: &std::sync::mpsc::Receiver<V
         }
         let data = String::from_utf8_lossy(&pending[..cut]).into_owned();
         pending.drain(..cut);
-        app.emit(event_name, PtyDataPayload { data }).ok();
+        end += cut as u64;
+        app.emit(event_name, PtyDataPayload { data, end }).ok();
     }
     // El proceso terminó con un carácter a medias: se manda lo que haya.
     if !pending.is_empty() {
         let data = String::from_utf8_lossy(&pending).into_owned();
-        app.emit(event_name, PtyDataPayload { data }).ok();
+        end += pending.len() as u64;
+        app.emit(event_name, PtyDataPayload { data, end }).ok();
     }
 }
 
@@ -433,13 +441,19 @@ fn exit_hooks(id: u32, code: i32) {
 pub async fn pty_attach(id: u32) -> Result<PtyAttach, String> {
     let buffers = buffers();
     let buf = buffers.get(&id).ok_or_else(|| format!("PTY session {id} not found"))?;
-    Ok(PtyAttach { data: String::from_utf8_lossy(&buf.data).into_owned(), exit_code: buf.exit_code })
+    Ok(PtyAttach {
+        data: String::from_utf8_lossy(&buf.data).into_owned(),
+        total: buf.total_bytes,
+        exit_code: buf.exit_code,
+    })
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PtyAttach {
     pub data: String,
+    /// Cuánto había escrito el proceso al copiar `data` (ver `PtyDataPayload::end`).
+    pub total: u64,
     pub exit_code: Option<i32>,
 }
 

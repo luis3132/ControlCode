@@ -13,6 +13,16 @@ import { clampZoom, TERMINAL_ZOOM } from "@/features/terminal/theme";
 const MARKS_KEY = "cc-terminal-input-marks";
 const GPU_KEY = "cc-terminal-gpu";
 const ZOOM_KEY = "cc-terminal-zoom";
+const HIBERNATE_KEY = "cc-terminal-hibernate-minutes";
+
+/** Por defecto, una terminal oculta hiberna a los 10 minutos. */
+export const HIBERNATE_DEFAULT_MINUTES = 10;
+
+function storedMinutes(): number {
+  const raw = localStorage.getItem(HIBERNATE_KEY);
+  const n = raw === null ? HIBERNATE_DEFAULT_MINUTES : Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : HIBERNATE_DEFAULT_MINUTES;
+}
 
 interface TerminalPrefsState {
   /** Dibujar una línea de corte en cada envío del usuario. */
@@ -32,6 +42,10 @@ interface TerminalPrefsState {
    *  fuente que se ve bien depende de la pantalla y de la distancia, no de la TUI. */
   zoom: number;
   setZoom: (value: number) => void;
+  /** A los cuántos minutos oculta hiberna una terminal (se suelta su xterm; el proceso
+   *  sigue). 0 = nunca. */
+  hibernateMinutes: number;
+  setHibernateMinutes: (value: number) => void;
 }
 
 export const useTerminalPrefsStore = create<TerminalPrefsState>((set) => ({
@@ -60,5 +74,13 @@ export const useTerminalPrefsStore = create<TerminalPrefsState>((set) => ({
     const zoom = clampZoom(value);
     localStorage.setItem(ZOOM_KEY, String(zoom));
     set({ zoom });
+  },
+
+  hibernateMinutes: storedMinutes(),
+
+  setHibernateMinutes: (value) => {
+    const minutes = Math.max(0, Math.round(value));
+    localStorage.setItem(HIBERNATE_KEY, String(minutes));
+    set({ hibernateMinutes: minutes });
   },
 }));

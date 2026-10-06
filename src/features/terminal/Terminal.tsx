@@ -14,7 +14,9 @@ import { registerCapabilityResponders } from "@/features/terminal/terminalCapabi
 import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
 import { installTuiScrollRail } from "@/features/terminal/tuiScrollRail";
-import { registerTerminal } from "@/features/terminal/terminalRegistry";
+import { registerTerminal, terminalAttached } from "@/features/terminal/terminalRegistry";
+import { isHibernated } from "@/features/terminal/hibernation";
+import { afterSnapshot, type PtyData } from "@/features/terminal/ptyStream";
 import { installTerminalKeyHandler } from "@/features/terminal/terminalKeys";
 import { IS_MAC, terminalClipboard } from "@/features/terminal/terminalClipboard";
 import { parseCwdOsc, rememberShellCwd, shellCwdOf } from "@/features/terminal/shellCwd";
@@ -309,14 +311,22 @@ export function Terminal({
       });
     };
 
+    /** Al reconectarse: lo que llega mientras se copia el scrollback espera acá, y después
+     *  se escribe solo lo que no venía en la copia (ver `ptyStream.ts`). */
+    let early: PtyData[] | null = null;
+    let snapshotTotal = 0;
+    const onPtyData = (chunk: PtyData) => {
+      if (early) {
+        early.push(chunk);
+        return;
+      }
+      const data = snapshotTotal ? afterSnapshot(chunk, snapshotTotal) : chunk.data;
+      if (data) term.write(data);
+    };
+
     const attachListeners = async (ptyId: number) => {
       // ── 3. Escuchar stdout del PTY ──────────────────────
-      unlistenData = await listen<{ data: string }>(
-        `pty-data-${ptyId}`,
-        (event) => {
-          term.write(event.payload.data);
-        }
-      );
+      unlistenData = await listen<PtyData>(`pty-data-${ptyId}`, (event) => onPtyData(event.payload));
 
       // ── 4. Escuchar salida del proceso ──────────────────
       unlistenExit = await listen<{ code: number }>(
@@ -335,19 +345,30 @@ export function Terminal({
       try {
         if (attachPtyId != null) {
           // Reconectar a un PTY que ya está vivo en otra ventana: nada de spawnear de nuevo.
-          const { data: buffered, exitCode } = await ptyAttach(attachPtyId);
+          // Primero se escucha y después se copia: así nada de lo que el proceso escriba en
+          // el medio se pierde (antes se copiaba y recién después se escuchaba).
+          early = [];
+          await attachListeners(attachPtyId);
+          const { data: buffered, total, exitCode } = await ptyAttach(attachPtyId);
           ptyIdRef.current = attachPtyId;
           await fitOnce();
           if (buffered) term.write(buffered);
+          snapshotTotal = total;
+          const waiting = early;
+          early = null;
+          waiting.forEach(onPtyData);
           // El proceso terminó mientras esta terminal no estaba montada (hibernada): se
           // muestra cómo terminó, como si hubiera estado mirando.
           if (exitCode !== null) {
+            unlistenExit?.();
+            unlistenExit = null;
             setStatus("exited");
             term.write(`\r\n\x1b[90m${t("terminal.exitCode", { code: exitCode })}\x1b[0m\r\n`);
             return;
           }
           setStatus("running");
           onReady?.(attachPtyId);
+          if (tabId) terminalAttached(tabId);
 
           // Reconectar NO cancela el descubrimiento. Antes esta rama devolvía sin llamar a
           // `pollSessionId`, así que una tab arrastrada a otra ventana (o mergeada) dejaba
@@ -357,8 +378,6 @@ export function Terminal({
           // horas vivo y su sesión ser mucho más vieja que esta reconexión.
           const attachCwd: string = cwd ?? (await homeDir());
           pollSessionId(attachCwd, openedAt ?? Math.floor(Date.now() / 1000));
-
-          await attachListeners(attachPtyId);
           // El área de terminal puede medir distinto que cuando el PTY nació (paneles
           // plegados, ventana redimensionada mientras la tab estaba en segundo plano).
           if (!cancelled) {
@@ -478,6 +497,7 @@ export function Terminal({
         onReady?.(ptyId);
         pollSessionId(resolvedCwd, startedAfter);
         await attachListeners(ptyId);
+        if (tabId) terminalAttached(tabId);
       } catch (err) {
         term.write(`\r\n\x1b[31m${t("terminal.ptyError", { error: err })}\x1b[0m\r\n`);
         setStatus("exited");
@@ -563,13 +583,12 @@ export function Terminal({
       disposeRail();
       unlistenData?.();
       unlistenExit?.();
-      if (ptyIdRef.current !== null) {
-        // Antes había un guardia acá para no matar un PTY que estaba viajando a otra
-        // ventana. Ese camino ya no existe: se cambia de workspace en el lugar, así que
-        // desmontar una terminal siempre significa cerrarla.
+      // Desmontar una terminal es cerrarla, salvo cuando se hiberna: ahí se suelta solo la
+      // xterm y el proceso sigue, para reconectarse al volver (ver `hibernation.ts`).
+      if (ptyIdRef.current !== null && !(tabId && isHibernated(tabId))) {
         ptyKill(ptyIdRef.current).catch(console.error);
-        ptyIdRef.current = null;
       }
+      ptyIdRef.current = null;
       termRef.current = null;
       unregister?.();
       term.dispose();

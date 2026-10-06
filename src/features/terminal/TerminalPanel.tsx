@@ -13,6 +13,14 @@ import { readDir } from "@/features/explorer/ipc";
 import {
   dropFilesOnTab, setFileDropTarget, terminalTabAt, TERMINAL_TAB_ATTR, useFileDropTarget,
 } from "@/features/terminal/fileDrop";
+import { dueForHibernation, hibernate, useHibernation, wake } from "@/features/terminal/hibernation";
+import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
+import { setTerminalWaker } from "@/features/terminal/terminalRegistry";
+import { ptyKill } from "@/features/terminal/ipc";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
+
+/** Cada cuánto se revisa qué terminales ocultas ya tienen que hibernar. */
+const HIBERNATE_CHECK_MS = 30_000;
 
 export function TerminalPanel() {
   const { t } = useTranslation();
@@ -34,6 +42,66 @@ export function TerminalPanel() {
   // arma su comando sin saber cómo reanudarla y arranca una sesión nueva (el comando se
   // fija al montar): se espera a conocerlas.
   const customLoaded = useAgentsStore((s) => s.loaded);
+  const docVisible = useDocumentVisible();
+  const hibernated = useHibernation((s) => s.ids);
+  const hibernateMinutes = useTerminalPrefsStore((s) => s.hibernateMinutes);
+
+  // ── Ahorro de energía ────────────────────────────────────────────────────────────────
+  //
+  // Una terminal que no se ve no dibuja (ver el `display` de abajo), y si lleva un rato
+  // así se hiberna: se suelta su xterm entera y el proceso sigue. `hiddenSince` es desde
+  // cuándo no se ve cada una; volver a verla la despierta.
+  const hiddenSince = useRef(new Map<string, number>());
+  const shownKeys = tabs.filter((tab) => visible.has(agentKey(tab.id)) && onWorkspace).map((tab) => tab.id);
+  const shownKey = shownKeys.join("|");
+  useEffect(() => {
+    const shownNow = new Set(shownKey ? shownKey.split("|") : []);
+    const now = Date.now();
+    for (const tab of useTabsStore.getState().tabs) {
+      if (shownNow.has(tab.id)) {
+        hiddenSince.current.delete(tab.id);
+        wake(tab.id);
+      } else if (!hiddenSince.current.has(tab.id)) {
+        hiddenSince.current.set(tab.id, now);
+      }
+    }
+    // Las cerradas ya no cuentan.
+    const alive = new Set(useTabsStore.getState().tabs.map((tab) => tab.id));
+    for (const id of hiddenSince.current.keys()) if (!alive.has(id)) hiddenSince.current.delete(id);
+  }, [shownKey, tabs.length]);
+
+  useEffect(() => {
+    const check = () => {
+      // Solo las que ya tienen proceso: una que todavía no arrancó no tiene a qué
+      // reconectarse al despertar.
+      const launched = new Map(
+        [...hiddenSince.current].filter(([id]) => useTabsStore.getState().tabs.find((tab) => tab.id === id)?.ptyId != null)
+      );
+      hibernate(dueForHibernation(launched, Date.now(), hibernateMinutes, useHibernation.getState().ids));
+    };
+    const id = window.setInterval(check, HIBERNATE_CHECK_MS);
+    return () => window.clearInterval(id);
+  }, [hibernateMinutes]);
+
+  // Una tab hibernada que se cierra no tiene una `<Terminal>` que al desmontarse mate su
+  // proceso: se mata acá.
+  const ptyOf = useRef(new Map<string, number | undefined>());
+  useEffect(() => {
+    const now = new Map(tabs.map((tab) => [tab.id, tab.ptyId ?? undefined]));
+    for (const [id, ptyId] of ptyOf.current) {
+      if (now.has(id) || !useHibernation.getState().ids.has(id)) continue;
+      wake(id);
+      if (ptyId != null) ptyKill(ptyId).catch(console.error);
+    }
+    ptyOf.current = now;
+  }, [tabs]);
+
+  // Pegarle algo a una hibernada (soltarle un archivo, mandarle un elemento del navegador)
+  // la despierta; lo pegado sale cuando se reconecta.
+  useEffect(() => {
+    setTerminalWaker((tabId) => wake(tabId));
+    return () => setTerminalWaker(null);
+  }, []);
 
   // Archivos soltados desde el gestor de archivos del sistema. El webview no los ve como
   // un drop de HTML: Tauri se queda con el arrastre de la ventana (en Windows, siempre) y
@@ -91,11 +159,19 @@ export function TerminalPanel() {
         const placement = visible.get(key);
         if (placement) lastRect.current.set(key, placement.rect);
         const shown = placement !== undefined;
+        // Oculta y con su proceso ya lanzado, la terminal sale del árbol de dibujo: xterm
+        // pausa su renderizador cuando su pantalla deja de intersectar (`display: none`
+        // lo dispara; `visibility: hidden` no), pero sigue leyendo la salida y contestando
+        // lo que la TUI le pregunta, así el agente no se traba. Al volver repinta de una.
+        // Antes de lanzarse se queda con `visibility`: necesita medir su lugar para que el
+        // PTY nazca del tamaño correcto.
+        const asleep = (!shown || !onWorkspace || !docVisible) && tab.ptyId != null;
         return (
           <div
             key={tab.id}
             style={{
               ...placeStyle(lastRect.current.get(key) ?? null),
+              display: asleep ? "none" : undefined,
               // Sin "visible" explícito: así hereda el visibility del contenedor de
               // AppShell (que lo oculta fuera de /workspace) en vez de sobreescribirlo.
               visibility: shown ? undefined : "hidden",
@@ -114,7 +190,7 @@ export function TerminalPanel() {
                 </span>
               </div>
             )}
-            {(customLoaded || agentDef(tab.agentId)) && <Terminal
+            {(customLoaded || agentDef(tab.agentId)) && !hibernated.has(tab.id) && <Terminal
               // El nonce en la key: reiniciar el agente desmonta esta terminal (lo que mata
               // su proceso) y monta otra, que relanza con `--resume`.
               key={`${tab.id}:${tab.restartNonce ?? 0}`}

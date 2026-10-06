@@ -324,6 +324,9 @@ export function installStorageSync(natives: Natives): void {
   // `localStorage.x = "1"` y `delete localStorage.x` no pasan por los métodos.
   let signature = `${signatureOf(local)}#${signatureOf(session)}`;
   natives.setInterval(() => {
+    // Con la tab oculta no se recorre el storage cada 2 s: lo que se escriba por métodos se
+    // copia igual, y lo asignado directo se ve en la primera vuelta al mostrarse.
+    if (storagePollPaused) return;
     const now = `${signatureOf(local)}#${signatureOf(session)}`;
     if (now !== signature) {
       signature = now;
@@ -334,6 +337,12 @@ export function installStorageSync(natives: Natives): void {
   // La primera copia le dice al proxy que esta página ya tiene su storage: desde ahí, en
   // esta ejecución de la app, no se repone nada más.
   schedule();
+}
+
+/** Pausa el sondeo del storage mientras nadie mira la tab (ver `view:hidden`). */
+let storagePollPaused = false;
+export function pauseStoragePoll(paused: boolean) {
+  storagePollPaused = paused;
 }
 
 // ── Barras de scroll ────────────────────────────────────────────

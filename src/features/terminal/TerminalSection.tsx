@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Slider, Switch, useTheme } from "neogestify-ui-components";
-import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
+import { Button, SegmentedControl, Slider, Switch, useTheme } from "neogestify-ui-components";
+import { HIBERNATE_DEFAULT_MINUTES, useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import {
   TERMINAL_FONT, TERMINAL_THEMES, TERMINAL_ZOOM, terminalFontSize,
 } from "@/features/terminal/theme";
@@ -57,6 +58,40 @@ function ZoomSetting() {
   );
 }
 
+/** Los tiempos que se ofrecen para hibernar. */
+const HIBERNATE_OPTIONS = [5, 10, 30, 60];
+
+/** Ahorro de energía: a los cuántos minutos oculta hiberna una terminal. */
+function HibernateSetting() {
+  const { t } = useTranslation();
+  const minutes = useTerminalPrefsStore((s) => s.hibernateMinutes);
+  const setMinutes = useTerminalPrefsStore((s) => s.setHibernateMinutes);
+  const [last, setLast] = useState(minutes || HIBERNATE_DEFAULT_MINUTES);
+  return (
+    <div>
+      <Switch
+        checked={minutes > 0}
+        onChange={(on) => setMinutes(on ? last : 0)}
+        label={t("settings.terminal.hibernate")}
+        description={t("settings.terminal.hibernate.desc")}
+        labelPosition="left"
+      />
+      {minutes > 0 && (
+        <div className="flex items-center gap-3 mt-2">
+          <span className="text-[12px] text-gray-500 dark:text-white/50">{t("settings.terminal.hibernate.after")}</span>
+          <SegmentedControl
+            size="sm"
+            aria-label={t("settings.terminal.hibernate.after")}
+            value={String(minutes)}
+            onChange={(v) => { setLast(Number(v)); setMinutes(Number(v)); }}
+            options={HIBERNATE_OPTIONS.map((m) => ({ value: String(m), label: t("settings.terminal.hibernate.minutes", { count: m }) }))}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TerminalSection() {
   const { t } = useTranslation();
   const inputMarks = useTerminalPrefsStore((s) => s.inputMarks);
@@ -78,6 +113,10 @@ export function TerminalSection() {
         description={t("settings.terminal.marks.desc")}
         labelPosition="left"
       />
+
+      <div className="h-4" />
+
+      <HibernateSetting />
 
       <div className="h-4" />
 
