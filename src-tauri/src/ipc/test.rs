@@ -684,15 +684,19 @@ fn el_barrido_borra_los_configs_de_tabs_y_tareas_que_ya_no_estan() {
 
     let dir = std::env::temp_dir().join(format!("cc-mcp-sweep-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
-    for name in ["tab-viva.json", "tab-cerrada.json", "tarea-viva.json", "tarea-borrada.json"] {
+    // Los de Gemini son dos por tab (settings y política): se barren igual.
+    for name in [
+        "tab-viva.json", "tab-cerrada.json", "tarea-viva.json", "tarea-borrada.json",
+        "tab-viva.gemini.json", "tab-viva.gemini.toml", "tab-cerrada.gemini.json", "tab-cerrada.gemini.toml",
+    ] {
         std::fs::write(dir.join(name), "{}").unwrap();
     }
 
-    assert_eq!(super::mcp::sweep_configs_in(&dir, &conn), 2);
+    assert_eq!(super::mcp::sweep_configs_in(&dir, &conn), 4);
     let mut quedaron: Vec<String> =
         std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
     quedaron.sort();
-    assert_eq!(quedaron, vec!["tab-viva.json", "tarea-viva.json"]);
+    assert_eq!(quedaron, vec!["tab-viva.gemini.json", "tab-viva.gemini.toml", "tab-viva.json", "tarea-viva.json"]);
 
     // Y es idempotente: correrlo de nuevo no borra lo que sí está vivo.
     assert_eq!(super::mcp::sweep_configs_in(&dir, &conn), 0);
@@ -883,4 +887,38 @@ fn una_cancelacion_se_recuerda_por_su_id() {
     crate::ipc::cancel::cancel("c-1");
     assert!(crate::ipc::cancel::is_cancelled(Some("c-1")));
     assert!(!crate::ipc::cancel::is_cancelled(None), "un pedido de la CLI nunca está cancelado");
+}
+
+/// Codex recibe el servidor con `-c` sobre su config.toml: el comando, sus argumentos (la
+/// tab va adentro), un timeout que alcance para las tools que esperan, y la aprobación.
+#[test]
+fn codex_recibe_el_servidor_por_claves_de_su_config() {
+    let args = super::mcp::codex_config_args("/opt/cc/ccode", &["mcp", "--cwd", "/p", "--tab", "t1"]);
+    let values: Vec<&String> = args.iter().skip(1).step_by(2).collect();
+    assert!(args.iter().step_by(2).all(|a| a == "-c"), "{args:?}");
+    assert!(values.contains(&&r#"mcp_servers.controlcode.command="/opt/cc/ccode""#.to_string()));
+    assert!(values.contains(&&r#"mcp_servers.controlcode.args=["mcp","--cwd","/p","--tab","t1"]"#.to_string()));
+    assert!(values.contains(&&r#"mcp_servers.controlcode.default_tools_approval_mode="writes""#.to_string()));
+    // El navegador se aprueba solo aunque escriba en la página; lanzar y subir, no.
+    assert!(values.contains(&&r#"mcp_servers.controlcode.tools.browser_click.approval_mode="approve""#.to_string()));
+    assert!(!values.iter().any(|v| v.contains("tools.git_push.") || v.contains("tools.process_start.")));
+    // Las de solo lectura no hace falta nombrarlas: `writes` ya no pregunta por ellas.
+    assert!(!values.iter().any(|v| v.contains("tools.process_output.")));
+}
+
+/// Gemini: nuestro servidor se suma a los settings de sistema que ya hubiera, y la política
+/// permite solo lo que se aprueba solo.
+#[test]
+fn gemini_recibe_el_servidor_sin_perder_los_settings_de_sistema() {
+    let base = json!({ "mcpServers": { "suyo": { "command": "x" } }, "general": { "vimMode": true } });
+    let settings = super::mcp::gemini_settings(&base, "/opt/cc/ccode", &["mcp", "--cwd", "/p"]);
+    assert_eq!(settings["mcpServers"]["suyo"]["command"], "x");
+    assert_eq!(settings["general"]["vimMode"], true);
+    assert_eq!(settings["mcpServers"]["controlcode"]["command"], "/opt/cc/ccode");
+    assert_eq!(settings["mcpServers"]["controlcode"]["args"], json!(["mcp", "--cwd", "/p"]));
+
+    let policy = super::mcp::gemini_policy();
+    assert!(policy.contains("toolName = \"browser_click\"") && policy.contains("toolName = \"process_output\""));
+    assert!(!policy.contains("\"git_push\"") && !policy.contains("\"process_start\""));
+    assert!(policy.contains("mcpName = \"controlcode\"") && policy.contains("decision = \"allow\""));
 }

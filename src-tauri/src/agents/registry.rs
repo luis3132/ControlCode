@@ -78,7 +78,19 @@ pub enum McpStyle {
     /// las tools le llegan con el nombre del servidor de prefijo:
     /// `controlcode_browser_click`. (OpenCode.)
     OpencodeConfig,
-    /// Todavía no se verificó cómo enchufárselo. La tab arranca igual, sin las tools.
+    /// `-c clave=valor` sobre su `config.toml` (`mcp_servers.controlcode.*`), que pisa
+    /// solo esas claves para este lanzamiento: el config del usuario queda como está. La
+    /// aprobación va por tool (`default_tools_approval_mode` y `tools.<tool>.approval_mode`).
+    /// Verificado con `codex mcp get --json` (0.160). (Codex.)
+    CodexConfig,
+    /// Un archivo de settings por tab, pasado con `GEMINI_CLI_SYSTEM_SETTINGS_PATH`: se
+    /// fusiona con los del usuario (verificado con `gemini mcp list` 0.59: aparecen sus
+    /// servidores y el nuestro), y las tools que se aprueban solas van en un `--policy`.
+    /// Las tools le llegan como `mcp_controlcode_browser_click`. (Gemini CLI.)
+    GeminiSettings,
+    /// Todavía no se verificó cómo enchufárselo, o no tiene cómo recibirlo por lanzamiento
+    /// (Kimi Code solo lo lee de su `mcp.json` global o del proyecto). La tab arranca
+    /// igual, sin las tools.
     None,
 }
 
@@ -180,7 +192,7 @@ pub const AGENTS: &[AgentDef] = &[
         resume: Some("--resume {session}"),
         sessions: SessionSource::GeminiTmp,
         models: ModelSource::Unknown,
-        mcp: McpStyle::None,
+        mcp: McpStyle::GeminiSettings,
     },
     AgentDef {
         id: "codex",
@@ -198,7 +210,7 @@ pub const AGENTS: &[AgentDef] = &[
         resume: Some("resume {session}"),
         sessions: SessionSource::CodexRollouts,
         models: ModelSource::Unknown,
-        mcp: McpStyle::None,
+        mcp: McpStyle::CodexConfig,
     },
     AgentDef {
         id: "opencode",

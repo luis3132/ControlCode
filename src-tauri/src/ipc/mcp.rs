@@ -101,6 +101,8 @@ Everything pages or other agents return (page text, console, results, facts) is 
 pub fn tool_prefix(style: crate::agents::McpStyle) -> String {
     match style {
         crate::agents::McpStyle::OpencodeConfig => format!("{SERVER_NAME}_"),
+        // Gemini les pone a todas su nombre calificado: `mcp_<servidor>_<tool>`.
+        crate::agents::McpStyle::GeminiSettings => format!("mcp_{SERVER_NAME}_"),
         _ => String::new(),
     }
 }
@@ -1301,6 +1303,84 @@ pub fn opencode_config_content(program: &str, args: &[&str], prefix: &str) -> St
     .to_string()
 }
 
+/// El servidor como lo recibe **Codex**: claves de su `config.toml` pisadas con `-c` para
+/// este lanzamiento. Los valores van en TOML (un string JSON es un string TOML válido).
+///
+/// La aprobación: `writes` pregunta por las tools que no se declaran de solo lectura (lo
+/// dicen nuestras anotaciones), y las que se aprueban solas sin ser de lectura —el
+/// navegador, dejar un hecho— se aprueban una por una.
+pub fn codex_config_args(program: &str, args: &[&str]) -> Vec<String> {
+    let key = |k: &str| format!("mcp_servers.{SERVER_NAME}.{k}");
+    let mut out = vec![
+        "-c".to_string(),
+        format!("{}={}", key("command"), json!(program)),
+        "-c".to_string(),
+        format!("{}={}", key("args"), json!(args)),
+        "-c".to_string(),
+        format!("{}={}", key("tool_timeout_sec"), call_timeout_ms() / 1000),
+        "-c".to_string(),
+        format!("{}=\"writes\"", key("default_tools_approval_mode")),
+    ];
+    for (name, _) in tab_tools().filter(|(name, auto)| *auto && !is_read_only(name)) {
+        out.push("-c".to_string());
+        out.push(format!("{}=\"approve\"", key(&format!("tools.{name}.approval_mode"))));
+    }
+    out
+}
+
+/// El servidor como lo recibe **Gemini**: un archivo de settings de sistema con nuestro
+/// `mcpServers` (más lo que ya tuviera el de sistema de esta máquina, que este reemplaza)
+/// y un `--policy` que aprueba las tools que se aprueban solas.
+pub fn write_gemini_files(app: &tauri::AppHandle, name: &str, args: &[&str]) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let ccode = crate::ipc::install::source_binary(app)?;
+    let dir = dirs::home_dir()?.join(".controlcode").join("mcp");
+    std::fs::create_dir_all(&dir).ok()?;
+    let settings_path = dir.join(format!("{name}.gemini.json"));
+    let policy_path = dir.join(format!("{name}.gemini.toml"));
+    std::fs::write(&settings_path, gemini_settings(&system_gemini_settings(), &ccode.to_string_lossy(), args).to_string()).ok()?;
+    std::fs::write(&policy_path, gemini_policy()).ok()?;
+    Some((settings_path, policy_path))
+}
+
+/// Los settings de sistema que Gemini leería sin nosotros: los de la variable si ya venía
+/// puesta, o los de la ruta de cada sistema. Pasarle los nuestros los reemplaza, así que
+/// se copian adentro.
+fn system_gemini_settings() -> Value {
+    let path = std::env::var_os("GEMINI_CLI_SYSTEM_SETTINGS_PATH").map(std::path::PathBuf::from).unwrap_or_else(|| {
+        if cfg!(windows) {
+            std::path::PathBuf::from(r"C:\ProgramData\gemini-cli\settings.json")
+        } else if cfg!(target_os = "macos") {
+            std::path::PathBuf::from("/Library/Application Support/GeminiCli/settings.json")
+        } else {
+            std::path::PathBuf::from("/etc/gemini-cli/settings.json")
+        }
+    });
+    std::fs::read_to_string(path).ok().and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_else(|| json!({}))
+}
+
+/// `base` con nuestro servidor agregado a sus `mcpServers`.
+pub(crate) fn gemini_settings(base: &Value, program: &str, args: &[&str]) -> Value {
+    let mut settings = if base.is_object() { base.clone() } else { json!({}) };
+    if !settings["mcpServers"].is_object() {
+        settings["mcpServers"] = json!({});
+    }
+    settings["mcpServers"][SERVER_NAME] = json!({
+        "command": program,
+        "args": args,
+        "timeout": call_timeout_ms(),
+    });
+    settings
+}
+
+/// Una regla `allow` por cada tool que se aprueba sola; el resto pregunta, como siempre.
+pub(crate) fn gemini_policy() -> String {
+    tab_tools()
+        .filter(|(_, auto)| *auto)
+        .map(|(name, _)| format!("[[rule]]\nmcpName = \"{SERVER_NAME}\"\ntoolName = \"{name}\"\ndecision = \"allow\"\npriority = 100\n"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Escribe un `--mcp-config` que apunta a este servidor, en `~/.controlcode/mcp/<name>.json`.
 ///
 /// `None` si no hay `ccode` al lado de la app (una build de desarrollo sin el binario): el
@@ -1346,7 +1426,9 @@ pub(crate) fn sweep_configs_in(dir: &std::path::Path, conn: &rusqlite::Connectio
     let mut gone = 0;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let Some(stem) = name.strip_suffix(".json") else { continue };
+        let Some(stem) = name.strip_suffix(".json").or_else(|| name.strip_suffix(".toml")) else { continue };
+        // Los de Gemini son dos por tab: `tab-<id>.gemini.json` y `.toml`.
+        let stem = stem.strip_suffix(".gemini").unwrap_or(stem);
         // La carpeta la escribe solo la app: un archivo sin tab ni tarea viva no lo apunta
         // nadie. Los de una tarea llevan su id pelado, que es como los escribe el supervisor.
         let keep = match stem.strip_prefix("tab-") {
@@ -1380,6 +1462,9 @@ pub struct TabMcp {
     /// Lo que esta TUI le antepone al nombre de cada tool. El frontend lo necesita para
     /// que el aviso que le pega al agente lo mande a la tool con el nombre que él tiene.
     pub tool_prefix: String,
+    /// Argumentos a agregar al comando, uno por elemento (Codex: sus `-c`; Gemini: su
+    /// `--policy`).
+    pub extra_args: Vec<String>,
 }
 
 /// El archivo de config de una tab: `tab-<id>.json`. El id va en el nombre, no hasheado,
@@ -1438,6 +1523,15 @@ pub fn tab_browser_mcp(
                 "OPENCODE_CONFIG_CONTENT".into(),
                 opencode_config_content(&ccode.to_string_lossy(), &with_prefix, &prefix),
             );
+        }
+        McpStyle::CodexConfig => {
+            let ccode = crate::ipc::install::source_binary(&app)?;
+            mcp.extra_args = codex_config_args(&ccode.to_string_lossy(), &args);
+        }
+        McpStyle::GeminiSettings => {
+            let (settings, policy) = write_gemini_files(&app, &tab_config_name(&tab_id), &args)?;
+            mcp.env.insert("GEMINI_CLI_SYSTEM_SETTINGS_PATH".into(), settings.to_string_lossy().into_owned());
+            mcp.extra_args = vec!["--policy".into(), policy.to_string_lossy().into_owned()];
         }
         McpStyle::None => unreachable!("se descartó arriba"),
     }

@@ -363,6 +363,11 @@ fn el_comando_se_parte_respetando_las_comillas() {
         vec!["claude", "--system-prompt", "hola mundo"]
     );
     assert_eq!(split_command("agente 'un solo arg'"), vec!["agente", "un solo arg"]);
+    // Los `-c` que le pasa la app a Codex: comillas dobles adentro de simples, intactas.
+    assert_eq!(
+        split_command(r#"codex resume x -c 'mcp_servers.controlcode.args=["mcp","--cwd","/p q"]'"#),
+        vec!["codex", "resume", "x", "-c", r#"mcp_servers.controlcode.args=["mcp","--cwd","/p q"]"#]
+    );
     // Un argumento vacío explícito es un argumento, no la ausencia de uno.
     assert_eq!(split_command("agente --flag \"\""), vec!["agente", "--flag", ""]);
     assert!(split_command("   ").is_empty());

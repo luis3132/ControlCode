@@ -34,7 +34,7 @@ export interface AgentRegistryEntry {
   /** Cómo recibe esta TUI el servidor MCP de la app. Espejo de `McpStyle` en
    *  `registry.rs`: `claudeFlags` por flags, `opencodeConfig` por su config, `none` = no
    *  se le enchufa (arranca igual, sin navegador ni orquestación). */
-  mcp: "claudeFlags" | "opencodeConfig" | "none";
+  mcp: "claudeFlags" | "opencodeConfig" | "codexConfig" | "geminiSettings" | "none";
 }
 
 let REGISTRY: AgentRegistryEntry[] = [];
