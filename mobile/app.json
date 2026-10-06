@@ -10,7 +10,12 @@
     "backgroundColor": "#0d1117",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.luis3132.controlcode"
+      "bundleIdentifier": "com.luis3132.controlcode",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
     },
     "android": {
       "package": "com.luis3132.controlcode",
@@ -34,7 +39,15 @@
         }
       ],
       "expo-notifications",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
