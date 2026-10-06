@@ -35,9 +35,11 @@ function PairingPanel({ pairing, onClose }: { pairing: Pairing; onClose: () => v
       border border-blue-300 dark:border-blue-500/40 bg-blue-50/40 dark:bg-blue-500/5">
       {/* El SVG lo arma el backend (crate `qrcode`) a partir de datos propios: no hay
           nada de afuera adentro. Fondo blanco siempre, para que la cámara lo lea en tema
-          oscuro. */}
+          oscuro. Su tamaño depende del largo del código (siempre ≥ 240 px): tiene
+          `viewBox`, así que se escala a la caja en vez de desbordarla. */}
       <div
-        className={`shrink-0 w-[240px] h-[240px] rounded-lg overflow-hidden bg-white ${expired ? "opacity-20" : ""}`}
+        className={`shrink-0 w-[240px] h-[240px] rounded-lg overflow-hidden bg-white
+          [&>svg]:w-full [&>svg]:h-full [&>svg]:block ${expired ? "opacity-20" : ""}`}
         dangerouslySetInnerHTML={{ __html: pairing.svg }}
       />
       <div className="flex flex-col gap-2 text-[12px] text-gray-600 dark:text-gray-300">
