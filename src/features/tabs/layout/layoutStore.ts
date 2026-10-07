@@ -1,12 +1,12 @@
 import { create } from "zustand";
 
 import { useTabsStore } from "@/features/tabs/store";
-import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { setViewReplacer, useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
 import {
   activate, agentKey, allGroups, closeGroup, createLayout, findGroup, focusGroup as focusInTree, isAgentKey, keyId,
-  moveItem, parseLayout, reconcile, resize, split, viewKey, type SplitSide, type WorkspaceLayout,
+  moveItem, parseLayout, reconcile, replaceItem, resize, split, viewKey, type SplitSide, type WorkspaceLayout,
 } from "./layoutTree";
 
 /**
@@ -188,6 +188,15 @@ export function syncLayouts(force = false): void {
 }
 
 const KEY = "cc-tab-layouts";
+
+// Una tab provisoria que se reemplaza deja a la nueva en su mismo lugar (ver `viewStore`).
+setViewReplacer((fromId, toId, cwd) => {
+  const workspace = comparablePath(cwd);
+  const layout = useLayoutStore.getState().layouts[workspace];
+  if (!layout) return;
+  const next = replaceItem(layout, viewKey(fromId), viewKey(toId));
+  if (next !== layout) useLayoutStore.setState((s) => ({ layouts: { ...s.layouts, [workspace]: next } }));
+});
 
 /** Engancha la sincronización y guarda los árboles de esta ventana en `localStorage`. */
 export function initLayoutSync(windowLabel: string): () => void {

@@ -33,6 +33,14 @@ pub fn run() {
             // Terminal embebida (PTY)
             crate::terminal::pty_create,
             crate::terminal::pty_attach,
+            crate::terminal::pty_output_totals,
+            // Subprocesos: los procesos largos que corren los agentes
+            crate::procs::procs_list,
+            crate::procs::procs_start,
+            crate::procs::procs_stop,
+            crate::procs::procs_restart,
+            crate::procs::procs_clear,
+            crate::procs::procs_usage,
             crate::terminal::pty_write,
             crate::terminal::pty_resize,
             crate::terminal::pty_kill,
@@ -69,19 +77,20 @@ pub fn run() {
             crate::window::confirm_exit_all,
             crate::window::close_window_saved,
             // Explorador de archivos del workspace (panel derecho)
-            crate::explorer::explorer_read_dir,
-            crate::explorer::explorer_repo_info,
+            crate::explorer::commands::explorer_read_dir,
+            crate::explorer::commands::explorer_repo_info,
             crate::explorer::explorer_search,
-            crate::explorer::explorer_create_file,
-            crate::explorer::explorer_create_dir,
-            crate::explorer::explorer_rename,
-            crate::explorer::explorer_copy,
-            crate::explorer::explorer_move,
-            crate::explorer::explorer_trash,
+            crate::explorer::watch::explorer_watch,
+            crate::explorer::commands::explorer_create_file,
+            crate::explorer::commands::explorer_create_dir,
+            crate::explorer::commands::explorer_rename,
+            crate::explorer::commands::explorer_copy,
+            crate::explorer::commands::explorer_move,
+            crate::explorer::commands::explorer_trash,
             // Tabs de archivo
-            crate::explorer::explorer_read_file,
-            crate::explorer::explorer_write_file,
-            crate::explorer::explorer_file_stat,
+            crate::explorer::commands::explorer_read_file,
+            crate::explorer::commands::explorer_write_file,
+            crate::explorer::commands::explorer_file_stat,
             // Control de versiones (panel derecho)
             crate::scm::scm_status,
             crate::scm::scm_init,
@@ -291,6 +300,8 @@ pub fn run() {
             // una sola.
             tauri::WindowEvent::Destroyed => {
                 let _ = window.app_handle().emit("cc-workspace-changed", ());
+                // Su panel ya no va a pedir dejar de vigilar: se suelta acá.
+                crate::explorer::watch::forget_window(window.label());
             }
             tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
                 let _ = window.emit("cc-window-bounds-changed", ());
@@ -336,6 +347,8 @@ pub fn run() {
 
             // Servidor IPC de la CLI `controlcode` (Fase 8). Va después de restaurar las
             // ventanas: varios comandos necesitan que exista al menos una para responder.
+            // Los subprocesos se enteran de cuándo termina cada PTY, haya o no ventana.
+            crate::procs::init(app.handle());
             crate::ipc::start(app.handle().clone());
             Ok(())
         })
@@ -354,6 +367,7 @@ pub fn run() {
                 // `lazy_static` y Rust no corre destructores de estáticos al salir, así
                 // que el `Drop` que limpia cada grupo hay que dispararlo a mano.
                 crate::terminal::kill_all_sessions();
+                crate::runs::kill_all_tasks();
             }
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 let windows = app_handle.webview_windows();

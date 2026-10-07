@@ -85,3 +85,31 @@ describe("qué TUI recibe el navegador y cómo nombra sus tools", () => {
     expect(browserToolPrefix(null)).toBe("");
   });
 });
+
+describe("appendBrowserMcp con Codex y Gemini", () => {
+  const codex: TabMcp = {
+    configPath: null,
+    allowedTools: [],
+    env: {},
+    toolPrefix: "",
+    extraArgs: ["-c", 'mcp_servers.controlcode.command="/opt/cc/ccode"', "-c", 'mcp_servers.controlcode.args=["mcp","--cwd","/p"]'],
+  };
+
+  it("Codex: cada -c va como un argumento, con sus comillas internas protegidas", () => {
+    expect(appendBrowserMcp("codex resume abc", codex)).toBe(
+      `codex resume abc -c 'mcp_servers.controlcode.command="/opt/cc/ccode"' -c 'mcp_servers.controlcode.args=["mcp","--cwd","/p"]'`
+    );
+  });
+
+  it("Codex: aplicarlo dos veces da lo mismo", () => {
+    const once = appendBrowserMcp("codex", codex);
+    expect(appendBrowserMcp(once, codex)).toBe(once);
+  });
+
+  it("Gemini: la política de la carpeta de la app se reemplaza, no se suma", () => {
+    const gemini: TabMcp = { ...codex, extraArgs: ["--policy", "/home/u/.controlcode/mcp/tab-a.gemini.toml"] };
+    const once = appendBrowserMcp("gemini --resume x", gemini);
+    expect(once).toBe("gemini --resume x --policy /home/u/.controlcode/mcp/tab-a.gemini.toml");
+    expect(appendBrowserMcp(once, gemini)).toBe(once);
+  });
+});

@@ -232,10 +232,15 @@ mod tests_cgroup {
         // módulo cae al recorrido por `ppid` y no hay nada que verificar acá.
         if imp::usa_cgroup(&group.imp) {
             assert_ne!(despues, antes, "el proceso tendría que haber cambiado de cgroup");
+            let nombre = despues.rsplit('/').next().unwrap_or_default().to_string();
             assert!(
-                despues.ends_with("/cc-tab-9001"),
+                nombre.starts_with(&format!("cc-{}-", std::process::id())) && nombre.ends_with("-9001"),
                 "quedó en {despues}, no en el cgroup de la tab"
             );
+            // Otro grupo con el mismo id (una tarea de la flota, otra instancia) no choca:
+            // antes el `create_dir` fallaba y el segundo quedaba sin cgroup en silencio.
+            let otro = ProcessGroup::new(9_001);
+            assert!(imp::usa_cgroup(&otro.imp), "el segundo grupo con el mismo id se quedó sin cgroup");
         }
 
         group.kill_all();
@@ -358,6 +363,11 @@ fn el_comando_se_parte_respetando_las_comillas() {
         vec!["claude", "--system-prompt", "hola mundo"]
     );
     assert_eq!(split_command("agente 'un solo arg'"), vec!["agente", "un solo arg"]);
+    // Los `-c` que le pasa la app a Codex: comillas dobles adentro de simples, intactas.
+    assert_eq!(
+        split_command(r#"codex resume x -c 'mcp_servers.controlcode.args=["mcp","--cwd","/p q"]'"#),
+        vec!["codex", "resume", "x", "-c", r#"mcp_servers.controlcode.args=["mcp","--cwd","/p q"]"#]
+    );
     // Un argumento vacío explícito es un argumento, no la ausencia de uno.
     assert_eq!(split_command("agente --flag \"\""), vec!["agente", "--flag", ""]);
     assert!(split_command("   ").is_empty());
@@ -395,5 +405,40 @@ mod shell {
         let cwd = process_cwd(child.id());
         let _ = child.kill();
         assert_eq!(cwd.map(std::path::PathBuf::from).map(|p| p.canonicalize().unwrap()), Some(dir));
+    }
+}
+
+mod utf8_split {
+    use super::super::pty_manager::utf8_split_point;
+
+    #[test]
+    fn no_parte_un_caracter_entre_dos_lecturas() {
+        let text = "año ✓ 🦀".as_bytes();
+        // Cada corte posible: lo que queda antes del punto siempre es UTF-8 válido, y lo
+        // que queda después es a lo sumo un carácter a medias.
+        for end in 0..=text.len() {
+            let cut = utf8_split_point(&text[..end]);
+            assert!(std::str::from_utf8(&text[..cut]).is_ok(), "corte inválido en {end}");
+            assert!(end - cut <= 3);
+        }
+        assert_eq!(utf8_split_point(text), text.len());
+    }
+
+    #[test]
+    fn junta_las_mitades() {
+        let text = "─ñ─".as_bytes();
+        let first = &text[..2]; // '─' son 3 bytes: llegan 2
+        let cut = utf8_split_point(first);
+        assert_eq!(cut, 0);
+        let mut joined = first[cut..].to_vec();
+        joined.extend_from_slice(&text[2..]);
+        assert_eq!(std::str::from_utf8(&joined[..utf8_split_point(&joined)]).unwrap(), "─ñ─");
+    }
+
+    #[test]
+    fn un_byte_invalido_no_traba_la_salida() {
+        let bytes = [b'a', 0xFF];
+        assert_eq!(utf8_split_point(&bytes), 2);
+        assert_eq!(utf8_split_point(&[]), 0);
     }
 }

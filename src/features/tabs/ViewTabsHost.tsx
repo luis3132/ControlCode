@@ -7,6 +7,7 @@ import { FileTab } from "@/features/editor/FileTab";
 import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { viewKey } from "@/features/tabs/layout/layoutTree";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
 /**
  * Donde se dibujan las tabs de archivo, diff y navegador: encima de las terminales.
@@ -20,6 +21,7 @@ export function ViewTabsHost() {
   const views = useViewTabsStore((s) => s.views);
   const keepMountedIds = useViewTabsStore((s) => s.keepMountedIds);
   const onWorkspace = useLocation().pathname.startsWith("/workspace");
+  const docVisible = useDocumentVisible();
   // Solo las del workspace activo tienen lugar: una de otro nunca se muestra.
   const { visible, focusedItem } = usePlacements();
   const lastRect = useRef(new Map<string, Rect | null>());
@@ -65,13 +67,17 @@ export function ViewTabsHost() {
             style={{
               ...placeStyle(lastRect.current.get(key) ?? null),
               visibility: shown ? undefined : "hidden",
+              // Oculta, ni siquiera se maqueta ni se pinta (una página con animaciones o
+              // recarga en caliente seguiría dibujando detrás). Conserva su tamaño, así la
+              // página no recibe un resize ni pierde su estado.
+              contentVisibility: shown && onWorkspace ? undefined : "hidden",
               pointerEvents: shown ? "auto" : "none",
             }}
             onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
           >
             {view.kind === "file" && <FileTab view={view} active={shown && onWorkspace} focused={focused} />}
             {view.kind === "diff" && <DiffTab view={view} active={shown && onWorkspace} />}
-            {view.kind === "browser" && <BrowserTab view={view} active={focused} />}
+            {view.kind === "browser" && <BrowserTab view={view} active={focused} shown={shown && onWorkspace && docVisible} />}
           </div>
         );
       })}

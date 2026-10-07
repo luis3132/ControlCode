@@ -51,7 +51,9 @@ function AgentRow({ agent, onClick, onContextMenu }: {
         {agent.title}
       </span>
       <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
-        {elapsed(agent.openedAt)}
+        {/* `openedAt` va en segundos (epoch) y `elapsed` espera milisegundos: sin el
+            `* 1000` cada tab decía llevar abierta "20712d". */}
+        {elapsed(agent.openedAt * 1000)}
       </span>
     </Button>
   );

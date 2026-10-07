@@ -352,9 +352,10 @@ pub async fn install_marketplace_skill(
     };
 
     match source_type.as_str() {
+        // La entrada es una carpeta o un `.md` suelto: la instalación resuelve los dos.
         "local" => {
-            let file = PathBuf::from(&location).join(&entry.folder_path).join("SKILL.md");
-            install_skill_internal(&file.to_string_lossy(), None, Some(origin), &db)
+            let entry_path = PathBuf::from(&location).join(&entry.folder_path);
+            install_skill_internal(&entry_path.to_string_lossy(), None, Some(origin), &db)
         }
         "github" => install_from_github(&location, &entry, origin, &db).await,
         "skillssh" => install_from_skillssh(&entry, origin, &db).await,
@@ -429,7 +430,9 @@ pub async fn marketplace_skill_readme(
 
     match source_type.as_str() {
         "local" => {
-            let file = PathBuf::from(&location).join(&entry.folder_path).join("SKILL.md");
+            let entry_path = PathBuf::from(&location).join(&entry.folder_path);
+            let file = crate::skills::skill_markdown(&entry_path)
+                .ok_or_else(|| format!("{} no tiene un archivo .md de skill", entry_path.display()))?;
             std::fs::read_to_string(&file).map_err(|e| format!("No se pudo leer {}: {e}", file.display()))
         }
         "github" => super::github::fetch_github_skill_markdown(&location, &entry).await,

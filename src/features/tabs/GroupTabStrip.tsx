@@ -133,6 +133,7 @@ export function GroupTabStrip({ items, active, groupFocused, draggable }: {
               isActive={key === active}
               groupFocused={groupFocused}
               onActivate={() => activate(key)}
+              onPin={() => useViewTabsStore.getState().pinView(view.id)}
               onClose={() => requestCloseItem(key)}
               onPointerDown={draggable ? (e) => beginTabDrag(e, key, title) : undefined}
               onContextMenu={(e) => openTabMenu(key, e.clientX, e.clientY)}

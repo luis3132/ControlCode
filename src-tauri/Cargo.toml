@@ -1,6 +1,6 @@
 [package]
 name = "controlcode"
-version = "1.8.8"
+version = "1.9.0"
 description = "Control Code — AI coding agent command center"
 authors = ["luis3132"]
 edition = "2024"
@@ -81,6 +81,11 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "async-
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "zip"] }
 trash = "5"
 tauri-plugin-clipboard-manager = "2"
+# El árbol de archivos se entera de lo que crean o borran los agentes (inotify, FSEvents,
+# ReadDirectoryChangesW). Ver explorer::watch.
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
+# CPU y memoria de cada subproceso y su descendencia, igual en Linux, macOS y Windows.
+sysinfo = { version = "0.38", default-features = false, features = ["system"] }
 
 # Señales POSIX: matar el GRUPO de procesos de una tab y no solo a su líder, para que no
 # queden huérfanos los procesos que el agente haya lanzado (ver terminal::pty_manager).

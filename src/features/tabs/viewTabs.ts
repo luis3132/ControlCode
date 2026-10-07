@@ -15,6 +15,10 @@ interface ViewBase {
   /** El workspace al que pertenece. La barra solo muestra las del workspace activo. */
   cwd: string;
   title: string;
+  /** Provisoria, como en VS Code: se abrió con un click (en el árbol, el buscador o Cambios)
+   *  y la reemplaza el próximo archivo que se abra así. Queda fija al editarla o con doble
+   *  click. Así la barra no se llena de todo lo que se fue mirando. */
+  transient?: boolean;
 }
 
 export interface FileView extends ViewBase {
@@ -94,6 +98,16 @@ export function relativeTo(path: string, root: string): string {
 }
 
 /** La tab que ya muestra esto, si hay: abrir dos veces lo mismo enfoca, no duplica. */
+/** La tab provisoria que reemplazaría un archivo o diff abierto con un click en `cwd`: la
+ *  que haya en ese workspace, salvo que tenga cambios sin guardar (esos solo existen en la
+ *  tab). Los navegadores nunca son provisorios. */
+export function transientToReplace(views: ViewTab[], cwd: string): ViewTab | undefined {
+  const workspace = comparablePath(cwd);
+  return views.find(
+    (v) => v.transient && v.kind !== "browser" && !(v.kind === "file" && v.dirty) && comparablePath(v.cwd) === workspace
+  );
+}
+
 export function findExisting(views: ViewTab[], wanted: ViewTarget): ViewTab | undefined {
   return views.find((v) => {
     if (v.kind !== wanted.kind || comparablePath(v.cwd) !== comparablePath(wanted.cwd)) return false;

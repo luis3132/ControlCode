@@ -49,6 +49,9 @@ impl FileMark {
 pub struct RepoInfo {
     /// `None` = la carpeta no está en ningún repo. El panel sigue funcionando, sin marcas.
     pub root: Option<String>,
+    /// El directorio de git de esta carpeta (`.git`, o `.git/worktrees/x` en un worktree).
+    /// Lo vigila el panel para refrescar las marcas cuando alguien hace `add` o `commit`.
+    pub git_dir: Option<String>,
     pub branch: Option<String>,
     /// Un worktree enlazado, no el checkout principal. Es lo que distingue un workspace
     /// "PRIMARY" de uno derivado.
@@ -63,18 +66,29 @@ pub struct RepoInfo {
 
 impl RepoInfo {
     fn none() -> Self {
-        RepoInfo { root: None, branch: None, is_worktree: false, changes: HashMap::new(), changed_count: 0 }
+        RepoInfo { root: None, git_dir: None, branch: None, is_worktree: false, changes: HashMap::new(), changed_count: 0 }
     }
 }
 
-fn git(cwd: &str, args: &[&str]) -> Option<String> {
+/// Corre `git` en `cwd`, distinguiendo "git contestó que no" (`Ok(None)`: no es un repo, la
+/// ruta no existe) de "git no contestó" (`Err`: se pasó del tiempo, o no se pudo lanzar).
+///
+/// La diferencia importa: un `git` que tarda porque otro tiene tomado el índice no puede
+/// convertirse en "esta carpeta no es un repo". El panel lo mostraba como "sin repo" y
+/// desarmaba los grupos hasta la lectura siguiente, que sí contestaba.
+fn git_checked(cwd: &str, args: &[&str]) -> Result<Option<String>, String> {
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(cwd).args(args);
-    let out = output_with_timeout(&mut cmd, GIT_TIMEOUT).ok()?;
+    let out = match output_with_timeout(&mut cmd, GIT_TIMEOUT) {
+        Ok(out) => out,
+        // Sin `git` instalado no hay repo que mostrar: no es un error transitorio.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("git no contestó: {e}")),
+    };
     if !out.status.success() {
-        return None;
+        return Ok(None);
     }
-    Some(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string())
+    Ok(Some(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string()))
 }
 
 /// Traduce las dos columnas de `git status --porcelain` a una sola marca.
@@ -129,32 +143,66 @@ pub(crate) fn parse_status_z(raw: &str) -> HashMap<String, String> {
     out
 }
 
+/// La rama del encabezado `## …` de `git status --branch`. `None` con HEAD desprendido.
+///
+/// Formas que da git: `main`, `main...origin/main [ahead 1]`, `No commits yet on main`
+/// (repo recién creado; versiones viejas dicen `Initial commit on main`) y
+/// `HEAD (no branch)`.
+pub(crate) fn branch_from_header(header: &str) -> Option<String> {
+    let rest = header.strip_prefix("## ")?;
+    if rest.starts_with("HEAD (no branch)") {
+        return None;
+    }
+    for unborn in ["No commits yet on ", "Initial commit on "] {
+        if let Some(name) = rest.strip_prefix(unborn) {
+            return Some(name.to_string());
+        }
+    }
+    let end = rest.find("...").or_else(|| rest.find(' ')).unwrap_or(rest.len());
+    Some(rest[..end].to_string()).filter(|b| !b.is_empty())
+}
+
 /// Todo lo que el panel necesita saber de la carpeta: repo, rama y cambios.
-#[tauri::command]
+///
+/// Dos procesos de git y no cinco: cada uno cuesta un fork y, en un repo grande, leer el
+/// índice. `rev-parse` responde varias preguntas de una (una línea por cada una, en
+/// orden), y la rama sale del encabezado de `status --branch`, que a diferencia de
+/// `rev-parse --abbrev-ref HEAD` también funciona en un repo sin commits.
+///
+/// `--no-optional-locks`: el `status` no toma `index.lock` para refrescar el índice. Sin
+/// eso competía con los agentes que hacen `git add`/`commit` en la misma carpeta, y uno
+/// de los dos fallaba con "index.lock exists".
 pub fn explorer_repo_info(path: String) -> Result<RepoInfo, String> {
-    let Some(root) = git(&path, &["rev-parse", "--show-toplevel"]) else {
+    let Some(dirs) = git_checked(
+        &path,
+        &["rev-parse", "--show-toplevel", "--absolute-git-dir", "--path-format=absolute", "--git-common-dir"],
+    )?
+    else {
         // No es un repo (o no hay `git`). No es un error: se muestra el árbol pelado.
         return Ok(RepoInfo::none());
     };
-
+    let mut lines = dirs.lines();
+    let (Some(root), own, common) = (lines.next(), lines.next(), lines.next()) else {
+        return Ok(RepoInfo::none());
+    };
     // En un worktree enlazado, el directorio de git propio y el común difieren. Es la
     // señal fiable: mirar si `.git` es archivo o carpeta falla con submódulos.
-    let is_worktree = match (git(&path, &["rev-parse", "--absolute-git-dir"]),
-                             git(&path, &["rev-parse", "--path-format=absolute", "--git-common-dir"])) {
-        (Some(own), Some(common)) => own != common,
-        _ => false,
+    let is_worktree = matches!((own, common), (Some(own), Some(common)) if own != common);
+
+    // Si el status no contesta, se avisa en vez de devolver un repo sin rama ni cambios: el
+    // panel se queda con lo que ya sabía.
+    let status = git_checked(&path, &["--no-optional-locks", "status", "--porcelain", "-z", "--branch", "--untracked-files=normal"])?
+        .ok_or("git status falló")?;
+    let (header, entries) = match status.split_once('\0') {
+        Some((first, rest)) if first.starts_with("## ") => (Some(first), rest),
+        _ => (None, status.as_str()),
     };
-
-    // En un repo recién inicializado, o con HEAD desprendido, `--abbrev-ref` da "HEAD".
-    // Eso no es un nombre de rama y mostrarlo confunde, así que se descarta.
-    let branch = git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]).filter(|b| b != "HEAD");
-
-    let changes = git(&path, &["status", "--porcelain", "-z", "--untracked-files=normal"])
-        .map(|raw| parse_status_z(&raw))
-        .unwrap_or_default();
+    let branch = header.and_then(branch_from_header);
+    let changes = parse_status_z(entries);
 
     Ok(RepoInfo {
-        root: Some(root),
+        root: Some(root.to_string()),
+        git_dir: own.map(str::to_string),
         branch,
         is_worktree,
         changed_count: changes.len(),

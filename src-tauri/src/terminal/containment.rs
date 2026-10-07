@@ -171,8 +171,14 @@ pub(crate) mod imp {
         // archivo del core, no de un controlador — y sin controladores habilitados no
         // aplica la restricción de "nada de procesos en nodos internos", así que los hilos
         // de la app pueden seguir viviendo en el cgroup padre.
+        // El nombre lleva el pid de esta instancia y un contador propio del proceso: los
+        // ids de las tabs y los de la flota (y los de otra instancia de la app colgada del
+        // mismo cgroup) empiezan todos en 1. Con `cc-tab-{id}` chocaban, el `create_dir`
+        // fallaba y el segundo grupo quedaba en silencio sin cgroup.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = own_cgroup()
-            .map(|own| own.join(format!("cc-tab-{id}")))
+            .map(|own| own.join(format!("cc-{}-{seq}-{id}", std::process::id())))
             .filter(|d| std::fs::create_dir(d).is_ok());
         Group { dir, leader: None }
     }
@@ -211,10 +217,16 @@ pub(crate) mod imp {
         // Además el recorrido manda SIGHUP y no SIGKILL, así que un agente bien portado
         // alcanza a cerrar sus archivos — importa, porque las TUIs escriben su transcript
         // al salir y de ahí sale el título de la sesión.
+        let Some(dir) = g.dir.take() else {
+            // Sin cgroup no hay `cgroup.kill` que remate: el recorrido escala solo.
+            if let Some(pid) = g.leader.take() {
+                super::unix_tree::kill_tree_escalating(pid, GRACIA);
+            }
+            return;
+        };
         if let Some(pid) = g.leader.take() {
             super::unix_tree::kill_tree(pid);
         }
-        let Some(dir) = g.dir.take() else { return };
 
         // Se espera a que el cgroup se vacíe solo por el SIGHUP anterior, y recién si
         // queda alguien se recurre al SIGKILL de `cgroup.kill`. En el caso normal esto
@@ -273,7 +285,9 @@ pub(crate) mod imp {
 
     pub fn kill_all(g: &mut Group) {
         if let Some(pid) = g.leader.take() {
-            super::unix_tree::kill_tree(pid);
+            // SIGHUP primero (un agente alcanza a guardar su transcript) y SIGKILL a lo
+            // que siga vivo: un servidor de desarrollo que ignora SIGHUP sobrevivía.
+            super::unix_tree::kill_tree_escalating(pid, std::time::Duration::from_millis(300));
         }
     }
 }
@@ -320,14 +334,32 @@ pub(crate) mod unix_tree {
         found
     }
 
-    pub fn kill_tree(root: u32) {
+    /// Manda SIGHUP al árbol, de las hojas a la raíz. Devuelve a quiénes.
+    pub fn kill_tree(root: u32) -> Vec<u32> {
         let procs = snapshot();
         let mut victims = descendants(root, &procs);
         victims.reverse(); // hojas primero
         victims.push(root);
-        for pid in victims {
+        for pid in &victims {
             unsafe {
-                libc::kill(pid as i32, libc::SIGHUP);
+                libc::kill(*pid as i32, libc::SIGHUP);
+            }
+        }
+        victims
+    }
+
+    /// SIGHUP al árbol, una espera de hasta `grace` a que se vayan solos, y SIGKILL a los
+    /// que sigan vivos. Es el remate que en Linux hace `cgroup.kill`.
+    pub fn kill_tree_escalating(root: u32, grace: std::time::Duration) {
+        let victims = kill_tree(root);
+        let alive = |pid: &u32| unsafe { libc::kill(*pid as i32, 0) == 0 };
+        let deadline = std::time::Instant::now() + grace;
+        while std::time::Instant::now() < deadline && victims.iter().any(alive) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        for pid in victims.iter().filter(|p| alive(p)) {
+            unsafe {
+                libc::kill(*pid as i32, libc::SIGKILL);
             }
         }
     }

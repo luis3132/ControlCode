@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { create } from "zustand";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   Button, ChevronDownIcon, ChevronRightIcon, CopyIcon, DocumentIcon, EditIcon, FolderIcon,
@@ -13,12 +15,13 @@ import { highlightAgents } from "@/features/browser/agentHighlight";
 import { agentPaint } from "@/features/browser/agentPaint";
 import * as ipc from "@/features/explorer/ipc";
 import { canDrop, dirFor, isInside, parentDir, remapPath } from "@/features/explorer/paths";
-import { flattenTree, relativeTo, toggleExpanded } from "@/features/explorer/tree";
-import type { DirEntry, FileMark, RepoInfo } from "@/features/explorer/types";
+import { buildMarkIndex, flattenTree, relativeTo, toggleExpanded, visibleWindow } from "@/features/explorer/tree";
+import type { DirEntry, FileMark, RepoInfo, TreeRow } from "@/features/explorer/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { dropFilesOnTab, setFileDropTarget, terminalTabAt } from "@/features/terminal/fileDrop";
+import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
 
@@ -34,6 +37,28 @@ export const MARK_CLASS: Record<FileMark, string> = {
 /** Lo copiado o cortado en el árbol. Vive fuera del componente: cambiar de tab cambia de
  *  carpeta, y copiar en un proyecto para pegar en otro es de lo más común. */
 const useFileClipboard = create<{ path: string; cut: boolean } | null>(() => null);
+
+/** Alto de cada fila, en px. Fijo: es lo que permite dibujar solo las que se ven. */
+const ROW_H = 22;
+
+/**
+ * Lo leído y lo abierto de cada carpeta, fuera del componente.
+ *
+ * El panel se desmonta al pasar a Buscar o a Cambios, y al volver el árbol aparecía
+ * colapsado y releído desde cero. Ahora vuelve como estaba y se refresca por detrás.
+ */
+const treeCache = new Map<string, { loaded: Map<string, DirEntry[]>; expanded: Set<string> }>();
+const TREE_CACHE_MAX = 16;
+
+function rememberTree(cwd: string, loaded: Map<string, DirEntry[]>, expanded: Set<string>) {
+  treeCache.delete(cwd);
+  treeCache.set(cwd, { loaded, expanded });
+  if (treeCache.size > TREE_CACHE_MAX) treeCache.delete(treeCache.keys().next().value!);
+}
+
+/** Cuánto esperar antes de releer las marcas de git tras un aviso: una tanda de cambios
+ *  (un `npm install`, un `git checkout`) son varios avisos, y cada lectura son dos `git`. */
+const REPO_REFRESH_MS = 800;
 
 /** Cuánto hay que mover antes de que un click pase a ser un arrastre. */
 const DRAG_THRESHOLD = 5;
@@ -119,6 +144,83 @@ function NameInput({ initial, depth, isDir, onCommit, onCancel }: {
   );
 }
 
+/** Lo que una fila le pide al árbol. Es un objeto estable (no cambia entre dibujos), así
+ *  las filas memoizadas no se redibujan solo porque el árbol se redibujó. */
+interface RowActions {
+  click: (entry: DirEntry) => void;
+  doubleClick: (entry: DirEntry) => void;
+  pointerDown: (e: React.PointerEvent<HTMLButtonElement>, entry: DirEntry) => void;
+  contextMenu: (e: React.MouseEvent, entry: DirEntry) => void;
+}
+
+const TreeRowButton = memo(function TreeRowButton({ entry, depth, isExpanded, mark, selected, dropHere, dimmed, openTitle, actions }: {
+  entry: DirEntry;
+  depth: number;
+  isExpanded: boolean;
+  mark: FileMark | null;
+  selected: boolean;
+  dropHere: boolean;
+  dimmed: boolean;
+  openTitle: string;
+  actions: RowActions;
+}) {
+  // Carpeta abierta / cerrada / archivo. Que la carpeta desplegada cambie de icono no
+  // duplica al chevron: el chevron dice "esto se puede plegar" y vive en la columna de la
+  // jerarquía; el icono dice qué ES la fila.
+  const Icon = entry.isDir ? (isExpanded ? FolderOpenIcon : FolderIcon) : DocumentIcon;
+  return (
+    <Button variant="custom"
+      data-tree-path={entry.path}
+      data-tree-dir={entry.isDir ? "1" : "0"}
+      onClick={() => actions.click(entry)}
+      onDoubleClick={() => actions.doubleClick(entry)}
+      onPointerDown={(e) => actions.pointerDown(e, entry)}
+      onContextMenu={(e) => actions.contextMenu(e, entry)}
+      style={{ paddingLeft: 8 + depth * 13 }}
+      title={entry.isDir ? undefined : openTitle}
+      className={`flex items-center gap-1.5 h-[22px] w-full pr-2 text-left
+        transition-colors duration-100
+        ${dimmed ? "opacity-50" : ""}
+        ${dropHere
+          ? "bg-blue-500/10 dark:bg-blue-400/10"
+          : selected
+            ? "bg-blue-500/12 dark:bg-blue-400/13"
+            : "hover:bg-gray-200/50 dark:hover:bg-white/4"}`}
+    >
+      <span className="w-3 shrink-0 flex items-center text-gray-400 dark:text-white/30">
+        {entry.isDir && (isExpanded
+          ? <ChevronDownIcon className="w-2.5 h-2.5" />
+          : <ChevronRightIcon className="w-2.5 h-2.5" />)}
+      </span>
+      {/* La carpeta va un punto más marcada que el archivo: en una lista larga es lo que
+          deja separar la estructura del contenido de un vistazo, sin meter un color que
+          compita con el azul de la fila seleccionada. */}
+      <Icon className={`w-3.5 h-3.5 shrink-0
+        ${entry.isHidden
+          ? "text-gray-300 dark:text-white/20"
+          : entry.isDir
+            ? "text-gray-500 dark:text-white/50"
+            : "text-gray-400 dark:text-white/30"}`} />
+      <span className={`flex-1 min-w-0 truncate text-[11.5px]
+        ${entry.isDir ? "font-semibold" : ""}
+        ${entry.isHidden
+          ? "text-gray-400 dark:text-white/30"
+          : "text-gray-700 dark:text-gray-300"}`}>
+        {entry.name}
+      </span>
+      {mark && (
+        <span className={`shrink-0 w-3 font-mono text-[9.5px] text-center ${MARK_CLASS[mark]}`}>
+          {mark}
+        </span>
+      )}
+    </Button>
+  );
+});
+
+/** Lo que se dibuja en la lista: una fila del árbol, o el campo de "nuevo" debajo de su
+ *  carpeta. Las dos miden `ROW_H`. */
+type ListItem = { kind: "row"; row: TreeRow } | { kind: "create" };
+
 /**
  * El árbol de archivos del workspace. Lee un nivel por vez — recursar un repo con
  * `node_modules` tarda segundos.
@@ -136,9 +238,9 @@ export function FilesView({ cwd, repo, title }: {
   const { t } = useTranslation();
   const openFile = useViewTabsStore((s) => s.openFile);
   const clipboard = useFileClipboard();
-  const [loaded, setLoaded] = useState<Map<string, DirEntry[]>>(new Map());
+  const [loaded, setLoaded] = useState<Map<string, DirEntry[]>>(() => (cwd && treeCache.get(cwd)?.loaded) || new Map());
   const [loading, setLoading] = useState(false);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(() => (cwd && treeCache.get(cwd)?.expanded) || new Set());
   const [selected, setSelected] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; entry: DirEntry | null } | null>(null);
   /** El segundo menú de "Enviar a un agente": a cuál, con su color. */
@@ -165,25 +267,85 @@ export function FilesView({ cwd, repo, title }: {
       .finally(() => { if (root) setLoading(false); });
   }, []);
 
-  // Cambiar de tab cambia de carpeta: lo leído de la anterior no sirve y mantenerlo haría
-  // que el árbol muestre por un instante los archivos de otro proyecto.
-  useEffect(() => {
-    setLoaded(new Map());
-    setExpanded(new Set());
-    setSelected(null);
-    setEditing(null);
-    if (cwd) load(cwd, true);
-  }, [cwd, load]);
-
-  const rows = useMemo(
-    () => (cwd ? flattenTree(cwd, loaded, expanded, repo) : []),
-    [cwd, loaded, expanded, repo]
-  );
-
   // Los manejadores de un arrastre se arman al apretar y terminan después de que el
   // arrastre abrió carpetas: tienen que ver las abiertas de ahora, no las de ese momento.
+  // Los avisos del observador, lo mismo.
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
+  const cwdRef = useRef(cwd);
+  cwdRef.current = cwd;
+  const repoRootRef = useRef(repo?.root ?? null);
+  repoRootRef.current = repo?.root ?? null;
+
+  // Cambiar de tab cambia de carpeta: lo leído de la anterior no sirve y mantenerlo haría
+  // que el árbol muestre por un instante los archivos de otro proyecto. Si esta carpeta ya
+  // se había mostrado, vuelve como estaba y se relee lo visible por detrás.
+  useEffect(() => {
+    const cached = cwd ? treeCache.get(cwd) : undefined;
+    setLoaded(cached?.loaded ?? new Map());
+    setExpanded(cached?.expanded ?? new Set());
+    setSelected(null);
+    setEditing(null);
+    if (cwd) {
+      if (cached) {
+        load(cwd);
+        cached.expanded.forEach((dir) => { if (cached.loaded.has(dir)) load(dir); });
+      } else {
+        load(cwd, true);
+      }
+    }
+    // Al irse (otra carpeta, u otra sección del panel) se guarda cómo quedó. Los refs
+    // tienen el estado del último dibujo, que todavía es el de esta carpeta.
+    return () => { if (cwd) rememberTree(cwd, loadedRef.current, expandedRef.current); };
+  }, [cwd, load]);
+
+  /** Releer las marcas de git, juntando los pedidos de una tanda. */
+  const repoTimer = useRef<number | null>(null);
+  const refreshMarks = useCallback(() => {
+    if (repoTimer.current !== null) window.clearTimeout(repoTimer.current);
+    repoTimer.current = window.setTimeout(() => {
+      repoTimer.current = null;
+      if (repoRootRef.current) invalidateRepoInfo(repoRootRef.current);
+    }, REPO_REFRESH_MS);
+  }, []);
+  useEffect(() => () => { if (repoTimer.current !== null) window.clearTimeout(repoTimer.current); }, []);
+
+  // Rust vigila las carpetas abiertas (cada una sin recursión) y el directorio de git, y
+  // avisa qué cambió. Antes no había nada: lo que creaba un agente no aparecía hasta
+  // tocar Actualizar.
+  const gitDir = repo?.gitDir ?? null;
+  useEffect(() => {
+    if (!cwd) return;
+    const dirs = [cwd, ...expanded].slice(0, 512);
+    // Abrir varias carpetas seguidas (o un arrastre que las va abriendo) es una sola
+    // actualización de lo vigilado.
+    const timer = window.setTimeout(() => ipc.watchDirs(dirs, gitDir).catch(console.error), 80);
+    return () => window.clearTimeout(timer);
+  }, [cwd, expanded, gitDir]);
+  useEffect(() => () => { ipc.watchDirs([], null).catch(() => {}); }, []);
+
+  useEffect(() => {
+    const label = getCurrentWindow().label;
+    const unlisten = listen<ipc.ExplorerChanged>("explorer-changed", ({ payload }) => {
+      if (payload.window !== label) return;
+      for (const dir of payload.dirs) {
+        if (dir === cwdRef.current || expandedRef.current.has(dir)) load(dir);
+        // Una carpeta leída pero cerrada se olvida: se lee de nuevo al abrirla.
+        else if (loadedRef.current.has(dir)) setLoaded((prev) => { const m = new Map(prev); m.delete(dir); return m; });
+      }
+      if (payload.git) refreshMarks();
+    });
+    return () => { unlisten.then((off) => off()).catch(() => {}); };
+  }, [load, refreshMarks]);
+
+  // Las marcas se indexan una vez por respuesta de git, no por fila en cada dibujo.
+  const marks = useMemo(() => buildMarkIndex(repo), [repo]);
+  const rows = useMemo(
+    () => (cwd ? flattenTree(cwd, loaded, expanded, marks) : []),
+    [cwd, loaded, expanded, marks]
+  );
 
   const entryOf = (path: string) => rows.find((r) => r.entry.path === path)?.entry ?? null;
 
@@ -203,7 +365,13 @@ export function FilesView({ cwd, repo, title }: {
       if (next.has(entry.path) && !loaded.has(entry.path)) load(entry.path);
       return;
     }
-    if (cwd) openFile(cwd, entry.path);
+    // Como en VS Code: un click lo mira en una tab provisoria, que el próximo reemplaza.
+    if (cwd) openFile(cwd, entry.path, undefined, { transient: true });
+  };
+
+  /** Doble click en un archivo: lo deja abierto en una tab fija. */
+  const onRowDoubleClick = (entry: DirEntry) => {
+    if (!entry.isDir && cwd) openFile(cwd, entry.path);
   };
 
   // Refrescar vuelve a leer lo que estaba abierto, no colapsa el árbol: con tres niveles
@@ -212,6 +380,7 @@ export function FilesView({ cwd, repo, title }: {
     if (!cwd) return;
     load(cwd, true);
     expanded.forEach((dir) => load(dir));
+    refreshMarks();
   };
 
   /** Lo que queda después de que algo se movió o se renombró: la selección y las carpetas
@@ -239,6 +408,7 @@ export function FilesView({ cwd, repo, title }: {
       if (dir === cwd || expandedRef.current.has(dir)) load(dir, dir === cwd);
       else setLoaded((prev) => { const m = new Map(prev); m.delete(dir); return m; });
     }
+    refreshMarks();
   };
 
   const startCreate = (kind: "file" | "folder", dir: string) => {
@@ -470,6 +640,23 @@ export function FilesView({ cwd, repo, title }: {
 
   useEffect(() => clearHover, []);
 
+  const onRowContextMenu = (e: React.MouseEvent, entry: DirEntry) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelected(entry.path);
+    setMenu({ x: e.clientX, y: e.clientY, entry });
+  };
+
+  // Las filas reciben siempre el mismo objeto y este llama a lo de este dibujo.
+  const actionsRef = useRef({ click: onRowClick, doubleClick: onRowDoubleClick, pointerDown: onRowPointerDown, contextMenu: onRowContextMenu });
+  actionsRef.current = { click: onRowClick, doubleClick: onRowDoubleClick, pointerDown: onRowPointerDown, contextMenu: onRowContextMenu };
+  const actions = useMemo<RowActions>(() => ({
+    click: (entry) => actionsRef.current.click(entry),
+    doubleClick: (entry) => actionsRef.current.doubleClick(entry),
+    pointerDown: (e, entry) => actionsRef.current.pointerDown(e, entry),
+    contextMenu: (e, entry) => actionsRef.current.contextMenu(e, entry),
+  }), []);
+
   // ── Dibujo ───────────────────────────────────────────────────────────────────────────
 
   /** Dónde va el campo de "nuevo": primera fila adentro de su carpeta. */
@@ -477,6 +664,58 @@ export function FilesView({ cwd, repo, title }: {
   const createDepth = creating
     ? creating.dir === cwd ? 0 : (rows.find((r) => r.entry.path === creating.dir)?.depth ?? -1) + 1
     : 0;
+
+  const items = useMemo<ListItem[]>(() => {
+    const out: ListItem[] = [];
+    if (creating && creating.dir === cwd) out.push({ kind: "create" });
+    for (const row of rows) {
+      out.push({ kind: "row", row });
+      if (creating && creating.dir === row.entry.path && row.isExpanded) out.push({ kind: "create" });
+    }
+    return out;
+  }, [rows, creating, cwd]);
+
+  // Solo se dibujan las filas que se ven (más un margen): un `node_modules` abierto son
+  // miles, y dibujarlas todas hacía que el panel tardara en abrir carpetas y en desplazarse.
+  const [view, setView] = useState({ top: 0, height: 0 });
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const measure = () => setView((v) => (v.height === el.clientHeight ? v : { ...v, height: el.clientHeight }));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const scrollFrame = useRef(0);
+  const onScroll = () => {
+    cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = requestAnimationFrame(() => {
+      const el = listRef.current;
+      if (el) setView((v) => (v.top === el.scrollTop ? v : { ...v, top: el.scrollTop }));
+    });
+  };
+  useEffect(() => () => cancelAnimationFrame(scrollFrame.current), []);
+  const { start, end } = visibleWindow(view.top, view.height, items.length, ROW_H);
+
+  // Lo que se está nombrando tiene que estar a la vista: con la lista recortada, un campo
+  // fuera de la ventana ni siquiera se dibuja y no tomaría el foco.
+  const editKey = editing ? (editing.kind === "rename" ? editing.path : `new:${editing.dir}`) : null;
+  useEffect(() => {
+    const el = listRef.current;
+    if (!editKey || !el) return;
+    const index = items.findIndex((item) =>
+      editing?.kind === "rename" ? item.kind === "row" && item.row.entry.path === editing.path : item.kind === "create");
+    if (index < 0) return;
+    const top = index * ROW_H;
+    if (top < el.scrollTop || top + ROW_H > el.scrollTop + el.clientHeight) {
+      el.scrollTop = Math.max(0, top - el.clientHeight / 2);
+      setView((v) => ({ ...v, top: el.scrollTop }));
+    }
+    // Solo al empezar a editar: `items` cambia mientras tanto y no hay que perseguirlo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editKey]);
+
   const createInput = creating && (
     <NameInput
       key="__new"
@@ -535,6 +774,7 @@ export function FilesView({ cwd, repo, title }: {
         ref={listRef}
         tabIndex={-1}
         onKeyDown={onKeyDown}
+        onScroll={onScroll}
         onContextMenu={(e) => {
           e.preventDefault();
           if (cwd) setMenu({ x: e.clientX, y: e.clientY, entry: null });
@@ -554,8 +794,10 @@ export function FilesView({ cwd, repo, title }: {
           </p>
         ) : (
           <>
-            {creating?.dir === cwd && createInput}
-            {rows.map(({ entry, depth, isExpanded, mark }) => {
+            <div style={{ height: start * ROW_H }} />
+            {items.slice(start, end).map((item) => {
+              if (item.kind === "create") return createInput;
+              const { entry, depth, isExpanded, mark } = item.row;
               if (editing?.kind === "rename" && editing.path === entry.path) {
                 return (
                   <NameInput
@@ -568,69 +810,22 @@ export function FilesView({ cwd, repo, title }: {
                   />
                 );
               }
-              // Carpeta abierta / cerrada / archivo. Que la carpeta desplegada cambie de
-              // icono no duplica al chevron: el chevron dice "esto se puede plegar" y vive
-              // en la columna de la jerarquía; el icono dice qué ES la fila.
-              const Icon = entry.isDir
-                ? (isExpanded ? FolderOpenIcon : FolderIcon)
-                : DocumentIcon;
-              const dropHere = drag?.target != null && drag.target !== cwd && isInside(entry.path, drag.target);
-              const isCut = clipboard?.cut === true && isInside(entry.path, clipboard.path);
               return (
-                <div key={entry.path}>
-                  <Button variant="custom"
-                    data-tree-path={entry.path}
-                    data-tree-dir={entry.isDir ? "1" : "0"}
-                    onClick={() => onRowClick(entry)}
-                    onPointerDown={(e) => onRowPointerDown(e, entry)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setSelected(entry.path);
-                      setMenu({ x: e.clientX, y: e.clientY, entry });
-                    }}
-                    style={{ paddingLeft: 8 + depth * 13 }}
-                    title={entry.isDir ? undefined : t("explorer.openFile")}
-                    className={`flex items-center gap-1.5 h-[22px] w-full pr-2 text-left
-                      transition-colors duration-100
-                      ${isCut || drag?.path === entry.path ? "opacity-50" : ""}
-                      ${dropHere
-                        ? "bg-blue-500/10 dark:bg-blue-400/10"
-                        : selected === entry.path
-                          ? "bg-blue-500/12 dark:bg-blue-400/13"
-                          : "hover:bg-gray-200/50 dark:hover:bg-white/4"}`}
-                  >
-                    <span className="w-3 shrink-0 flex items-center text-gray-400 dark:text-white/30">
-                      {entry.isDir && (isExpanded
-                        ? <ChevronDownIcon className="w-2.5 h-2.5" />
-                        : <ChevronRightIcon className="w-2.5 h-2.5" />)}
-                    </span>
-                    {/* La carpeta va un punto más marcada que el archivo: en una lista larga es
-                        lo que deja separar la estructura del contenido de un vistazo, sin meter
-                        un color que compita con el azul de la fila seleccionada. */}
-                    <Icon className={`w-3.5 h-3.5 shrink-0
-                      ${entry.isHidden
-                        ? "text-gray-300 dark:text-white/20"
-                        : entry.isDir
-                          ? "text-gray-500 dark:text-white/50"
-                          : "text-gray-400 dark:text-white/30"}`} />
-                    <span className={`flex-1 min-w-0 truncate text-[11.5px]
-                      ${entry.isDir ? "font-semibold" : ""}
-                      ${entry.isHidden
-                        ? "text-gray-400 dark:text-white/30"
-                        : "text-gray-700 dark:text-gray-300"}`}>
-                      {entry.name}
-                    </span>
-                    {mark && (
-                      <span className={`shrink-0 w-3 font-mono text-[9.5px] text-center ${MARK_CLASS[mark]}`}>
-                        {mark}
-                      </span>
-                    )}
-                  </Button>
-                  {creating?.dir === entry.path && isExpanded && createInput}
-                </div>
+                <TreeRowButton
+                  key={entry.path}
+                  entry={entry}
+                  depth={depth}
+                  isExpanded={isExpanded}
+                  mark={mark}
+                  selected={selected === entry.path}
+                  dropHere={drag?.target != null && drag.target !== cwd && isInside(entry.path, drag.target)}
+                  dimmed={(clipboard?.cut === true && isInside(entry.path, clipboard.path)) || drag?.path === entry.path}
+                  openTitle={t("explorer.openFile")}
+                  actions={actions}
+                />
               );
             })}
+            <div style={{ height: (items.length - end) * ROW_H }} />
           </>
         )}
       </div>

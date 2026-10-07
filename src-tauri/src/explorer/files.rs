@@ -77,7 +77,6 @@ fn image_mime(path: &Path) -> Option<&'static str> {
     IMAGES.iter().find(|(e, _)| *e == ext).map(|(_, mime)| *mime)
 }
 
-#[tauri::command]
 pub fn explorer_read_file(path: String) -> Result<FileContent, String> {
     let file = Path::new(&path);
     let meta = std::fs::metadata(file).map_err(|e| format!("no se pudo leer {path}: {e}"))?;
@@ -115,7 +114,6 @@ pub fn explorer_read_file(path: String) -> Result<FileContent, String> {
 }
 
 /// `None` = ya no existe (lo borró un agente con la tab abierta).
-#[tauri::command]
 pub fn explorer_file_stat(path: String) -> Result<Option<FileStat>, String> {
     match std::fs::metadata(&path) {
         Ok(meta) => Ok(Some(FileStat { mtime: mtime_ms(&meta), size: meta.len() })),
@@ -128,7 +126,6 @@ pub fn explorer_file_stat(path: String) -> Result<Option<FileStat>, String> {
 ///
 /// Sin esa condición, guardar una tab abierta hace un rato pisaría en silencio lo que un
 /// agente escribió mientras tanto — y es exactamente lo que pasa en esta app todo el día.
-#[tauri::command]
 pub fn explorer_write_file(
     path: String,
     content: String,

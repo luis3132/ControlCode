@@ -6,6 +6,7 @@ import { agentIcon } from "@/features/agents/agentIcons";
 
 import { isLive } from "./fleetOrder";
 import { PermissionCard } from "./PermissionCard";
+import { useRunsStore } from "./store";
 import type { PendingApproval, Task, TaskStatus } from "./types";
 
 /** Segundos transcurridos, refrescados solo mientras la tarea sigue viva. */
@@ -57,9 +58,10 @@ const BADGE: Record<TaskStatus, string> = {
  * que "qué archivo tocó" viene como dato: las líneas son ya la forma corta (`Bash(cargo
  * test)`), no un recorte de su salida. Quien quiera el detalle abre la tarea como pane.
  */
-export function AgentCard({ task, activity, waiting = [], approval, focused, onCancel, onOpenPane, onShowResult, onDecide, onDiscardWorktree, onReroute }: {
+const NO_ACTIVITY: string[] = [];
+
+export function AgentCard({ task, waiting = [], approval, focused, onCancel, onOpenPane, onShowResult, onDecide, onDiscardWorktree, onReroute }: {
   task: Task;
-  activity: string[];
   /** Las dependencias que todavía no terminaron, por su key. */
   waiting?: string[];
   /** El permiso que esta tarea está esperando, si hay uno. */
@@ -73,6 +75,9 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
   onReroute: () => void;
   onDecide: (allow: boolean, remember: boolean) => void;
 }) {
+  // Cada tarjeta lee SU actividad: si la página leyera el mapa entero, cada línea de
+  // cualquier agente redibujaba la consola completa.
+  const activity = useRunsStore((s) => s.activity[task.id] ?? NO_ACTIVITY);
   const { t } = useTranslation();
   const Icon = agentIcon(task.agentId);
   const elapsed = useElapsed(task);

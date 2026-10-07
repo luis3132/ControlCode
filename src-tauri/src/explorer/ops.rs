@@ -43,7 +43,6 @@ fn out(p: &Path) -> String {
     p.to_string_lossy().to_string()
 }
 
-#[tauri::command]
 pub fn explorer_create_file(dir: String, name: String) -> Result<String, String> {
     let path = child(&dir, &name)?;
     // `create_new` falla si ya existe, en el mismo syscall: no hay carrera entre mirar y
@@ -56,14 +55,12 @@ pub fn explorer_create_file(dir: String, name: String) -> Result<String, String>
     Ok(out(&path))
 }
 
-#[tauri::command]
 pub fn explorer_create_dir(dir: String, name: String) -> Result<String, String> {
     let path = child(&dir, &name)?;
     fs::create_dir(&path).map_err(|e| format!("no se pudo crear {}: {e}", path.display()))?;
     Ok(out(&path))
 }
 
-#[tauri::command]
 pub fn explorer_rename(path: String, name: String) -> Result<String, String> {
     let from = PathBuf::from(&path);
     let parent = from.parent().ok_or("no se puede renombrar la raíz")?;
@@ -162,7 +159,6 @@ fn target_dir(dir: &str) -> Result<PathBuf, String> {
 
 /// Copia `path` adentro de `dir`. Pegar en la misma carpeta es duplicar: el nombre libre
 /// que le toca es `x copy`.
-#[tauri::command]
 pub fn explorer_copy(path: String, dir: String) -> Result<String, String> {
     let (from, name) = source(&path)?;
     let dir = target_dir(&dir)?;
@@ -180,7 +176,6 @@ pub fn explorer_copy(path: String, dir: String) -> Result<String, String> {
 
 /// Mueve `path` adentro de `dir`, con el mismo nombre. Si ya hay algo con ese nombre
 /// falla: mover es arrastrar, y un arrastre no debería reemplazar nada sin preguntar.
-#[tauri::command]
 pub fn explorer_move(path: String, dir: String) -> Result<String, String> {
     let (from, name) = source(&path)?;
     let dir = target_dir(&dir)?;
@@ -210,7 +205,6 @@ pub fn explorer_move(path: String, dir: String) -> Result<String, String> {
 
 /// A la papelera del sistema (Papelera de reciclaje en Windows, Papelera en macOS, la de
 /// freedesktop en Linux), no un borrado definitivo.
-#[tauri::command]
 pub fn explorer_trash(paths: Vec<String>) -> Result<(), String> {
     let existing: Vec<&String> = paths.iter().filter(|p| exists(Path::new(p))).collect();
     if existing.is_empty() {

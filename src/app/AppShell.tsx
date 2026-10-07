@@ -33,11 +33,12 @@ import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
 import { useFleetEvents } from "@/features/runs/useFleetEvents";
+import { useProcessEvents } from "@/features/processes/useProcessEvents";
 import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
 
 /** Las rutas que se muestran como modal encima de las terminales en vez de reemplazarlas. */
-const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/forge"];
+const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/forge", "/processes"];
 
 function toFrontendTab(row: RestoredTabRow): Tab {
   return {
@@ -109,6 +110,8 @@ export function AppShell() {
   // La flota se escucha desde acá y no desde su pantalla: un agente que pide permiso con
   // la consola cerrada tiene que verse igual (ver `useFleetEvents`).
   useFleetEvents();
+  // Los subprocesos, igual: la insignia del riel los cuenta con la sección cerrada.
+  useProcessEvents();
 
   useEffect(() => {
     detectAgents().then(setDetectedAgents);

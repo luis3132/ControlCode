@@ -429,7 +429,34 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let git_read = super::mcp::git_read_tool_names();
     assert!(git_read.iter().all(|n| git.contains(n)), "{git_read:?}");
     assert!(!git_read.iter().any(|n| n.ends_with("git_push") || n.ends_with("_create")));
-    assert_eq!(browser.len() + orchestration.len() + git.len() + 1, offered.len());
+    // Las de subprocesos: todas se ofrecen; se aprueban solas las que solo miran.
+    let process = super::mcp::process_tool_names();
+    assert!(process.iter().all(|n| offered.contains(n)), "{process:?}");
+    let process_read = super::mcp::process_read_tool_names();
+    assert!(process_read.iter().all(|n| process.contains(n)));
+    assert!(!process_read.iter().any(|n| n.ends_with("_start") || n.ends_with("_stop") || n.ends_with("_send")));
+    assert_eq!(browser.len() + orchestration.len() + git.len() + process.len() + 1, offered.len());
+}
+
+/// Las tools de subprocesos le piden a la app `proc.<acción>` con quién pide y sus
+/// argumentos, y le devuelven al agente el texto de la respuesta.
+#[test]
+fn las_tools_de_subprocesos_piden_su_accion_con_quien_pide() {
+    let call = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "process_start", "arguments": { "command": "npm run dev", "wait_for": "ready" } } });
+    let (out, seen) = mcp_session(&McpContext::Cwd { cwd: "/p".into(), tab: Some("t9".into()) }, &[call], |_, _| {
+        Ok(json!({ "text": "Ready." }))
+    });
+    assert_eq!(seen[0].0, "proc.start");
+    assert_eq!(seen[0].1["cwd"], "/p");
+    assert_eq!(seen[0].1["tabId"], "t9");
+    assert_eq!(seen[0].1["args"]["command"], "npm run dev");
+    assert_eq!(out[0]["result"]["content"][0]["text"], "Ready.");
+    // Mirar no pide permiso; lanzar, escribir y parar sí, y parar se marca destructivo.
+    assert!(super::mcp::auto_approved("process_output") && super::mcp::auto_approved("process_list"));
+    assert!(!super::mcp::auto_approved("process_start") && !super::mcp::auto_approved("process_send"));
+    assert_eq!(super::mcp::annotations("process_stop")["destructiveHint"], true);
+    assert_eq!(super::mcp::annotations("process_wait")["readOnlyHint"], true);
 }
 
 /// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo
@@ -657,15 +684,19 @@ fn el_barrido_borra_los_configs_de_tabs_y_tareas_que_ya_no_estan() {
 
     let dir = std::env::temp_dir().join(format!("cc-mcp-sweep-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
-    for name in ["tab-viva.json", "tab-cerrada.json", "tarea-viva.json", "tarea-borrada.json"] {
+    // Los de Gemini son dos por tab (settings y política): se barren igual.
+    for name in [
+        "tab-viva.json", "tab-cerrada.json", "tarea-viva.json", "tarea-borrada.json",
+        "tab-viva.gemini.json", "tab-viva.gemini.toml", "tab-cerrada.gemini.json", "tab-cerrada.gemini.toml",
+    ] {
         std::fs::write(dir.join(name), "{}").unwrap();
     }
 
-    assert_eq!(super::mcp::sweep_configs_in(&dir, &conn), 2);
+    assert_eq!(super::mcp::sweep_configs_in(&dir, &conn), 4);
     let mut quedaron: Vec<String> =
         std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
     quedaron.sort();
-    assert_eq!(quedaron, vec!["tab-viva.json", "tarea-viva.json"]);
+    assert_eq!(quedaron, vec!["tab-viva.gemini.json", "tab-viva.gemini.toml", "tab-viva.json", "tarea-viva.json"]);
 
     // Y es idempotente: correrlo de nuevo no borra lo que sí está vivo.
     assert_eq!(super::mcp::sweep_configs_in(&dir, &conn), 0);
@@ -856,4 +887,38 @@ fn una_cancelacion_se_recuerda_por_su_id() {
     crate::ipc::cancel::cancel("c-1");
     assert!(crate::ipc::cancel::is_cancelled(Some("c-1")));
     assert!(!crate::ipc::cancel::is_cancelled(None), "un pedido de la CLI nunca está cancelado");
+}
+
+/// Codex recibe el servidor con `-c` sobre su config.toml: el comando, sus argumentos (la
+/// tab va adentro), un timeout que alcance para las tools que esperan, y la aprobación.
+#[test]
+fn codex_recibe_el_servidor_por_claves_de_su_config() {
+    let args = super::mcp::codex_config_args("/opt/cc/ccode", &["mcp", "--cwd", "/p", "--tab", "t1"]);
+    let values: Vec<&String> = args.iter().skip(1).step_by(2).collect();
+    assert!(args.iter().step_by(2).all(|a| a == "-c"), "{args:?}");
+    assert!(values.contains(&&r#"mcp_servers.controlcode.command="/opt/cc/ccode""#.to_string()));
+    assert!(values.contains(&&r#"mcp_servers.controlcode.args=["mcp","--cwd","/p","--tab","t1"]"#.to_string()));
+    assert!(values.contains(&&r#"mcp_servers.controlcode.default_tools_approval_mode="writes""#.to_string()));
+    // El navegador se aprueba solo aunque escriba en la página; lanzar y subir, no.
+    assert!(values.contains(&&r#"mcp_servers.controlcode.tools.browser_click.approval_mode="approve""#.to_string()));
+    assert!(!values.iter().any(|v| v.contains("tools.git_push.") || v.contains("tools.process_start.")));
+    // Las de solo lectura no hace falta nombrarlas: `writes` ya no pregunta por ellas.
+    assert!(!values.iter().any(|v| v.contains("tools.process_output.")));
+}
+
+/// Gemini: nuestro servidor se suma a los settings de sistema que ya hubiera, y la política
+/// permite solo lo que se aprueba solo.
+#[test]
+fn gemini_recibe_el_servidor_sin_perder_los_settings_de_sistema() {
+    let base = json!({ "mcpServers": { "suyo": { "command": "x" } }, "general": { "vimMode": true } });
+    let settings = super::mcp::gemini_settings(&base, "/opt/cc/ccode", &["mcp", "--cwd", "/p"]);
+    assert_eq!(settings["mcpServers"]["suyo"]["command"], "x");
+    assert_eq!(settings["general"]["vimMode"], true);
+    assert_eq!(settings["mcpServers"]["controlcode"]["command"], "/opt/cc/ccode");
+    assert_eq!(settings["mcpServers"]["controlcode"]["args"], json!(["mcp", "--cwd", "/p"]));
+
+    let policy = super::mcp::gemini_policy();
+    assert!(policy.contains("toolName = \"browser_click\"") && policy.contains("toolName = \"process_output\""));
+    assert!(!policy.contains("\"git_push\"") && !policy.contains("\"process_start\""));
+    assert!(policy.contains("mcpName = \"controlcode\"") && policy.contains("decision = \"allow\""));
 }

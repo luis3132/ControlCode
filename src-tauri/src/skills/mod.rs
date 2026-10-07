@@ -25,6 +25,7 @@ mod test;
 
 pub use authoring::*;
 pub use bundled::ensure_bundled_skills;
+pub(crate) use files::skill_markdown;
 pub(crate) use frontmatter::{rename_in_content, scan_frontmatter_for_marketplace};
 pub use install::*;
 pub use links::*;

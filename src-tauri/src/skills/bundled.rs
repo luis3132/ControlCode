@@ -35,7 +35,7 @@ pub(super) const BUNDLED: &[&str] = &["controlcode-orchestrator"];
 /// bucket en el store (no se mezcla con las que el usuario instaló a mano) y hace que la
 /// UI muestre de dónde salió. No hay ninguna fila en `registries` con este id, y no hace
 /// falta: la columna está desnormalizada justamente para eso.
-const ORIGIN_ID: &str = "controlcode-builtin";
+pub(super) const ORIGIN_ID: &str = "controlcode-builtin";
 const ORIGIN_NAME: &str = "Control Code";
 
 /// Clave en `settings` con lo ya aprovisionado: `{ "<carpeta>": { version, path } }`.

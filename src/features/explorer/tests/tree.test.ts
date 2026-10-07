@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { flattenTree, markForPath, relativeTo, toggleExpanded } from "../tree";
+import { buildMarkIndex, flattenTree, markFor, markForPath, relativeTo, toggleExpanded, visibleWindow } from "../tree";
 import type { DirEntry, RepoInfo } from "../types";
 
 const dir = (path: string): DirEntry => ({
@@ -135,5 +135,46 @@ describe("toggleExpanded", () => {
     expect(a.size).toBe(0);
     expect(b.has("/p/src")).toBe(true);
     expect(toggleExpanded(b, "/p/src").has("/p/src")).toBe(false);
+  });
+});
+
+describe("buildMarkIndex", () => {
+  it("cada carpeta hereda la marca más fuerte de adentro, a cualquier profundidad", () => {
+    const index = buildMarkIndex(repo({ "a/b/c/x.ts": "M", "a/y.ts": "?", "a/b/z.ts": "U" }));
+    expect(markFor(index, dir("/p/a"))).toBe("U");
+    expect(markFor(index, dir("/p/a/b"))).toBe("U");
+    expect(markFor(index, dir("/p/a/b/c"))).toBe("M");
+    expect(markFor(index, file("/p/a/y.ts"))).toBe("?");
+    expect(markFor(index, dir("/p/otra"))).toBeNull();
+  });
+
+  it("una carpeta untracked (`dir/`) se marca ella y sus padres", () => {
+    const index = buildMarkIndex(repo({ "src/nueva/": "?" }));
+    expect(markFor(index, dir("/p/src/nueva"))).toBe("?");
+    expect(markFor(index, dir("/p/src"))).toBe("?");
+  });
+
+  it("da lo mismo que calcularlo fila por fila", () => {
+    const r = repo({ "a/b.ts": "M", "a/c/d.ts": "A", "e.ts": "D" });
+    const index = buildMarkIndex(r);
+    for (const entry of [dir("/p/a"), dir("/p/a/c"), file("/p/a/b.ts"), file("/p/e.ts"), dir("/p/x")]) {
+      expect(markFor(index, entry)).toBe(markForPath(r, entry));
+    }
+  });
+});
+
+describe("visibleWindow", () => {
+  it("dibuja solo lo visible más un margen", () => {
+    expect(visibleWindow(0, 220, 1000, 22, 5)).toEqual({ start: 0, end: 15 });
+    expect(visibleWindow(2200, 220, 1000, 22, 5)).toEqual({ start: 95, end: 115 });
+  });
+
+  it("no se pasa del final ni del principio", () => {
+    expect(visibleWindow(21_900, 220, 1000, 22, 5)).toEqual({ start: 990, end: 1000 });
+    expect(visibleWindow(0, 220, 3, 22, 5)).toEqual({ start: 0, end: 3 });
+  });
+
+  it("sin medir todavía dibuja un primer tramo", () => {
+    expect(visibleWindow(0, 0, 1000, 22, 5)).toEqual({ start: 0, end: 10 });
   });
 });

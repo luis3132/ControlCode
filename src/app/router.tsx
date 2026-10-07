@@ -9,6 +9,7 @@ import { FleetPage } from "@/features/runs/FleetPage";
 import { MarketplacePage } from "@/features/marketplace/MarketplacePage";
 import { RegistriesPage } from "@/features/marketplace/RegistriesPage";
 import { ForgePage } from "@/features/forge/ForgePage";
+import { ProcessesPage } from "@/features/processes/ProcessesPage";
 
 export const router = createHashRouter([
   {
@@ -23,6 +24,7 @@ export const router = createHashRouter([
       { path: "sessions", element: <SessionsPage /> },
       { path: "fleet", element: <FleetPage /> },
       { path: "forge", element: <ForgePage /> },
+      { path: "processes", element: <ProcessesPage /> },
       { path: "marketplace", element: <MarketplacePage /> },
       { path: "marketplace/registries", element: <RegistriesPage /> },
     ],

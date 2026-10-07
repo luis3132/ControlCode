@@ -140,3 +140,61 @@ describe("grupos enganchados a las tabs", () => {
     expect(layout().focused).toBe("g2");
   });
 });
+
+describe("tabs provisorias (como VS Code)", () => {
+  let unsubs: (() => void)[] = [];
+
+  beforeEach(() => {
+    resetLayoutSync();
+    useTabsStore.setState({ tabs: [], activeTabId: null, hydrated: true });
+    useViewTabsStore.setState({ views: [], activeViewId: null, keepMountedIds: [] });
+    const sync = () => syncLayouts();
+    unsubs = [useTabsStore.subscribe(sync), useViewTabsStore.subscribe(sync)];
+  });
+
+  afterEach(() => unsubs.forEach((u) => u()));
+
+  const views = () => useViewTabsStore.getState().views;
+  const paths = () => views().map((v) => (v.kind === "file" ? `${v.path.split("/").pop()}${v.transient ? "~" : ""}` : v.kind));
+  const open = (name: string, transient = true) => useViewTabsStore.getState().openFile("/p", `/p/${name}`, undefined, { transient });
+
+  it("un click reemplaza al anterior en su mismo lugar; no se acumulan", () => {
+    addAgent(agent("t1"));
+    open("pinned.ts", false);
+    open("a.ts");
+    open("b.ts");
+    open("c.ts");
+    expect(paths()).toEqual(["pinned.ts", "c.ts~"]);
+    // En la barra, la nueva quedó donde estaba la vieja (no al final ni en otro grupo).
+    const items = groups()[0]!.items;
+    expect(items).toEqual(["a:t1", `v:${views()[0]!.id}`, `v:${views()[1]!.id}`]);
+    expect(groups()[0]!.active).toBe(`v:${views()[1]!.id}`);
+  });
+
+  it("doble click (abrirla fija) la deja: el próximo click abre otra", () => {
+    addAgent(agent("t1"));
+    open("a.ts");
+    open("a.ts", false);
+    open("b.ts");
+    expect(paths()).toEqual(["a.ts", "b.ts~"]);
+    useViewTabsStore.getState().pinView(views()[1]!.id);
+    open("c.ts");
+    expect(paths()).toEqual(["a.ts", "b.ts", "c.ts~"]);
+  });
+
+  it("una provisoria con cambios sin guardar no se reemplaza", () => {
+    addAgent(agent("t1"));
+    open("a.ts");
+    // Lo que hace FileTab al editarla: la marca sucia y la fija.
+    useViewTabsStore.getState().updateView(views()[0]!.id, { dirty: true, transient: false });
+    open("b.ts");
+    expect(paths()).toEqual(["a.ts", "b.ts~"]);
+  });
+
+  it("reabrir con un click la que ya está fija no la vuelve provisoria", () => {
+    addAgent(agent("t1"));
+    open("a.ts", false);
+    open("a.ts");
+    expect(paths()).toEqual(["a.ts"]);
+  });
+});

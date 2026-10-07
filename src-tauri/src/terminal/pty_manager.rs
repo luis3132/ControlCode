@@ -25,6 +25,10 @@ struct PtySession {
 struct PtyBuffer {
     data: Vec<u8>,
     total_bytes: u64,
+    /// `Some` = el proceso ya terminó, con este código. El buffer se conserva hasta que se
+    /// cierra la tab (`pty_kill`): una terminal hibernada que se despierta después de que
+    /// su proceso salió tiene que poder mostrar lo que escribió.
+    exit_code: Option<i32>,
 }
 
 type PtyRegistry = Arc<Mutex<HashMap<u32, PtySession>>>;
@@ -64,11 +68,49 @@ fn buffers() -> MutexGuard<'static, HashMap<u32, PtyBuffer>> {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PtyDataPayload {
     pub data: String,
+    /// Cuántos bytes había escrito el proceso al terminar este tramo (la misma cuenta que
+    /// `PtyAttach::total`). Una terminal que se reconecta copia el scrollback y descarta
+    /// los eventos que ya venían en esa copia: sin esto, lo que llegaba entre la copia y
+    /// el listener se perdía, o se escribía dos veces.
+    pub end: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PtyExitPayload {
     pub code: i32,
+}
+
+/// Hasta cuánto se junta en un solo evento hacia el frontend. Cada evento se serializa a
+/// JSON y cruza al webview; con un proceso que escupe salida sin parar (un build, un
+/// `npm install`), mandar uno por cada lectura de 4 KB saturaba el puente.
+const MAX_EVENT_BYTES: usize = 64 * 1024;
+
+/// Dónde cortar `bytes` para no partir un carácter UTF-8: lo que queda después del corte
+/// es el principio de un carácter que todavía no llegó entero, y espera a la próxima
+/// lectura. Convertir cada lectura por separado lo convertía en `�` (pasa con acentos,
+/// emojis y los dibujos de caja de las TUIs cuando caen justo en el borde).
+pub(crate) fn utf8_split_point(bytes: &[u8]) -> usize {
+    let len = bytes.len();
+    // Un carácter ocupa a lo sumo 4 bytes: solo puede estar incompleto en los últimos 3.
+    for back in 1..=len.min(3) {
+        let b = bytes[len - back];
+        if b & 0b1100_0000 == 0b1000_0000 {
+            continue; // byte de continuación: el comienzo está más atrás
+        }
+        let needed = if b & 0b1000_0000 == 0 {
+            1
+        } else if b & 0b1110_0000 == 0b1100_0000 {
+            2
+        } else if b & 0b1111_0000 == 0b1110_0000 {
+            3
+        } else if b & 0b1111_1000 == 0b1111_0000 {
+            4
+        } else {
+            1 // byte inválido: no hay nada que esperar
+        };
+        return if needed > back { len - back } else { len };
+    }
+    len
 }
 
 fn append_to_buffer(id: u32, chunk: &[u8]) {
@@ -214,23 +256,45 @@ pub async fn pty_create(
     prelaunch: Option<Vec<String>>,
     app: AppHandle,
 ) -> Result<u32, String> {
+    // La terminal pelada se resuelve acá y no en el catálogo: así también una tab guardada
+    // con `bash` abre PowerShell en Windows (ver `shell::resolve`).
+    let launch = build_launch(&super::shell::resolve(&command), &prelaunch.unwrap_or_default());
+    spawn(&app, SpawnOptions { label: &command, launch, cwd: &cwd, cols, rows, env: env.unwrap_or_default() })
+}
+
+/// Lo que hace falta para lanzar un proceso en un PTY.
+pub struct SpawnOptions<'a> {
+    /// Cómo se lo nombra en los errores.
+    pub label: &'a str,
+    pub launch: CommandBuilder,
+    pub cwd: &'a str,
+    pub cols: u16,
+    pub rows: u16,
+    pub env: HashMap<String, String>,
+}
+
+/// Lanza un proceso en un PTY nuevo y devuelve su id. Su salida va al scrollback y al
+/// evento `pty-data-{id}`; su fin, a `pty-exit-{id}`.
+///
+/// No depende de que haya una terminal dibujándolo: lo usan las tabs (`pty_create`) y los
+/// subprocesos que lanza el backend (`procs`), que se miran solo cuando alguien abre su
+/// sección.
+pub fn spawn<R: tauri::Runtime>(app: &AppHandle<R>, opts: SpawnOptions<'_>) -> Result<u32, String> {
     let pty_system = native_pty_system();
-    let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
+    let size = PtySize { rows: opts.rows, cols: opts.cols, pixel_width: 0, pixel_height: 0 };
 
     let pair = pty_system
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-    // La terminal pelada se resuelve acá y no en el catálogo: así también una tab guardada
-    // con `bash` abre PowerShell en Windows (ver `shell::resolve`).
-    let mut cmd = build_launch(&super::shell::resolve(&command), &prelaunch.unwrap_or_default());
-    cmd.cwd(&cwd);
+    let mut cmd = opts.launch;
+    cmd.cwd(opts.cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     for var in crate::app::app_only_env() {
         cmd.env_remove(var);
     }
-    for (k, v) in env.unwrap_or_default() {
+    for (k, v) in opts.env {
         cmd.env(k, v);
     }
 
@@ -246,7 +310,7 @@ pub async fn pty_create(
     let child = pair
         .slave
         .spawn_command(cmd)
-        .map_err(|e| format!("Failed to spawn '{command}': {e}"))?;
+        .map_err(|e| format!("Failed to spawn '{}': {e}", opts.label))?;
     group.adopt(&*child);
 
     let writer = pair
@@ -263,15 +327,27 @@ pub async fn pty_create(
     buffers().insert(id, PtyBuffer::default());
 
     let app_clone = app.clone();
-    let event_name = format!("pty-data-{id}");
     let exit_event = format!("pty-exit-{id}");
+
+    // Dos hilos por PTY. El lector solo lee y guarda (scrollback y orquestador reciben los
+    // bytes tal cual llegan); el emisor manda al frontend. Mientras el emisor está
+    // ocupado con un evento, el lector sigue juntando, y el próximo evento lleva todo lo
+    // acumulado: con salida esporádica cada lectura sale enseguida (nada de demora al
+    // tipear), y con un torrente los eventos se agrupan solos en vez de ser uno por cada
+    // lectura de 4 KB.
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let emitter = {
+        let app = app.clone();
+        let event_name = format!("pty-data-{id}");
+        std::thread::spawn(move || emit_loop(&app, &event_name, &rx))
+    };
 
     // `spawn_blocking` y no `spawn`: `reader.read()` es una lectura bloqueante sobre el fd
     // del PTY, y dentro de un `tokio::spawn` normal secuestra un worker del runtime durante
     // toda la vida del proceso. Con unas pocas terminales abiertas se agotan los workers y
     // el resto de tareas async de la app deja de progresar.
-    tokio::task::spawn_blocking(move || {
-        let mut buf = [0u8; 4096];
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut buf = [0u8; 16 * 1024];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
@@ -280,12 +356,16 @@ pub async fn pty_create(
                     // Modo push del orquestador (Fase 9): si nadie observa esta tab, esto
                     // es una lectura atómica y vuelve.
                     crate::orchestrator::watch::observe(id, &buf[..n]);
-                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    app_clone.emit(&event_name, PtyDataPayload { data }).ok();
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
                 }
                 Err(_) => break,
             }
         }
+        // Lo último que se leyó sale antes que el aviso de fin.
+        drop(tx);
+        let _ = emitter.join();
         // Se recoge el estado real del hijo antes de avisar al frontend. Sin este `wait`
         // el proceso queda además como zombie hasta que muere la app, porque nadie
         // reclama su status en el sistema.
@@ -294,25 +374,101 @@ pub async fn pty_create(
             .and_then(|mut session| session.killer.wait().ok())
             .map_or(0, |status| status.exit_code() as i32);
         crate::orchestrator::watch::note_exit(id, code);
+        if let Some(buf) = buffers().get_mut(&id) {
+            buf.exit_code = Some(code);
+        }
         app_clone.emit(&exit_event, PtyExitPayload { code }).ok();
-        buffers().remove(&id);
+        exit_hooks(id, code);
     });
 
     Ok(id)
 }
 
+/// Junta lo que el lector fue dejando y lo manda al frontend, cortando siempre en un
+/// borde de carácter UTF-8.
+fn emit_loop<R: tauri::Runtime>(app: &AppHandle<R>, event_name: &str, rx: &std::sync::mpsc::Receiver<Vec<u8>>) {
+    let mut pending: Vec<u8> = Vec::new();
+    let mut end: u64 = 0;
+    while let Ok(chunk) = rx.recv() {
+        pending.extend_from_slice(&chunk);
+        while pending.len() < MAX_EVENT_BYTES {
+            match rx.try_recv() {
+                Ok(more) => pending.extend_from_slice(&more),
+                Err(_) => break,
+            }
+        }
+        let cut = utf8_split_point(&pending);
+        if cut == 0 {
+            continue;
+        }
+        let data = String::from_utf8_lossy(&pending[..cut]).into_owned();
+        pending.drain(..cut);
+        end += cut as u64;
+        app.emit(event_name, PtyDataPayload { data, end }).ok();
+    }
+    // El proceso terminó con un carácter a medias: se manda lo que haya.
+    if !pending.is_empty() {
+        let data = String::from_utf8_lossy(&pending).into_owned();
+        end += pending.len() as u64;
+        app.emit(event_name, PtyDataPayload { data, end }).ok();
+    }
+}
+
+type ExitHook = Box<dyn Fn(u32, i32) + Send + Sync>;
+
+lazy_static::lazy_static! {
+    static ref EXIT_HOOKS: Mutex<Vec<ExitHook>> = Mutex::new(Vec::new());
+}
+
+/// Registra algo que tiene que enterarse cuando termina cualquier PTY (los subprocesos
+/// marcan así su estado sin depender de que haya una ventana escuchando).
+pub fn on_exit(hook: impl Fn(u32, i32) + Send + Sync + 'static) {
+    EXIT_HOOKS.lock().unwrap_or_else(|e| e.into_inner()).push(Box::new(hook));
+}
+
+fn exit_hooks(id: u32, code: i32) {
+    for hook in EXIT_HOOKS.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+        hook(id, code);
+    }
+}
+
 /// Se "conecta" a un PTY que ya existe (p. ej. al mover una tab a otra ventana sin
 /// matar el proceso) y devuelve el scrollback acumulado para reproducirlo en el xterm nuevo.
+///
+/// También sirve para un PTY que ya terminó y cuya tab sigue abierta (una terminal
+/// hibernada que se despierta tarde): `exitCode` dice cómo terminó.
 #[tauri::command]
-pub fn pty_attach(id: u32) -> Result<String, String> {
-    if !registry().contains_key(&id) {
-        return Err(format!("PTY session {id} not found"));
-    }
+pub async fn pty_attach(id: u32) -> Result<PtyAttach, String> {
     let buffers = buffers();
-    Ok(buffers
-        .get(&id)
-        .map(|b| String::from_utf8_lossy(&b.data).into_owned())
-        .unwrap_or_default())
+    let buf = buffers.get(&id).ok_or_else(|| format!("PTY session {id} not found"))?;
+    Ok(PtyAttach {
+        data: String::from_utf8_lossy(&buf.data).into_owned(),
+        total: buf.total_bytes,
+        exit_code: buf.exit_code,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PtyAttach {
+    pub data: String,
+    /// Cuánto había escrito el proceso al copiar `data` (ver `PtyDataPayload::end`).
+    pub total: u64,
+    pub exit_code: Option<i32>,
+}
+
+/// ¿El proceso del PTY sigue corriendo? (Su buffer puede seguir existiendo después de
+/// que terminó, ver `PtyBuffer::exit_code`.)
+pub fn is_running(id: u32) -> bool {
+    registry().contains_key(&id)
+}
+
+/// Cuánto escribió en total cada PTY. Barato (no copia nada): el autoguardado lo usa para
+/// pedir el scrollback solo de las tabs que tuvieron salida nueva.
+#[tauri::command]
+pub fn pty_output_totals(ids: Vec<u32>) -> HashMap<u32, u64> {
+    let buffers = buffers();
+    ids.into_iter().filter_map(|id| buffers.get(&id).map(|b| (id, b.total_bytes))).collect()
 }
 
 /// Scrollback acumulado de un PTY vivo, sin exigir que el llamador sea el frontend.
@@ -369,6 +525,14 @@ pub async fn pty_resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
 /// Termina el proceso del PTY y limpia la sesión.
 #[tauri::command]
 pub async fn pty_kill(id: u32) -> Result<(), String> {
+    let result = terminate(id);
+    release(id);
+    result
+}
+
+/// Mata el proceso del PTY y toda su descendencia, pero conserva su salida: un subproceso
+/// detenido sigue mostrando sus logs hasta que se lo limpia (`release`).
+pub fn terminate(id: u32) -> Result<(), String> {
     if let Some(mut session) = registry().remove(&id) {
         // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
         // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los
@@ -379,8 +543,24 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
         // señal, no espera a que el proceso muera de verdad.
         let _ = session.killer.wait();
     }
-    buffers().remove(&id);
     Ok(())
+}
+
+/// Suelta el scrollback de un PTY que ya no se va a mirar.
+pub fn release(id: u32) {
+    buffers().remove(&id);
+}
+
+/// El pid del proceso que lanzó el PTY, mientras corre.
+pub fn process_id(id: u32) -> Option<u32> {
+    registry().get(&id).and_then(|s| s.killer.process_id())
+}
+
+/// Cómo se lanza un comando escrito por una persona o un agente (`npm run dev`,
+/// `cd api && cargo run`): por el shell, con sus pipes, `&&` y variables. En unix es el
+/// shell de login del usuario, para que esté el `PATH` de nvm, cargo o pyenv.
+pub fn shell_launch(script: &str) -> CommandBuilder {
+    shell_running(script.to_string())
 }
 
 /// Mata todas las sesiones vivas y su descendencia. Se llama al salir de la app.

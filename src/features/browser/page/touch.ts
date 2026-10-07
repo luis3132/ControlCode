@@ -22,7 +22,13 @@
  *    (`mouseover`, `mouseenter`, `mousemove` sin apretar y sus equivalentes de puntero) no
  *    llegan a la página. Un dedo no pasa por encima: apoya.
  * 5. **Los toques**, tanto los del agente (`runtime.ts`) como los del usuario: apretar con
- *    el mouse manda `touchstart`/`touchmove`/`touchend` sobre el elemento.
+ *    el mouse manda `touchstart`/`touchmove`/`touchend` sobre el elemento. Cada motor los
+ *    arma distinto (ver [`sendTouch`]): WebKitGTK no deja hacer `new Touch()`, y por eso en
+ *    Linux no llegaba ningún toque.
+ * 6. **Arrastrar desplaza**, como un dedo: la página o el contenedor que se pueda mover, en
+ *    vez de seleccionar texto. Salvo que la página maneje el gesto ella misma (un carrusel
+ *    que cancela el `touchmove`). El click que sigue a un arrastre no llega, y el cursor es
+ *    un círculo, como en las herramientas de desarrollo de cualquier navegador.
  *
  * Lo que NO se puede: que el click nativo del usuario deje de existir. Una página que
  * escucha `touchstart` y llama a `preventDefault()` para cancelar el click igual va a
@@ -189,62 +195,194 @@ function applyToAttributes(touch: boolean): number {
   return changed;
 }
 
-/**
- * Un evento táctil de verdad, para lo que escucha `touchstart` y no `pointerdown`. Si el
- * motor no sabe construirlos, los de puntero (con `pointerType: "touch"`) ya llevan la
- * misma información.
+/** Un punto de contacto, armado como lo acepte el motor:
+ *
+ * - `new Touch(...)`: Chromium (WebView2 en Windows).
+ * - `document.createTouch(...)`: WebKit (WebKitGTK en Linux), donde `new Touch` tira
+ *   "Illegal constructor". Verificado con WebKitGTK 2.54.
+ * - Un objeto con la misma forma: Safari de escritorio (macOS), que no tiene táctil.
  */
-export function sendTouch(el: Element, type: string, x: number, y: number): void {
-  if (typeof Touch !== "function" || typeof TouchEvent !== "function") return;
+function makeTouch(el: Element, x: number, y: number): Touch {
+  const init = {
+    identifier: 1, target: el, clientX: x, clientY: y,
+    pageX: x + window.scrollX, pageY: y + window.scrollY,
+    screenX: x + window.screenX, screenY: y + window.screenY,
+    radiusX: 11, radiusY: 11, rotationAngle: 0, force: 0.5,
+  };
   try {
-    const point = new Touch({ identifier: 1, target: el, clientX: x, clientY: y, pageX: x, pageY: y });
-    // En `touchend` ya no hay dedos apoyados: `touches` va vacío y el que se levantó va en
-    // `changedTouches`. Una galería que mira `touches.length` depende de eso.
-    const down = type !== "touchend" ? [point] : [];
-    el.dispatchEvent(new TouchEvent(type, {
-      bubbles: true, cancelable: true, composed: true, view: window,
-      touches: down, targetTouches: down, changedTouches: [point],
-    }));
+    if (typeof Touch === "function") return new Touch(init);
   } catch {
-    /* sin soporte de táctil: quedan los de puntero */
+    /* WebKit: constructor ilegal */
   }
+  const legacy = document as Document & {
+    createTouch?: (view: Window, target: EventTarget, id: number, pageX: number, pageY: number, screenX: number, screenY: number) => Touch;
+  };
+  if (typeof legacy.createTouch === "function") {
+    try {
+      return legacy.createTouch(window, el, 1, init.pageX, init.pageY, init.screenX, init.screenY);
+    } catch {
+      /* sigue abajo */
+    }
+  }
+  return init as unknown as Touch;
+}
+
+/** Una lista de toques: WebKit exige un `TouchList` de verdad en `TouchEvent`. */
+function makeList(touches: Touch[]): Touch[] | TouchList {
+  const legacy = document as Document & { createTouchList?: (...t: Touch[]) => TouchList };
+  try {
+    if (typeof legacy.createTouchList === "function") return legacy.createTouchList(...touches);
+  } catch {
+    /* un objeto que no es un Touch real (Safari de escritorio) no entra en la lista */
+  }
+  return touches;
 }
 
 /**
+ * Manda un evento táctil de verdad, para lo que escucha `touchstart` y no `pointerdown`.
+ * Devuelve `false` si la página lo canceló (`preventDefault`): es la señal de que maneja
+ * el gesto ella misma y no hay que desplazar por ella.
+ */
+export function sendTouch(el: Element, type: string, x: number, y: number): boolean {
+  const point = makeTouch(el, x, y);
+  // En `touchend` ya no hay dedos apoyados: `touches` va vacío y el que se levantó va en
+  // `changedTouches`. Una galería que mira `touches.length` depende de eso.
+  const down = type !== "touchend" ? [point] : [];
+  const lists = { touches: makeList(down), targetTouches: makeList(down), changedTouches: makeList([point]) };
+  const base = { bubbles: true, cancelable: true, composed: true };
+  let event: Event;
+  try {
+    event = new TouchEvent(type, { ...base, view: window, ...lists } as TouchEventInit);
+  } catch {
+    // Sin `TouchEvent` (Safari de escritorio) o sin aceptar estas listas: un evento con el
+    // mismo nombre y las mismas listas, que es lo que lee una página.
+    event = new Event(type, base);
+    for (const [key, value] of Object.entries(lists)) {
+      Object.defineProperty(event, key, { value, enumerable: true });
+    }
+  }
+  try {
+    return el.dispatchEvent(event);
+  } catch {
+    return true;
+  }
+}
+
+/** El contenedor que un arrastre movería: el primero hacia arriba que se puede desplazar
+ *  en esa dirección, o la página. */
+function scrollerFor(el: Element | null, dx: number, dy: number): Element {
+  for (let node = el; node && node !== document.documentElement; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    const canY = /(auto|scroll|overlay)/.test(style.overflowY) && node.scrollHeight > node.clientHeight;
+    const canX = /(auto|scroll|overlay)/.test(style.overflowX) && node.scrollWidth > node.clientWidth;
+    if ((dy !== 0 && canY) || (dx !== 0 && canX)) return node;
+  }
+  return document.scrollingElement ?? document.documentElement;
+}
+
+/** Lo que cambia mientras está prendido: no se selecciona texto arrastrando (en un
+ *  teléfono se arrastra para desplazar), salvo en los campos, y el cursor es un dedo. */
+const STYLE_ID = "cc-touch-style";
+const FINGER = "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><circle cx='12' cy='12' r='9' fill='rgba(120,120,120,0.35)' stroke='rgba(80,80,80,0.6)' stroke-width='1.5'/></svg>\") 12 12, pointer";
+function setTouchStyle(touch: boolean): void {
+  const existing = document.getElementById(STYLE_ID);
+  if (!touch) {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent =
+    `html, html * { -webkit-user-select: none !important; user-select: none !important; cursor: ${FINGER} !important; }\n` +
+    "input, textarea, [contenteditable], [contenteditable] * { -webkit-user-select: text !important; user-select: text !important; }";
+  (document.head ?? document.documentElement).appendChild(style);
+}
+
+/** Cuánto hay que mover para que apoyar sea arrastrar y no tocar. */
+const PAN_THRESHOLD = 6;
+
+/**
  * El puntero del usuario, contestado como un dedo: lo de pasar por encima no llega a la
- * página, y apretar manda además los eventos de toque.
+ * página, apretar manda los eventos de toque, y arrastrar desplaza.
  *
  * Va en captura y sobre `window`, así que corta antes que los oyentes de la página. El
  * selector de elementos de Control Code se registra antes (se inyecta primero) y por eso
  * sigue viendo el mouse: sin eso, marcar algo dejaría de funcionar con el táctil prendido.
  */
 function watchRealInput(): () => void {
-  const hovering = (e: MouseEvent) => e.isTrusted && e.buttons === 0;
+  const fromMouse = (e: PointerEvent) => e.isTrusted && (!e.pointerType || e.pointerType === "mouse");
   const stopHover = (e: Event) => {
-    if (hovering(e as MouseEvent)) e.stopImmediatePropagation();
+    const mouse = e as MouseEvent;
+    if (mouse.isTrusted && mouse.buttons === 0) e.stopImmediatePropagation();
   };
-  const finger = (type: string) => (e: Event) => {
-    const pointer = e as PointerEvent;
-    if (!pointer.isTrusted || (pointer.pointerType && pointer.pointerType !== "mouse")) return;
-    if (type === "touchmove" && pointer.buttons === 0) return;
-    const el = pointer.target instanceof Element ? pointer.target : document.body;
-    if (el) sendTouch(el, type, pointer.clientX, pointer.clientY);
+
+  /** El dedo apoyado ahora. `handled`: la página canceló el toque, el gesto es suyo. */
+  let finger: { target: Element; startX: number; startY: number; lastX: number; lastY: number; panning: boolean; handled: boolean } | null = null;
+  let swallowClick = false;
+
+  const down = (e: Event) => {
+    const p = e as PointerEvent;
+    if (!fromMouse(p) || p.button !== 0) return;
+    const target = p.target instanceof Element ? p.target : document.body;
+    const handled = !sendTouch(target, "touchstart", p.clientX, p.clientY);
+    finger = { target, startX: p.clientX, startY: p.clientY, lastX: p.clientX, lastY: p.clientY, panning: false, handled };
+  };
+  const move = (e: Event) => {
+    const p = e as PointerEvent;
+    if (!fromMouse(p) || !finger || (p.buttons & 1) === 0) return;
+    // El `touchmove` va al elemento donde empezó el toque, como en un táctil de verdad.
+    if (!sendTouch(finger.target, "touchmove", p.clientX, p.clientY)) finger.handled = true;
+    const dx = p.clientX - finger.lastX;
+    const dy = p.clientY - finger.lastY;
+    finger.lastX = p.clientX;
+    finger.lastY = p.clientY;
+    if (finger.handled) return;
+    if (!finger.panning && Math.hypot(p.clientX - finger.startX, p.clientY - finger.startY) >= PAN_THRESHOLD) {
+      finger.panning = true;
+    }
+    if (!finger.panning) return;
+    scrollerFor(finger.target, dx, dy).scrollBy(-dx, -dy);
+    window.getSelection()?.removeAllRanges();
+  };
+  const up = (e: Event) => {
+    const p = e as PointerEvent;
+    if (!fromMouse(p) || !finger) return;
+    sendTouch(finger.target, "touchend", p.clientX, p.clientY);
+    // Después de arrastrar, levantar el dedo no es un toque: el click no llega.
+    swallowClick = finger.panning;
+    finger = null;
+    if (swallowClick) window.setTimeout(() => { swallowClick = false; }, 0);
+  };
+  const click = (e: Event) => {
+    if (!swallowClick || !e.isTrusted) return;
+    swallowClick = false;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  // Arrastrar un link o una imagen arrancaría el arrastre nativo en vez de desplazar.
+  const dragStart = (e: Event) => {
+    if (e.isTrusted) e.preventDefault();
   };
 
   const hover = ["mouseover", "mouseout", "mouseenter", "mouseleave", "mousemove",
-    "pointerover", "pointerout", "pointerenter", "pointerleave", "pointermove"];
-  const taps: [string, EventListener][] = [
-    ["pointerdown", finger("touchstart")],
-    ["pointermove", finger("touchmove")],
-    ["pointerup", finger("touchend")],
-    ["pointercancel", finger("touchend")],
+    "pointerover", "pointerout", "pointerenter", "pointerleave"];
+  const handlers: [string, EventListener][] = [
+    ["pointerdown", down],
+    ["pointermove", (e) => { stopHover(e); move(e); }],
+    ["pointerup", up],
+    ["pointercancel", up],
+    ["click", click],
+    ["dragstart", dragStart],
   ];
   for (const type of hover) window.addEventListener(type, stopHover, true);
-  for (const [type, handler] of taps) window.addEventListener(type, handler, true);
+  for (const [type, handler] of handlers) window.addEventListener(type, handler, true);
+  setTouchStyle(true);
 
   return () => {
     for (const type of hover) window.removeEventListener(type, stopHover, true);
-    for (const [type, handler] of taps) window.removeEventListener(type, handler, true);
+    for (const [type, handler] of handlers) window.removeEventListener(type, handler, true);
+    setTouchStyle(false);
   };
 }
 

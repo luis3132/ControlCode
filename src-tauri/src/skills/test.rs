@@ -1908,3 +1908,120 @@ fn attachear_dos_veces_no_duplica_la_fila() {
         .unwrap();
     assert_eq!(filas, 1, "tres attach del mismo alcance dejaron {filas} filas");
 }
+
+// ── Skills que no vienen como `carpeta/SKILL.md` ─────────────────
+
+/// Un `.md` suelto (`facturas-crear.md`) es la skill entera: se arma su carpeta con él
+/// adentro como SKILL.md, con el nombre del archivo, y no se copia nada de lo que tenga al
+/// lado (si no, uno suelto en Descargas metería Descargas entera en la skill).
+#[test]
+fn un_md_suelto_se_instala_en_su_propia_carpeta() {
+    let (db, _ws, _tab, _cwd, skills_dir) = setup();
+    let app = state_for(db);
+    let state = app.state::<DbConnection>();
+
+    let downloads = temp_dir("descargas");
+    std::fs::write(downloads.join("facturas-crear.md"), "Cómo crear una factura.\n\n1. Pedí los datos.\n").unwrap();
+    std::fs::write(downloads.join("otra-cosa.pdf"), "no es de la skill").unwrap();
+    let source = downloads.join("facturas-crear.md").to_string_lossy().to_string();
+
+    let preview = preview_skill_metadata(source.clone()).expect("preview");
+    assert_eq!(preview.folder_name, "facturas-crear");
+
+    let info = install_skill(source, None, state.clone()).expect("install");
+    assert_eq!(info.name, "facturas-crear");
+    let dest = Path::new(&info.source_path);
+    assert_eq!(dest, skills_dir.join("local").join("facturas-crear"));
+    let installed = std::fs::read_to_string(dest.join("SKILL.md")).unwrap();
+    assert!(installed.starts_with("---\n") && installed.contains("name: facturas-crear"), "{installed}");
+    assert!(installed.contains("1. Pedí los datos."), "{installed}");
+    let files: Vec<String> = std::fs::read_dir(dest).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+    assert_eq!(files, vec!["SKILL.md"], "solo la skill, nada de lo que estaba al lado");
+    // El archivo original queda donde estaba.
+    assert!(downloads.join("facturas-crear.md").exists());
+}
+
+/// Una carpeta es la skill aunque su markdown no se llame SKILL.md: se usa el suyo, la
+/// carpeta da el nombre y los archivos de soporte viajan con ella.
+#[test]
+fn una_carpeta_con_otro_md_es_la_skill_con_su_nombre() {
+    let (db, _ws, _tab, _cwd, _skills_dir) = setup();
+    let app = state_for(db);
+    let state = app.state::<DbConnection>();
+
+    let parent = temp_dir("carpeta");
+    let folder = parent.join("facturas-crear");
+    std::fs::create_dir_all(folder.join("scripts")).unwrap();
+    std::fs::write(folder.join("facturas.md"), "---\ndescription: Crear facturas\n---\nPasos.\n").unwrap();
+    std::fs::write(folder.join("scripts").join("emitir.sh"), "echo hola").unwrap();
+
+    let info = install_skill(folder.to_string_lossy().to_string(), None, state.clone()).expect("install");
+    assert_eq!(info.name, "facturas-crear");
+    assert_eq!(info.description.as_deref(), Some("Crear facturas"));
+    let dest = Path::new(&info.source_path);
+    assert!(dest.join("SKILL.md").is_file());
+    assert!(dest.join("scripts").join("emitir.sh").is_file(), "los archivos de soporte viajan");
+    assert!(!dest.join("facturas.md").exists(), "el markdown original pasó a ser el SKILL.md");
+}
+
+/// Qué markdown es el de una carpeta: SKILL.md; si no, el que se llama como ella; si no,
+/// el único. Con varios y ninguno de esos no se adivina.
+#[test]
+fn el_markdown_de_una_carpeta_no_se_adivina() {
+    use super::files::find_skill_md_in_dir;
+    let dir = temp_dir("mds").join("facturas");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("notas.md"), "x").unwrap();
+    assert_eq!(find_skill_md_in_dir(&dir).unwrap().file_name().unwrap(), "notas.md");
+    std::fs::write(dir.join("otro.md"), "x").unwrap();
+    assert!(find_skill_md_in_dir(&dir).is_none(), "dos .md sin pista: no se elige uno al azar");
+    std::fs::write(dir.join("facturas.md"), "x").unwrap();
+    assert_eq!(find_skill_md_in_dir(&dir).unwrap().file_name().unwrap(), "facturas.md");
+    std::fs::write(dir.join("skill.md"), "x").unwrap();
+    assert_eq!(find_skill_md_in_dir(&dir).unwrap().file_name().unwrap(), "skill.md");
+    // Algo que no es un markdown se rechaza con un mensaje que dice qué elegir.
+    std::fs::write(dir.join("a.txt"), "x").unwrap();
+    let err = preview_skill_metadata(dir.join("a.txt").to_string_lossy().to_string()).err().unwrap();
+    assert!(err.contains(".md"), "{err}");
+}
+
+/// Lo que un repositorio local reconoce como skill: una carpeta con su markdown, o un
+/// `.md` suelto. Un archivo que no es markdown, no.
+#[test]
+fn una_entrada_de_repositorio_puede_ser_carpeta_o_md_suelto() {
+    let base = temp_dir("registro");
+    std::fs::create_dir_all(base.join("con-skill")).unwrap();
+    std::fs::write(base.join("con-skill").join("SKILL.md"), "x").unwrap();
+    std::fs::create_dir_all(base.join("sin-nada")).unwrap();
+    std::fs::write(base.join("suelta.md"), "x").unwrap();
+    std::fs::write(base.join("imagen.png"), "x").unwrap();
+    assert!(super::skill_markdown(&base.join("con-skill")).is_some());
+    assert!(super::skill_markdown(&base.join("sin-nada")).is_none());
+    assert_eq!(super::skill_markdown(&base.join("suelta.md")).unwrap(), base.join("suelta.md"));
+    assert!(super::skill_markdown(&base.join("imagen.png")).is_none());
+}
+
+/// La skill que trae la app se enlaza en todo agente con una tab viva, sin adjuntarla: es
+/// la que le explica sus herramientas. Una skill común sigue necesitando que la adjunten.
+#[test]
+fn la_skill_de_control_code_se_enlaza_en_todos_los_agentes() {
+    let (db, _ws, _tab, tab_cwd, _skills_dir) = setup();
+    let builtin_src = temp_dir("builtin");
+    std::fs::write(builtin_src.join("SKILL.md"), "---\nname: controlcode-orchestrator\n---\nTools.\n").unwrap();
+    let other_src = temp_dir("otra");
+    std::fs::write(other_src.join("SKILL.md"), "---\nname: otra\n---\nx\n").unwrap();
+    let origin = SkillOrigin { registry_id: "controlcode-builtin", registry_name: "Control Code", skill_id: "controlcode-orchestrator" };
+    install_skill_internal(&builtin_src.join("SKILL.md").to_string_lossy(), None, Some(origin), &db).unwrap();
+    install_skill_internal(&other_src.join("SKILL.md").to_string_lossy(), None, None, &db).unwrap();
+
+    let conn = db.lock().unwrap();
+    let cwd = tab_cwd.to_string_lossy().to_string();
+    super::links::reconcile_link_dir(&conn, &cwd, "claude-code").unwrap();
+    let links = tab_cwd.join(".claude").join("skills");
+    assert!(links.join("controlcode-orchestrator").exists(), "la de Control Code va sola");
+    assert!(!links.join("otra").exists(), "las demás hay que adjuntarlas");
+
+    // Sin una tab viva de ese agente en esa carpeta no se enlaza nada.
+    super::links::reconcile_link_dir(&conn, &cwd, "codex").unwrap();
+    assert!(!tab_cwd.join(".agents").join("skills").join("controlcode-orchestrator").exists());
+}

@@ -352,3 +352,146 @@ mod ops {
         assert!(renamed.ends_with("z.md") && std::path::Path::new(&renamed).is_file());
     }
 }
+
+mod repo_and_watch {
+    use std::fs;
+    use std::process::Command;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::super::git::{branch_from_header, explorer_repo_info};
+    use super::super::watch::{Changed, DirWatcher};
+
+    struct Tmp(std::path::PathBuf);
+    impl Drop for Tmp {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn tmp() -> Tmp {
+        let p = std::env::temp_dir().join(format!("cc-repo-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&p).unwrap();
+        // canonicalize: en macOS /var es un symlink a /private/var y git devuelve la real.
+        Tmp(fs::canonicalize(&p).unwrap())
+    }
+
+    fn s(p: &std::path::Path) -> String {
+        p.to_string_lossy().to_string()
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let ok = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+
+    #[test]
+    fn la_rama_sale_del_encabezado_de_status() {
+        assert_eq!(branch_from_header("## main").as_deref(), Some("main"));
+        assert_eq!(branch_from_header("## main...origin/main [ahead 1]").as_deref(), Some("main"));
+        assert_eq!(branch_from_header("## feat/x...origin/feat/x").as_deref(), Some("feat/x"));
+        assert_eq!(branch_from_header("## No commits yet on trunk").as_deref(), Some("trunk"));
+        assert_eq!(branch_from_header("## Initial commit on trunk").as_deref(), Some("trunk"));
+        assert_eq!(branch_from_header("## HEAD (no branch)"), None);
+        assert_eq!(branch_from_header("M  a.txt"), None);
+    }
+
+    #[test]
+    fn repo_info_con_dos_llamadas_a_git() {
+        let dir = tmp();
+        // Una carpeta que no es repo se muestra pelada, sin error.
+        let none = explorer_repo_info(s(&dir.0)).unwrap();
+        assert!(none.root.is_none() && none.git_dir.is_none());
+
+        // Recién creado, sin commits: igual tiene rama.
+        git(&dir.0, &["init", "-q", "-b", "trunk"]);
+        fs::write(dir.0.join("nuevo.txt"), "x").unwrap();
+        let fresh = explorer_repo_info(s(&dir.0)).unwrap();
+        assert_eq!(fresh.root.as_deref(), Some(s(&dir.0).as_str()));
+        assert_eq!(fresh.branch.as_deref(), Some("trunk"));
+        assert_eq!(fresh.git_dir.as_deref(), Some(s(&dir.0.join(".git")).as_str()));
+        assert!(!fresh.is_worktree);
+        assert_eq!(fresh.changes.get("nuevo.txt").map(String::as_str), Some("?"));
+
+        // Con un commit y un archivo modificado, desde una subcarpeta.
+        fs::create_dir(dir.0.join("sub")).unwrap();
+        fs::write(dir.0.join("sub/a.txt"), "1").unwrap();
+        git(&dir.0, &["add", "."]);
+        git(&dir.0, &["commit", "-q", "-m", "x"]);
+        fs::write(dir.0.join("sub/a.txt"), "2").unwrap();
+        let info = explorer_repo_info(s(&dir.0.join("sub"))).unwrap();
+        assert_eq!(info.root.as_deref(), Some(s(&dir.0).as_str()));
+        assert_eq!(info.branch.as_deref(), Some("trunk"));
+        assert_eq!(info.changes.get("sub/a.txt").map(String::as_str), Some("M"));
+        assert_eq!(info.changed_count, 1);
+        // `--no-optional-locks`: mirar no deja un lock que le haga fallar el commit a otro.
+        assert!(!dir.0.join(".git/index.lock").exists());
+    }
+
+    fn wait(rx: &mpsc::Receiver<Changed>) -> Changed {
+        rx.recv_timeout(Duration::from_secs(5)).expect("el watcher no avisó")
+    }
+
+    #[test]
+    fn avisa_lo_que_cambia_en_las_carpetas_abiertas_y_nada_mas() {
+        let dir = tmp();
+        let open = dir.0.join("abierta");
+        let closed = dir.0.join("cerrada");
+        fs::create_dir_all(&open).unwrap();
+        fs::create_dir_all(&closed).unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let mut watcher = DirWatcher::new(move |c| {
+            let _ = tx.send(c);
+        })
+        .unwrap();
+        watcher.set(&[s(&open)], None);
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Crear, renombrar y borrar adentro de una carpeta abierta: avisa esa carpeta.
+        fs::write(open.join("a.txt"), "x").unwrap();
+        assert!(wait(&rx).dirs.contains(&s(&open)));
+        fs::rename(open.join("a.txt"), open.join("b.txt")).unwrap();
+        assert!(wait(&rx).dirs.contains(&s(&open)));
+        fs::remove_file(open.join("b.txt")).unwrap();
+        assert!(wait(&rx).dirs.contains(&s(&open)));
+
+        // En una carpeta que el panel no tiene abierta: silencio.
+        fs::write(closed.join("c.txt"), "x").unwrap();
+        assert!(rx.recv_timeout(Duration::from_millis(600)).is_err(), "avisó de una carpeta cerrada");
+
+        // Al cerrarla en el panel deja de avisar.
+        watcher.set(&[], None);
+        std::thread::sleep(Duration::from_millis(100));
+        fs::write(open.join("d.txt"), "x").unwrap();
+        assert!(rx.recv_timeout(Duration::from_millis(600)).is_err(), "siguió avisando después de cerrarla");
+    }
+
+    #[test]
+    fn un_cambio_en_git_refresca_las_marcas() {
+        let dir = tmp();
+        git(&dir.0, &["init", "-q"]);
+        fs::write(dir.0.join("a.txt"), "x").unwrap();
+        let git_dir = dir.0.join(".git");
+
+        let (tx, rx) = mpsc::channel();
+        let mut watcher = DirWatcher::new(move |c| {
+            let _ = tx.send(c);
+        })
+        .unwrap();
+        watcher.set(&[], Some(&s(&git_dir)));
+        std::thread::sleep(Duration::from_millis(100));
+
+        git(&dir.0, &["add", "a.txt"]);
+        let changed = wait(&rx);
+        assert!(changed.git && changed.dirs.is_empty());
+    }
+}

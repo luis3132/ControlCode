@@ -26,6 +26,10 @@ import { isScmError, type Commit, type Provider, type ScmEntry, type ScmError, t
 /** Cada cuánto se vuelve a leer el estado mientras el panel está a la vista. Los agentes
  *  escriben archivos todo el tiempo; sin esto la lista quedaría vieja enseguida. */
 const POLL_MS = 4000;
+/** Con la ventana sin foco (el usuario está en el editor, en el navegador) se lee mucho
+ *  menos: cada lectura son tres `git`, y nadie está mirando la lista. Al volver el foco se
+ *  lee en el momento. */
+const UNFOCUSED_POLL_MS = 20_000;
 
 /** Cuántos commits trae el historial por vez. */
 const LOG_PAGE = 50;
@@ -117,7 +121,8 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
     if (!cwd) return;
     try {
       const next = await scmStatus(cwd);
-      setStatus(next);
+      // Lo mismo que antes no redibuja el panel: pasa en casi todas las lecturas.
+      setStatus((prev) => (prev !== undefined && JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
       if (next) {
         const count = next.staged.length + next.unstaged.length + next.untracked.length + next.conflicted.length;
         if (lastCount.current !== null && lastCount.current !== count) invalidateRepoInfo(next.root);
@@ -141,12 +146,25 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
   }, [load]);
 
   useEffect(() => {
+    let lastAt = Date.now();
     const id = setInterval(() => {
       // Mientras corre una operación, el estado va a cambiar al terminar: leerlo a mitad
       // mostraría un estado intermedio que parpadea.
-      if (document.visibilityState === "visible" && !busyRef.current) load();
+      if (document.visibilityState !== "visible" || busyRef.current) return;
+      if (!document.hasFocus() && Date.now() - lastAt < UNFOCUSED_POLL_MS) return;
+      lastAt = Date.now();
+      load();
     }, POLL_MS);
-    return () => clearInterval(id);
+    const onFocus = () => {
+      if (busyRef.current) return;
+      lastAt = Date.now();
+      load();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [load]);
 
   const root = status?.root ?? null;
@@ -230,12 +248,13 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
     });
   };
 
-  const openEntry = (entry: ScmEntry, group: Group) => {
+  /** Con un click, en una tab provisoria (como en VS Code); con doble click, fija. */
+  const openEntry = (entry: ScmEntry, group: Group, transient = true) => {
     const abs = `${status.root}/${entry.path}`;
     // Un archivo nuevo no tiene contra qué compararse, y uno en conflicto se resuelve
     // editándolo: los dos se abren directo.
-    if (entry.status === "?" || group === "conflicted") openFile(cwd, abs);
-    else openDiff(cwd, status.root, entry.path, group === "staged");
+    if (entry.status === "?" || group === "conflicted") openFile(cwd, abs, undefined, { transient });
+    else openDiff(cwd, status.root, entry.path, group === "staged", undefined, { transient });
   };
 
   const toggleGroup = (g: Group) =>
@@ -255,6 +274,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
       <div
         key={`${group}:${entry.path}`}
         onClick={() => openEntry(entry, group)}
+        onDoubleClick={() => openEntry(entry, group, false)}
         title={entry.origPath ? `${entry.origPath} → ${entry.path}` : entry.path}
         className="group flex items-center gap-1.5 h-[24px] pl-6 pr-2 cursor-pointer
           hover:bg-gray-200/50 dark:hover:bg-white/4"

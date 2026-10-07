@@ -355,3 +355,12 @@ export function FilePlusIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Subprocesos: una línea de actividad, el pulso de algo que corre. */
+export function ProcessIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M3 12h4l2.5-6 5 12 2.5-6h4" />
+    </svg>
+  );
+}

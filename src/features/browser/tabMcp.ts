@@ -12,6 +12,9 @@ export interface TabMcp {
   env: Record<string, string>;
   /** Lo que esta TUI le antepone al nombre de cada tool. */
   toolPrefix: string;
+  /** Argumentos a agregar al comando, uno por elemento (Codex: sus `-c`; Gemini: su
+   *  `--policy`). */
+  extraArgs?: string[];
 }
 
 /**
@@ -37,10 +40,18 @@ const SERVER_NAME = "controlcode";
  * mande al agente a usar una: el nombre que lee tiene que ser el que puede escribir.
  */
 export function browserToolPrefix(agentId: string | null | undefined): string {
-  return agentId && agentDef(agentId)?.mcp === "opencodeConfig" ? `${SERVER_NAME}_` : "";
+  const style = agentId ? agentDef(agentId)?.mcp : undefined;
+  if (style === "opencodeConfig") return `${SERVER_NAME}_`;
+  // Gemini les pone a todas su nombre calificado.
+  if (style === "geminiSettings") return `mcp_${SERVER_NAME}_`;
+  return "";
 }
 
 const quote = (value: string) => (value.includes('"') ? `'${value}'` : `"${value}"`);
+
+/** Un argumento suelto: sin comillas si no le hacen falta (`-c`, una ruta sin espacios),
+ *  así la limpieza de una corrida anterior lo reconoce igual que como se escribió. */
+const arg = (value: string) => (/^[\w@%+=:,./\\-]+$/.test(value) ? value : quote(value));
 
 /** Un valor de flag como se escribe en la línea de comandos: entre comillas o suelto. */
 const VALUE = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;
@@ -72,10 +83,20 @@ const PREVIOUS = new RegExp(
  * ruta, otras tools— se pasa a la de ahora en vez de arrancar con las dos: la vieja apunta
  * a un archivo que el barrido del arranque ya borró.
  */
+/** Lo que agregaron Codex (`-c mcp_servers.controlcode.…`) y Gemini (`--policy` de la
+ *  carpeta de la app) en una corrida anterior. */
+const PREVIOUS_EXTRA = new RegExp(
+  String.raw`\s*-c\s+(?:'mcp_servers\.${SERVER_NAME}\.[^']*'|"mcp_servers\.${SERVER_NAME}\.[^"]*"|mcp_servers\.${SERVER_NAME}\.\S*)`
+  + String.raw`|\s*--policy\s+(?:"[^"]*[/\\]mcp[/\\][^"]*"|'[^']*[/\\]mcp[/\\][^']*'|\S*[/\\]mcp[/\\]\S*)`,
+  "g"
+);
+
 export function appendBrowserMcp(command: string, mcp: TabMcp): string {
-  const clean = command.replace(PREVIOUS, "").trim();
-  if (!mcp.configPath) return clean;
-  return `${clean} --mcp-config ${quote(mcp.configPath)} --allowedTools ${quote(mcp.allowedTools.join(","))}`;
+  const clean = command.replace(PREVIOUS, "").replace(PREVIOUS_EXTRA, "").trim();
+  const extra = (mcp.extraArgs ?? []).map(arg).join(" ");
+  const withExtra = extra ? `${clean} ${extra}` : clean;
+  if (!mcp.configPath) return withExtra;
+  return `${withExtra} --mcp-config ${quote(mcp.configPath)} --allowedTools ${quote(mcp.allowedTools.join(","))}`;
 }
 
 /** Un lanzamiento con el navegador enchufado: el comando y las variables del proceso. */
@@ -101,7 +122,7 @@ export async function withBrowserMcp(
     const mcp = await invoke<TabMcp | null>("tab_browser_mcp", { cwd, tabId, agentId });
     if (!mcp) return { command, env: {} };
     return {
-      command: mcp.configPath ? appendBrowserMcp(command, mcp) : command,
+      command: mcp.configPath || mcp.extraArgs?.length ? appendBrowserMcp(command, mcp) : command,
       env: mcp.env ?? {},
     };
   } catch {

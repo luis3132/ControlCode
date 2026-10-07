@@ -10,6 +10,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { OrchestratorIndicator } from "@/features/orchestrator/OrchestratorIndicator";
 import { FleetIndicator } from "@/features/runs/FleetIndicator";
+import { ProcessIndicator } from "@/features/processes/ProcessIndicator";
 import { BranchIcon } from "@/app/icons";
 import type { RepoInfo } from "@/features/explorer/types";
 
@@ -115,6 +116,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
 
       <span>{t("status.agents", { n: tabs.length })}</span>
       <FleetIndicator />
+      <ProcessIndicator />
       <OrchestratorIndicator />
     </footer>
   );
