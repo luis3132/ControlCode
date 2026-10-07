@@ -203,7 +203,7 @@ pub(super) fn claude_project_slug(cwd: &str) -> String {
 /// Con una cuenta alternativa, TODO lo de Claude Code vive ahí adentro — incluidos los
 /// transcripts — así que buscar en `~/.claude` daría siempre "sin sesión": ni título ni
 /// resume. `None` = la cuenta del sistema.
-pub(super) fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
+pub(crate) fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
     let root = match profile {
         Some(dir) => dir.to_path_buf(),
         None => dirs::home_dir().unwrap_or_default().join(".claude"),

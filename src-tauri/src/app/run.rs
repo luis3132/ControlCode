@@ -224,6 +224,10 @@ pub fn run() {
             crate::skills::restore_session_skills,
             crate::ipc::bridge::cli_respond,
             crate::ipc::mcp::tab_browser_mcp,
+            crate::chat::commands::chat_send,
+            crate::chat::commands::chat_stop,
+            crate::chat::commands::chat_running,
+            crate::chat::commands::chat_transcript,
             crate::runs::run_start_orchestration,
             crate::runs::run_cancel_run,
             crate::runs::run_list_facts,
@@ -368,6 +372,7 @@ pub fn run() {
                 // que el `Drop` que limpia cada grupo hay que dispararlo a mano.
                 crate::terminal::kill_all_sessions();
                 crate::runs::kill_all_tasks();
+                crate::chat::kill_all();
             }
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 let windows = app_handle.webview_windows();

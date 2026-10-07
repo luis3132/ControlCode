@@ -10,9 +10,8 @@ use tauri::{AppHandle, Manager};
 
 use crate::ipc::protocol::arg_str;
 
-/// `run.approve` — ¿puede esta tarea usar esta herramienta?
+/// `run.approve` — ¿puede esta tarea (o esta tab en modo HTML) usar esta herramienta?
 pub(super) fn run_approve(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    let task_id = arg_str(args, "taskId")?;
     let tool_name = arg_str(args, "toolName")?;
     let input = args.get("input").cloned().unwrap_or(json!({}));
     let timeout = args
@@ -26,8 +25,16 @@ pub(super) fn run_approve(app: &AppHandle, args: &Value) -> Result<Value, String
         .inner()
         .clone();
 
-    let verdict =
-        crate::runs::resolve_permission(app, &db, &task_id, &tool_name, input, Duration::from_secs(timeout));
+    let timeout = Duration::from_secs(timeout);
+    let verdict = match args.get("taskId").and_then(Value::as_str) {
+        Some(task_id) => crate::runs::resolve_permission(app, &db, task_id, &tool_name, input, timeout),
+        None => {
+            let tab_id = arg_str(args, "tabId")?;
+            let cwd = arg_str(args, "cwd")?;
+            let tool_use_id = args.get("toolUseId").and_then(Value::as_str).map(str::to_string);
+            crate::runs::resolve_tab_permission(app, &db, &tab_id, &cwd, &tool_name, input, tool_use_id, timeout)
+        }
+    };
 
     Ok(json!({ "allow": verdict.allow, "reason": verdict.reason }))
 }

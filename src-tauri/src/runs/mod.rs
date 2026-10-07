@@ -9,7 +9,7 @@
 //! cada agente. La capa de `orchestrator::{digest,cursors,watch}` sigue siendo para las
 //! tabs interactivas y no se toca — acá no hace falta comprimir nada.
 
-mod activity;
+pub(crate) mod activity;
 mod adapters;
 mod agents;
 mod broker;
@@ -704,6 +704,30 @@ pub fn resolve_permission(
     verdict
 }
 
+/// Lo mismo que [`resolve_permission`], para una tab en modo HTML.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_tab_permission(
+    app: &AppHandle,
+    db: &DbConnection,
+    tab_id: &str,
+    cwd: &str,
+    tool_name: &str,
+    input: serde_json::Value,
+    tool_use_id: Option<String>,
+    timeout: Duration,
+) -> broker::Verdict {
+    supervisor::notify_approvals(app);
+    let verdict = broker::resolve_for_tab(db, tab_id, cwd, tool_name, input, tool_use_id, timeout);
+    supervisor::notify_approvals(app);
+    verdict
+}
+
+/// Descarta lo que una tab en modo HTML estaba esperando: su turno terminó o se paró.
+/// El chat vuelve a pedir la cola al enterarse, así que acá no se avisa.
+pub fn drop_tab_approvals(tab_id: &str) -> usize {
+    broker::drop_tab(tab_id)
+}
+
 /// Los pedidos que están esperando a una persona ahora mismo.
 #[tauri::command]
 pub fn run_pending_approvals() -> Vec<broker::PendingApproval> {
@@ -757,7 +781,7 @@ fn remember_rule(
         return Ok(None);
     };
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let Some(cwd) = store::project_cwd_of_task(&conn, &pending.task_id) else {
+    let Some(cwd) = broker::cwd_of(&conn, pending) else {
         return Ok(None);
     };
     store::upsert_rule(&conn, &cwd, &pattern, allow)?;
