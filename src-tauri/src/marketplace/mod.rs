@@ -1,7 +1,8 @@
 //! Fase 6 — Marketplace y repositorios de skills configurables.
 //!
-//! Formato abierto de `registry.json` (opcional — sin él, se auto-escanean carpetas con
-//! `SKILL.md` dentro de la fuente):
+//! Formato abierto de `registry.json` (opcional — sin él, se auto-escanean las carpetas con
+//! un markdown de skill adentro y, en un repositorio local, también los `.md` sueltos de
+//! la raíz; ver `skills::files::resolve_skill_source`):
 //! ```json
 //! {
 //!   "name": "Mi repo de skills",
@@ -10,7 +11,7 @@
 //!       "id": "mi-skill",                 // opcional, default: nombre de la carpeta
 //!       "name": "Mi Skill",               // opcional, default: id
 //!       "description": "...",
-//!       "path": "skills/mi-skill",        // carpeta relativa a la raíz del registry, contiene SKILL.md
+//!       "path": "skills/mi-skill",        // relativa a la raíz: una carpeta con su .md, o un .md suelto
 //!       "categories": ["git"],
 //!       "compatibleAgents": ["claude-code"]
 //!     }

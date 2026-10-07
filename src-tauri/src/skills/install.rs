@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::database::DbConnection;
 
-use super::files::{copy_dir_recursive, resolve_skill_file, scan_skill_file, slugify};
+use super::files::{copy_dir_recursive, resolve_skill_source, scan_skill_file, slugify};
 use super::frontmatter::{render_skill_md, split_frontmatter};
 use super::links::reconcile_link_dirs;
 use super::settings::resolve_skills_dir;
@@ -22,14 +22,11 @@ use super::types::{
 /// decidir si mostrar un formulario de metadata antes de instalar.
 #[tauri::command]
 pub fn preview_skill_metadata(source_file: String) -> Result<SkillPreview, String> {
-    let (file, folder) = resolve_skill_file(&source_file)?;
-    let Some((meta, _content)) = scan_skill_file(&file) else {
+    let resolved = resolve_skill_source(&source_file)?;
+    let Some((meta, _content)) = scan_skill_file(&resolved.md) else {
         return Err(format!("No se pudo leer {source_file}"));
     };
-    let folder_name = folder
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "skill".to_string());
+    let folder_name = resolved.default_name.clone();
     let missing = missing_fields(&meta);
     Ok(SkillPreview { meta: meta.into(), folder_name, missing })
 }
@@ -136,8 +133,11 @@ pub(crate) fn install_skill_internal(
     }
 
 
-    let (file, source) = resolve_skill_file(source_file)?;
-    let Some((parsed_meta, original_content)) = scan_skill_file(&file) else {
+    // `resolved` vive hasta el final: si era un `.md` suelto, su carpeta temporal se borra
+    // al soltarlo, y la copia de abajo la necesita.
+    let resolved = resolve_skill_source(source_file)?;
+    let source = resolved.folder.clone();
+    let Some((parsed_meta, original_content)) = scan_skill_file(&resolved.md) else {
         return Err(format!("No se pudo leer {source_file}"));
     };
 
@@ -151,11 +151,7 @@ pub(crate) fn install_skill_internal(
         None => parsed_meta,
     };
 
-    let folder_basename = source
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "skill".to_string());
-    let name = meta.name.clone().unwrap_or(folder_basename);
+    let name = meta.name.clone().unwrap_or_else(|| resolved.default_name.clone());
 
     // Una instalación VIEJA de esta misma skill. Las filas anteriores a que existiera
     // `origin_skill_id` no saben de qué entrada salieron, así que la búsqueda por (repo,
@@ -199,6 +195,10 @@ pub(crate) fn install_skill_internal(
     let dest = bucket_dir.join(&slug);
 
     copy_dir_recursive(&source, &dest).map_err(|e| e.to_string())?;
+    // El markdown original pasa a ser el SKILL.md de abajo: no se deja duplicado.
+    if let Some(original) = &resolved.replaced_md {
+        let _ = std::fs::remove_file(dest.join(original));
+    }
 
     // Si se completó metadata (o simplemente para normalizar), reescribimos SKILL.md en
     // la copia global con el frontmatter final — "guardar el archivo modificado" pedido
@@ -358,8 +358,9 @@ pub(crate) fn update_installed(
     overrides: Option<SkillFrontmatterInput>,
     db: &DbConnection,
 ) -> Result<SkillInfo, String> {
-    let (file, source) = resolve_skill_file(source_file)?;
-    let Some((parsed_meta, original_content)) = scan_skill_file(&file) else {
+    let resolved = resolve_skill_source(source_file)?;
+    let source = resolved.folder.clone();
+    let Some((parsed_meta, original_content)) = scan_skill_file(&resolved.md) else {
         return Err(format!("No se pudo leer {source_file}"));
     };
     let meta: SkillFrontmatter = match overrides {
@@ -372,12 +373,11 @@ pub(crate) fn update_installed(
     let dest_path = Path::new(dest);
     let _ = std::fs::remove_dir_all(dest_path);
     copy_dir_recursive(&source, dest_path).map_err(|e| e.to_string())?;
+    if let Some(original) = &resolved.replaced_md {
+        let _ = std::fs::remove_file(dest_path.join(original));
+    }
 
-    let name = meta
-        .name
-        .clone()
-        .or_else(|| source.file_name().map(|n| n.to_string_lossy().to_string()))
-        .unwrap_or_else(|| "skill".to_string());
+    let name = meta.name.clone().unwrap_or_else(|| resolved.default_name.clone());
     let (_, body) = split_frontmatter(&original_content);
     let mut meta_to_write = meta.clone();
     meta_to_write.name = Some(name.clone());
