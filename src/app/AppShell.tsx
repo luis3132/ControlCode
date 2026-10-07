@@ -56,6 +56,7 @@ function toFrontendTab(row: RestoredTabRow): Tab {
     accountId: row.accountId ?? undefined,
     prelaunch: row.prelaunch ?? undefined,
     openedAt: row.openedAt,
+    mode: row.mode === "html" ? "html" : undefined,
   };
 }
 

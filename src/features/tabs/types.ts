@@ -47,4 +47,9 @@ export interface Tab {
   prelaunch?: PrelaunchStep[];
   /** Unix seconds — cuándo se abrió esta tab por primera vez (no se toca en autosaves). */
   openedAt: number;
+  /** Cómo se ve: la TUI en su terminal, o el chat de la app (solo Claude Code, ver
+   *  `features/chat`). Ausente = terminal. */
+  mode?: TabMode;
 }
+
+export type TabMode = "terminal" | "html";

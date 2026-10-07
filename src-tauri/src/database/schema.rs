@@ -596,6 +596,10 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     if conn.prepare("SELECT prelaunch FROM tabs LIMIT 1").is_err() {
         conn.execute("ALTER TABLE tabs ADD COLUMN prelaunch TEXT NOT NULL DEFAULT '[]'", [])?;
     }
+    // Cómo se ve la tab: la TUI en su terminal (`terminal`) o el chat de la app (`html`).
+    if conn.prepare("SELECT mode FROM tabs LIMIT 1").is_err() {
+        conn.execute("ALTER TABLE tabs ADD COLUMN mode TEXT NOT NULL DEFAULT 'terminal'", [])?;
+    }
     if conn.prepare("SELECT prelaunch FROM session_history LIMIT 1").is_err() {
         conn.execute(
             "ALTER TABLE session_history ADD COLUMN prelaunch TEXT NOT NULL DEFAULT '[]'",

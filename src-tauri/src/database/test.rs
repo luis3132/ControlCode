@@ -107,6 +107,7 @@ fn payload(tabs: Vec<&str>, authoritative: bool) -> WindowStatePayload {
                 account_id: None,
                 prelaunch: Vec::new(),
                 opened_at: 0,
+                mode: "terminal".into(),
             })
             .collect(),
     }
@@ -164,6 +165,34 @@ fn un_guardado_autoritativo_si_cierra_las_tabs_que_faltan() {
     let skills: String =
         conn.query_row("SELECT skills FROM session_history", [], |r| r.get(0)).unwrap();
     assert!(skills.contains("una-skill"), "el historial guarda la skill: {skills}");
+}
+
+/// Una tab en modo HTML vuelve en modo HTML al reabrir la app; un modo que no se conoce
+/// vuelve como terminal.
+#[test]
+fn el_modo_de_la_tab_se_guarda_y_vuelve() {
+    let db: DbConnection = std::sync::Arc::new(std::sync::Mutex::new(setup_window_save()));
+    let app = mock_app_with_main_window();
+
+    let mut state = payload(vec!["t1", "t2"], true);
+    state.tabs[0].mode = "html".into();
+    state.tabs[1].mode = "otro".into();
+    db_save_window_state_sync(state, &db, app.handle()).unwrap();
+
+    let conn = db.lock().unwrap();
+    let mode = |id: &str| -> String {
+        conn.query_row("SELECT mode FROM tabs WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+    };
+    assert_eq!(mode("t1"), "html");
+    assert_eq!(mode("t2"), "terminal");
+    // Y sin el campo en el payload (un frontend viejo), la terminal de siempre.
+    let viejo: TabStatePayload = serde_json::from_value(serde_json::json!({
+        "id": "x", "title": "", "titleIsCustom": false, "agentId": "a", "agentLabel": "A",
+        "command": "a", "cwd": "/", "tabOrder": 0, "sessionId": null, "scrollback": null,
+        "historyId": null, "accountId": null, "openedAt": 0
+    }))
+    .unwrap();
+    assert_eq!(viejo.mode, "terminal");
 }
 
 // ── Siembra de repositorios ──────────────────────────────────────

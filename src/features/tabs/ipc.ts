@@ -19,6 +19,7 @@ export interface TabStatePayload {
   prelaunch: PrelaunchStep[];
   scrollback: string | null;
   openedAt: number;
+  mode: "terminal" | "html";
 }
 
 export interface WindowStatePayload {
@@ -57,6 +58,7 @@ export interface RestoredTabRow {
   accountId: string | null;
   prelaunch: PrelaunchStep[];
   openedAt: number;
+  mode: "terminal" | "html";
 }
 
 export interface RestoredWindowState {
