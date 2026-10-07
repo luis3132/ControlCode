@@ -202,7 +202,9 @@ export function SearchPanel({ cwd }: { cwd: string | null }) {
               {open && file.matches.map((m, i) => (
                 <Button variant="custom"
                   key={`${m.line}:${m.column}:${i}`}
-                  onClick={() => openFile(cwd, file.path, { line: m.line, column: m.column })}
+                  // Como en VS Code: un resultado se mira en una tab provisoria, doble click la fija.
+                  onClick={() => openFile(cwd, file.path, { line: m.line, column: m.column }, { transient: true })}
+                  onDoubleClick={() => openFile(cwd, file.path, { line: m.line, column: m.column })}
                   className="flex items-center gap-2 w-full h-[22px] pl-9 pr-2 text-left
                     hover:bg-blue-500/8 dark:hover:bg-blue-400/8"
                 >

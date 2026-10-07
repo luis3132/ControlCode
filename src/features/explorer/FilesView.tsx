@@ -148,6 +148,7 @@ function NameInput({ initial, depth, isDir, onCommit, onCancel }: {
  *  las filas memoizadas no se redibujan solo porque el árbol se redibujó. */
 interface RowActions {
   click: (entry: DirEntry) => void;
+  doubleClick: (entry: DirEntry) => void;
   pointerDown: (e: React.PointerEvent<HTMLButtonElement>, entry: DirEntry) => void;
   contextMenu: (e: React.MouseEvent, entry: DirEntry) => void;
 }
@@ -172,6 +173,7 @@ const TreeRowButton = memo(function TreeRowButton({ entry, depth, isExpanded, ma
       data-tree-path={entry.path}
       data-tree-dir={entry.isDir ? "1" : "0"}
       onClick={() => actions.click(entry)}
+      onDoubleClick={() => actions.doubleClick(entry)}
       onPointerDown={(e) => actions.pointerDown(e, entry)}
       onContextMenu={(e) => actions.contextMenu(e, entry)}
       style={{ paddingLeft: 8 + depth * 13 }}
@@ -363,7 +365,13 @@ export function FilesView({ cwd, repo, title }: {
       if (next.has(entry.path) && !loaded.has(entry.path)) load(entry.path);
       return;
     }
-    if (cwd) openFile(cwd, entry.path);
+    // Como en VS Code: un click lo mira en una tab provisoria, que el próximo reemplaza.
+    if (cwd) openFile(cwd, entry.path, undefined, { transient: true });
+  };
+
+  /** Doble click en un archivo: lo deja abierto en una tab fija. */
+  const onRowDoubleClick = (entry: DirEntry) => {
+    if (!entry.isDir && cwd) openFile(cwd, entry.path);
   };
 
   // Refrescar vuelve a leer lo que estaba abierto, no colapsa el árbol: con tres niveles
@@ -640,10 +648,11 @@ export function FilesView({ cwd, repo, title }: {
   };
 
   // Las filas reciben siempre el mismo objeto y este llama a lo de este dibujo.
-  const actionsRef = useRef({ click: onRowClick, pointerDown: onRowPointerDown, contextMenu: onRowContextMenu });
-  actionsRef.current = { click: onRowClick, pointerDown: onRowPointerDown, contextMenu: onRowContextMenu };
+  const actionsRef = useRef({ click: onRowClick, doubleClick: onRowDoubleClick, pointerDown: onRowPointerDown, contextMenu: onRowContextMenu });
+  actionsRef.current = { click: onRowClick, doubleClick: onRowDoubleClick, pointerDown: onRowPointerDown, contextMenu: onRowContextMenu };
   const actions = useMemo<RowActions>(() => ({
     click: (entry) => actionsRef.current.click(entry),
+    doubleClick: (entry) => actionsRef.current.doubleClick(entry),
     pointerDown: (e, entry) => actionsRef.current.pointerDown(e, entry),
     contextMenu: (e, entry) => actionsRef.current.contextMenu(e, entry),
   }), []);

@@ -12,12 +12,14 @@ const ICON = { file: DocumentIcon, diff: BranchIcon, browser: GlobeIcon } as con
  * Una tab de archivo, diff o navegador en la barra de arriba.
  *
  * Mismo alto, forma y línea de activa que la de un agente —conviven en la misma tira—,
- * pero en cursiva y sin punto de estado: no hay proceso del que informar, y la cursiva es
- * lo que deja distinguir de un vistazo "esto es un agente" de "esto es algo que abrí".
+ * pero sin punto de estado: no hay proceso del que informar; el icono dice qué es.
+ *
+ * La cursiva es la de VS Code: una tab provisoria, que reemplaza el próximo archivo que se
+ * abra con un click. Doble click la deja fija.
  */
 export function ViewTabItem({
   view, tabKey, className = "", hint, paint = null, paintHint, isActive, groupFocused = true,
-  onActivate, onClose, onPointerDown, onContextMenu,
+  onActivate, onPin, onClose, onPointerDown, onContextMenu,
 }: {
   view: ViewTab;
   /** El color del agente que maneja esta vista. Ausente = la abrió el usuario. */
@@ -32,6 +34,8 @@ export function ViewTabItem({
   /** `false` en un grupo sin el foco: la línea de la activa va en gris. */
   groupFocused?: boolean;
   onActivate: () => void;
+  /** Doble click: la deja fija si era provisoria. */
+  onPin?: () => void;
   onClose: () => void;
   onPointerDown?: (e: React.PointerEvent<HTMLElement>) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
@@ -47,6 +51,7 @@ export function ViewTabItem({
       onPointerDown={onPointerDown}
       onContextMenu={onContextMenu && ((e) => { e.preventDefault(); onContextMenu(e); })}
       onClick={onActivate}
+      onDoubleClick={onPin}
       // Click del medio cierra, como en cualquier navegador o editor.
       onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(); } }}
       title={paintHint ?? (view.kind === "browser" ? view.url || title : view.kind === "file" ? view.path : `${view.root}/${view.path}`)}
@@ -65,7 +70,7 @@ export function ViewTabItem({
       )}
 
       <Icon className={`w-3.5 h-3.5 shrink-0 opacity-70 ${paint ? paint.ink : view.kind === "diff" ? "text-amber-500" : ""}`} />
-      <span className="flex-1 min-w-0 truncate text-xs italic">
+      <span className={`flex-1 min-w-0 truncate text-xs ${view.transient ? "italic" : ""}`}>
         {title}
         {hint && <span className="not-italic text-[10px] text-gray-400 dark:text-white/30"> · {hint}</span>}
       </span>

@@ -248,12 +248,13 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
     });
   };
 
-  const openEntry = (entry: ScmEntry, group: Group) => {
+  /** Con un click, en una tab provisoria (como en VS Code); con doble click, fija. */
+  const openEntry = (entry: ScmEntry, group: Group, transient = true) => {
     const abs = `${status.root}/${entry.path}`;
     // Un archivo nuevo no tiene contra qué compararse, y uno en conflicto se resuelve
     // editándolo: los dos se abren directo.
-    if (entry.status === "?" || group === "conflicted") openFile(cwd, abs);
-    else openDiff(cwd, status.root, entry.path, group === "staged");
+    if (entry.status === "?" || group === "conflicted") openFile(cwd, abs, undefined, { transient });
+    else openDiff(cwd, status.root, entry.path, group === "staged", undefined, { transient });
   };
 
   const toggleGroup = (g: Group) =>
@@ -273,6 +274,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
       <div
         key={`${group}:${entry.path}`}
         onClick={() => openEntry(entry, group)}
+        onDoubleClick={() => openEntry(entry, group, false)}
         title={entry.origPath ? `${entry.origPath} → ${entry.path}` : entry.path}
         className="group flex items-center gap-1.5 h-[24px] pl-6 pr-2 cursor-pointer
           hover:bg-gray-200/50 dark:hover:bg-white/4"

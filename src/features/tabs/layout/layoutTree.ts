@@ -77,6 +77,23 @@ function mapGroups(node: LayoutNode, fn: (g: GroupNode) => GroupNode): LayoutNod
   return { ...node, children: node.children.map((c) => mapGroups(c, fn)) };
 }
 
+/** Cambia una clave por otra en el lugar que ocupa (su grupo, su posición y, si era la
+ *  visible, también la visible). Es lo que deja reemplazar una tab provisoria sin que salte
+ *  al final de la barra. */
+export function replaceItem(layout: WorkspaceLayout, from: string, to: string): WorkspaceLayout {
+  let found = false;
+  const root = mapGroups(layout.root, (group) => {
+    if (!group.items.includes(from)) return group;
+    found = true;
+    return {
+      ...group,
+      items: group.items.map((k) => (k === from ? to : k)),
+      active: group.active === from ? to : group.active,
+    };
+  });
+  return found ? { ...layout, root } : layout;
+}
+
 /** Saca un grupo del árbol, repartiendo su lugar entre sus hermanos. */
 function removeGroupNode(node: LayoutNode, groupId: string): LayoutNode | null {
   if (node.kind === "group") return node.id === groupId ? null : node;

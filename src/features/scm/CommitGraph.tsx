@@ -202,7 +202,8 @@ export function CommitGraph({ cwd, root, commits, onTag }: {
                     return (
                       <Button variant="custom"
                         key={f.path}
-                        onClick={() => openDiff(cwd, root, f.path, false, { hash: c.hash, short: c.short, origPath: f.origPath })}
+                        onClick={() => openDiff(cwd, root, f.path, false, { hash: c.hash, short: c.short, origPath: f.origPath }, { transient: true })}
+                        onDoubleClick={() => openDiff(cwd, root, f.path, false, { hash: c.hash, short: c.short, origPath: f.origPath })}
                         title={f.origPath ? `${f.origPath} → ${f.path}` : f.path}
                         className="flex items-center gap-1.5 w-full h-[22px] px-1 pr-3 text-left rounded
                           hover:bg-gray-200/60 dark:hover:bg-white/5"

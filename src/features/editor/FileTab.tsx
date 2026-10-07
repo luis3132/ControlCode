@@ -68,7 +68,8 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
   const setDirty = useCallback((next: boolean) => {
     if (dirty.current === next) return;
     dirty.current = next;
-    updateView(view.id, { dirty: next });
+    // Editarla la deja fija (VS Code): sus cambios no pueden irse con el próximo archivo.
+    updateView(view.id, next ? { dirty: true, transient: false } : { dirty: false });
   }, [updateView, view.id]);
 
   const load = useCallback(async (intoEditor: boolean) => {
