@@ -282,3 +282,21 @@ fn parar_un_turno_lo_mata_y_lo_marca() {
     assert_eq!(seen[0]["stopped"], true);
     assert!(!super::session::is_running("tab-stop"));
 }
+
+/// Con pasos previos, el turno corre en un shell que los ejecuta y termina en el programa,
+/// con los argumentos intactos aunque tengan espacios o comillas.
+#[cfg(unix)]
+#[test]
+fn los_pasos_previos_preparan_el_entorno_y_los_argumentos_llegan_enteros() {
+    use super::launch::{command_for, quote};
+
+    assert_eq!(quote("--model"), "--model");
+    assert_eq!(quote("a b"), "'a b'");
+    assert_eq!(quote("it's"), r"'it'\''s'");
+
+    let args = vec!["-c".to_string(), "printf '%s|%s' \"$CC_PRE\" \"$0\"".to_string(), "con espacio 'y' comillas".to_string()];
+    let out = tauri::async_runtime::block_on(async {
+        command_for("sh".as_ref(), &args, &["export CC_PRE=listo".to_string()]).output().await.unwrap()
+    });
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "listo|con espacio 'y' comillas");
+}

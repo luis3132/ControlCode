@@ -75,8 +75,9 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const setAccountsOpen = useUiStore((s) => s.setAccountsOpen);
   const accountsOpen = useUiStore((s) => s.accountsOpen);
-  // Permisos que un agente de la flota está esperando: se ven desde cualquier pantalla.
-  const pendingApprovals = useRunsStore((s) => s.approvals.length);
+  // Permisos que un agente de la flota está esperando: se ven desde cualquier pantalla. Los
+  // de las tabs en modo HTML no: el globo lleva a la flota, y esos se contestan en su chat.
+  const pendingApprovals = useRunsStore((s) => s.approvals.filter((a) => a.taskId !== null).length);
   const runningProcs = useRunningHere();
 
   // `startsWith` y no `===`: si no, /marketplace/registries no ilumina Marketplace.

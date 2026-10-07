@@ -6,6 +6,7 @@ import { useAccountsStore } from "@/features/accounts/store";
 import { agentIcon } from "@/features/agents/agentIcons";
 import type { AgentPaint } from "@/features/browser/agentPaint";
 import type { Tab } from "@/features/tabs/types";
+import { useChatActivity } from "@/features/chat/store";
 
 interface TabItemProps {
   tab: Tab;
@@ -120,12 +121,16 @@ export function TabItem({
         </span>
       )}
 
-      {/* Sin PTY todavía = arrancando. Es lo único que se puede afirmar del estado. */}
-      <span
-        className={`w-1.5 h-1.5 rounded-full shrink-0 transition-opacity
-          ${tab.ptyId == null ? "bg-amber-500" : "bg-emerald-500"}
-          group-hover:opacity-0`}
-      />
+      {tab.mode === "html" ? (
+        <ChatDot tabId={tab.id} />
+      ) : (
+        // Sin PTY todavía = arrancando. Es lo único que se puede afirmar del estado.
+        <span
+          className={`w-1.5 h-1.5 rounded-full shrink-0 transition-opacity
+            ${tab.ptyId == null ? "bg-amber-500" : "bg-emerald-500"}
+            group-hover:opacity-0`}
+        />
+      )}
 
       {/* Botón cerrar — siempre visible pero sutil, hover lo destaca */}
       <Button variant="icon"
@@ -151,5 +156,17 @@ export function TabItem({
         </svg>
       </Button>
     </div>
+  );
+}
+
+/** En modo HTML no hay PTY: el punto dice si el agente trabaja o espera un permiso. */
+function ChatDot({ tabId }: { tabId: string }) {
+  const activity = useChatActivity(tabId);
+  return (
+    <span
+      className={`w-1.5 h-1.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0
+        ${activity === "approval" ? "bg-amber-500 animate-pulse" : "bg-emerald-500"}
+        ${activity === "working" ? "animate-pulse" : ""}`}
+    />
   );
 }

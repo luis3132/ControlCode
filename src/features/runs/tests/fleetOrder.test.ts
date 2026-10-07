@@ -221,7 +221,7 @@ describe("handed_off", () => {
 });
 
 function pedido(taskId: string): PendingApproval {
-  return { id: `ap-${taskId}`, taskId, toolName: "Edit", input: {}, askedAt: 0, suggestedRule: null };
+  return { id: `ap-${taskId}`, taskId, tabId: null, cwd: null, toolUseId: null, toolName: "Edit", input: {}, askedAt: 0, suggestedRule: null };
 }
 
 describe("fleetSummary", () => {

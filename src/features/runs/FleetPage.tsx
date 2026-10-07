@@ -132,7 +132,8 @@ export function FleetPage() {
   // algo concreto y no sobre una lista.
   const byTask = useMemo(() => {
     const map = new Map<string, PendingApproval>();
-    for (const a of approvals) if (!map.has(a.taskId)) map.set(a.taskId, a);
+    // Los de las tabs en modo HTML se contestan en su chat.
+    for (const a of approvals) if (a.taskId !== null && !map.has(a.taskId)) map.set(a.taskId, a);
     return map;
   }, [approvals]);
   const blocked = useMemo(() => new Set(byTask.keys()), [byTask]);

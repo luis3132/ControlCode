@@ -115,7 +115,9 @@ export interface FleetSummary {
  */
 export function fleetSummary(tasks: Task[], approvals: PendingApproval[]): FleetSummary {
   const ids = new Set(tasks.map((t) => t.id));
-  const blocked = new Set(approvals.filter((a) => ids.has(a.taskId)).map((a) => a.taskId));
+  const blocked = new Set(
+    approvals.flatMap((a) => (a.taskId !== null && ids.has(a.taskId) ? [a.taskId] : []))
+  );
   return {
     // Solo lo que tiene proceso: "3 en segundo plano" con dos esperando turno prometería
     // más trabajo del que hay.

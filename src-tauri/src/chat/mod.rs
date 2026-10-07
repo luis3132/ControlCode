@@ -2,6 +2,7 @@
 //! la TUI, con un turno `claude -p` por mensaje (ver `session.rs`).
 
 pub mod commands;
+pub(crate) mod launch;
 pub mod parse;
 pub mod session;
 #[cfg(test)]
