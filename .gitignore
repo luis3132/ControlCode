@@ -8,6 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 .claude
+.agents
 node_modules
 dist
 dist-ssr
@@ -23,3 +24,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+*.env
