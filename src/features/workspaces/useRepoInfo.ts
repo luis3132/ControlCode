@@ -10,6 +10,17 @@ const UNRESOLVED: RepoInfo = {
 const invalidators = new Set<(root: string) => void>();
 
 /**
+ * Lo último que se supo de cada carpeta, compartido por TODOS los montajes del hook.
+ *
+ * Sin esto la caché vivía en el estado del componente y moría con él: cada vez que se
+ * entraba a Sesiones se volvía a preguntar a git por todas las carpetas del historial, y
+ * mientras no contestaban la lista se dibujaba desarmada (cada carpeta como su propio
+ * grupo, sin rama) para reacomodarse un instante después. Ahora un montaje nuevo arranca
+ * con lo que ya se sabía y lo relee por detrás.
+ */
+const shared = new Map<string, RepoInfo>();
+
+/**
  * Vuelve a leer lo que se sabía del repo `root`.
  *
  * La caché es por carpeta y para siempre, lo cual está bien mientras nada cambie — pero el
@@ -53,11 +64,12 @@ export function mergeRepoInfo(
  * dibuja con lo que haya y se reacomoda solo cuando llegan las respuestas.
  */
 export function useRepoInfo(cwds: string[]): Map<string, RepoInfo> {
-  const [cache, setCache] = useState<Map<string, RepoInfo>>(new Map());
+  const [cache, setCache] = useState<Map<string, RepoInfo>>(() => new Map(shared));
   const cacheRef = useRef(cache);
   cacheRef.current = cache;
-  /** Las carpetas que hay que volver a leer (sin dejar de mostrar lo que tienen). */
-  const stale = useRef(new Set<string>());
+  /** Las carpetas que hay que volver a leer (sin dejar de mostrar lo que tienen). Lo que
+   *  vino de `shared` arranca acá: se muestra ya, pero pudo cambiar desde que se leyó. */
+  const stale = useRef(new Set(shared.keys()));
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
@@ -97,6 +109,7 @@ export function useRepoInfo(cwds: string[]): Map<string, RepoInfo> {
       )
     ).then((pairs) => {
       done = true;
+      pairs.forEach(([cwd, info]) => shared.set(cwd, info));
       if (gone) return;
       setCache((prev) => mergeRepoInfo(prev, pairs));
     });
