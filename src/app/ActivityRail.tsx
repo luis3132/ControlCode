@@ -4,8 +4,9 @@ import { Button, Badge, BoxIcon, ClockIcon, CloudIcon, GearIcon, NetworkIcon, St
 
 import { useUiStore } from "@/app/uiStore";
 import { shortcutForPath } from "@/app/shortcuts";
-import { PullRequestIcon } from "@/app/icons";
+import { ProcessIcon, PullRequestIcon } from "@/app/icons";
 import { useRunsStore } from "@/features/runs/store";
+import { useRunningHere } from "@/features/processes/ProcessIndicator";
 
 /** "Marketplace · Ctrl+M". El tooltip es donde alguien se entera del atajo. */
 function withShortcut(label: string, path: string | null): string {
@@ -76,6 +77,7 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
   const accountsOpen = useUiStore((s) => s.accountsOpen);
   // Permisos que un agente de la flota está esperando: se ven desde cualquier pantalla.
   const pendingApprovals = useRunsStore((s) => s.approvals.length);
+  const runningProcs = useRunningHere();
 
   // `startsWith` y no `===`: si no, /marketplace/registries no ilumina Marketplace.
   const on = (path: string) => pathname.startsWith(path) && path !== "/";
@@ -108,6 +110,16 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
         onClick={() => navigate("/fleet")}
       >
         <NetworkIcon className="w-[18px] h-[18px]" />
+      </RailButton>
+
+      <RailButton
+        label={runningProcs > 0 ? t("rail.processesRunning", { count: runningProcs }) : t("sidebar.processes")}
+        path="/processes"
+        active={on("/processes")}
+        badge={runningProcs}
+        onClick={() => navigate("/processes")}
+      >
+        <ProcessIcon className="w-[18px] h-[18px]" />
       </RailButton>
 
       <RailButton label={t("sidebar.forge")} path="/forge" active={on("/forge")} onClick={() => navigate("/forge")}>
