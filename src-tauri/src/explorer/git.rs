@@ -70,14 +70,25 @@ impl RepoInfo {
     }
 }
 
-fn git(cwd: &str, args: &[&str]) -> Option<String> {
+/// Corre `git` en `cwd`, distinguiendo "git contestó que no" (`Ok(None)`: no es un repo, la
+/// ruta no existe) de "git no contestó" (`Err`: se pasó del tiempo, o no se pudo lanzar).
+///
+/// La diferencia importa: un `git` que tarda porque otro tiene tomado el índice no puede
+/// convertirse en "esta carpeta no es un repo". El panel lo mostraba como "sin repo" y
+/// desarmaba los grupos hasta la lectura siguiente, que sí contestaba.
+fn git_checked(cwd: &str, args: &[&str]) -> Result<Option<String>, String> {
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(cwd).args(args);
-    let out = output_with_timeout(&mut cmd, GIT_TIMEOUT).ok()?;
+    let out = match output_with_timeout(&mut cmd, GIT_TIMEOUT) {
+        Ok(out) => out,
+        // Sin `git` instalado no hay repo que mostrar: no es un error transitorio.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("git no contestó: {e}")),
+    };
     if !out.status.success() {
-        return None;
+        return Ok(None);
     }
-    Some(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string())
+    Ok(Some(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string()))
 }
 
 /// Traduce las dos columnas de `git status --porcelain` a una sola marca.
@@ -162,10 +173,11 @@ pub(crate) fn branch_from_header(header: &str) -> Option<String> {
 /// eso competía con los agentes que hacen `git add`/`commit` en la misma carpeta, y uno
 /// de los dos fallaba con "index.lock exists".
 pub fn explorer_repo_info(path: String) -> Result<RepoInfo, String> {
-    let Some(dirs) = git(
+    let Some(dirs) = git_checked(
         &path,
         &["rev-parse", "--show-toplevel", "--absolute-git-dir", "--path-format=absolute", "--git-common-dir"],
-    ) else {
+    )?
+    else {
         // No es un repo (o no hay `git`). No es un error: se muestra el árbol pelado.
         return Ok(RepoInfo::none());
     };
@@ -177,8 +189,10 @@ pub fn explorer_repo_info(path: String) -> Result<RepoInfo, String> {
     // señal fiable: mirar si `.git` es archivo o carpeta falla con submódulos.
     let is_worktree = matches!((own, common), (Some(own), Some(common)) if own != common);
 
-    let status = git(&path, &["--no-optional-locks", "status", "--porcelain", "-z", "--branch", "--untracked-files=normal"])
-        .unwrap_or_default();
+    // Si el status no contesta, se avisa en vez de devolver un repo sin rama ni cambios: el
+    // panel se queda con lo que ya sabía.
+    let status = git_checked(&path, &["--no-optional-locks", "status", "--porcelain", "-z", "--branch", "--untracked-files=normal"])?
+        .ok_or("git status falló")?;
     let (header, entries) = match status.split_once('\0') {
         Some((first, rest)) if first.starts_with("## ") => (Some(first), rest),
         _ => (None, status.as_str()),

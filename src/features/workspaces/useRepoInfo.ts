@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { repoInfo } from "@/features/explorer/ipc";
 import type { RepoInfo } from "@/features/explorer/types";
@@ -10,14 +10,39 @@ const UNRESOLVED: RepoInfo = {
 const invalidators = new Set<(root: string) => void>();
 
 /**
- * Descarta lo que se sabía del repo `root` para que se vuelva a leer.
+ * Vuelve a leer lo que se sabía del repo `root`.
  *
  * La caché es por carpeta y para siempre, lo cual está bien mientras nada cambie — pero el
  * panel de control de versiones cambia el repo (commitea, cambia de rama), y sin avisar
  * acá las marcas del árbol y la rama del lateral seguirían mostrando lo de antes.
+ *
+ * Releer NO borra lo que había: se sigue mostrando hasta que llega lo nuevo. Antes la
+ * entrada se borraba, y mientras volvía la respuesta el panel creía que la carpeta no era
+ * un repo — "sin repo", los grupos desarmados — y un instante después volvía todo. Con un
+ * agente trabajando eso pasaba cada pocos segundos.
  */
 export function invalidateRepoInfo(root: string) {
   invalidators.forEach((invalidate) => invalidate(root));
+}
+
+/** Si `cwd` está en el repo `root` (o es esa carpeta). */
+export function belongs(cwd: string, info: RepoInfo | undefined, root: string): boolean {
+  return info?.root === root || cwd === root || cwd.startsWith(`${root}/`) || cwd.startsWith(`${root}\\`);
+}
+
+/** Suma las respuestas a la caché. Si nada cambió devuelve la MISMA caché: releer el repo
+ *  cada pocos segundos no puede redibujar el panel entero cada vez. */
+export function mergeRepoInfo(
+  prev: Map<string, RepoInfo>,
+  pairs: ReadonlyArray<readonly [string, RepoInfo]>
+): Map<string, RepoInfo> {
+  let next: Map<string, RepoInfo> | null = null;
+  for (const [cwd, info] of pairs) {
+    if (JSON.stringify(prev.get(cwd)) === JSON.stringify(info)) continue;
+    next ??= new Map(prev);
+    next.set(cwd, info);
+  }
+  return next ?? prev;
 }
 
 /**
@@ -29,18 +54,22 @@ export function invalidateRepoInfo(root: string) {
  */
 export function useRepoInfo(cwds: string[]): Map<string, RepoInfo> {
   const [cache, setCache] = useState<Map<string, RepoInfo>>(new Map());
+  const cacheRef = useRef(cache);
+  cacheRef.current = cache;
+  /** Las carpetas que hay que volver a leer (sin dejar de mostrar lo que tienen). */
+  const stale = useRef(new Set<string>());
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
     const invalidate = (root: string) => {
-      setCache((prev) => {
-        const next = new Map(prev);
-        for (const [cwd, info] of prev) {
-          if (info.root === root || cwd === root || cwd.startsWith(`${root}/`)) next.delete(cwd);
+      let any = false;
+      for (const [cwd, info] of cacheRef.current) {
+        if (belongs(cwd, info, root)) {
+          stale.current.add(cwd);
+          any = true;
         }
-        return next.size === prev.size ? prev : next;
-      });
-      setVersion((v) => v + 1);
+      }
+      if (any) setVersion((v) => v + 1);
     };
     invalidators.add(invalidate);
     return () => { invalidators.delete(invalidate); };
@@ -52,31 +81,31 @@ export function useRepoInfo(cwds: string[]): Map<string, RepoInfo> {
 
   useEffect(() => {
     const wanted: string[] = JSON.parse(key);
-    const missing = wanted.filter((cwd) => !cache.has(cwd));
-    if (missing.length === 0) return;
+    const toRead = wanted.filter((cwd) => !cacheRef.current.has(cwd) || stale.current.has(cwd));
+    if (toRead.length === 0) return;
+    toRead.forEach((cwd) => stale.current.delete(cwd));
 
-    let stale = false;
+    let gone = false;
+    let done = false;
     Promise.all(
-      missing.map((cwd) =>
+      toRead.map((cwd) =>
         repoInfo(cwd)
           .then((info) => [cwd, info] as const)
-          // Una carpeta que ya no existe (la borraron con la tab abierta) no puede tumbar
-          // al resto: se cachea como "sin repo" y el panel la muestra igual.
-          .catch(() => [cwd, UNRESOLVED] as const)
+          // Si git no contestó, se queda lo que ya se sabía. Solo una carpeta que nunca se
+          // pudo leer (la borraron con la tab abierta) cae en "sin repo".
+          .catch(() => [cwd, cacheRef.current.get(cwd) ?? UNRESOLVED] as const)
       )
     ).then((pairs) => {
-      if (stale) return;
-      setCache((prev) => {
-        const next = new Map(prev);
-        for (const [cwd, info] of pairs) next.set(cwd, info);
-        return next;
-      });
+      done = true;
+      if (gone) return;
+      setCache((prev) => mergeRepoInfo(prev, pairs));
     });
 
-    return () => { stale = true; };
-    // `cache` queda fuera a propósito: agregarlo relanzaría el efecto con cada respuesta.
-    // `version` sí entra: es la señal de que algo se invalidó y hay que volver a leer.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      gone = true;
+      // Cortada a mitad de camino: lo que se iba a releer sigue pendiente.
+      if (!done) toRead.forEach((cwd) => stale.current.add(cwd));
+    };
   }, [key, version]);
 
   return cache;

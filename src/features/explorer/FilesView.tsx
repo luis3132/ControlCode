@@ -58,7 +58,7 @@ function rememberTree(cwd: string, loaded: Map<string, DirEntry[]>, expanded: Se
 
 /** Cuánto esperar antes de releer las marcas de git tras un aviso: una tanda de cambios
  *  (un `npm install`, un `git checkout`) son varios avisos, y cada lectura son dos `git`. */
-const REPO_REFRESH_MS = 300;
+const REPO_REFRESH_MS = 800;
 
 /** Cuánto hay que mover antes de que un click pase a ser un arrastre. */
 const DRAG_THRESHOLD = 5;
