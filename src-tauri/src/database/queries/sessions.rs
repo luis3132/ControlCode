@@ -431,12 +431,29 @@ fn parse_archived_skills(json: &str) -> Vec<ArchivedSkill> {
 
 /// Historial de tabs cerradas de un workspace, más reciente primero. Filtrado
 /// estrictamente por `workspace_id` — dos workspaces nunca comparten entradas.
+///
+/// Async + `spawn_blocking`: un comando síncrono corre en el hilo principal, y si otro hilo
+/// tenía el lock de la base (un guardado de ventana que re-descubre sesiones tarda ~1 s),
+/// entrar a Sesiones congelaba la interfaz entera hasta que lo soltara.
 #[tauri::command]
-pub fn db_list_session_history(
+pub async fn db_list_session_history(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<SessionHistoryEntry>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
+    let db = (*db).clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        list_session_history(&conn, &workspace_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// La consulta en sí, sobre una conexión ya lockeada.
+pub fn list_session_history(
+    conn: &Connection,
+    workspace_id: &str,
+) -> Result<Vec<SessionHistoryEntry>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, prelaunch, opened_at, closed_at
@@ -445,7 +462,7 @@ pub fn db_list_session_history(
         .map_err(|e| e.to_string())?;
 
     let entries = stmt
-        .query_map([&workspace_id], |row| {
+        .query_map([workspace_id], |row| {
             let skills_json: String = row.get(8)?;
             let skills = parse_archived_skills(&skills_json);
             let siblings_json: String = row.get(9)?;
@@ -545,16 +562,24 @@ pub fn workspace_name(conn: &Connection, workspace_id: &str) -> Option<String> {
 /// - `history_id` es la entrada del historial de la que salió la tab. Una tab reabierta
 ///   desde Sesiones lo lleva puesto, así que identifica el caso que importa acá incluso sin
 ///   id de sesión.
+///
+/// Fuera del hilo principal por lo mismo que `db_list_session_history`: es lo primero que
+/// corre al apretar "Reabrir".
 #[tauri::command]
-pub fn find_open_tab_for_session(
+pub async fn find_open_tab_for_session(
     session_id: Option<String>,
     history_id: Option<String>,
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Option<OpenTabLocation>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    open_tab_for_session(&conn, session_id.as_deref(), history_id.as_deref(), &workspace_id)
-        .map_err(|e| e.to_string())
+    let db = (*db).clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        open_tab_for_session(&conn, session_id.as_deref(), history_id.as_deref(), &workspace_id)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// La búsqueda en sí, separada del comando para poder probarla.

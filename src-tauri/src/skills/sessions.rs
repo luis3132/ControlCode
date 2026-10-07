@@ -43,13 +43,29 @@ fn find_in_marketplace(conn: &rusqlite::Connection, name: &str) -> Option<SkillS
 /// Resuelve, para cada skill archivada de una sesión, si sigue instalada y —si no— dónde
 /// volver a bajarla. Es lo que le permite a la UI avisar "esta sesión tenía N skills y
 /// falta X" antes de reabrirla.
+///
+/// Sesiones lo pide para la sesión marcada, así que corre fuera del hilo principal: cada
+/// cambio de selección no puede quedar esperando el lock de la base con la interfaz quieta.
 #[tauri::command]
-pub fn check_session_skills(
+pub async fn check_session_skills(
     history_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<SessionSkillStatus>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let archived = crate::database::archived_skills_of_session(&conn, &history_id)?;
+    let db = (*db).clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        session_skill_statuses(&conn, &history_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// La resolución en sí, sobre una conexión ya lockeada.
+pub fn session_skill_statuses(
+    conn: &rusqlite::Connection,
+    history_id: &str,
+) -> Result<Vec<SessionSkillStatus>, String> {
+    let archived = crate::database::archived_skills_of_session(conn, history_id)?;
 
     let mut out = Vec::with_capacity(archived.len());
     for a in archived {
@@ -98,7 +114,7 @@ pub fn check_session_skills(
                 > 1;
 
         let available_from = if installed_skill_id.is_none() {
-            find_in_marketplace(&conn, &a.name)
+            find_in_marketplace(conn, &a.name)
         } else {
             None
         };
@@ -129,7 +145,10 @@ pub fn restore_session_skills(
     tab_id: String,
     db: tauri::State<DbConnection>,
 ) -> Result<Vec<String>, String> {
-    let statuses = check_session_skills(history_id, db.clone())?;
+    let statuses = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        session_skill_statuses(&conn, &history_id)?
+    };
 
     let mut still_missing = Vec::new();
     for status in statuses {
