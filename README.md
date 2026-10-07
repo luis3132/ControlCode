@@ -52,12 +52,13 @@ Anything else you use can be registered as a first-class agent — see *Bring yo
 - **GPU rendering** on the terminal you're looking at, falling back to the DOM renderer for good if the driver loses the context.
 - **JetBrains Mono ships with the app**, so the grid looks the same on every machine, and a faint cut line marks each time you send something.
 - **Sharp text on Linux.** WebKitGTK's GPU compositing blurs text on many machines; it's off by default, with a switch in Settings.
+- **Tabs you're not looking at don't cost.** A hidden terminal stops drawing (it keeps reading, so the agent never stalls), and after a while it hibernates: its terminal is freed from memory while the process keeps running, and it's rebuilt when you come back. Hidden browser tabs stop painting and polling without losing the page. Configurable in Settings → Terminal.
 
 ### 🗂️ Files, search and git beside the agents
 
 The right panel belongs to the active folder:
 
-- **Files** — the tree with git status marks. Files open as tabs next to the agents.
+- **Files** — the tree with git status marks, updated as soon as something changes on disk (an agent creating a file, a `git add`). Files open as tabs next to the agents.
 - **Search** — VS Code-style search as you type: case, whole word, regex, include and exclude globs. It respects `.gitignore`, and a click opens the file at that line.
 - **Source control** — stage, unstage and discard; commit, or commit everything; switch, create and check out branches; fetch, pull, push (publishing the branch if it has no upstream) and the recent log. It runs your own `git`, so your config, hooks and credentials apply. The remote's provider (GitHub, GitLab, Bitbucket, Azure, Codeberg) is detected for *open on the web*.
 
@@ -74,6 +75,12 @@ Open a browser tab from the tab bar, or click a local URL in any terminal (`Loca
 **Mark elements on the page, write a note, send them to an agent.** It receives what it needs to find them in the *code*: the component that rendered them (React, Vue, Svelte), a selector, the identifying attributes and the HTML.
 
 **How it works:** the page is loaded through a local proxy that injects the picker script and passes hot-reload WebSockets through untouched — an iframe from another origin is otherwise a closed box.
+
+### ⚙️ Subprocesses: servers and builds you can see
+
+Agents run their dev servers, watchers and long builds through Control Code instead of in the background of their own shell. **Subprocesses** lists them — the current workspace's, or all of them — with who started each one (in its tab's color), how long it's been running, and the CPU and memory of its whole process tree. Open one to see its live terminal and type into it; stop it (Ctrl-C first, then kill), force-quit or restart it. You can start one yourself too.
+
+Agents read the logs only when they need them: what's new since their last read, the last lines, a grep, or just the errors with context — so they can tell how the server is doing or why the build broke without filling their context.
 
 ### 🚀 A fleet of background agents
 
@@ -264,6 +271,17 @@ The first value can be given positionally, without its flag: `ccode skill instal
 | `tab output <id> [--lines 40]` | What's *new* since the last read, compressed. `--full` for everything, `--raw` for unprocessed bytes |
 | `tab send <id> "..."` | Type into its terminal, then Enter. `--no-enter` to skip |
 
+#### Subprocesses
+
+| Command | Description |
+|---|---|
+| `proc start "<command>" [--name web] [--cwd <path>]` | Run it as a subprocess in the current folder. `--wait-for <regex>` blocks until the output matches |
+| `proc list [--all]` | This workspace's subprocesses (`--all`: every workspace), with state, CPU, memory and unread errors |
+| `proc output <id>` | What it printed since the last read, summarized. `--lines N`, `--grep <regex>` or `--errors` instead |
+| `proc wait <id> [--until exit\|pattern\|idle]` | Block until it exits, prints `--pattern`, or goes quiet |
+| `proc send <id> "..."` | Type into it, then Enter. `--no-enter` to skip |
+| `proc stop <id> [--force]` / `proc restart <id>` | Stop it (Ctrl-C, then kill) / start it again |
+
 **Terminal tabs.** `--agent bash` opens a plain shell instead of an agent, and every command above works on it. It's how an agent runs something that should stay visible and keep running — a dev server, a test watcher, a log tail:
 
 ```bash
@@ -359,7 +377,7 @@ Background agents, each in its own git worktree, shown in the fleet console. Wit
 | `--json-args '{...}'` | Pass raw arguments as JSON |
 | `--version` / `--help` | Version / usage |
 
-`ccode mcp` also exists, but it isn't for you: it's the `controlcode` MCP server the app attaches to its agents. With `--cwd <folder> [--tab <id>]` it gives an interactive tab its tools (the project browser, fleet orchestration, your git account, asking you a question); with `--task <id>` it's also the permission server a background agent asks before using a tool. It speaks JSON-RPC on stdin/stdout instead of printing one JSON line.
+`ccode mcp` also exists, but it isn't for you: it's the `controlcode` MCP server the app attaches to its agents. With `--cwd <folder> [--tab <id>]` it gives an interactive tab its tools (the project browser, fleet orchestration, your git account, subprocesses, asking you a question) — Claude Code, Codex, OpenCode and Gemini CLI each receive it in their own format; Kimi Code can't receive one per launch; with `--task <id>` it's also the permission server a background agent asks before using a tool. It speaks JSON-RPC on stdin/stdout instead of printing one JSON line.
 
 ### Exit codes
 
