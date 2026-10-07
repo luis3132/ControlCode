@@ -2000,3 +2000,28 @@ fn una_entrada_de_repositorio_puede_ser_carpeta_o_md_suelto() {
     assert_eq!(super::skill_markdown(&base.join("suelta.md")).unwrap(), base.join("suelta.md"));
     assert!(super::skill_markdown(&base.join("imagen.png")).is_none());
 }
+
+/// La skill que trae la app se enlaza en todo agente con una tab viva, sin adjuntarla: es
+/// la que le explica sus herramientas. Una skill común sigue necesitando que la adjunten.
+#[test]
+fn la_skill_de_control_code_se_enlaza_en_todos_los_agentes() {
+    let (db, _ws, _tab, tab_cwd, _skills_dir) = setup();
+    let builtin_src = temp_dir("builtin");
+    std::fs::write(builtin_src.join("SKILL.md"), "---\nname: controlcode-orchestrator\n---\nTools.\n").unwrap();
+    let other_src = temp_dir("otra");
+    std::fs::write(other_src.join("SKILL.md"), "---\nname: otra\n---\nx\n").unwrap();
+    let origin = SkillOrigin { registry_id: "controlcode-builtin", registry_name: "Control Code", skill_id: "controlcode-orchestrator" };
+    install_skill_internal(&builtin_src.join("SKILL.md").to_string_lossy(), None, Some(origin), &db).unwrap();
+    install_skill_internal(&other_src.join("SKILL.md").to_string_lossy(), None, None, &db).unwrap();
+
+    let conn = db.lock().unwrap();
+    let cwd = tab_cwd.to_string_lossy().to_string();
+    super::links::reconcile_link_dir(&conn, &cwd, "claude-code").unwrap();
+    let links = tab_cwd.join(".claude").join("skills");
+    assert!(links.join("controlcode-orchestrator").exists(), "la de Control Code va sola");
+    assert!(!links.join("otra").exists(), "las demás hay que adjuntarlas");
+
+    // Sin una tab viva de ese agente en esa carpeta no se enlaza nada.
+    super::links::reconcile_link_dir(&conn, &cwd, "codex").unwrap();
+    assert!(!tab_cwd.join(".agents").join("skills").join("controlcode-orchestrator").exists());
+}

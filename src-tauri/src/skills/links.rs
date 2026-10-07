@@ -101,11 +101,39 @@ pub(super) fn desired_skills_for_link_dir(
                 OR (ps.scope = 'workspace' AND (ps.cwd = '' OR ps.cwd = ?1)))"
     );
     let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
-    let rows = stmt
+    let mut rows: Vec<SkillInfo> = stmt
         .query_map([cwd, agent_id], row_to_skill_info)
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
+
+    // Las skills que trae la app (hoy, la que explica sus herramientas MCP y la CLI) van en
+    // TODOS los agentes, sin tener que adjuntarlas: sin ella un agente no sabe que tiene un
+    // navegador, subprocesos o la cuenta de git del usuario. Solo donde hay una tab viva de
+    // ese agente, como las demás. Si el usuario la borra desde Skills, la fila desaparece
+    // y deja de enlazarse: se respeta.
+    let live = conn
+        .query_row(
+            "SELECT 1 FROM tabs t JOIN windows w ON w.id = t.window_id AND w.is_open = 1
+             WHERE t.cwd = ?1 AND t.agent_id = ?2 LIMIT 1",
+            [cwd, agent_id],
+            |_| Ok(()),
+        )
+        .is_ok();
+    if live {
+        let query = format!("SELECT {SKILL_COLUMNS} FROM skills WHERE registry_id = ?1");
+        let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
+        let builtin: Vec<SkillInfo> = stmt
+            .query_map([super::bundled::ORIGIN_ID], row_to_skill_info)
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        for skill in builtin {
+            if !rows.iter().any(|r| r.id == skill.id) {
+                rows.push(skill);
+            }
+        }
+    }
     Ok(rows)
 }
 
