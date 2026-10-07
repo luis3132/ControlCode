@@ -105,13 +105,7 @@ pub fn sync_set_auto(app: AppHandle, auto: bool) -> Result<(), String> {
     set(&conn, "sync.auto", if auto { "1" } else { "0" })
 }
 
-/// El nombre del repo, como lo aceptan GitHub, GitLab y Gitea.
-fn valid_repo_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 100
-        && !name.starts_with(['.', '-'])
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-}
+use crate::forge::for_sync::valid_repo_name;
 
 /// Configura la sincronización en una cuenta: usa el repo `nombre` de esa cuenta si ya
 /// existe (otra máquina lo creó) o lo crea PRIVADO. Un repo que existe y es público se

@@ -6,8 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
-  DevicePoll, DeviceStart, ForgeItem, ForgeItemDetail, ForgeKind, ForgeKindInfo, ForgeRepo, GitAccount,
-  Label, NewIssue, NewPull, NewRelease, Release, RepoTarget,
+  DevicePoll, DeviceStart, ForgeItem, ForgeItemDetail, ForgeKind, ForgeKindInfo, ForgeRepo, GitAccount, Label, NewIssue, NewPull, NewRelease, Release, RepoOwner, RepoTarget,
 } from "./types";
 
 export const forgeKinds = () => invoke<ForgeKindInfo[]>("forge_kinds");
@@ -23,6 +22,13 @@ export const forgeAddToken = (kind: ForgeKind, host: string, token: string, user
 export const forgeRemoveAccount = (id: string) => invoke<void>("forge_remove_account", { id });
 
 export const forgeRepos = (accountId: string) => invoke<ForgeRepo[]>("forge_repos", { accountId });
+/** Dónde puede crear repos la cuenta: ella misma primero, después sus organizaciones. */
+export const forgeOwners = (accountId: string) => invoke<RepoOwner[]>("forge_owners", { accountId });
+/** Crea el repo en el host para la carpeta `cwd` (inicializándola si no es un repo), lo
+ *  deja como `origin` y sube la rama. */
+export const forgeCreateRepo = (args: {
+  cwd: string; accountId: string; owner: RepoOwner | null; name: string; description: string | null; private: boolean;
+}) => invoke<ForgeRepo>("forge_create_repo", args);
 /** Devuelve la carpeta del clon. */
 export const forgeClone = (url: string, parent: string, name: string | null, accountId: string | null) =>
   invoke<string>("forge_clone", { url, parent, name, accountId });

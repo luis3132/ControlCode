@@ -559,3 +559,56 @@ async fn publica_una_rama_creada_desde_una_remota() {
     std::fs::remove_dir_all(origin).ok();
     std::fs::remove_dir_all(local).ok();
 }
+
+// ── Dejar una carpeta lista para un remoto nuevo ─────────────────
+
+/// Un repo sin commits recibe el primero, con lo que haya, y queda listo para subir; con
+/// `origin` puesto, se sube a ese remoto con su rama publicada.
+#[test]
+fn un_repo_sin_commits_queda_listo_y_se_sube_a_su_origin() {
+    let dir = temp_repo("prep-sin-commits");
+    std::fs::write(dir.join("README.md"), "hola").unwrap();
+    let root = super::commands::prepare_for_remote(&dir.to_string_lossy(), "Initial commit").expect("prepare");
+    assert_eq!(std::fs::canonicalize(&root).unwrap(), std::fs::canonicalize(&dir).unwrap());
+    let log = std::process::Command::new("git").arg("-C").arg(&dir).args(["log", "--format=%s"]).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&log.stdout).trim(), "Initial commit");
+
+    // El remoto: un repo bare, como el que deja el host recién creado.
+    let bare = std::env::temp_dir().join(format!("cc-scm-prep-bare-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&bare);
+    std::fs::create_dir_all(&bare).unwrap();
+    git_in(&bare, &["init", "-q", "--bare"]);
+    super::commands::add_origin(&root, &bare.to_string_lossy()).expect("origin");
+    git_in(&dir, &["push", "-q", "-u", "origin", "HEAD"]);
+    let remote_log = std::process::Command::new("git").arg("-C").arg(&bare).args(["log", "--format=%s", "main"]).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&remote_log.stdout).trim(), "Initial commit");
+
+    // Con `origin` ya puesto, no se pisa.
+    let err = super::commands::prepare_for_remote(&root, "x").unwrap_err();
+    assert!(matches!(&err, super::ScmError::Git(m) if m.contains("origin")), "{err:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&bare);
+}
+
+/// Una carpeta que no es un repo se inicializa. El primer commit necesita que git sepa
+/// quién sos: en una máquina sin `user.name` el error lo dice con todas las letras.
+#[test]
+fn una_carpeta_sin_repo_se_inicializa() {
+    let dir = std::env::temp_dir().join(format!("cc-scm-prep-carpeta-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("index.html"), "<h1>hola</h1>").unwrap();
+    match super::commands::prepare_for_remote(&dir.to_string_lossy(), "Initial commit") {
+        Ok(root) => {
+            assert!(std::path::Path::new(&root).join(".git").exists());
+            let head = std::process::Command::new("git").arg("-C").arg(&dir).args(["rev-parse", "HEAD"]).output().unwrap();
+            assert!(head.status.success(), "quedó con su primer commit");
+        }
+        Err(super::ScmError::Git(m)) => {
+            assert!(dir.join(".git").exists(), "igual se inicializó");
+            assert!(m.contains("user.name"), "{m}");
+        }
+        Err(e) => panic!("{e:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

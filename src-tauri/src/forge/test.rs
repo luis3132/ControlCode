@@ -417,3 +417,53 @@ mod renovar_con_varias_instancias {
         assert!(err.contains("venció"));
     }
 }
+
+// ── Crear un repo en el host ─────────────────────────────────────
+
+/// Lo que se le pide a cada host para crear un repo vacío, en la cuenta o en una
+/// organización (en GitLab, un grupo por su id).
+#[test]
+fn crear_un_repo_pide_lo_de_cada_host() {
+    use super::api::{create_repo_request, RepoOwner};
+    let me = RepoOwner { login: "luis".into(), org: false, id: None };
+    let org = RepoOwner { login: "acme".into(), org: true, id: Some(42) };
+
+    let (path, body) = create_repo_request(ForgeKind::Github, Some(&me), "app", "Mi app", true);
+    assert_eq!(path, "/user/repos");
+    assert_eq!(body, json!({ "name": "app", "private": true, "description": "Mi app", "auto_init": false }));
+    let (path, body) = create_repo_request(ForgeKind::Github, Some(&org), "app", "", false);
+    assert_eq!(path, "/orgs/acme/repos");
+    assert_eq!(body["private"], false);
+    // Gitea: lo mismo que GitHub.
+    assert_eq!(create_repo_request(ForgeKind::Gitea, Some(&org), "app", "", true).0, "/orgs/acme/repos");
+    assert_eq!(create_repo_request(ForgeKind::Gitea, None, "app", "", true).0, "/user/repos");
+
+    let (path, body) = create_repo_request(ForgeKind::Gitlab, Some(&org), "app", "", false);
+    assert_eq!(path, "/projects");
+    assert_eq!(body["namespace_id"], 42);
+    assert_eq!(body["visibility"], "public");
+    let (_, body) = create_repo_request(ForgeKind::Gitlab, Some(&me), "app", "", true);
+    assert!(body.get("namespace_id").is_none(), "en la cuenta no se manda grupo");
+    assert_eq!(body["visibility"], "private");
+}
+
+#[test]
+fn las_organizaciones_y_los_grupos_se_leen_de_cada_host() {
+    use super::api::owner_from;
+    let gh = owner_from(ForgeKind::Github, &json!({ "login": "acme", "id": 7 })).unwrap();
+    assert_eq!((gh.login.as_str(), gh.org, gh.id), ("acme", true, Some(7)));
+    let gitea = owner_from(ForgeKind::Gitea, &json!({ "username": "equipo", "id": 3 })).unwrap();
+    assert_eq!(gitea.login, "equipo");
+    let gl = owner_from(ForgeKind::Gitlab, &json!({ "full_path": "empresa/front", "id": 99 })).unwrap();
+    assert_eq!((gl.login.as_str(), gl.id), ("empresa/front", Some(99)));
+    assert!(owner_from(ForgeKind::Gitlab, &json!({ "id": 1 })).is_none());
+}
+
+#[test]
+fn el_nombre_del_repo_se_valida_como_en_los_hosts() {
+    use super::api::valid_repo_name;
+    assert!(valid_repo_name("facturas-crear") && valid_repo_name("app.web_2"));
+    for bad in ["", ".oculto", "-guion", "con espacio", "a/b", "ñandú"] {
+        assert!(!valid_repo_name(bad), "{bad}");
+    }
+}
