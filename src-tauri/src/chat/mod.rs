@@ -3,6 +3,7 @@
 
 pub mod commands;
 pub(crate) mod launch;
+pub mod models;
 pub mod parse;
 pub mod session;
 #[cfg(test)]

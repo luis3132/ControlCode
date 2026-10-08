@@ -17,7 +17,7 @@ import { awaitSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { useTabsStore } from "@/features/tabs/store";
 import type { Tab } from "@/features/tabs/types";
 
-import { chatRunning, chatSend, chatStop, chatTranscript } from "./ipc";
+import { chatRunning, chatSend, chatSessionSettings, chatStop, chatTranscript } from "./ipc";
 import { buildContent, parseSlash } from "./message";
 import { loadMode, loadModel, saveCommands, saveMode, saveModel } from "./prefs";
 import { addNotice, addUser, reduceAll, reduceChat, settleStreaming } from "./reduce";
@@ -169,7 +169,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     load: async (tab, force = false) => {
       const cur = get().get(tab.id);
       if (cur.loaded && !force) return;
-      const [events, running] = await Promise.all([
+      const [events, running, settings] = await Promise.all([
         tab.sessionId
           ? chatTranscript(tab.cwd, tab.sessionId, tab.accountId ?? null).catch((e) => {
               console.error(e);
@@ -177,8 +177,16 @@ export const useChatStore = create<ChatStore>((set, get) => {
             })
           : Promise.resolve([]),
         chatRunning(tab.id).catch(() => false),
+        tab.sessionId
+          ? chatSessionSettings(tab.cwd, tab.sessionId, tab.accountId ?? null).catch(() => null)
+          : Promise.resolve(null),
       ]);
-      patch(tab.id, () => ({ chat: reduceAll(emptyChat(), events), loaded: true, running }));
+      // Se sigue con el modelo que la sesión venía usando: si en la consola se cambió, eso
+      // manda, no lo último que se eligió acá. Sin avisarlo en la conversación: no es un
+      // cambio, es seguir igual.
+      const model = settings?.model ?? null;
+      if (model) saveModel(tab.id, model);
+      patch(tab.id, (c) => ({ chat: reduceAll(emptyChat(), events), loaded: true, running, model: model ?? c.model }));
     },
 
     onEnvelope: (tabId, env) => {

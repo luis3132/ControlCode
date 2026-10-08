@@ -300,3 +300,74 @@ fn los_pasos_previos_preparan_el_entorno_y_los_argumentos_llegan_enteros() {
     });
     assert_eq!(String::from_utf8_lossy(&out.stdout), "listo|con espacio 'y' comillas");
 }
+
+/// El modelo y el esfuerzo con que viene una sesión, de su `.jsonl` real: la última
+/// respuesta manda. Un `/model` o `/effort` mandado con `-p` vale solo para ese proceso (la
+/// CLI lo dice: "for this session only"), y la respuesta siguiente lo confirma.
+#[test]
+fn el_modelo_y_el_esfuerzo_de_la_sesion_salen_de_su_ultima_respuesta() {
+    use super::parse::{session_settings, SessionSettings};
+    let content = include_str!("fixtures/claude_model_session.jsonl");
+    let s = session_settings(content);
+    assert_eq!(s, SessionSettings { model: Some("claude-sonnet-5-5".into()), effort: Some("medium".into()) });
+
+    // Cortado en la respuesta que corrió con `--model sonnet --effort high`.
+    let upto: Vec<&str> = content.lines().take(6).collect();
+    let s = session_settings(&upto.join("\n"));
+    assert_eq!(s.model.as_deref(), Some("claude-sonnet-5-5"));
+    assert_eq!(s.effort.as_deref(), Some("high"));
+
+    assert_eq!(session_settings(""), SessionSettings::default());
+}
+
+/// En la TUI, `/model` y `/effort` sin argumentos abren un selector, y lo elegido sale en la
+/// salida del comando. Valen para lo que sigue aunque todavía no haya respuestas con ellos.
+#[test]
+fn un_model_o_effort_de_la_tui_cuenta_aunque_no_haya_respondido_todavia() {
+    use super::parse::session_settings;
+    let user = |text: &str| json!({"type":"user","message":{"role":"user","content":text}}).to_string();
+    let answer = json!({"type":"assistant","effort":"xhigh","message":{"model":"claude-opus-5-5","content":[{"type":"text","text":"hola"}]}}).to_string();
+    let synthetic = json!({"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"x"}]}}).to_string();
+    let lines = [
+        answer.clone(),
+        user("<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args></command-args>"),
+        user("<local-command-stdout>Set model to Haiku 5.5</local-command-stdout>"),
+        synthetic,
+        user("<command-name>/effort</command-name>\n<command-args></command-args>"),
+        user("<local-command-stdout>Set effort level to low (this session only): Quick</local-command-stdout>"),
+    ];
+    let s = session_settings(&lines.join("\n"));
+    assert_eq!(s.model.as_deref(), Some("haiku"));
+    assert_eq!(s.effort.as_deref(), Some("low"));
+
+    // Con argumentos: el nombre tal cual; `default` vuelve al de la configuración.
+    let typed = [answer.clone(), user("<command-name>/model</command-name><command-args>claude-opus-4-1</command-args>")];
+    assert_eq!(session_settings(&typed.join("\n")).model.as_deref(), Some("claude-opus-4-1"));
+    let back = [answer.clone(), user("<command-name>/model</command-name><command-args>default</command-args>")];
+    assert_eq!(session_settings(&back.join("\n")).model, None);
+    // Un nivel que no existe no pisa el que había.
+    let bad = [answer, user("<command-name>/effort</command-name><command-args>turbo</command-args>")];
+    assert_eq!(session_settings(&bad.join("\n")).effort.as_deref(), Some("xhigh"));
+}
+
+/// El catálogo del selector de `/model`, tal como lo deja el bundle de la CLI: con nombre y
+/// versión, y sin los retirados.
+#[test]
+fn el_catalogo_de_modelos_sale_del_binario_con_su_version() {
+    use super::models::{scan_catalog, used_in, ModelInfo};
+    let bundle = b"xx{id:\"claude-opus-5-5\",name:\"Opus 5.5\",short_name:\"Opus\",section:\"main\",cap..}\0\
+{id:\"claude-opus-4-5-20251101\",name:\"Opus 4.5\",short_name:\"Opus\",section:\"deprecated\"}\
+{id:\"claude-haiku-4-5-20251001\",name:\"Haiku 4.5\",short_name:\"Haiku\",section:\"main\"}\
+{id:\"claude-opus-5-5\",name:\"Opus 5.5\",short_name:\"Opus\",section:\"main\"}";
+    assert_eq!(
+        scan_catalog(&bundle[..]),
+        vec![
+            ModelInfo { id: "claude-opus-5-5".into(), name: Some("Opus 5.5".into()) },
+            ModelInfo { id: "claude-haiku-4-5-20251001".into(), name: Some("Haiku 4.5".into()) },
+        ]
+    );
+
+    // Lo que usaron las sesiones, de su `.jsonl` (el fixture real), sin `<synthetic>`.
+    let used = used_in(include_str!("fixtures/claude_model_session.jsonl"));
+    assert_eq!(used, ["claude-haiku-5-5", "claude-sonnet-5-5"]);
+}

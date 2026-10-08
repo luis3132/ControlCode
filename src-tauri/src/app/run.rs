@@ -229,6 +229,8 @@ pub fn run() {
             crate::chat::commands::chat_stop,
             crate::chat::commands::chat_running,
             crate::chat::commands::chat_transcript,
+            crate::chat::commands::chat_session_settings,
+            crate::chat::models::chat_models,
             crate::runs::run_start_orchestration,
             crate::runs::run_cancel_run,
             crate::runs::run_list_facts,

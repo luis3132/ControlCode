@@ -33,6 +33,30 @@ pub fn chat_running(tab_id: String) -> bool {
     session::is_running(&tab_id)
 }
 
+/// Con qué modelo y esfuerzo viene corriendo una sesión (ver `parse::session_settings`).
+/// Vacío si todavía no existe.
+#[tauri::command]
+pub async fn chat_session_settings(
+    cwd: String,
+    session_id: String,
+    account_id: Option<String>,
+    db: State<'_, DbConnection>,
+) -> Result<parse::SessionSettings, String> {
+    if session_id.is_empty() || !session_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err(format!("'{session_id}' no es un id de sesión"));
+    }
+    let profile = account_id.as_deref().and_then(|id| crate::accounts::dir_for(&db, id));
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = crate::session::claude_project_dir(&cwd, profile.as_deref().map(std::path::Path::new));
+        match std::fs::read_to_string(dir.join(format!("{session_id}.jsonl"))) {
+            Ok(content) => parse::session_settings(&content),
+            Err(_) => parse::SessionSettings::default(),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// La conversación guardada de una sesión de Claude Code, con herramientas y resultados.
 ///
 /// Por id exacto y nunca "la más reciente de la carpeta": mostrar otra conversación como si

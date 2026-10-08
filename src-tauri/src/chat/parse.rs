@@ -341,3 +341,96 @@ pub fn transcript(content: &str) -> Vec<ChatEvent> {
         .flat_map(|v| parse_value(&v))
         .collect()
 }
+
+/// Con qué modelo y esfuerzo está corriendo una sesión, según su `.jsonl`.
+#[derive(serde::Serialize, Default, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSettings {
+    /// El nombre completo (`claude-opus-5-5`) o el alias que se eligió con `/model`.
+    pub model: Option<String>,
+    /// `low` … `max`.
+    pub effort: Option<String>,
+}
+
+/// Lo último que rige en la sesión: el modelo y el esfuerzo de la última respuesta, o un
+/// `/model` / `/effort` posterior (la TUI los aplica al resto de la conversación aunque
+/// todavía no haya respondido nada con ellos).
+///
+/// Hace falta porque `claude -p --resume` no hereda el esfuerzo (vuelve al de fábrica en
+/// cada turno), y porque al pasar de la consola al chat la persona espera seguir con lo que
+/// tenía puesto en la TUI, no con lo último que eligió en el chat.
+pub fn session_settings(content: &str) -> SessionSettings {
+    let mut out = SessionSettings::default();
+    // Un `/model` sin argumentos abre el selector de la TUI: lo elegido aparece recién en
+    // la salida del comando, que es la entrada siguiente.
+    let mut waiting: Option<&'static str> = None;
+    for v in content.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        if v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        match v.get("type").and_then(Value::as_str) {
+            Some("assistant") => {
+                // Las respuestas que arma la CLI sola (la salida de un comando) dicen
+                // `<synthetic>`: no corrieron con ningún modelo.
+                if let Some(model) = v.pointer("/message/model").and_then(Value::as_str).filter(|m| !m.starts_with('<')) {
+                    out.model = Some(model.to_string());
+                }
+                if let Some(effort) = v.get("effort").and_then(Value::as_str) {
+                    out.effort = Some(effort.to_string());
+                }
+            }
+            Some("user") => {
+                let Some(text) = v.pointer("/message/content").and_then(text_of) else { continue };
+                if let Some(name) = tag(&text, "command-name") {
+                    let args = tag(&text, "command-args").unwrap_or_default();
+                    waiting = None;
+                    match name.trim_start_matches('/') {
+                        "model" if args.is_empty() => waiting = Some("model"),
+                        "model" => out.model = model_from(&args),
+                        "effort" if args.is_empty() => waiting = Some("effort"),
+                        "effort" => out.effort = effort_from(&args).or(out.effort),
+                        _ => {}
+                    }
+                } else if let Some(stdout) = tag(&text, "local-command-stdout") {
+                    match waiting.take() {
+                        // "Set model to Opus 5.5 (default)", "Set model to `Haiku 5.5` …"
+                        Some("model") => {
+                            if let Some(rest) = stdout.split("Set model to ").nth(1) {
+                                out.model = model_from(rest.trim_start_matches('`')).or(out.model);
+                            }
+                        }
+                        // "Set effort level to low (this session only): …"
+                        Some("effort") => {
+                            if let Some(rest) = stdout.split("Set effort level to ").nth(1) {
+                                out.effort = effort_from(rest).or(out.effort);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Lo que va a `--model` a partir de lo que se escribió o se mostró: un nombre completo
+/// queda igual, y un nombre para mostrar (`Opus 5.5`) se vuelve su alias (`opus`).
+fn model_from(text: &str) -> Option<String> {
+    let first = text.split_whitespace().next()?.trim_matches(|c: char| c == '`' || c == '"');
+    if first.is_empty() || first.eq_ignore_ascii_case("default") {
+        return None;
+    }
+    Some(if first.starts_with("claude-") { first.to_string() } else { first.to_lowercase() })
+}
+
+fn effort_from(text: &str) -> Option<String> {
+    let word = text.split(|c: char| !c.is_ascii_alphanumeric()).find(|w| !w.is_empty())?.to_lowercase();
+    is_effort(&word).then_some(word)
+}
+
+/// Los niveles que acepta `claude --effort`.
+fn is_effort(level: &str) -> bool {
+    matches!(level, "low" | "medium" | "high" | "xhigh" | "max")
+}

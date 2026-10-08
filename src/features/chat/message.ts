@@ -86,18 +86,70 @@ export function mention(path: string, isDir = false): string {
   return /\s/.test(p) ? `@"${p}"` : `@${p}`;
 }
 
-/** Los alias de `claude --model` (ver `CLAUDE_MODELS` en `agents/registry.rs`). */
-export const CLAUDE_MODEL_ALIASES = [
-  { id: "haiku", label: "Haiku" },
-  { id: "sonnet", label: "Sonnet" },
-  { id: "opus", label: "Opus" },
-  { id: "fable", label: "Fable" },
-] as const;
+export interface ModelChoice {
+  /** Lo que recibe `--model`: el nombre completo, así lo que dice el menú es lo que corre. */
+  id: string;
+  /** "Opus 5.5". */
+  label: string;
+}
+
+/** Familia y versión de un id (`claude-opus-5-5` → opus, 5, 5). Una fecha al final
+ *  (`claude-haiku-4-5-20251001`) no es parte de la versión. */
+export function modelVersion(id: string): { family: string; major: number; minor: number } | null {
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-|$)/.exec(id);
+  if (!m) return null;
+  return { family: m[1]!, major: Number(m[2]), minor: m[3] ? Number(m[3]) : 0 };
+}
+
+/** El orden de las familias en el menú: de la más capaz a la más rápida. Las que no se
+ *  conocen van al final, por nombre. */
+const FAMILY_ORDER = ["fable", "opus", "sonnet", "haiku"];
+
+/**
+ * Los modelos que ofrece el selector: **el más nuevo de cada familia**, con su versión.
+ *
+ * Ninguna lista vive acá, porque Anthropic saca modelos y una lista en el código envejece
+ * sola. Salen de:
+ *
+ * 1. **El catálogo de la CLI instalada** (`known`, ver `chat/models.rs`): lo que muestra
+ *    su `/model`, con nombre y versión.
+ * 2. **Lo que se usó de verdad** (`known` sin nombre, y `seen` de esta carpeta): un alias
+ *    puede apuntar a un modelo más nuevo que el del catálogo, y ese es el que corre.
+ *
+ * Un nombre completo y no un alias, para que "Opus 5.5" en el menú sea Opus 5.5 al correr.
+ * Cualquier otro se escribe con `/model <nombre>`.
+ */
+export function modelChoices(known: { id: string; name: string | null }[], seen: string[]): ModelChoice[] {
+  const named = new Map(known.filter((m) => m.name).map((m) => [m.id, m.name!]));
+  const best = new Map<string, { id: string; major: number; minor: number }>();
+  for (const id of [...known.map((m) => m.id), ...seen]) {
+    const v = modelVersion(id);
+    if (!v) continue;
+    const cur = best.get(v.family);
+    const newer = !cur || v.major > cur.major || (v.major === cur.major && v.minor > cur.minor);
+    // A igual versión, el que tiene nombre de catálogo (el id corto, sin fecha).
+    const same = cur && v.major === cur.major && v.minor === cur.minor && named.has(id) && !named.has(cur.id);
+    if (newer || same) best.set(v.family, { id, major: v.major, minor: v.minor });
+  }
+  const rank = (f: string) => (FAMILY_ORDER.includes(f) ? FAMILY_ORDER.indexOf(f) : FAMILY_ORDER.length);
+  return [...best.entries()]
+    .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
+    .map(([, m]) => ({ id: m.id, label: named.get(m.id) ?? modelLabel(m.id) ?? m.id }));
+}
+
+/** Cómo se muestra el modelo elegido: un alias (`opus`, de antes o escrito a mano) con la
+ *  versión a la que hoy apunta según la lista; un nombre completo, legible. */
+export function modelShownAs(model: string, choices: ModelChoice[]): string {
+  const exact = choices.find((c) => c.id === model);
+  if (exact) return exact.label;
+  const family = choices.find((c) => modelVersion(c.id)?.family === model.toLowerCase());
+  return family?.label ?? modelLabel(model) ?? model;
+}
 
 /** `claude-haiku-5-5` → `Haiku 5.5`, para mostrar el modelo que reportó el `init`. */
 export function modelLabel(model: string | null): string | null {
   if (!model) return null;
-  const m = /^claude-([a-z]+)-(\d+)(?:-(\d+))?/.exec(model);
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-|$)/.exec(model);
   if (!m) return model;
   const name = m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1);
   return m[3] ? `${name} ${m[2]}.${m[3]}` : `${name} ${m[2]}`;

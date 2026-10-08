@@ -9,7 +9,8 @@ import { dropText } from "@/features/explorer/paths";
 import type { Tab } from "@/features/tabs/types";
 
 import { registerComposer } from "./bridge";
-import { CLAUDE_MODEL_ALIASES, modelLabel, slashAction, slashMenu, slashQuery, type BuiltinCommand } from "./message";
+import { chatModels } from "./ipc";
+import { modelChoices, modelLabel, modelShownAs, slashAction, slashMenu, slashQuery, type BuiltinCommand } from "./message";
 import { loadCommands } from "./prefs";
 import { useChatStore } from "./store";
 import type { ImageAttachment, PermissionMode } from "./types";
@@ -138,9 +139,20 @@ export function Composer({ tab, isActive }: { tab: Tab; isActive: boolean }) {
     ref.current?.focus();
   };
 
+  // El más nuevo de cada familia, con su versión: del catálogo de la CLI instalada y de lo
+  // que usaron las sesiones recientes. Un modelo nuevo aparece solo. Ver `modelChoices`.
+  const [known, setKnown] = useState<{ id: string; name: string | null }[]>([]);
+  useEffect(() => {
+    let stale = false;
+    chatModels(tab.accountId ?? null)
+      .then((list) => { if (!stale) setKnown(list); })
+      .catch(console.error);
+    return () => { stale = true; };
+  }, [tab.accountId]);
+  const models = useMemo(() => modelChoices(known, []), [known]);
   const modelItems: DropdownItem[] = [
     { id: "", label: t("chat.model.default"), onSelect: () => store.setModel(tabId, null) },
-    ...CLAUDE_MODEL_ALIASES.map((m) => ({ id: m.id, label: m.label, onSelect: () => store.setModel(tabId, m.id) })),
+    ...models.map((m) => ({ id: m.id, label: m.label, onSelect: () => store.setModel(tabId, m.id) })),
   ];
   const modeItems: DropdownItem[] = MODES.map((mode) => ({
     id: mode,
@@ -155,7 +167,7 @@ export function Composer({ tab, isActive }: { tab: Tab; isActive: boolean }) {
     onSelect: () => store.setMode(tabId, mode),
   }));
   const modelShown = c.model
-    ? CLAUDE_MODEL_ALIASES.find((m) => m.id === c.model)?.label ?? c.model
+    ? modelShownAs(c.model, models)
     : modelLabel(c.chat.info?.model ?? null) ?? t("chat.model.default");
 
   const chip = `cc-t h-6 px-2 rounded-md text-[11px] flex items-center gap-1 text-gray-600 dark:text-white/60
