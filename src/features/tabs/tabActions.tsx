@@ -16,6 +16,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo, type Tab } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
+import type { WizardResult } from "@/features/tabs/wizard/useAgentWizard";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import i18n from "@/i18n";
 import { AppDialog } from "@/shared/ui/AppDialog";
@@ -37,6 +38,8 @@ interface TabActionsState {
    *  con sus skills y comandos previos) o trabajar un issue (el agente nuevo recibe
    *  `prompt` apenas arranca). */
   wizardFor: WizardFor | null;
+  /** "Agregar carpeta": el asistente empieza por elegir la carpeta. */
+  addFolderOpen: boolean;
 }
 
 const useTabActions = create<TabActionsState>(() => ({
@@ -45,6 +48,7 @@ const useTabActions = create<TabActionsState>(() => ({
   skillTarget: null,
   wizardOpen: false,
   wizardFor: null,
+  addFolderOpen: false,
 }));
 
 interface WizardFor {
@@ -60,6 +64,22 @@ export const openNewAgentWith = (wizardFor: WizardFor) => useTabActions.setState
 
 export const openTabMenu = (key: string, x: number, y: number) => useTabActions.setState({ menu: { key, x, y } });
 export const openNewAgentWizard = () => useTabActions.setState({ wizardOpen: true });
+/** Sumar una carpeta al workspace: el asistente en un modal, empezando por elegirla. */
+export const openAddFolderWizard = () => useTabActions.setState({ addFolderOpen: true });
+
+/**
+ * Abre lo que se eligió en el asistente: la tab, con sus skills montadas antes de que el
+ * agente arranque (varias TUIs solo escanean su carpeta al boot; Terminal.tsx espera esta
+ * promesa antes de invocar pty_create), y el `prompt` si lo había. El modal del "+" e Inicio
+ * terminan los dos acá.
+ */
+export function launchAgent({ cwd, agent, skillIds, accountId, prelaunch }: WizardResult, prompt?: string): string {
+  const { workspaceId, addTab } = useTabsStore.getState();
+  const tabId = addTab({ cwd, agent, accountId, prelaunch });
+  registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, skillIds));
+  if (prompt) sendWhenReady(tabId, prompt);
+  return tabId;
+}
 
 export async function requestCloseItem(key: string): Promise<void> {
   if (isAgentKey(key)) {
@@ -114,7 +134,7 @@ export function splitWithItem(key: string, side: SplitSide): void {
 export function TabDialogs() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { menu, closingDirty, skillTarget, wizardOpen, wizardFor } = useTabActions();
+  const { menu, closingDirty, skillTarget, wizardOpen, wizardFor, addFolderOpen } = useTabActions();
   const tabs = useTabsStore((s) => s.tabs);
   const activeTab = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId));
   const workspaceId = useTabsStore((s) => s.workspaceId);
@@ -203,24 +223,16 @@ export function TabDialogs() {
       {skillTarget && <SkillPalette target={skillTarget} onClose={() => close({ skillTarget: null })} />}
 
       <NewAgentDialog
-        isOpen={(wizardOpen && activeTab !== undefined) || wizardFor !== null}
-        cwd={wizardFor?.cwd ?? activeTab?.cwd ?? ""}
-        title={wizardFor?.title}
+        isOpen={addFolderOpen || (wizardOpen && activeTab !== undefined) || wizardFor !== null}
+        // "Agregar carpeta" no trae carpeta: el asistente empieza por elegirla.
+        cwd={addFolderOpen ? undefined : wizardFor?.cwd ?? activeTab?.cwd ?? ""}
+        title={addFolderOpen ? t("folders.add") : wizardFor?.title}
         initialSkillIds={wizardFor?.skillIds}
         initialPrelaunch={wizardFor?.prelaunch}
-        onClose={() => close({ wizardOpen: false, wizardFor: null })}
-        onConfirm={({ agent, skillIds, accountId, prelaunch }) => {
-          const cwd = wizardFor?.cwd ?? activeTab?.cwd;
-          const prompt = wizardFor?.prompt;
-          if (!cwd) return;
-          const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch });
+        onClose={() => close({ wizardOpen: false, wizardFor: null, addFolderOpen: false })}
+        onConfirm={(result) => {
+          launchAgent(result, wizardFor?.prompt);
           navigate("/workspace");
-
-          // Los symlinks de las skills elegidas tienen que existir en el cwd ANTES de que
-          // el agente arranque (varias TUIs solo escanean su carpeta al boot) —
-          // Terminal.tsx espera esta promesa antes de invocar pty_create.
-          registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, skillIds));
-          if (prompt) sendWhenReady(tabId, prompt);
         }}
       />
     </>

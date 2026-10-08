@@ -86,6 +86,32 @@ fn probe_agent(def: &AgentDef) -> AgentInfo {
     }
 }
 
+/// Los niveles que acepta `--effort`, leídos del `--help` de la TUI instalada.
+///
+/// Se leen y no se declaran porque son de la versión que tenga la persona: la 2.1.293 dice
+/// `(low, medium, high, xhigh, max)`, y una lista escrita acá envejecería sola — es el
+/// mismo motivo por el que los modelos salen del catálogo y de lo que se vio correr.
+/// Vacío = esa TUI no habla de esfuerzo, y la UI no ofrece el control.
+pub fn parse_effort_levels(help: &str) -> Vec<String> {
+    levels(help).unwrap_or_default()
+}
+
+fn levels(help: &str) -> Option<Vec<String>> {
+    let at = help.find("--effort")?;
+    // La lista puede caer en la línea siguiente: el `--help` envuelve la descripción, así
+    // que se mira hasta donde empieza la opción que sigue.
+    let after = &help[at..];
+    let block = &after[..after.find("\n  --").unwrap_or(after.len())];
+    let open = block.find('(')?;
+    let close = block[open..].find(')')? + open;
+    let found: Vec<String> = block[open + 1..close]
+        .split(',')
+        .map(|s| s.split_whitespace().collect::<String>())
+        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_lowercase()))
+        .collect();
+    (!found.is_empty()).then_some(found)
+}
+
 /// Detecta qué agentes de IA están instalados en el PATH del sistema.
 /// Siempre incluye bash como último elemento con available: true.
 ///
@@ -98,6 +124,38 @@ fn probe_agent(def: &AgentDef) -> AgentInfo {
 ///
 /// Los sondeos van en paralelo: son independientes, y en serie la lista tardaba la SUMA de
 /// todos los `--version` — con uno lento, varios segundos de "no hay agentes".
+/// Los niveles de esfuerzo de una TUI, preguntándole a ella. Se cachea: el `--help` de un
+/// binario no cambia hasta que se actualiza, y esto lo mira el chat al abrir cada tab.
+#[tauri::command]
+pub async fn agent_efforts(agent_id: String) -> Vec<String> {
+    lazy_static::lazy_static! {
+        static ref CACHE: std::sync::Mutex<std::collections::HashMap<String, Vec<String>>> =
+            std::sync::Mutex::new(std::collections::HashMap::new());
+    }
+    if let Ok(cache) = CACHE.lock() {
+        if let Some(hit) = cache.get(&agent_id) {
+            return hit.clone();
+        }
+    }
+    let Some(command) = registry::agent_command(&agent_id) else { return Vec::new() };
+    let levels = tokio::task::spawn_blocking(move || {
+        let out = crate::util::output_with_timeout(
+            std::process::Command::new(command).arg("--help"),
+            std::time::Duration::from_secs(20),
+        );
+        out.ok()
+            .filter(|o| o.status.success())
+            .map(|o| parse_effort_levels(&String::from_utf8_lossy(&o.stdout)))
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default();
+    if let Ok(mut cache) = CACHE.lock() {
+        cache.insert(agent_id, levels.clone());
+    }
+    levels
+}
+
 #[tauri::command]
 pub async fn detect_agents() -> Result<Vec<AgentInfo>, String> {
     tokio::task::spawn_blocking(|| {

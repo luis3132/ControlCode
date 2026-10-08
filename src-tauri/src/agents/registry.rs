@@ -297,6 +297,10 @@ pub struct AgentRegistryEntry {
     pub id: String,
     pub label: String,
     pub command: String,
+    /// Los alias de modelo que acepta, si se le conocen. Van acá y no en una tabla del
+    /// frontend porque es lo mismo que mira el ruteo de la flota (`runs::roster`): una
+    /// sola lista, un solo lugar donde agregar cuando sale un modelo nuevo.
+    pub models: Vec<RegistryModel>,
     pub skills_dir: Option<String>,
     pub resume: Option<String>,
     pub supports_accounts: bool,
@@ -305,6 +309,13 @@ pub struct AgentRegistryEntry {
     /// la tab arranca con el navegador, y saber con qué nombre tiene que mandar al agente
     /// a usar una tool (OpenCode las prefija con el nombre del servidor).
     pub mcp: McpStyle,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryModel {
+    pub id: String,
+    pub label: String,
 }
 
 /// El catálogo estático de TUIs de fábrica. Sin I/O: responde en el acto.
@@ -316,6 +327,15 @@ pub fn agent_registry() -> Vec<AgentRegistryEntry> {
             id: a.id.to_string(),
             label: a.label.to_string(),
             command: a.command.to_string(),
+            models: match a.models {
+                ModelSource::Aliases(aliases) => aliases
+                    .iter()
+                    .map(|m| RegistryModel { id: m.id.to_string(), label: m.label.to_string() })
+                    .collect(),
+                // Los de opencode se sondean (son 89 y cambian): no son parte del catálogo
+                // estático. Ver `runs::roster`.
+                _ => Vec::new(),
+            },
             skills_dir: a.skills_dir.map(str::to_string),
             resume: a.resume.map(str::to_string),
             supports_accounts: a.profile.is_some(),

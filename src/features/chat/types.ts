@@ -3,6 +3,7 @@ export type ChatEvent =
   | { kind: "init"; sessionId: string | null; model: string | null; permissionMode: string | null;
       slashCommands: string[]; terminalCommands: string[] }
   | { kind: "status"; status: string | null }
+  | { kind: "usage"; inputTokens: number | null; outputTokens: number | null }
   | { kind: "textDelta"; text: string; parent: string | null }
   | { kind: "thinkingDelta"; text: string; parent: string | null }
   | { kind: "toolStart"; id: string; name: string; parent: string | null }
@@ -20,10 +21,11 @@ export type ChatEvent =
       tokensOut: number | null; durationMs: number | null }
   | { kind: "retry"; attempt: number | null; maxRetries: number | null; error: string | null };
 
-/** Lo que llega por `chat-event-<tabId>`. */
+/** Lo que llega por `chat-event-<tabId>`. `side` = es de una pregunta al margen (`/btw`),
+ *  que corre aparte y no entra en la conversación. */
 export type ChatEnvelope =
-  | { type: "events"; events: ChatEvent[] }
-  | { type: "ended"; code: number | null; stopped: boolean; stderr: string };
+  | { type: "events"; events: ChatEvent[]; side: boolean }
+  | { type: "ended"; code: number | null; stopped: boolean; stderr: string; side: boolean };
 
 export interface ToolResult {
   content: string;
@@ -45,7 +47,10 @@ export type ChatItem =
   | { kind: "compacted"; id: number; summary: string | null }
   | { kind: "result"; id: number; ok: boolean; error: string | null; costUsd: number | null;
       tokensIn: number | null; tokensOut: number | null; durationMs: number | null }
-  | { kind: "notice"; id: number; tone: "info" | "error"; text: string };
+  | { kind: "notice"; id: number; tone: "info" | "error"; text: string }
+  /** Una pregunta al margen (`/btw`): se responde sobre una COPIA de la conversación, así
+   *  que la ve entera y no le agrega nada. Se dibuja como su propia tarjeta, acá mismo. */
+  | { kind: "side"; id: number; question: string; inner: ChatState; running: boolean };
 
 export interface ChatInfo {
   model: string | null;
@@ -54,15 +59,25 @@ export interface ChatInfo {
   terminalCommands: string[];
 }
 
+/** Lo que lleva gastado el turno en curso, para mostrarlo mientras trabaja. */
+export interface LiveUsage {
+  /** El contexto que entró. */
+  input: number | null;
+  /** Lo que lleva escrito. */
+  output: number | null;
+}
+
 export interface ChatState {
   items: ChatItem[];
   nextId: number;
   /** "requesting", "compacting", un reintento… `null` = nada que contar. */
   status: string | null;
+  /** Lo que va gastando el turno en curso. `null` = todavía no dijo nada. */
+  usage: LiveUsage | null;
   info: ChatInfo | null;
 }
 
-export const emptyChat = (): ChatState => ({ items: [], nextId: 1, status: null, info: null });
+export const emptyChat = (): ChatState => ({ items: [], nextId: 1, status: null, usage: null, info: null });
 
 /** Una imagen adjunta, lista para la API. */
 export interface ImageAttachment {
@@ -79,3 +94,8 @@ export interface Outgoing {
 }
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
+
+/** Cuánto puede pensar el modelo, tal como lo acepta `claude --effort`. `null` = lo que
+ *  traiga la TUI de fábrica. */
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+export const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];

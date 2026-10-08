@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, ChevronDownIcon, ChevronRightIcon } from "neogestify-ui-components";
+import { AnimateSpin, Button, ChevronDownIcon, ChevronRightIcon } from "neogestify-ui-components";
 
 import { Markdown } from "@/shared/ui/Markdown";
 import type { PendingApproval } from "@/features/runs/types";
@@ -32,10 +32,17 @@ function Item({ item, ...props }: ItemsProps & { item: ChatItem }) {
   switch (item.kind) {
     case "user":
       return (
-        <div className="self-end max-w-[85%] flex flex-col items-end gap-1">
-          <div className="px-3 py-2 rounded-2xl rounded-br-md text-[13px] leading-relaxed whitespace-pre-wrap break-words
-            bg-blue-600 text-white">
-            {item.text || <span className="italic opacity-70">{t("chat.imageOnly")}</span>}
+        // Lo que escribió la persona va en una burbuja al margen derecho y en un gris
+        // tranquilo, no en el azul del acento: el acento de la app marca lo accionable
+        // (botones, selección), y un párrafo que grita azul al lado de la respuesta —que es
+        // lo que de verdad se lee— le roba la atención a la conversación.
+        // `data-chat-user`: lo que busca el salto entre mensajes de `ChatView`.
+        <div data-chat-user className="self-end max-w-[78%] flex flex-col items-end gap-1">
+          <div className="px-3.5 py-2.5 rounded-2xl rounded-br-md text-[13.5px] leading-[1.6]
+            whitespace-pre-wrap break-words
+            bg-gray-100 text-gray-900 border border-gray-200/70
+            dark:bg-white/[0.07] dark:text-gray-100 dark:border-white/[0.06]">
+            {item.text || <span className="italic text-gray-400 dark:text-white/35">{t("chat.imageOnly")}</span>}
           </div>
           {item.images > 0 && (
             <span className="text-[10.5px] text-gray-400 dark:text-white/35">
@@ -46,7 +53,7 @@ function Item({ item, ...props }: ItemsProps & { item: ChatItem }) {
       );
     case "text":
       return (
-        <div className="min-w-0 [&_p]:text-[13px]">
+        <div className="min-w-0 [&_p]:text-[13.5px] [&_p]:leading-[1.75] [&_li]:text-[13.5px]">
           <Markdown content={item.text} />
           {item.streaming && <span className="inline-block w-1.5 h-3.5 ml-0.5 align-middle bg-gray-400 animate-pulse" />}
         </div>
@@ -77,6 +84,8 @@ function Item({ item, ...props }: ItemsProps & { item: ChatItem }) {
       return <Compacted summary={item.summary} />;
     case "result":
       return <ResultLine item={item} />;
+    case "side":
+      return <SideQuestion item={item} {...props} />;
     case "notice":
       return (
         <div className={`px-3 py-2 rounded-lg text-[12px] whitespace-pre-wrap break-words
@@ -89,13 +98,52 @@ function Item({ item, ...props }: ItemsProps & { item: ChatItem }) {
   }
 }
 
+/**
+ * Una pregunta al margen (`/btw`): se contesta sobre una COPIA de la conversación, así que
+ * la ve entera y no le agrega nada ni toca archivos.
+ *
+ * Va con su propio marco y no como un mensaje más para que se entienda de un vistazo que
+ * eso NO es parte de la conversación: el agente, cuando siga, no se acuerda de esto.
+ */
+function SideQuestion({ item, ...props }: ItemsProps & { item: Extract<ChatItem, { kind: "side" }> }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="flex flex-col rounded-xl border border-dashed overflow-hidden
+      border-violet-300/70 dark:border-violet-400/25 bg-violet-50/40 dark:bg-violet-400/[0.04]">
+      <Button variant="custom" onClick={() => setOpen((v) => !v)}
+        className="flex items-start gap-2 w-full px-3 py-2 text-left
+          hover:bg-violet-100/50 dark:hover:bg-violet-400/[0.07]">
+        <span className="shrink-0 mt-px text-[10px] font-bold uppercase tracking-wider
+          text-violet-600 dark:text-violet-300/90">
+          {t("chat.btw")}
+        </span>
+        <span className="flex-1 min-w-0 text-[12.5px] text-gray-700 dark:text-gray-200 break-words">
+          {item.question}
+        </span>
+        {item.running && <AnimateSpin className="w-3 h-3 shrink-0 mt-0.5 text-violet-500" />}
+        {open ? <ChevronDownIcon className="w-3 h-3 shrink-0 mt-1 text-gray-400" />
+              : <ChevronRightIcon className="w-3 h-3 shrink-0 mt-1 text-gray-400" />}
+      </Button>
+      {open && (
+        <div className="flex flex-col gap-2.5 px-3 pb-2.5">
+          <ChatItems {...props} items={item.inner.items} />
+          <span className="text-[10.5px] text-violet-700/70 dark:text-violet-300/50">
+            {t("chat.btw.hint")}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Thinking({ text, streaming }: { text: string; streaming: boolean }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <div className="flex flex-col gap-1">
       <Button variant="custom" onClick={() => setOpen((v) => !v)}
-        className="self-start flex items-center gap-1 text-[11.5px] italic text-gray-500 dark:text-white/40 hover:underline">
+        className="self-start flex items-center gap-1 text-[11.5px] italic text-gray-500 dark:text-white/45 hover:underline">
         {open ? <ChevronDownIcon className="w-3 h-3" /> : <ChevronRightIcon className="w-3 h-3" />}
         {streaming ? t("chat.thinkingNow") : t("chat.thinking")}
       </Button>

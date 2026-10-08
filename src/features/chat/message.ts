@@ -21,16 +21,23 @@ export function parseSlash(text: string): { name: string; args: string } | null 
  * Los comandos que en el chat son un componente y no texto para el agente:
  * - `clear`: empezar otra conversación (la anterior queda en Sesiones).
  * - `model`: el selector de modelo, o cambiarlo directo con `/model sonnet`.
+ * - `effort`: cuánto puede pensar (`/effort high`), o el selector.
  * - `mode`: el modo de permisos.
+ * - `btw`: una pregunta al margen, sobre una copia de la conversación.
  * `compact` va como texto: la CLI lo corre con `-p`.
  */
-export const BUILTIN_COMMANDS = ["clear", "model", "mode", "compact"] as const;
+export const BUILTIN_COMMANDS = ["clear", "model", "effort", "mode", "btw", "compact"] as const;
 export type BuiltinCommand = (typeof BUILTIN_COMMANDS)[number];
 
 /** Los que `claude -p` no tiene y solo existen en la TUI, además de los que avise `init`. */
 const TUI_ONLY = new Set([
   "resume", "continue", "exit", "quit", "login", "logout", "config", "theme", "vim", "terminal-setup",
   "ide", "statusline", "permissions", "memory", "doctor", "color", "focus", "help", "status", "export",
+  // Paneles de la TUI: mandarlos como texto le haría contestar al modelo sobre un panel
+  // que nadie ve, y encima gastando tokens.
+  "usage", "cost", "context", "agents", "hooks", "mcp", "plugin", "plugins", "bashes", "rewind",
+  "sessions", "upgrade", "release-notes", "bug", "feedback", "keybindings", "output-style",
+  "install-github-app", "privacy-settings", "todos", "add-dir",
 ]);
 
 export type SlashAction =

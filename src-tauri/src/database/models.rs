@@ -29,6 +29,11 @@ pub struct WorkspaceSummary {
     pub last_active: i64,
     pub window_count: i64,
     pub tab_count: i64,
+    /// Ventanas marcadas abiertas. Inicio lo usa para ofrecer "ir a la ventana" en vez de
+    /// abrirlo otra vez; quien abre igual confirma contra las ventanas nativas vivas.
+    pub open_window_count: i64,
+    /// Las carpetas de sus tabs, sin repetir, en el orden en que se abrieron.
+    pub folders: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

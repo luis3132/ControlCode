@@ -152,7 +152,9 @@ fn turn(resume: bool) -> ChatTurn {
         session_id: "s-1".into(),
         resume,
         model: Some("sonnet".into()),
+        effort: Some("high".into()),
         permission_mode: Some("acceptEdits".into()),
+        side: false,
         content: vec![json!({"type":"text","text":"hola"})],
         env: Default::default(),
         prelaunch: Vec::new(),
@@ -167,6 +169,7 @@ fn los_flags_del_turno() {
     assert!(has(["--resume", "s-1"]));
     assert!(has(["--model", "sonnet"]));
     assert!(has(["--permission-mode", "acceptEdits"]));
+    assert!(has(["--effort", "high"]));
     assert!(has(["--permission-prompt-tool", "mcp__controlcode__approve_tool_use"]));
     assert!(has(["--permission-prompts", "host"]));
     assert!(has(["--allowedTools", "mcp__controlcode__browser_click"]));
@@ -182,6 +185,26 @@ fn los_flags_del_turno() {
     assert!(has(["--permission-mode", "default"]));
     assert!(has(["--permission-prompts", "none"]));
     assert!(!args.contains(&"--model".to_string()));
+
+    // Un esfuerzo que no existe tampoco viaja: la CLI lo rechazaría y el turno entero se
+    // caería por un selector mal guardado.
+    let mut raro = turn(true);
+    raro.effort = Some("ultra".into());
+    assert!(!claude_args(&raro, None).contains(&"--effort".to_string()));
+}
+
+/// Una pregunta al margen corre sobre una copia de la conversación y sin poder escribir:
+/// eso es lo que la hace "al margen" y no otro turno más.
+#[test]
+fn una_pregunta_al_margen_forkea_y_no_escribe() {
+    let mut aparte = turn(true);
+    aparte.side = true;
+    aparte.permission_mode = Some("bypassPermissions".into());
+    let args = claude_args(&aparte, None);
+    let has = |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
+    assert!(args.contains(&"--fork-session".to_string()), "no toca la conversación");
+    assert!(has(["--resume", "s-1"]), "pero la ve entera");
+    assert!(has(["--permission-mode", "plan"]), "el modo que pidió la tab no la deja escribir");
 }
 
 #[test]
@@ -269,7 +292,7 @@ fn parar_un_turno_lo_mata_y_lo_marca() {
     tauri::async_runtime::block_on(async {
         super::session::start(app.handle(), t, "sleep".into(), vec!["30".into()]).unwrap();
         assert!(super::session::is_running("tab-stop"));
-        assert!(super::session::stop("tab-stop"));
+        assert!(super::session::stop("tab-stop", false));
         for _ in 0..100 {
             if !seen.lock().unwrap().is_empty() {
                 break;
@@ -299,6 +322,54 @@ fn los_pasos_previos_preparan_el_entorno_y_los_argumentos_llegan_enteros() {
         command_for("sh".as_ref(), &args, &["export CC_PRE=listo".to_string()]).output().await.unwrap()
     });
     assert_eq!(String::from_utf8_lossy(&out.stdout), "listo|con espacio 'y' comillas");
+}
+
+
+/// Lo gastado mientras el turno corre, para el reloj de "trabajando". Las líneas son las de
+/// una corrida real con `--include-partial-messages` (2.1.293, haiku).
+#[test]
+fn el_stream_dice_cuanto_lleva_gastado() {
+    let start = json!({"type":"stream_event","event":{"type":"message_start","message":{
+        "model":"claude-haiku-5-5","role":"assistant","content":[],
+        "usage":{"input_tokens":2,"cache_creation_input_tokens":11878,"cache_read_input_tokens":10481}}}});
+    // La entrada es TODO el contexto que viajó: lo nuevo más lo que salió de la caché, que
+    // en una conversación larga es casi todo. Contar solo `input_tokens` daría 2.
+    assert!(matches!(&parse_line(&start.to_string())[0],
+        ChatEvent::Usage { input_tokens: Some(22361), .. }));
+
+    let delta = json!({"type":"stream_event","event":{"type":"message_delta",
+        "delta":{"stop_reason":"end_turn"},
+        "usage":{"input_tokens":2,"cache_read_input_tokens":10481,"output_tokens":49}}});
+    assert!(matches!(&parse_line(&delta.to_string())[0],
+        ChatEvent::Usage { input_tokens: None, output_tokens: Some(49) }));
+
+    // Un `message_start` sin uso no inventa un cero.
+    let vacio = json!({"type":"stream_event","event":{"type":"message_start","message":{"role":"assistant"}}});
+    assert!(parse_line(&vacio.to_string()).is_empty());
+}
+
+
+/// Las capas de configuración de la TUI: lo del proyecto pisa lo del usuario, y lo local
+/// pisa a los dos. Es con lo que el chat dice "va a arrancar con esto".
+#[test]
+fn los_valores_de_fabrica_salen_de_settings_json() {
+    use super::commands::merge_defaults;
+    let usuario = json!({"model": "opus", "effortLevel": "xhigh", "hooks": {}});
+    let proyecto = json!({"effortLevel": "medium"});
+    let local = json!({"ultracode": true});
+
+    let solo_usuario = merge_defaults(&[usuario.clone()]);
+    assert_eq!(solo_usuario.model.as_deref(), Some("opus"));
+    assert_eq!(solo_usuario.effort.as_deref(), Some("xhigh"));
+    assert!(!solo_usuario.ultracode);
+
+    let todo = merge_defaults(&[usuario, proyecto, local]);
+    assert_eq!(todo.effort.as_deref(), Some("medium"), "la del proyecto manda");
+    assert_eq!(todo.model.as_deref(), Some("opus"), "lo que la capa no dice, no lo borra");
+    assert!(todo.ultracode);
+
+    // Un settings sin nada de esto no inventa valores.
+    assert_eq!(merge_defaults(&[json!({"permissions": {}})]), super::commands::ChatDefaults::default());
 }
 
 /// El modelo y el esfuerzo con que viene una sesión, de su `.jsonl` real: la última
@@ -348,6 +419,24 @@ fn un_model_o_effort_de_la_tui_cuenta_aunque_no_haya_respondido_todavia() {
     // Un nivel que no existe no pisa el que había.
     let bad = [answer, user("<command-name>/effort</command-name><command-args>turbo</command-args>")];
     assert_eq!(session_settings(&bad.join("\n")).effort.as_deref(), Some("xhigh"));
+}
+
+/// Una pregunta al margen corre en una copia, en modo plan y sin nada que espere a una
+/// persona: sin eso el modelo preguntaba (`AskUserQuestion`) y la tarjeta quedaba colgada.
+#[test]
+fn una_pregunta_al_margen_no_puede_preguntar_ni_planificar() {
+    let mut t = turn(true);
+    t.side = true;
+    let args = claude_args(&t, None);
+    let has = |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
+    assert!(args.contains(&"--fork-session".to_string()));
+    assert!(has(["--permission-mode", "plan"]));
+    assert!(has(["--disallowedTools", "AskUserQuestion,ExitPlanMode,EnterPlanMode"]));
+    assert!(args.iter().any(|a| a == "--append-system-prompt"));
+
+    // El turno normal no lleva nada de eso.
+    let args = claude_args(&turn(true), None);
+    assert!(!args.iter().any(|a| a == "--disallowedTools" || a == "--fork-session"));
 }
 
 /// El catálogo del selector de `/model`, tal como lo deja el bundle de la CLI: con nombre y

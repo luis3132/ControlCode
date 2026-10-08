@@ -21,10 +21,18 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
+export interface RegistryModel {
+  /** Lo que recibe el flag de modelo. */
+  id: string;
+  label: string;
+}
+
 export interface AgentRegistryEntry {
   id: string;
   label: string;
   command: string;
+  /** Los alias de modelo que acepta. Vacío = no se le conocen. */
+  models: RegistryModel[];
   /** Carpeta de skills relativa al cwd. `null` = no gestiona skills. */
   skillsDir: string | null;
   /** Argumentos de reanudación con el placeholder `{session}`. `null` = no sabe. */

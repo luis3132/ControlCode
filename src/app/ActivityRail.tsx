@@ -1,12 +1,13 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button, Badge, BoxIcon, ClockIcon, CloudIcon, GearIcon, NetworkIcon, StackIcon, Tooltip, UserIcon } from "neogestify-ui-components";
+import { Button, AddIcon, Badge, BoxIcon, ClockIcon, CloudIcon, FolderIcon, GearIcon, NetworkIcon, Tooltip, UserIcon } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
 import { shortcutForPath } from "@/app/shortcuts";
 import { ProcessIcon, PullRequestIcon } from "@/app/icons";
 import { useRunsStore } from "@/features/runs/store";
 import { useRunningHere } from "@/features/processes/ProcessIndicator";
+import { openAddFolderWizard } from "@/features/tabs/tabActions";
 
 /** "Marketplace · Ctrl+M". El tooltip es donde alguien se entera del atajo. */
 function withShortcut(label: string, path: string | null): string {
@@ -88,6 +89,21 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
       bg-gray-100 dark:bg-[#080b0f]
       border-r border-gray-200 dark:border-white/7">
 
+      {/* Plegado, el "+" de Carpetas queda escondido con el panel: baja acá, arriba de todo. */}
+      {collapsed && (
+        <>
+          <RailButton
+            label={t("folders.add")}
+            path={null}
+            active={false}
+            onClick={openAddFolderWizard}
+          >
+            <AddIcon className="w-[18px] h-[18px]" />
+          </RailButton>
+          <span className="w-5 h-px my-1 shrink-0 bg-gray-300 dark:bg-white/10" />
+        </>
+      )}
+
       <RailButton
         label={t("rail.workspaces")}
         path={null}
@@ -95,7 +111,7 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
         badge={agentCount}
         onClick={toggleWorkspaces}
       >
-        <StackIcon className="w-[18px] h-[18px]" />
+        <FolderIcon className="w-[18px] h-[18px]" />
       </RailButton>
 
       <RailButton label={t("sidebar.sessions")} path="/sessions" active={on("/sessions")} onClick={() => navigate("/sessions")}>

@@ -17,7 +17,7 @@ import { RouteModal } from "@/app/RouteModal";
 import { EditorArea } from "@/features/tabs/EditorArea";
 import { initLayoutSync } from "@/features/tabs/layout/layoutStore";
 import { initViewTabsPersistence } from "@/features/tabs/viewStore";
-import { useUiStore } from "@/app/uiStore";
+import { initPanelFit, useUiStore } from "@/app/uiStore";
 import { buildWorkspaceTree } from "@/features/workspaces/workspaceTree";
 import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { useSnapshotsStore } from "@/features/workspaces/snapshotsStore";
@@ -34,6 +34,7 @@ import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
 import { useFleetEvents } from "@/features/runs/useFleetEvents";
 import { useProcessEvents } from "@/features/processes/useProcessEvents";
+import { initNotifications } from "@/features/notifications/watch";
 import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
 
@@ -124,6 +125,11 @@ export function AppShell() {
   // Puente de la CLI `ccode`: esta ventana queda disponible para atender los comandos
   // que solo el frontend puede resolver (crear/cerrar tabs).
   useEffect(() => initCliBridge(), []);
+  // Los avisos de la campana y el punto de "terminó" de las tabs: escuchan los stores de
+  // siempre y comparan cada cambio con el anterior.
+  useEffect(() => initNotifications(), []);
+  // Con la ventana angosta queda desplegado un solo panel lateral (ver `app/panels`).
+  useEffect(() => initPanelFit(), []);
 
   // Maximizada, la ventana ocupa el área de trabajo del monitor borde a borde — con la
   // ventana transparent:true, esquinas redondeadas ahí se verían como triángulos

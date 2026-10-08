@@ -42,15 +42,15 @@ export function ToolCard({ tool, running, approval, onDecide, focused, renderChi
   const state = tool.result ? (tool.result.isError ? "error" : "ok") : running ? "running" : "cut";
 
   return (
-    <div className={`flex flex-col rounded-lg border overflow-hidden
+    <div className={`flex flex-col rounded-xl border overflow-hidden
       ${approval
         ? "border-amber-300/70 dark:border-amber-500/30"
         : state === "error"
           ? "border-red-300/60 dark:border-red-500/25"
-          : "border-gray-200 dark:border-white/8"}
-      bg-gray-50/60 dark:bg-white/[0.02]`}>
+          : "border-gray-200/80 dark:border-white/[0.07]"}
+      bg-gray-50/70 dark:bg-white/[0.025]`}>
       <Button variant="custom" onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 w-full px-2.5 h-8 text-left hover:bg-gray-100 dark:hover:bg-white/[0.04]">
+        className="flex items-center gap-2 w-full px-3 h-9 text-left hover:bg-gray-100 dark:hover:bg-white/[0.045]">
         <span className="w-3.5 h-3.5 shrink-0 flex items-center justify-center">
           {state === "running" && <AnimateSpin className="w-3 h-3 text-blue-500" />}
           {state === "ok" && <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />}

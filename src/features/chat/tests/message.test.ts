@@ -33,7 +33,9 @@ describe("comandos de /", () => {
 
   it("el menú pone los de la app primero y filtra", () => {
     const menu = slashMenu("", ["compact", "graphify", "doctor", "__remote", "code-review"], ["doctor"]);
-    expect(menu.map((e) => e.name)).toEqual(["clear", "model", "mode", "compact", "graphify", "code-review"]);
+    expect(menu.map((e) => e.name)).toEqual([
+      "clear", "model", "effort", "mode", "btw", "compact", "graphify", "code-review",
+    ]);
     expect(slashMenu("rev", ["code-review", "review-pr"], []).map((e) => e.name)).toEqual(["review-pr", "code-review"]);
   });
 

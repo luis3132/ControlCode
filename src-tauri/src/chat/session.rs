@@ -39,8 +39,15 @@ pub struct ChatTurn {
     pub session_id: String,
     pub resume: bool,
     pub model: Option<String>,
+    /// Cuánto puede pensar: `low`, `medium`, `high`, `xhigh` o `max`.
+    pub effort: Option<String>,
     /// `default`, `acceptEdits`, `plan` o `bypassPermissions`.
     pub permission_mode: Option<String>,
+    /// Una pregunta al margen (`/btw`): corre sobre una COPIA de la conversación
+    /// (`--fork-session`), así que la ve entera y no le agrega nada. Sin permiso de
+    /// escribir y sin puente de permisos: una pregunta no toca archivos.
+    #[serde(default)]
+    pub side: bool,
     /// El mensaje: bloques `text` e `image` de la API.
     pub content: Vec<Value>,
     /// Las de la cuenta y las de la TUI custom.
@@ -56,9 +63,9 @@ pub struct ChatTurn {
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ChatEnvelope {
     /// Lo que dijo el agente, ya traducido. Varios por línea.
-    Events { events: Vec<ChatEvent> },
+    Events { events: Vec<ChatEvent>, side: bool },
     /// El proceso terminó. `stopped` = lo paró la persona.
-    Ended { code: Option<i32>, stopped: bool, stderr: String },
+    Ended { code: Option<i32>, stopped: bool, stderr: String, side: bool },
 }
 
 pub fn event_name(tab_id: &str) -> String {
@@ -88,6 +95,12 @@ fn live() -> std::sync::MutexGuard<'static, HashMap<String, Live>> {
     LIVE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// La clave del registro. Una pregunta al margen va aparte: puede correr mientras la
+/// conversación trabaja, que es justamente para lo que sirve.
+fn live_key(tab_id: &str, side: bool) -> String {
+    if side { format!("{tab_id}#btw") } else { tab_id.to_string() }
+}
+
 pub fn is_running(tab_id: &str) -> bool {
     live().contains_key(tab_id)
 }
@@ -101,14 +114,17 @@ pub fn kill_all() {
 }
 
 /// Para el turno de una tab. `false` si no había ninguno.
-pub fn stop(tab_id: &str) -> bool {
+pub fn stop(tab_id: &str, side: bool) -> bool {
     let mut map = live();
-    let Some(entry) = map.get_mut(tab_id) else { return false };
+    let Some(entry) = map.get_mut(&live_key(tab_id, side)) else { return false };
     entry.stopped = true;
     entry.group.kill_all();
     drop(map);
-    // Lo que esperaba una decisión ya no tiene a quién contestarle.
-    crate::runs::drop_tab_approvals(tab_id);
+    // Lo que esperaba una decisión ya no tiene a quién contestarle. Una pregunta al margen
+    // no tiene puente de permisos, así que no deja nada esperando.
+    if !side {
+        crate::runs::drop_tab_approvals(tab_id);
+    }
     true
 }
 
@@ -136,7 +152,28 @@ pub fn claude_args(turn: &ChatTurn, mcp: Option<(&str, &[String])>) -> Vec<Strin
         args.push("--model".into());
         args.push(model.into());
     }
-    let mode = turn.permission_mode.as_deref().filter(|m| is_permission_mode(m)).unwrap_or("default");
+    if let Some(effort) = turn.effort.as_deref().filter(|e| is_effort(e)) {
+        args.push("--effort".into());
+        args.push(effort.into());
+    }
+    if turn.side {
+        // La copia: la pregunta ve la conversación entera y la original no se entera.
+        args.push("--fork-session".into());
+        // Nadie va a contestar: no hay puente de permisos ni tarjeta para responder. Una
+        // pregunta del modelo (o un plan que espera aprobación) dejaba la tarjeta colgada
+        // sin respuesta, así que esas herramientas no existen acá, y se le dice que conteste.
+        args.push("--disallowedTools".into());
+        args.push(SIDE_DISALLOWED.join(","));
+        args.push("--append-system-prompt".into());
+        args.push(SIDE_PROMPT.into());
+    }
+    // Una pregunta al margen no escribe. `plan` es el único modo que lo garantiza del lado
+    // de la TUI, y sin puente de permisos (ver `chat_send`) lo que pidiera se niega solo.
+    let mode = if turn.side {
+        "plan"
+    } else {
+        turn.permission_mode.as_deref().filter(|m| is_permission_mode(m)).unwrap_or("default")
+    };
     args.push("--permission-mode".into());
     args.push(mode.into());
     match mcp {
@@ -160,8 +197,21 @@ pub fn claude_args(turn: &ChatTurn, mcp: Option<(&str, &[String])>) -> Vec<Strin
     args
 }
 
+/// Lo que una pregunta al margen no puede usar: todo lo que espera a una persona.
+pub const SIDE_DISALLOWED: &[&str] = &["AskUserQuestion", "ExitPlanMode", "EnterPlanMode"];
+
+const SIDE_PROMPT: &str = "This is a side question (/btw) the user asked while the main conversation goes on. \
+Answer it directly and briefly from what you already know of the conversation. Do not ask the user anything, \
+do not write a plan and do not change files: there is no one to approve them, and this answer is not added to \
+the main conversation.";
+
 pub fn is_permission_mode(mode: &str) -> bool {
     matches!(mode, "default" | "acceptEdits" | "plan" | "bypassPermissions")
+}
+
+/// Los niveles que acepta `claude --effort`, verificado contra el `--help` de la 2.1.293.
+pub fn is_effort(level: &str) -> bool {
+    matches!(level, "low" | "medium" | "high" | "xhigh" | "max")
 }
 
 /// La línea que se le escribe por stdin.
@@ -201,9 +251,14 @@ pub fn start<R: Runtime>(
     // terminar en dos procesos escribiendo la misma sesión.
     let mut group = ProcessGroup::new(SEQ.fetch_add(1, Ordering::Relaxed));
     {
+        let key = live_key(&turn.tab_id, turn.side);
         let mut map = live();
-        if map.contains_key(&turn.tab_id) {
-            return Err("esta tab ya tiene un turno en curso".into());
+        if map.contains_key(&key) {
+            return Err(if turn.side {
+                "esta tab ya tiene una pregunta al margen en curso".into()
+            } else {
+                "esta tab ya tiene un turno en curso".to_string()
+            });
         }
         let mut cmd = command_for(&program, &args, &turn.prelaunch);
         cmd.current_dir(&turn.cwd)
@@ -218,22 +273,25 @@ pub fn start<R: Runtime>(
         let stdin = child.stdin.take();
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        map.insert(turn.tab_id.clone(), Live { group, stopped: false });
+        map.insert(key, Live { group, stopped: false });
         drop(map);
 
         let app = app.clone();
         let tab_id = turn.tab_id.clone();
+        let side = turn.side;
         let line = user_line(&turn.content);
         tokio::spawn(async move {
-            run(app, tab_id, child, line, stdin, stdout, stderr).await;
+            run(app, tab_id, side, child, line, stdin, stdout, stderr).await;
         });
     }
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run<R: Runtime>(
     app: AppHandle<R>,
     tab_id: String,
+    side: bool,
     mut child: tokio::process::Child,
     line: String,
     stdin: Option<tokio::process::ChildStdin>,
@@ -264,7 +322,7 @@ async fn run<R: Runtime>(
         while let Ok(Some(l)) = lines.next_line().await {
             let events = parse::parse_line(&l);
             if !events.is_empty() {
-                let _ = app.emit(&name, ChatEnvelope::Events { events });
+                let _ = app.emit(&name, ChatEnvelope::Events { events, side });
             }
         }
     }
@@ -272,7 +330,9 @@ async fn run<R: Runtime>(
     let code = child.wait().await.ok().and_then(|s| s.code());
     let stderr = err_task.await.unwrap_or_default();
     // Sacarlo del registro corre el `Drop` del grupo: barre lo que el turno dejó andando.
-    let stopped = live().remove(&tab_id).map(|l| l.stopped).unwrap_or(true);
-    crate::runs::drop_tab_approvals(&tab_id);
-    let _ = app.emit(&name, ChatEnvelope::Ended { code, stopped, stderr: tail(&stderr, 2000) });
+    let stopped = live().remove(&live_key(&tab_id, side)).map(|l| l.stopped).unwrap_or(true);
+    if !side {
+        crate::runs::drop_tab_approvals(&tab_id);
+    }
+    let _ = app.emit(&name, ChatEnvelope::Ended { code, stopped, stderr: tail(&stderr, 2000), side });
 }

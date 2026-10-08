@@ -1024,3 +1024,26 @@ fn varias_instancias_arrancan_y_escriben_la_misma_base_a_la_vez() {
     assert_eq!(mode, "wal");
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// El selector de workspaces ofrece "ir a la ventana" a uno que ya está abierto: cuenta
+/// solo las ventanas abiertas, sin que las tabs (el JOIN) las multipliquen, y lista sus
+/// carpetas. `default` no se lista.
+#[test]
+fn la_lista_de_workspaces_cuenta_sus_ventanas_abiertas() {
+    let conn = setup();
+    conn.execute_batch(
+        "INSERT INTO windows (id, label, workspace_id, is_open, last_active)
+             VALUES ('win2', 'win2', 'ws', 0, 0);",
+    )
+    .unwrap();
+    insert_tab(&conn, "tab-1", None, None);
+    insert_tab(&conn, "tab-2", None, None);
+
+    let list = list_workspaces(&conn).unwrap();
+
+    assert!(list.iter().all(|w| w.id != DEFAULT_WORKSPACE_ID));
+    let ws = list.iter().find(|w| w.id == "ws").expect("el workspace guardado");
+    assert_eq!((ws.window_count, ws.tab_count, ws.open_window_count), (2, 2, 1));
+    // Dos tabs en la misma carpeta: la carpeta va una sola vez.
+    assert_eq!(ws.folders, vec!["/proj".to_string()]);
+}

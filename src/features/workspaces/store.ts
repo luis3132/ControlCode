@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { AlertaToast } from "neogestify-ui-components";
 import { useTabsStore } from "@/features/tabs/store";
 import { useSkillsStore } from "@/features/skills/store";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { broadcastEvent, focusWindow } from "@/shared/ipc/window";
 
 import * as ipc from "./ipc";
@@ -18,8 +19,11 @@ interface WorkspacesState {
   /** Guarda bajo un nombre nuevo todas las ventanas abiertas que comparten el workspace
    *  actual de esta ventana (no necesariamente todas las ventanas abiertas en el proceso). */
   saveCurrentAsWorkspace: (name: string) => Promise<string>;
-  /** Abre un workspace guardado; si closeCurrent, cierra primero todas las ventanas abiertas. */
-  openWorkspace: (id: string, closeCurrent: boolean) => Promise<void>;
+  /** Abre un workspace guardado: en esta ventana (que se cierra cuando ya están las suyas)
+   *  o en ventanas aparte, dejando esta como está. */
+  openWorkspace: (id: string, where: "here" | "new") => Promise<void>;
+  /** Una ventana en blanco más en el workspace de esta ventana. */
+  openNewWindow: () => Promise<void>;
   /** Si el workspace ya tiene ventanas nativas vivas, las enfoca (en vez de abrir otro
    *  juego de ventanas duplicado) y devuelve `true` — el llamador no debe mostrar el
    *  diálogo de "cerrar actuales/mantener". Si devuelve `false`, el workspace no está
@@ -69,8 +73,8 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
     return ws.id;
   },
 
-  openWorkspace: async (id, closeCurrent) => {
-    await ipc.openWorkspace(id, closeCurrent);
+  openWorkspace: async (id, where) => {
+    await ipc.openWorkspace(id, where === "here" ? getCurrentWindow().label : null);
     await get().loadWorkspaces();
     // Best-effort: no bloquea la apertura del workspace si el check falla.
     useSkillsStore.getState().checkHealth(id).then((issues) => {
@@ -78,6 +82,10 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
         AlertaToast("Skills", `${issues.length} skill symlink(s) need attention`, "warning", 6000);
       }
     }).catch(() => {});
+  },
+
+  openNewWindow: async () => {
+    await ipc.openNewWindow(useTabsStore.getState().workspaceId);
   },
 
   focusIfOpen: async (id) => {

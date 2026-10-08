@@ -33,6 +33,11 @@ pub enum ChatEvent {
     },
     /// "Pidiendo", "compactando"… `None` = volvió a lo normal.
     Status { status: Option<String> },
+    /// Cuánto lleva consumido el turno MIENTRAS corre: el contexto que entró y lo que va
+    /// escribiendo. Es lo que la TUI muestra al lado del reloj; sale de los eventos de
+    /// streaming de la API (`message_start` trae la entrada, `message_delta` la salida
+    /// acumulada), que antes se descartaban.
+    Usage { input_tokens: Option<i64>, output_tokens: Option<i64> },
     /// Un pedazo de texto mientras se escribe. El bloque entero llega después en `Text`.
     TextDelta { text: String, parent: Option<String> },
     ThinkingDelta { text: String, parent: Option<String> },
@@ -147,6 +152,28 @@ fn stream_event(e: &Value, parent: Option<String>) -> Vec<ChatEvent> {
                 _ => Vec::new(),
             }
         }
+        Some("message_start") => {
+            let usage = e.pointer("/message/usage");
+            let get = |k: &str| usage.and_then(|u| u.get(k)).and_then(Value::as_i64);
+            // El contexto que se mandó: lo nuevo más lo que salió de la caché, que en una
+            // conversación larga es casi todo.
+            let input = [get("input_tokens"), get("cache_creation_input_tokens"), get("cache_read_input_tokens")];
+            input
+                .iter()
+                .any(Option::is_some)
+                .then(|| {
+                    vec![ChatEvent::Usage {
+                        input_tokens: Some(input.iter().flatten().sum()),
+                        output_tokens: get("output_tokens"),
+                    }]
+                })
+                .unwrap_or_default()
+        }
+        Some("message_delta") => e
+            .pointer("/usage/output_tokens")
+            .and_then(Value::as_i64)
+            .map(|out| vec![ChatEvent::Usage { input_tokens: None, output_tokens: Some(out) }])
+            .unwrap_or_default(),
         Some("content_block_delta") => {
             let Some(delta) = e.get("delta") else { return Vec::new() };
             match delta.get("type").and_then(Value::as_str) {
@@ -427,10 +454,5 @@ fn model_from(text: &str) -> Option<String> {
 
 fn effort_from(text: &str) -> Option<String> {
     let word = text.split(|c: char| !c.is_ascii_alphanumeric()).find(|w| !w.is_empty())?.to_lowercase();
-    is_effort(&word).then_some(word)
-}
-
-/// Los niveles que acepta `claude --effort`.
-fn is_effort(level: &str) -> bool {
-    matches!(level, "low" | "medium" | "high" | "xhigh" | "max")
+    super::session::is_effort(&word).then_some(word)
 }

@@ -61,12 +61,13 @@ export async function switchToTerminal(tab: Tab): Promise<void> {
     for (let i = 0; i < 20 && (await chatRunning(tab.id).catch(() => false)); i++) await sleep(100);
   }
   // Sin `ptyId` y con otro nonce, la terminal se monta de cero y lanza `claude --resume`,
-  // con el modelo del chat: cambiar de vista no puede cambiar con qué se está trabajando.
-  const { model } = useChatStore.getState().get(tab.id);
+  // con el modelo y el esfuerzo del chat: `--resume` solo no los trae (el esfuerzo vuelve
+  // al de fábrica), y cambiar de vista no puede cambiar con qué se está trabajando.
+  const { model, effort } = useChatStore.getState().get(tab.id);
   useTabsStore.getState().updateTab(tab.id, {
     mode: undefined,
     ptyId: null,
     restartNonce: (tab.restartNonce ?? 0) + 1,
-    launchArgs: model ? ["--model", model] : undefined,
+    launchArgs: [...(model ? ["--model", model] : []), ...(effort ? ["--effort", effort] : [])],
   });
 }

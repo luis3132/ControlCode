@@ -6,6 +6,7 @@ import {
 } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { openAddFolderWizard } from "@/features/tabs/tabActions";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { BranchIcon, RunningIcon } from "@/app/icons";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
@@ -328,9 +329,11 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
             )}
           </span>
         )}
-        <Tooltip content={t("workspaces.new")} placement="bottom">
+        {/* Sumar una carpeta a este workspace: el asistente la elige y pide el agente. */}
+        <Tooltip content={t("folders.add")} placement="bottom">
           <Button variant="icon"
-            onClick={() => navigate("/")}
+            onClick={openAddFolderWizard}
+            aria-label={t("folders.add")}
             className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
               text-gray-400 dark:text-white/35
               hover:text-gray-700 dark:hover:text-white

@@ -5,7 +5,7 @@ import { setAgentRegistry, type AgentRegistryEntry } from "@/features/agents/reg
 import { appendBrowserMcp, browserToolPrefix, hasBrowserMcp, type TabMcp } from "../tabMcp";
 
 const entry = (id: string, mcp: AgentRegistryEntry["mcp"]): AgentRegistryEntry => ({
-  id, label: id, command: id, skillsDir: null, resume: null, supportsAccounts: false, sessions: "", mcp,
+  id, label: id, command: id, models: [], skillsDir: null, resume: null, supportsAccounts: false, sessions: "", mcp,
 });
 
 describe("appendBrowserMcp", () => {

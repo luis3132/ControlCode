@@ -48,12 +48,15 @@ export function ModeToggle({ tab }: { tab: Tab }) {
           onClick={() => void toggle()}
           disabled={switching}
           aria-label={label}
-          className={`cc-t h-6 px-2 rounded-md text-[11px] font-medium border shadow-sm backdrop-blur
+          // Un control que vive encima del contenido: se ve siempre (medio transparente
+          // no se leía sobre un diff), y lo que lo separa del fondo es el borde, no el peso.
+          className={`cc-t h-7 px-2.5 rounded-full text-[11px] font-medium border shadow-sm backdrop-blur
             disabled:opacity-50
             ${confirm
-              ? "bg-amber-500 text-white border-amber-500"
-              : "bg-white/85 text-gray-700 border-gray-200 hover:bg-white dark:bg-[#161b22]/85 dark:text-gray-200 dark:border-white/10 dark:hover:bg-[#161b22]"}
-            ${html ? "" : "opacity-60 hover:opacity-100"}`}
+              ? "bg-amber-500 text-white border-amber-500 hover:bg-amber-600"
+              : `bg-white/95 text-gray-600 border-gray-200 hover:text-gray-900 hover:border-gray-300
+                 dark:bg-[#161b22]/95 dark:text-white/60 dark:border-white/10
+                 dark:hover:text-white dark:hover:border-white/20`}`}
         >
           {label}
         </Button>

@@ -104,6 +104,16 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
           terminalCommands: event.terminalCommands,
         },
       };
+    case "usage":
+      // La entrada llega una vez (al abrir el mensaje) y la salida va subiendo: se
+      // conserva la última de cada una.
+      return {
+        ...state,
+        usage: {
+          input: event.inputTokens ?? state.usage?.input ?? null,
+          output: event.outputTokens ?? state.usage?.output ?? null,
+        },
+      };
     case "status":
       return { ...state, status: event.status };
     case "retry":

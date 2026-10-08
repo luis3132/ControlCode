@@ -169,6 +169,8 @@ pub fn run() {
             // Detección de agentes
             crate::agents::agent_registry,
             crate::agents::detect_agents,
+            crate::agents::agent_efforts,
+            crate::agents::agent_words,
             crate::agents::agent_search_path,
             // Agentes headless (consola de flota)
             crate::runs::run_list_tasks,
@@ -229,6 +231,7 @@ pub fn run() {
             crate::chat::commands::chat_stop,
             crate::chat::commands::chat_running,
             crate::chat::commands::chat_transcript,
+            crate::chat::commands::chat_defaults,
             crate::chat::commands::chat_session_settings,
             crate::chat::models::chat_models,
             crate::runs::run_start_orchestration,
