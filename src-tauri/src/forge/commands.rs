@@ -197,11 +197,13 @@ pub async fn forge_create_repo(
     let api = Api::new(account.kind, &account.host, &token)?;
 
     // Primero lo local: si algo falla acá, no queda un repo vacío en la nube.
+    step(&app, &cwd, "local", None);
     let local = cwd.clone();
     let root = blocking(move || crate::scm::prepare_for_remote(&local, "Initial commit"))
         .await?
         .map_err(scm_to_forge)?;
 
+    step(&app, &cwd, "remote", None);
     let repo = api.create_repo(owner.as_ref(), &name, description.as_deref().unwrap_or("").trim(), private).await?;
     if repo.clone_url.is_empty() {
         return Err(ForgeError::Api(format!("Se creó {} pero el host no devolvió su URL", repo.full_name)));
@@ -210,6 +212,9 @@ pub async fn forge_create_repo(
     let (r, url) = (root.clone(), repo.clone_url.clone());
     blocking(move || crate::scm::add_origin(&r, &url)).await?.map_err(scm_to_forge)?;
     store::set_repo_choice(&db(&app)?.lock().unwrap(), &root, &account_id)?;
+    // Desde acá el repo YA existe: el diálogo lo muestra con su enlace mientras se sube,
+    // que en un proyecto grande puede tardar minutos.
+    step(&app, &cwd, "push", Some(&repo));
     crate::scm::sync(&app, root, crate::scm::Sync::Push).await.map_err(|e| match scm_to_forge(e) {
         // El repo ya existe y está conectado: lo que falló es solo subir, y se reintenta
         // desde Cambios. Se dice así para que no lo vuelvan a crear.
@@ -217,6 +222,16 @@ pub async fn forge_create_repo(
         other => other,
     })?;
     Ok(repo)
+}
+
+/// En qué va la creación de un repo: `local` (preparar el repo y el primer commit),
+/// `remote` (crearlo en la cuenta), `push` (ya existe; se sube la rama). Sin esto el diálogo
+/// decía "Creando…" durante toda la subida, con el repo ya creado y sin forma de saberlo.
+pub const CREATE_STEP_EVENT: &str = "forge-create-step";
+
+fn step(app: &AppHandle, cwd: &str, step: &str, repo: Option<&ForgeRepo>) {
+    use tauri::Emitter;
+    let _ = app.emit(CREATE_STEP_EVENT, serde_json::json!({ "cwd": cwd, "step": step, "repo": repo }));
 }
 
 /// El nombre de carpeta que git le daría al clon: el último tramo de la URL, sin `.git`.

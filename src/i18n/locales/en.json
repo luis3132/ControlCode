@@ -1596,5 +1596,14 @@
   "chat.question.several": "You can pick several",
   "chat.question.other": "Another answer…",
   "chat.question.answer": "Answer",
-  "chat.question.skip": "Don't answer"
+  "chat.question.skip": "Don't answer",
+  "forge.create.step.local": "Prepare the local repo",
+  "forge.create.step.remote": "Create the repository in the account",
+  "forge.create.step.push": "Push the branch (already created)",
+  "forge.create.background": "Close; the push keeps going",
+  "forge.create.doneTitle": "Repository created",
+  "forge.create.pushFailedTitle": "Created, but not pushed",
+  "forge.create.pushFailedBody": "The repository exists and is set as origin. The push failed: retry it from Changes, no need to create it again.",
+  "forge.create.finish": "Done",
+  "forge.create.doneToast": "{{repo}} is now origin and the branch is pushed."
 }

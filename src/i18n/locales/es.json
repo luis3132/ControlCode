@@ -1596,5 +1596,14 @@
   "chat.question.several": "Podés elegir varias",
   "chat.question.other": "Otra respuesta…",
   "chat.question.answer": "Responder",
-  "chat.question.skip": "No contestar"
+  "chat.question.skip": "No contestar",
+  "forge.create.step.local": "Preparar el repo local",
+  "forge.create.step.remote": "Crear el repositorio en la cuenta",
+  "forge.create.step.push": "Subir la rama (ya está creado)",
+  "forge.create.background": "Cerrar; la subida sigue",
+  "forge.create.doneTitle": "Repositorio creado",
+  "forge.create.pushFailedTitle": "Creado, pero sin subir",
+  "forge.create.pushFailedBody": "El repositorio existe y quedó como origin. La subida falló: reintentala desde Cambios, no hace falta crearlo de nuevo.",
+  "forge.create.finish": "Listo",
+  "forge.create.doneToast": "{{repo}} quedó como origin y la rama ya está subida."
 }

@@ -111,7 +111,10 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
   const [tagsVersion, setTagsVersion] = useState(0);
   const [discard, setDiscard] = useState<{ tracked: string[]; untracked: string[]; label: string } | null>(null);
   /** El diálogo de crear el repo en la nube: para una carpeta sin repo o un repo sin remoto. */
-  const [creatingRepo, setCreatingRepo] = useState(false);
+  // Los datos con los que se abrió el diálogo de crear el repo. Se congelan: mientras se
+  // crea, la carpeta pasa a ser un repo y el panel se relee, pero el diálogo tiene que
+  // seguir siendo el mismo, con la misma carpeta (es con la que filtra sus avisos).
+  const [creatingRepo, setCreatingRepo] = useState<{ cwd: string; isRepo: boolean } | null>(null);
   const busyRef = useRef(busy);
   busyRef.current = busy;
   const { target } = useRepoTarget(cwd);
@@ -209,32 +212,38 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
     [status]
   );
 
+  // Crear el repo en GitHub/GitLab/Gitea: inicializa si hace falta, lo deja como `origin`
+  // y sube. Al terminar se relee todo, igual que después de cualquier operación.
+  //
+  // Va SIEMPRE en el mismo lugar del árbol (ver `withDialog`): el panel tiene un `return`
+  // distinto para "no es un repo" y para "es un repo", y crear el repo lo pasa de uno al
+  // otro a mitad del proceso. Colgado de cada uno, React lo desmontaba y lo volvía a montar
+  // vacío: parecía que no había hecho nada, y después aparecía el aviso de que sí.
+  const createRepoDialog = creatingRepo && (
+    <CreateRepoDialog
+      cwd={creatingRepo.cwd}
+      isRepo={creatingRepo.isRepo}
+      onClose={() => setCreatingRepo(null)}
+      onCreated={() => {
+        setCreatingRepo(null);
+        run("create", async () => {}).catch(() => {});
+      }}
+    />
+  );
+  const withDialog = (content: React.ReactNode) => <>{content}{createRepoDialog}</>;
+
   if (!cwd) {
-    return <p className="px-3 py-6 text-center text-[11.5px] text-gray-400 dark:text-white/30">{t("explorer.noTab")}</p>;
+    return withDialog(<p className="px-3 py-6 text-center text-[11.5px] text-gray-400 dark:text-white/30">{t("explorer.noTab")}</p>);
   }
   if (status === undefined) {
-    return (
+    return withDialog(
       <div className="flex flex-col gap-2 px-3.5 py-3">
         {[70, 50, 80, 45].map((w, i) => <Skeleton key={i} variant="text" height={12} width={`${w}%`} />)}
       </div>
     );
   }
-  // Crear el repo en GitHub/GitLab/Gitea: inicializa si hace falta, lo deja como `origin`
-  // y sube. Al terminar se relee todo, igual que después de cualquier operación.
-  const createRepoDialog = creatingRepo && (
-    <CreateRepoDialog
-      cwd={status?.root ?? cwd}
-      isRepo={!!status}
-      onClose={() => setCreatingRepo(false)}
-      onCreated={() => {
-        setCreatingRepo(false);
-        run("create", async () => {}).catch(() => {});
-      }}
-    />
-  );
-
   if (status === null) {
-    return (
+    return withDialog(
       <>
         <EmptyState
           className="m-auto px-4"
@@ -247,7 +256,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
                 onClick={() => run("init", () => scmInit(cwd))}>
                 {t("scm.init")}
               </Button>
-              <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => setCreatingRepo(true)}
+              <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => setCreatingRepo({ cwd, isRepo: false })}
                 className="flex items-center justify-center gap-1.5">
                 <PushIcon className="w-3.5 h-3.5" />
                 {t("scm.createRemote")}
@@ -255,7 +264,6 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
             </div>
           }
         />
-        {createRepoDialog}
       </>
     );
   }
@@ -375,7 +383,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
     );
   };
 
-  return (
+  return withDialog(
     <>
       <div className="relative flex items-center gap-1 h-8 shrink-0 pl-2 pr-1.5 bg-gray-100/60 dark:bg-white/2">
         <Button variant="custom"
@@ -508,7 +516,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
             </Button>
           ) : totalChanges === 0 && status.remotes.length === 0 ? (
             // Sin remoto, lo que sigue a commitear es publicar el repo en la nube.
-            <Button size="sm" variant="primary" fullWidth disabled={!!busy} onClick={() => setCreatingRepo(true)}
+            <Button size="sm" variant="primary" fullWidth disabled={!!busy} onClick={() => setCreatingRepo({ cwd: status.root, isRepo: true })}
               className="flex items-center justify-center gap-1.5">
               <PushIcon className="w-3.5 h-3.5" />
               {t("scm.createRemote")}
@@ -523,7 +531,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
           {/* Con cambios sin commitear y sin remoto, publicar sigue a mano: sube lo ya
               commiteado, y lo demás queda para el próximo push. */}
           {totalChanges > 0 && status.remotes.length === 0 && (
-            <Button size="sm" variant="outline" fullWidth disabled={!!busy} onClick={() => setCreatingRepo(true)}
+            <Button size="sm" variant="outline" fullWidth disabled={!!busy} onClick={() => setCreatingRepo({ cwd: status.root, isRepo: true })}
               className="flex items-center justify-center gap-1.5 mt-1.5">
               <PushIcon className="w-3.5 h-3.5" />
               {t("scm.createRemote")}
@@ -688,8 +696,6 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
           <code className="block mt-2 text-[11px] font-mono break-all text-gray-500 dark:text-gray-400">{discard.label}</code>
         </AppDialog>
       )}
-
-      {createRepoDialog}
     </>
   );
 }
