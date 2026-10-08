@@ -24,6 +24,20 @@ export function setTerminalWaker(fn: ((tabId: string) => boolean) | null) {
   waker = fn;
 }
 
+/**
+ * Las tabs en modo HTML no tienen terminal: lo que se les pega va al input de su chat (o,
+ * con `submit`, se manda). Lo instala `features/chat`; cada función devuelve `false` si la
+ * tab no está en modo HTML, y entonces sigue el camino de siempre.
+ */
+export interface ChatSink {
+  paste: (tabId: string, text: string, submit: boolean) => boolean;
+  focus: (tabId: string) => boolean;
+}
+let chatSink: ChatSink | null = null;
+export function setChatSink(sink: ChatSink | null) {
+  chatSink = sink;
+}
+
 /** Mensajes para agentes que todavía no terminaron de arrancar. */
 const queued = new Map<string, string>();
 
@@ -62,6 +76,7 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
  * espera a que la terminal se quede quieta, que es cuando la persona empezaría a escribir.
  */
 export function sendWhenReady(tabId: string, text: string): void {
+  if (chatSink?.paste(tabId, text, true)) return;
   queued.set(tabId, text);
   const term = terminals.get(tabId);
   if (term) sendWhenSettled(tabId, term, text);
@@ -90,6 +105,7 @@ export function terminalAttached(tabId: string): void {
 /** Pega `text` en la terminal de la tab y, con `submit`, lo manda. `false` si la tab no
  *  tiene una terminal viva. */
 export function pasteIntoTab(tabId: string, text: string, submit: boolean): boolean {
+  if (chatSink?.paste(tabId, text, submit)) return true;
   const term = terminals.get(tabId);
   if (!term || !attached.has(tabId)) {
     // Hibernada: se despierta y lo pegado sale apenas se reconecta. Montada pero todavía
@@ -109,5 +125,6 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean): bool
 
 /** Le da el foco a la terminal de la tab, para seguir escribiendo en lo que se pegó. */
 export function focusTab(tabId: string): void {
+  if (chatSink?.focus(tabId)) return;
   terminals.get(tabId)?.focus();
 }

@@ -907,7 +907,7 @@ fn archived_session_skills_are_checked_and_restored() {
     }
 
     // Con las dos instaladas no falta nada.
-    let statuses = check_session_skills("hist-1".to_string(), state.clone()).unwrap();
+    let statuses = session_skill_statuses(&state.lock().unwrap(), "hist-1").unwrap();
     assert_eq!(statuses.len(), 2);
     assert!(
         statuses.iter().all(|s| !s.is_missing()),
@@ -916,7 +916,7 @@ fn archived_session_skills_are_checked_and_restored() {
 
     // Se desinstala una: ahora la app tiene que saber cuál falta y de dónde bajarla.
     delete_skill(gone.id.clone(), state.clone()).unwrap();
-    let statuses = check_session_skills("hist-1".to_string(), state.clone()).unwrap();
+    let statuses = session_skill_statuses(&state.lock().unwrap(), "hist-1").unwrap();
     let missing: Vec<&SessionSkillStatus> = statuses.iter().filter(|s| s.is_missing()).collect();
     assert_eq!(missing.len(), 1);
     assert_eq!(missing[0].name, "la-que-falta");
@@ -970,7 +970,7 @@ fn legacy_archived_skill_names_still_resolve() {
         ).unwrap();
     }
 
-    let statuses = check_session_skills("hist-legacy".to_string(), state.clone()).unwrap();
+    let statuses = session_skill_statuses(&state.lock().unwrap(), "hist-legacy").unwrap();
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].name, "git-commit-helper");
     assert_eq!(

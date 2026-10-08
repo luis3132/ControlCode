@@ -14,8 +14,12 @@ export const renameWorkspace = (workspaceId: string, name: string) =>
 export const deleteWorkspace = (workspaceId: string) =>
   invoke<void>("db_delete_workspace", { workspaceId });
 
-export const openWorkspace = (workspaceId: string, closeCurrent: boolean) =>
-  invoke<void>("open_workspace", { workspaceId, closeCurrent });
+/** `closeLabel`: la ventana a cerrar una vez abierto (la que lo pidió, para "abrir acá"). */
+export const openWorkspace = (workspaceId: string, closeLabel: string | null) =>
+  invoke<void>("open_workspace", { workspaceId, closeCurrent: false, closeLabel });
+
+/** Una ventana en blanco más, dentro del workspace dado. */
+export const openNewWindow = (workspaceId: string) => invoke<void>("open_new_window", { workspaceId });
 
 /** Vacía el bucket `default` y abre una ventana en blanco ahí. */
 export const resetDefaultWorkspace = () => invoke<void>("reset_default_workspace");

@@ -616,7 +616,7 @@ fn un_pedido_espera_hasta_que_alguien_contesta() {
         std::thread::yield_now();
     };
     assert_eq!(visto[0].tool_name, "Edit");
-    assert_eq!(visto[0].task_id, "t1");
+    assert_eq!(visto[0].task_id.as_deref(), Some("t1"));
 
     assert!(broker::decide(id, true, None));
     let verdict = esperando.join().unwrap();
@@ -2226,4 +2226,97 @@ mod otras_tuis {
         let fin = agent.finish(None, 0);
         assert_eq!(fin.result.as_deref(), Some("No hay nada."));
     }
+}
+
+/// Una tab en modo HTML pregunta como una tarea, pero con su carpeta: no tiene fila en
+/// `tasks` de donde sacarla. Las reglas de esa carpeta la cubren, "recordar" en otro pedido
+/// de la misma carpeta la libera, y parar el turno suelta lo que esperaba.
+#[test]
+fn una_tab_en_modo_html_pide_permiso_con_su_carpeta() {
+    let _serial = con_broker_limpio();
+    let db = db_compartida();
+    {
+        let conn = db.lock().unwrap();
+        store::upsert_rule(&conn, "/tmp/tab", "Bash(cargo test)", true).unwrap();
+    }
+
+    // Lo que una regla cubre ni llega a la cola, y no deja registro de flota.
+    let v = broker::resolve_for_tab(&db, "tab-1", "/tmp/tab", "Bash", serde_json::json!({"command": "cargo test"}), None, Duration::from_secs(5));
+    assert!(v.allow);
+    assert_eq!(v.by, broker::DecidedBy::Rule);
+    let registros: i64 = db.lock().unwrap().query_row("SELECT COUNT(*) FROM task_approvals", [], |r| r.get(0)).unwrap();
+    assert_eq!(registros, 0);
+
+    // Lo que no, espera con su tab, su carpeta y la herramienta que lo pidió.
+    let db2 = db.clone();
+    let h = std::thread::spawn(move || {
+        broker::resolve_for_tab(&db2, "tab-1", "/tmp/tab", "Bash", serde_json::json!({"command": "npm i"}), Some("toolu_9".into()), Duration::from_secs(5))
+    });
+    let p = loop {
+        if let Some(p) = broker::pending().into_iter().next() {
+            break p;
+        }
+        std::thread::yield_now();
+    };
+    assert_eq!(p.task_id, None);
+    assert_eq!(p.tab_id.as_deref(), Some("tab-1"));
+    assert_eq!(p.cwd.as_deref(), Some("/tmp/tab"));
+    assert_eq!(p.tool_use_id.as_deref(), Some("toolu_9"));
+    assert_eq!(broker::cwd_of(&db.lock().unwrap(), &p).as_deref(), Some("/tmp/tab"));
+
+    // Una regla nueva en esa carpeta lo resuelve sin que nadie lo conteste a mano.
+    {
+        let conn = db.lock().unwrap();
+        store::upsert_rule(&conn, "/tmp/tab", "Bash(npm i)", true).unwrap();
+    }
+    assert_eq!(broker::release_matching(&db, "/tmp/tab"), 1);
+    assert!(h.join().unwrap().allow);
+
+    // Parar el turno suelta lo que esperaba.
+    let db3 = db.clone();
+    let h = std::thread::spawn(move || {
+        broker::resolve_for_tab(&db3, "tab-2", "/tmp/tab", "Write", serde_json::json!({"file_path": "/tmp/tab/x"}), None, Duration::from_secs(5))
+    });
+    while broker::pending().is_empty() {
+        std::thread::yield_now();
+    }
+    assert_eq!(broker::drop_tab("tab-1"), 0, "solo suelta los de esa tab");
+    assert_eq!(broker::drop_tab("tab-2"), 1);
+    assert_eq!(h.join().unwrap().by, broker::DecidedBy::Cancelled);
+}
+
+/// `AskUserQuestion` no es un permiso sino una pregunta: ninguna regla la contesta (ni una
+/// escrita a mano para la herramienta entera), y lo que vuelve es el input con las
+/// respuestas de la persona adentro, que es como la herramienta las recibe.
+#[test]
+fn una_pregunta_del_agente_se_contesta_con_las_respuestas_en_el_input() {
+    let _serial = con_broker_limpio();
+    let db = db_compartida();
+    {
+        let conn = db.lock().unwrap();
+        store::upsert_rule(&conn, "/tmp/q", "AskUserQuestion", true).unwrap();
+    }
+    let input = serde_json::json!({"questions": [{"question": "¿Color?", "options": [{"label": "Rojo"}, {"label": "Azul"}]}]});
+    let db2 = db.clone();
+    let asked = input.clone();
+    let h = std::thread::spawn(move || {
+        broker::resolve_for_tab(&db2, "tab-q", "/tmp/q", "AskUserQuestion", asked, Some("toolu_q".into()), Duration::from_secs(5))
+    });
+    let p = loop {
+        if let Some(p) = broker::pending().into_iter().next() {
+            break p;
+        }
+        std::thread::yield_now();
+    };
+    assert_eq!(p.suggested_rule, None, "una pregunta no se recuerda");
+    // Guardar una regla no la libera: lo que falta es la respuesta.
+    assert_eq!(broker::release_matching(&db, "/tmp/q"), 0);
+
+    let answers = std::collections::HashMap::from([("¿Color?".to_string(), "Azul".to_string())]);
+    assert!(broker::decide_with_input(&p.id, super::with_answers(&p.input, answers)));
+    let verdict = h.join().unwrap();
+    assert!(verdict.allow);
+    let updated = verdict.updated_input.expect("con las respuestas");
+    assert_eq!(updated["answers"]["¿Color?"], "Azul");
+    assert_eq!(updated["questions"], input["questions"]);
 }

@@ -4,6 +4,11 @@ import { useTranslation } from "react-i18next";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { Button, CloseIcon } from "neogestify-ui-components";
 
+import { usePlacements } from "@/features/tabs/layout/layoutStore";
+import { agentKey } from "@/features/tabs/layout/layoutTree";
+import { useTabsStore } from "@/features/tabs/store";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
+
 import { buildPreview } from "./PermissionCard";
 import { useRunsStore } from "./store";
 import type { PendingApproval } from "./types";
@@ -38,6 +43,8 @@ export function ApprovalToast() {
   const { pathname } = useLocation();
   const approvals = useRunsStore((s) => s.approvals);
   const tasks = useRunsStore((s) => s.tasks);
+  const tabs = useTabsStore((s) => s.tabs);
+  const placed = usePlacements().visible;
   const decideApproval = useRunsStore((s) => s.decideApproval);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -54,10 +61,14 @@ export function ApprovalToast() {
     }
   }, [approvals]);
 
-  // Lo más viejo primero: es lo que lleva más tiempo parado.
+  // Lo más viejo primero: es lo que lleva más tiempo parado. Los de una tab en modo HTML
+  // que está a la vista no: la tarjeta ya está en su chat.
+  const onWorkspace = pathname.startsWith("/workspace");
   const pending = useMemo(
-    () => [...approvals].sort((a, b) => a.askedAt - b.askedAt),
-    [approvals]
+    () => [...approvals]
+      .filter((a) => !(a.tabId && onWorkspace && placed.has(agentKey(a.tabId))))
+      .sort((a, b) => a.askedAt - b.askedAt),
+    [approvals, onWorkspace, placed]
   );
   const visible = pending.filter((a) => !dismissed.has(a.id));
   const current = visible[0];
@@ -66,9 +77,16 @@ export function ApprovalToast() {
     [current]
   );
 
-  if (!current || !preview || pathname.startsWith("/fleet")) return null;
+  if (!current || !preview || (pathname.startsWith("/fleet") && current.taskId !== null)) return null;
 
   const task = tasks.find((tk) => tk.id === current.taskId);
+  const tab = current.tabId ? tabs.find((tb) => tb.id === current.tabId) : undefined;
+  const goTo = () => {
+    if (!current.tabId) return navigate("/fleet");
+    navigate("/workspace");
+    useTabsStore.getState().activateTab(current.tabId);
+    useViewTabsStore.getState().showTerminal();
+  };
   const others = pending.length - 1;
 
   const decide = async (allow: boolean) => {
@@ -100,7 +118,9 @@ export function ApprovalToast() {
             {t("fleet.toast.title")}
           </span>
           <span className="truncate text-[11px] text-gray-500 dark:text-white/45" title={task?.title}>
-            {task ? t("fleet.toast.task", { task: task.title, agent: task.agentId }) : t("fleet.toast.unknownTask")}
+            {tab
+              ? t("chat.toast.tab", { tab: tab.title })
+              : task ? t("fleet.toast.task", { task: task.title, agent: task.agentId }) : t("fleet.toast.unknownTask")}
           </span>
         </div>
         <Button variant="icon"
@@ -145,10 +165,12 @@ export function ApprovalToast() {
 
       <div className="flex items-center gap-1.5 px-4 py-3">
         <Button variant="custom"
-          onClick={() => navigate("/fleet")}
+          onClick={goTo}
           className="mr-auto text-[11.5px] text-blue-600 dark:text-blue-400 hover:underline inline-block"
         >
-          {others > 0 ? t("fleet.toast.openMore", { count: others }) : t("fleet.toast.open")}
+          {current.tabId
+            ? t("chat.toast.open")
+            : others > 0 ? t("fleet.toast.openMore", { count: others }) : t("fleet.toast.open")}
         </Button>
         <Button variant="custom"
           onClick={() => void decide(false)}

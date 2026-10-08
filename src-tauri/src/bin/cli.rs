@@ -596,9 +596,12 @@ fn run_mcp(args: &[String]) -> ExitCode {
     // config, y no hay razón para que el orden en que lo escriba alguien a mano tenga que
     // coincidir con el que escribe la app.
     let mut flags: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
+    // `--approvals`: la tab está en modo HTML y los permisos los contesta su chat.
+    let mut approvals = false;
     let mut rest = args.iter();
     while let Some(flag) = rest.next() {
         match flag.as_str() {
+            "--approvals" => approvals = true,
             name @ ("--task" | "--cwd" | "--tab" | "--prefix") => {
                 let Some(value) = rest.next() else {
                     eprintln!("Falta el valor de {name}");
@@ -615,10 +618,17 @@ fn run_mcp(args: &[String]) -> ExitCode {
 
     let context = match (flags.remove("--task"), flags.remove("--cwd")) {
         (Some(task), _) => McpContext::Task(task),
-        (None, Some(cwd)) => McpContext::Cwd { cwd, tab: flags.remove("--tab") },
+        (None, Some(cwd)) => match (flags.remove("--tab"), approvals) {
+            (Some(tab), true) => McpContext::Chat { cwd, tab },
+            (None, true) => {
+                eprintln!("--approvals necesita --tab: los permisos se contestan en el chat de esa tab");
+                return ExitCode::from(EXIT_USAGE);
+            }
+            (tab, false) => McpContext::Cwd { cwd, tab },
+        },
         (None, None) => {
             eprintln!(
-                "Uso: ccode mcp --task <id-de-tarea> | --cwd <carpeta> [--tab <id-de-tab>] [--prefix <prefijo>]"
+                "Uso: ccode mcp --task <id-de-tarea> | --cwd <carpeta> [--tab <id-de-tab> [--approvals]] [--prefix <prefijo>]"
             );
             return ExitCode::from(EXIT_USAGE);
         }

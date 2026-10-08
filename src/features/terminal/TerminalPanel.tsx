@@ -6,7 +6,7 @@ import { Terminal } from "@/features/terminal/Terminal";
 import { useTabsStore } from "@/features/tabs/store";
 import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
-import { buildResumeCommand, isResumable } from "@/features/sessions/agentResume";
+import { buildResumeCommand, isResumable, withLaunchArgs } from "@/features/sessions/agentResume";
 import { agentDef } from "@/features/agents/registry";
 import { useAgentsStore } from "@/features/agents/store";
 import { readDir } from "@/features/explorer/ipc";
@@ -18,6 +18,10 @@ import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { setTerminalWaker } from "@/features/terminal/terminalRegistry";
 import { ptyKill } from "@/features/terminal/ipc";
 import { useDocumentVisible } from "@/shared/useDocumentVisible";
+import { ChatView } from "@/features/chat/ChatView";
+import { ModeToggle } from "@/features/chat/ModeToggle";
+import { installChatSink } from "@/features/chat/bridge";
+import { supportsHtmlMode } from "@/features/chat/switchMode";
 
 /** Cada cuánto se revisa qué terminales ocultas ya tienen que hibernar. */
 const HIBERNATE_CHECK_MS = 30_000;
@@ -103,6 +107,9 @@ export function TerminalPanel() {
     return () => setTerminalWaker(null);
   }, []);
 
+  // Lo que se le pega a una tab en modo HTML va a su chat (ver `features/chat/bridge`).
+  useEffect(() => installChatSink(), []);
+
   // Archivos soltados desde el gestor de archivos del sistema. El webview no los ve como
   // un drop de HTML: Tauri se queda con el arrastre de la ventana (en Windows, siempre) y
   // avisa con las rutas y la posición, en píxeles físicos.
@@ -165,7 +172,11 @@ export function TerminalPanel() {
         // lo que la TUI le pregunta, así el agente no se traba. Al volver repinta de una.
         // Antes de lanzarse se queda con `visibility`: necesita medir su lugar para que el
         // PTY nazca del tamaño correcto.
-        const asleep = (!shown || !onWorkspace || !docVisible) && tab.ptyId != null;
+        // Una tab en modo HTML no tiene terminal (ver `features/chat`): su chat oculto no se
+        // dibuja, y sigue recibiendo lo que manda el agente.
+        const toggleable = supportsHtmlMode(tab.agentId);
+        const html = toggleable && tab.mode === "html";
+        const asleep = (!shown || !onWorkspace || !docVisible) && (tab.ptyId != null || html);
         return (
           <div
             key={tab.id}
@@ -190,12 +201,14 @@ export function TerminalPanel() {
                 </span>
               </div>
             )}
-            {(customLoaded || agentDef(tab.agentId)) && !hibernated.has(tab.id) && <Terminal
+            {toggleable && <ModeToggle tab={tab} />}
+            {html && <ChatView tab={tab} isActive={key === focusedItem && onWorkspace} />}
+            {!html && (customLoaded || agentDef(tab.agentId)) && !hibernated.has(tab.id) && <Terminal
               // El nonce en la key: reiniciar el agente desmonta esta terminal (lo que mata
               // su proceso) y monta otra, que relanza con `--resume`.
               key={`${tab.id}:${tab.restartNonce ?? 0}`}
               tabId={tab.id}
-              command={buildResumeCommand(tab.agentId, tab.command, tab.sessionId)}
+              command={withLaunchArgs(buildResumeCommand(tab.agentId, tab.command, tab.sessionId), tab.launchArgs)}
               cwd={tab.cwd}
               agentId={tab.agentId}
               accountId={tab.accountId}
@@ -206,6 +219,7 @@ export function TerminalPanel() {
               isVisible={shown}
               openedAt={tab.openedAt}
               knownSessionId={tab.sessionId}
+              cornerTaken={toggleable}
               onReady={(ptyId) => setPtyId(tab.id, ptyId)}
               onSessionDiscovered={(sessionId) => setSessionId(tab.id, sessionId)}
             />}

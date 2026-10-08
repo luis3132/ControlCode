@@ -73,11 +73,14 @@ function shortPath(path?: string): string {
  * muestra la regla tal cual se va a guardar, no una descripción de ella — lo que se
  * recuerda es exactamente lo que se ve.
  */
-export function PermissionCard({ approval, onDecide, focused }: {
+export function PermissionCard({ approval, onDecide, focused, hidePreview = false }: {
   approval: PendingApproval;
   onDecide: (allow: boolean, remember: boolean) => void;
   /** Solo la tarjeta enfocada responde al teclado: con varias, `y` sería ambiguo. */
   focused: boolean;
+  /** Sin el diff ni el comando: en el chat la tarjeta va adentro de la herramienta, que
+   *  ya los muestra. */
+  hidePreview?: boolean;
 }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
@@ -119,11 +122,13 @@ export function PermissionCard({ approval, onDecide, focused }: {
       bg-amber-50 dark:bg-amber-500/8
       border border-amber-300/70 dark:border-amber-500/25">
 
-      <span className="truncate font-mono text-[10.5px] text-amber-800 dark:text-amber-300/90">
-        {preview.title}
-      </span>
+      {!hidePreview && (
+        <span className="truncate font-mono text-[10.5px] text-amber-800 dark:text-amber-300/90">
+          {preview.title}
+        </span>
+      )}
 
-      {preview.diff.length > 0 && (
+      {!hidePreview && preview.diff.length > 0 && (
         <div className="flex flex-col rounded overflow-hidden bg-white/60 dark:bg-black/25">
           {preview.diff.map((line, i) => (
             <span
@@ -146,7 +151,7 @@ export function PermissionCard({ approval, onDecide, focused }: {
         </div>
       )}
 
-      {preview.literal && (
+      {!hidePreview && preview.literal && (
         <span className="line-clamp-3 px-1.5 py-1 rounded font-mono text-[10px] leading-relaxed
           bg-white/60 dark:bg-black/25 text-gray-700 dark:text-white/65">
           {preview.literal}

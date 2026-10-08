@@ -14,6 +14,10 @@ import { useFocusInside } from "@/shared/ui/useFocusInside";
  *
  * Lo importante es que las rutas NO cambian: adentro se sigue navegando igual (el detalle
  * de una skill, los repositorios del marketplace), y lo único distinto es dónde se pinta.
+ *
+ * Se pinta como Configuración (`ShellModal`): encima de toda la ventana, no solo del área
+ * de las terminales. Antes quedaba encajado entre los paneles laterales y la barra de tabs,
+ * y con la ventana chica no se distinguía de una página más.
  */
 export function RouteModal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   const { t } = useTranslation();
@@ -37,7 +41,7 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
   }, [onClose]);
 
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center p-6">
+    <div className="fixed inset-0 z-100 flex items-center justify-center p-8">
       <Button variant="custom"
         onClick={onClose}
         aria-label={t("btn.close")}
@@ -45,7 +49,7 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
         children={null}
       />
 
-      <div ref={frameRef} tabIndex={-1} className="outline-none cc-rise relative flex flex-col w-full max-w-5xl h-full
+      <div ref={frameRef} tabIndex={-1} className="outline-none cc-rise relative flex flex-col w-full max-w-5xl h-full max-h-[48rem]
         rounded-2xl overflow-hidden
         bg-gray-50 dark:bg-[#0d1117]
         border border-gray-200 dark:border-white/12

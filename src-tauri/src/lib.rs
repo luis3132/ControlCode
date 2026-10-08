@@ -5,6 +5,7 @@
 mod accounts;
 mod agents;
 mod app;
+mod chat;
 mod database;
 mod explorer;
 mod forge;

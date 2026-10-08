@@ -1,7 +1,7 @@
 import "@/i18n/index";
 import "@fontsource-variable/jetbrains-mono";
 import ReactDOM from "react-dom/client";
-import { ThemeProvider } from "neogestify-ui-components";
+import { ThemeProvider, ToastProvider } from "neogestify-ui-components";
 import App from "@/app/App";
 import { loadAgentRegistry } from "@/features/agents/registry";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
@@ -49,7 +49,11 @@ const rendering = renderingInfo()
 Promise.all([loadAgentRegistry(), terminalFont, rendering]).then(() => {
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <ThemeProvider>
-      <App />
+      {/* Los avisos efímeros de la app ("se creó", "se exportó"). Abajo al centro: la
+          esquina de abajo a la derecha es de los pedidos de permiso (`ApprovalToast`). */}
+      <ToastProvider position="bottom-center" limit={4}>
+        <App />
+      </ToastProvider>
     </ThemeProvider>
   );
 });

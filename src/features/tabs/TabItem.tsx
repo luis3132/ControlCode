@@ -6,6 +6,10 @@ import { useAccountsStore } from "@/features/accounts/store";
 import { agentIcon } from "@/features/agents/agentIcons";
 import type { AgentPaint } from "@/features/browser/agentPaint";
 import type { Tab } from "@/features/tabs/types";
+import { useChatActivity, useChatStore } from "@/features/chat/store";
+import { useNotificationsStore } from "@/features/notifications/store";
+import { formatUptime } from "@/features/processes/types";
+import { activeMark, TAB_ACTIVE, TAB_IDLE, TAB_SHELL } from "@/features/tabs/tabStyle";
 
 interface TabItemProps {
   tab: Tab;
@@ -74,22 +78,13 @@ export function TabItem({
         onContextMenu(e);
       }}
       title={paintHint}
-      className={`
-        group relative flex items-center gap-2 h-10 pl-3 pr-1.5 shrink-0
-        max-w-48 min-w-27 rounded-t-[9px] cursor-pointer select-none
-        transition-colors duration-150 ${className}
+      className={`${TAB_SHELL} max-w-64 min-w-27 ${className}
         ${paint && !isActive ? paint.tint : ""}
-        ${isActive
-          ? "bg-gray-50 dark:bg-[#0d1117] text-gray-900 dark:text-white"
-          : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-white/5 hover:text-gray-800 dark:hover:text-gray-200"}
-      `}
+        ${isActive ? TAB_ACTIVE : TAB_IDLE}`}
     >
       {/* El mismo color que el navegador que está manejando: las dos tabs se leen como una. */}
       {paint && <span className={`absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-r ${paint.strip}`} />}
-      {/* La tab activa se funde con el área de abajo; la línea la remata. */}
-      {isActive && (
-        <span className={`absolute bottom-0 left-0 right-0 h-[2px] ${groupFocused ? "bg-blue-500" : "bg-gray-300 dark:bg-white/20"}`} />
-      )}
+      {isActive && <span className={activeMark(groupFocused)} />}
 
       <AgentIcon className={`w-3.5 h-3.5 shrink-0 opacity-70 ${paint ? paint.ink : ""}`} />
 
@@ -109,41 +104,40 @@ export function TabItem({
             text-gray-900 dark:text-white"
         />
       ) : (
-        <span className="flex flex-col flex-1 min-w-0 leading-tight">
+        <span className="flex items-baseline gap-1.5 flex-1 min-w-0">
           <span className="text-xs truncate">{tab.title}</span>
           {account && (
             <span title={account.hint ?? undefined}
-              className="text-[9.5px] truncate text-gray-400 dark:text-white/35">
+              className="text-[10px] truncate shrink-[2] text-gray-400 dark:text-white/35">
               {account.name ?? t("accounts.system")}
             </span>
           )}
         </span>
       )}
 
-      {/* Sin PTY todavía = arrancando. Es lo único que se puede afirmar del estado. */}
-      <span
-        className={`w-1.5 h-1.5 rounded-full shrink-0 transition-opacity
-          ${tab.ptyId == null ? "bg-amber-500" : "bg-emerald-500"}
-          group-hover:opacity-0`}
-      />
+      {tab.mode === "html" ? (
+        <ChatStatus tabId={tab.id} />
+      ) : (
+        // Sin PTY todavía = arrancando. Es lo único que se puede afirmar del estado.
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${tab.ptyId == null ? "bg-amber-500" : "bg-emerald-500"}`} />
+      )}
 
-      {/* Botón cerrar — siempre visible pero sutil, hover lo destaca */}
+      {/* Cerrar: a la vista en la activa; en las demás, al pasar el mouse. Siempre ocupa su
+          lugar, así el ancho de la tab no salta. */}
       <Button variant="icon"
         onClick={(e) => {
           e.stopPropagation();
           onClose(e);
         }}
         onMouseDown={(e) => e.stopPropagation()}
-        title="Cerrar"
-        className="
-          absolute right-1.5 shrink-0 flex items-center justify-center
-          w-4 h-4 rounded
-          text-gray-400 dark:text-gray-600
-          opacity-0 group-hover:opacity-100
+        title={t("btn.close")}
+        aria-label={t("btn.close")}
+        className={`shrink-0 flex items-center justify-center w-4 h-4 rounded
+          text-gray-400 dark:text-gray-500
           hover:text-gray-700 dark:hover:text-white
           hover:bg-gray-200 dark:hover:bg-white/15
-          transition-opacity duration-100
-         p-0"
+          transition-opacity duration-100 p-0
+          ${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
       >
         <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
           <line x1="1" y1="1" x2="7" y2="7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
@@ -152,4 +146,48 @@ export function TabItem({
       </Button>
     </div>
   );
+}
+
+/**
+ * En modo HTML no hay PTY, pero sí se sabe qué hace el agente: si espera un permiso lo dice
+ * con palabras (es lo único que pide algo de vos), si trabaja muestra hace cuánto, y si
+ * terminó mientras no lo mirabas queda un punto azul hasta que lo veas.
+ */
+function ChatStatus({ tabId }: { tabId: string }) {
+  const { t } = useTranslation();
+  const activity = useChatActivity(tabId);
+  const startedAt = useChatStore((s) => s.chats[tabId]?.startedAt ?? null);
+  const finished = useNotificationsStore((s) => tabId in s.finished);
+
+  if (activity === "approval") {
+    return (
+      <span className="shrink-0 px-1.5 py-px rounded-full text-[9.5px] font-semibold
+        bg-amber-500/15 text-amber-700 dark:text-amber-400">
+        {t("tabs.status.approval")}
+      </span>
+    );
+  }
+  if (activity === "working") {
+    return (
+      <span className="flex items-center gap-1 shrink-0 font-mono text-[10px] tabular-nums text-gray-400 dark:text-white/45"
+        title={t("tabs.status.working")}>
+        <span className="w-2.5 h-2.5 rounded-full border-[1.5px] border-emerald-500/25 border-t-emerald-500 animate-spin" />
+        {startedAt !== null && <Since at={startedAt} />}
+      </span>
+    );
+  }
+  if (finished) {
+    return <span title={t("tabs.status.finished")} className="w-1.5 h-1.5 rounded-full shrink-0 bg-blue-500" />;
+  }
+  return <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-emerald-500" />;
+}
+
+/** "42s", "3m 05s": el reloj del turno en curso, que se mueve solo mientras se muestra. */
+function Since({ at }: { at: number }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return <>{formatUptime(now - at)}</>;
 }

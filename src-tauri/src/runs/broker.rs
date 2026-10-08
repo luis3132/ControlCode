@@ -33,12 +33,29 @@ use crate::util::now_ts;
 use super::rules::{self, Decision, PermissionRule};
 use super::store;
 
+/// De quién es un pedido: una tarea de la flota, o una tab en modo HTML.
+///
+/// La tab no tiene fila en `tasks`, así que trae su carpeta consigo: es donde viven sus
+/// reglas y donde "recordar" las escribe.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Owner {
+    Task(String),
+    Tab { tab_id: String, cwd: String },
+}
+
 /// Lo que un agente está esperando que le contesten.
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingApproval {
     pub id: String,
-    pub task_id: String,
+    /// La tarea que pregunta. `None` = es de una tab.
+    pub task_id: Option<String>,
+    /// La tab que pregunta (modo HTML). `None` = es de una tarea.
+    pub tab_id: Option<String>,
+    /// La carpeta de la tab. En las tareas sale de su fila, así que no viaja.
+    pub cwd: Option<String>,
+    /// El id de la llamada a la herramienta, para que el chat ponga la tarjeta junto a ella.
+    pub tool_use_id: Option<String>,
     pub tool_name: String,
     /// El `input` crudo de la herramienta. De acá sale el diff.
     pub input: serde_json::Value,
@@ -77,6 +94,9 @@ pub struct Verdict {
     pub allow: bool,
     pub reason: Option<String>,
     pub by: DecidedBy,
+    /// El input con el que se aprueba, cuando no es el que pidió el agente. Hoy solo
+    /// `AskUserQuestion`: la respuesta de la persona viaja como `answers` adentro de él.
+    pub updated_input: Option<serde_json::Value>,
 }
 
 const RULE_DENIED: &str = "una regla de esta carpeta lo tiene denegado";
@@ -121,10 +141,29 @@ pub fn ask(
     input: serde_json::Value,
     timeout: Duration,
 ) -> Verdict {
+    ask_as(id, &Owner::Task(task_id.to_string()), tool_name, input, None, timeout)
+}
+
+/// [`ask`] para cualquier dueño.
+pub fn ask_as(
+    id: &str,
+    owner: &Owner,
+    tool_name: &str,
+    input: serde_json::Value,
+    tool_use_id: Option<String>,
+    timeout: Duration,
+) -> Verdict {
     let id = id.to_string();
+    let (task_id, tab_id, cwd) = match owner {
+        Owner::Task(task) => (Some(task.clone()), None, None),
+        Owner::Tab { tab_id, cwd } => (None, Some(tab_id.clone()), Some(cwd.clone())),
+    };
     let pending = PendingApproval {
         id: id.clone(),
-        task_id: task_id.to_string(),
+        task_id,
+        tab_id,
+        cwd,
+        tool_use_id,
         tool_name: tool_name.to_string(),
         suggested_rule: rules::exact_rule_for(tool_name, &input),
         input,
@@ -145,12 +184,14 @@ pub fn ask(
             Some(w) if w.verdict.is_some() => {
                 return q.remove(&id).and_then(|w| w.verdict).expect("recién comprobado");
             }
-            // La entrada desapareció sin veredicto: la tarea se canceló o la app cierra.
+            // La entrada desapareció sin veredicto: la tarea (o el turno de la tab) se
+            // canceló, o la app cierra.
             None => {
                 return Verdict {
                     allow: false,
-                    reason: Some("la tarea se canceló mientras esperaba".into()),
+                    reason: Some("se canceló mientras esperaba".into()),
                     by: DecidedBy::Cancelled,
+                    updated_input: None,
                 };
             }
             Some(_) => {}
@@ -163,6 +204,7 @@ pub fn ask(
                 allow: false,
                 reason: Some("nadie contestó el pedido de permiso a tiempo".into()),
                 by: DecidedBy::Timeout,
+                updated_input: None,
             };
         }
         let (guard, _) = DECIDED
@@ -189,7 +231,19 @@ fn decide_with(id: &str, verdict: Verdict) -> bool {
 /// Contesta un pedido como decisión de una persona. `false` si ya no existe (venció, o la
 /// tarea se canceló) o si ya estaba resuelto.
 pub fn decide(id: &str, allow: bool, reason: Option<String>) -> bool {
-    decide_with(id, Verdict { allow, reason, by: DecidedBy::User })
+    decide_with(id, Verdict { allow, reason, by: DecidedBy::User, updated_input: None })
+}
+
+/// Aprueba un pedido con otro input: el de `AskUserQuestion` con las respuestas de la
+/// persona adentro. `false` si ya no existe o ya estaba resuelto.
+pub fn decide_with_input(id: &str, input: serde_json::Value) -> bool {
+    decide_with(id, Verdict { allow: true, reason: None, by: DecidedBy::User, updated_input: Some(input) })
+}
+
+/// Las herramientas que no son un permiso sino una pregunta: ninguna regla las contesta,
+/// porque lo que el agente necesita es la respuesta, no un "sí".
+pub fn is_question(tool_name: &str) -> bool {
+    tool_name == "AskUserQuestion"
 }
 
 /// Descarta lo que esté esperando de una tarea.
@@ -197,9 +251,18 @@ pub fn decide(id: &str, allow: bool, reason: Option<String>) -> bool {
 /// Se llama al cancelarla y al terminar su proceso. Un pedido sin dueño no lo va a
 /// contestar nadie nunca, y dejarlo en la cola lo mostraría en la consola para siempre.
 pub fn drop_task(task_id: &str) -> usize {
+    drop_where(|p| p.task_id.as_deref() == Some(task_id))
+}
+
+/// Descarta lo que esté esperando de una tab: su turno terminó o se paró.
+pub fn drop_tab(tab_id: &str) -> usize {
+    drop_where(|p| p.tab_id.as_deref() == Some(tab_id))
+}
+
+fn drop_where(owned: impl Fn(&PendingApproval) -> bool) -> usize {
     let mut q = queue();
     let ids: Vec<String> =
-        q.values().filter(|w| w.pending.task_id == task_id).map(|w| w.pending.id.clone()).collect();
+        q.values().filter(|w| owned(&w.pending)).map(|w| w.pending.id.clone()).collect();
     for id in &ids {
         q.remove(id);
     }
@@ -234,15 +297,17 @@ pub fn resolve(
     // no en su worktree; el registro guarda la ruta REAL que tocó el agente, que es lo que
     // uno quiere encontrar al revisar qué se autorizó.
     let as_project = in_project_terms(db, task_id, &input);
+    let decision =
+        if is_question(tool_name) { Decision::Ask } else { rules::decide(&rules, tool_name, &as_project) };
 
-    match rules::decide(&rules, tool_name, &as_project) {
+    match decision {
         Decision::Allow => {
             record(db, &Uuid::new_v4().to_string(), task_id, tool_name, &input, Some(true), DecidedBy::Rule);
-            Verdict { allow: true, reason: None, by: DecidedBy::Rule }
+            Verdict { allow: true, reason: None, by: DecidedBy::Rule, updated_input: None }
         }
         Decision::Deny => {
             record(db, &Uuid::new_v4().to_string(), task_id, tool_name, &input, Some(false), DecidedBy::Rule);
-            Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule }
+            Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule, updated_input: None }
         }
         Decision::Ask => {
             let id = Uuid::new_v4().to_string();
@@ -275,22 +340,65 @@ pub fn release_matching(db: &DbConnection, cwd: &str) -> usize {
             .collect();
         let owned = candidates
             .into_iter()
-            .filter(|p| store::project_cwd_of_task(&conn, &p.task_id).as_deref() == Some(cwd))
+            .filter(|p| cwd_of(&conn, p).as_deref() == Some(cwd))
             .collect();
         (rules, owned)
     };
 
     owned
         .into_iter()
+        .filter(|p| !is_question(&p.tool_name))
         .filter(|p| match rules::decide(&rules, &p.tool_name, &p.input) {
-            Decision::Allow => decide_with(&p.id, Verdict { allow: true, reason: None, by: DecidedBy::Rule }),
+            Decision::Allow => decide_with(&p.id, Verdict { allow: true, reason: None, by: DecidedBy::Rule, updated_input: None }),
             Decision::Deny => decide_with(
                 &p.id,
-                Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule },
+                Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule, updated_input: None },
             ),
             Decision::Ask => false,
         })
         .count()
+}
+
+/// La carpeta cuyas reglas valen para un pedido: la de la tab, o la del proyecto de la tarea.
+pub fn cwd_of(conn: &rusqlite::Connection, p: &PendingApproval) -> Option<String> {
+    match (&p.cwd, &p.task_id) {
+        (Some(cwd), _) => Some(cwd.clone()),
+        (None, Some(task)) => store::project_cwd_of_task(conn, task),
+        (None, None) => None,
+    }
+}
+
+/// Qué se le contesta a una tab en modo HTML que pide permiso.
+///
+/// El mismo circuito que [`resolve`] —reglas de la carpeta primero, una persona después—
+/// pero sin el registro de auditoría: `task_approvals` es de las tareas de la flota, y una
+/// tab no tiene fila ahí. En una tab la persona ya está mirando la conversación.
+pub fn resolve_for_tab(
+    db: &DbConnection,
+    tab_id: &str,
+    cwd: &str,
+    tool_name: &str,
+    input: serde_json::Value,
+    tool_use_id: Option<String>,
+    timeout: Duration,
+) -> Verdict {
+    let rules: Vec<PermissionRule> = match db.lock() {
+        Ok(conn) => store::list_rules(&conn, cwd)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| PermissionRule { pattern: r.pattern, allow: r.allow })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    let decision = if is_question(tool_name) { Decision::Ask } else { rules::decide(&rules, tool_name, &input) };
+    match decision {
+        Decision::Allow => Verdict { allow: true, reason: None, by: DecidedBy::Rule, updated_input: None },
+        Decision::Deny => Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule, updated_input: None },
+        Decision::Ask => {
+            let owner = Owner::Tab { tab_id: tab_id.to_string(), cwd: cwd.to_string() };
+            ask_as(&Uuid::new_v4().to_string(), &owner, tool_name, input, tool_use_id, timeout)
+        }
+    }
 }
 
 /// El input con las rutas del worktree traducidas a las del proyecto. Sin worktree, igual.

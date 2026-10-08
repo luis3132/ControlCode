@@ -122,6 +122,8 @@ pub fn run() {
             crate::forge::forge_remove_account,
             crate::forge::forge_repos,
             crate::forge::forge_clone,
+            crate::forge::forge_owners,
+            crate::forge::forge_create_repo,
             crate::forge::forge_repo,
             crate::forge::forge_set_repo_account,
             crate::forge::forge_pulls,
@@ -169,6 +171,8 @@ pub fn run() {
             // Detección de agentes
             crate::agents::agent_registry,
             crate::agents::detect_agents,
+            crate::agents::agent_efforts,
+            crate::agents::agent_words,
             crate::agents::agent_search_path,
             // Agentes headless (consola de flota)
             crate::runs::run_list_tasks,
@@ -180,6 +184,7 @@ pub fn run() {
             crate::runs::run_discard_worktree,
             crate::runs::run_pending_approvals,
             crate::runs::run_decide_approval,
+            crate::runs::run_answer_question,
             crate::runs::run_list_rules,
             crate::runs::run_add_rule,
             crate::runs::run_delete_rule,
@@ -224,6 +229,13 @@ pub fn run() {
             crate::skills::restore_session_skills,
             crate::ipc::bridge::cli_respond,
             crate::ipc::mcp::tab_browser_mcp,
+            crate::chat::commands::chat_send,
+            crate::chat::commands::chat_stop,
+            crate::chat::commands::chat_running,
+            crate::chat::commands::chat_transcript,
+            crate::chat::commands::chat_defaults,
+            crate::chat::commands::chat_session_settings,
+            crate::chat::models::chat_models,
             crate::runs::run_start_orchestration,
             crate::runs::run_cancel_run,
             crate::runs::run_list_facts,
@@ -368,6 +380,7 @@ pub fn run() {
                 // que el `Drop` que limpia cada grupo hay que dispararlo a mano.
                 crate::terminal::kill_all_sessions();
                 crate::runs::kill_all_tasks();
+                crate::chat::kill_all();
             }
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 let windows = app_handle.webview_windows();

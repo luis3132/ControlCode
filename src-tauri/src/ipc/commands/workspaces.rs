@@ -43,7 +43,7 @@ pub(super) fn workspace_open(app: &AppHandle, args: &Value) -> Result<Value, Str
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?
-        .block_on(crate::window::open_workspace(app, id_for_task, close_current))?;
+        .block_on(crate::window::open_workspace(app, id_for_task, close_current, None))?;
 
     Ok(json!({ "workspaceId": id, "opened": true }))
 }

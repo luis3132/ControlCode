@@ -13,6 +13,7 @@ import {
 import { allGroups, type GroupNode, type LayoutNode, type SplitNode } from "@/features/tabs/layout/layoutTree";
 import { useTabsStore } from "@/features/tabs/store";
 import { openNewAgentWizard } from "@/features/tabs/tabActions";
+import { STRIP_BG } from "@/features/tabs/tabStyle";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
 
@@ -203,12 +204,11 @@ function GroupView({ group, focused, divided }: { group: GroupNode; focused: boo
       {divided && (
         <div
           data-tab-strip={group.id}
-          className="cc-scroll-x pointer-events-auto flex items-stretch h-10 shrink-0
-            bg-gray-100 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800"
+          className={`cc-scroll-x pointer-events-auto flex items-stretch h-9 shrink-0 pl-1 ${STRIP_BG}`}
         >
           <GroupTabStrip items={group.items} active={group.active} groupFocused={focused} draggable />
           <div className="flex-1" />
-          <div data-strip-actions className="sticky right-0 flex items-center gap-0.5 px-1.5 shrink-0 bg-gray-100 dark:bg-gray-900">
+          <div data-strip-actions className={`sticky right-0 flex items-center gap-0.5 px-1.5 shrink-0 ${STRIP_BG}`}>
             <GroupButton label={t("tabs.split.right")} onClick={() => splitGroup(group.id, "right", group.active)}>
               <SplitRightIcon className="w-3.5 h-3.5" />
             </GroupButton>

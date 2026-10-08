@@ -66,6 +66,9 @@ interface TerminalProps {
   openedAt?: number;
   /** Session id ya conocido de la tab. Si viene, no hace falta salir a descubrirlo. */
   knownSessionId?: string;
+  /** La esquina de arriba a la derecha la ocupa el botón de modo (ver `ModeToggle`): el
+   *  aviso de estado va más abajo. */
+  cornerTaken?: boolean;
   /** Variables de entorno extra para ESTE proceso, además de las que declare la TUI custom. */
   env?: Record<string, string> | null;
   /** Cuenta (perfil) de la TUI con la que correr. Sus variables se resuelven acá adentro,
@@ -102,6 +105,7 @@ export function Terminal({
   isVisible = isActive,
   openedAt,
   knownSessionId,
+  cornerTaken = false,
   env,
   accountId,
   prelaunch,
@@ -654,7 +658,7 @@ export function Terminal({
       }}
     >
       {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={menuItems()} />}
-      <StatusBadge status={status} isDark={isDark} />
+      <StatusBadge status={status} isDark={isDark} lowered={cornerTaken} />
 
       {/* El margen alrededor del texto, en un envoltorio propio y NO en el contenedor de
           xterm: fit() mide ese contenedor incluyendo su padding, y con el padding ahí

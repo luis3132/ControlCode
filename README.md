@@ -44,6 +44,17 @@ The **+** opens a step-by-step wizard for that folder: agent → account → ski
 
 Anything else you use can be registered as a first-class agent — see *Bring your own tool* below.
 
+### 💬 HTML mode for Claude Code
+
+A Claude Code tab can drop the TUI: the **HTML mode** button in its top-right corner turns it into a chat drawn by the app, on the same conversation, and **Console** takes it back to the terminal with `--resume`. Whatever was running is stopped first, so two processes never write the same session.
+
+- **The whole conversation**, history included: markdown, reasoning, every tool as a card with its output, edits as diffs, the todo list as a checklist, subagents nested under their task, compactions and the cost of each turn.
+- **Permissions inline**, next to the tool that asks, with *remember for this folder* — the same rules as the fleet.
+- **The `/` commands as components**: model, permission mode (ask, accept edits, plan, don't ask), compact and new conversation, plus a `/` menu with the agent's skills and commands. The ones that only exist in the TUI say so.
+- **Enter sends, Shift+Enter breaks the line.** What you send while it works is queued; Stop (or Esc) ends the turn. Paste images, attach files as `@mentions`; dropped files, browser elements and git items land in the input.
+
+Each message is one `claude -p --resume` turn with stream-json, no hidden protocol: the model and the mode apply from the next message on.
+
 ### ⌨️ A terminal that behaves like one
 
 - **Kitty keyboard protocol.** TUIs that ask for it can tell Shift+Enter from Enter, Ctrl+I from Tab and Escape from Alt. Accents with dead keys and AltGr characters still type as text, and Tab / Shift+Tab never leave the terminal.
@@ -377,7 +388,7 @@ Background agents, each in its own git worktree, shown in the fleet console. Wit
 | `--json-args '{...}'` | Pass raw arguments as JSON |
 | `--version` / `--help` | Version / usage |
 
-`ccode mcp` also exists, but it isn't for you: it's the `controlcode` MCP server the app attaches to its agents. With `--cwd <folder> [--tab <id>]` it gives an interactive tab its tools (the project browser, fleet orchestration, your git account, subprocesses, asking you a question) — Claude Code, Codex, OpenCode and Gemini CLI each receive it in their own format; Kimi Code can't receive one per launch; with `--task <id>` it's also the permission server a background agent asks before using a tool. It speaks JSON-RPC on stdin/stdout instead of printing one JSON line.
+`ccode mcp` also exists, but it isn't for you: it's the `controlcode` MCP server the app attaches to its agents. With `--cwd <folder> [--tab <id>]` it gives an interactive tab its tools (the project browser, fleet orchestration, your git account, subprocesses, asking you a question) — Claude Code, Codex, OpenCode and Gemini CLI each receive it in their own format; Kimi Code can't receive one per launch; with `--task <id>` it's also the permission server a background agent asks before using a tool, and `--tab <id> --approvals` makes it the one a tab in HTML mode asks. It speaks JSON-RPC on stdin/stdout instead of printing one JSON line.
 
 ### Exit codes
 

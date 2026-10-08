@@ -121,6 +121,10 @@ export const listApprovals = () => invoke<PendingApproval[]>("run_pending_approv
  * Contesta un permiso. Con `remember`, además deja escrita su regla exacta para la carpeta.
  * `false` = el pedido ya no existe (venció, se canceló la tarea o ya estaba resuelto).
  */
+/** Contesta una pregunta del agente (`AskUserQuestion`): pregunta → respuesta. */
+export const answerQuestion = (approvalId: string, answers: Record<string, string>) =>
+  invoke<boolean>("run_answer_question", { approvalId, answers });
+
 export const decideApproval = (approvalId: string, allow: boolean, remember: boolean) =>
   invoke<boolean>("run_decide_approval", { approvalId, allow, remember });
 

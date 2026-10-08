@@ -138,3 +138,56 @@ fn cada_tui_dice_como_recibe_el_mcp_y_como_nombra_sus_tools() {
     let front = crate::agents::agent_registry();
     assert_eq!(front.iter().find(|a| a.id == "opencode").expect("falta opencode").mcp, McpStyle::OpencodeConfig);
 }
+
+
+/// Los niveles de esfuerzo salen del `--help` de la TUI instalada, no de una lista escrita
+/// en el código. El texto es el de `claude --help` de la 2.1.293, con el envoltorio de
+/// línea que mete la CLI justo en el medio de la lista.
+#[test]
+fn los_esfuerzos_se_leen_del_help() {
+    let help = "  --debug [filter]                      Enable debug mode\n  --effort <level>                      Effort level for the current session\n\
+                                        (low, medium, high, xhigh, max)\n  --environment <environment_id>        Create a new cloud session\n";
+    assert_eq!(super::parse_effort_levels(help), ["low", "medium", "high", "xhigh", "max"]);
+
+    // Una TUI que no habla de esfuerzo no ofrece el control, en vez de inventarle niveles.
+    assert!(super::parse_effort_levels("  --model <model>  Model for the session\n").is_empty());
+    assert!(super::parse_effort_levels("  --effort <level>  sin lista\n").is_empty());
+}
+
+
+/// Las palabras del "trabajando" se leen de la tira larga que trae el binario de la TUI, no
+/// de una lista escrita acá. El buffer imita cómo quedan en el bundle: la palabra, unos
+/// bytes de cabecera, la siguiente.
+#[test]
+fn las_palabras_salen_de_una_tira_larga() {
+    const LISTA: [&str; 21] = [
+        "Accomplishing", "Actioning", "Baking", "Beaming", "Booping", "Brewing", "Churning",
+        "Conjuring", "Dancing", "Doodling", "Effecting", "Fermenting", "Frolicking", "Galloping",
+        "Herding", "Hyperspacing", "Ideating", "Julienning", "Kneading", "Levitating", "Manifesting",
+    ];
+    /// La tira tal como la deja el bundle: cabecera corta y palabra, una detrás de otra.
+    fn tira(words: &[&str]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for w in words {
+            out.extend_from_slice(&[0x0c, 0, 0, 0x80, 0x11, 0x22, 0x33, 0]);
+            out.extend_from_slice(w.as_bytes());
+        }
+        out
+    }
+
+    let mut buf: Vec<u8> = b"ruido suelto Loading y mas de dieciseis bytes de distancia".to_vec();
+    buf.extend_from_slice(&tira(&LISTA));
+    buf.extend_from_slice(b"\0\0 y despues, bien lejos de la tira, otra cosa Compiling");
+
+    assert_eq!(super::scan_words(&buf[..]), LISTA, "la tira entera, en orden y sin lo de alrededor");
+
+    // Una palabra suelta no es una lista: sin tira larga no se devuelve nada, y la UI se
+    // queda con su texto de siempre.
+    assert!(super::scan_words(&b"Loading... Processing... Thinking..."[..]).is_empty());
+
+    // Lo que SÍ puede pasar, y se acepta: una palabra pegada a la tira entra con ella. Es
+    // una de más en un sorteo de doscientas, no vale pagarlo con un parser frágil.
+    let mut pegada = tira(&["Rebooting"]);
+    pegada.extend_from_slice(&tira(&LISTA));
+    assert_eq!(super::scan_words(&pegada[..]).first().map(String::as_str), Some("Rebooting"));
+}

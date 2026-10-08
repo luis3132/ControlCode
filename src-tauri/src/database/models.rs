@@ -29,6 +29,11 @@ pub struct WorkspaceSummary {
     pub last_active: i64,
     pub window_count: i64,
     pub tab_count: i64,
+    /// Ventanas marcadas abiertas. Inicio lo usa para ofrecer "ir a la ventana" en vez de
+    /// abrirlo otra vez; quien abre igual confirma contra las ventanas nativas vivas.
+    pub open_window_count: i64,
+    /// Las carpetas de sus tabs, sin repetir, en el orden en que se abrieron.
+    pub folders: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -70,6 +75,8 @@ pub struct TabRow {
     pub opened_at: i64,
     pub created_at: i64,
     pub last_active: i64,
+    /// `terminal` (la TUI) o `html` (el chat de la app). Ver `chat`.
+    pub mode: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -90,6 +97,20 @@ pub struct TabStatePayload {
     #[serde(default)]
     pub prelaunch: Vec<crate::prelaunch::PrelaunchStep>,
     pub opened_at: i64,
+    /// `terminal` o `html`. Sin el campo (un frontend viejo), la terminal de siempre.
+    #[serde(default = "default_tab_mode")]
+    pub mode: String,
+}
+
+fn default_tab_mode() -> String {
+    TAB_MODE_TERMINAL.into()
+}
+
+pub const TAB_MODE_TERMINAL: &str = "terminal";
+
+/// Un modo que la app sepa dibujar; cualquier otra cosa es la terminal.
+pub fn tab_mode(mode: &str) -> &'static str {
+    if mode == "html" { "html" } else { TAB_MODE_TERMINAL }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -213,5 +234,6 @@ pub(super) fn row_to_tab(row: &rusqlite::Row) -> rusqlite::Result<TabRow> {
         opened_at: row.get(14)?,
         created_at: row.get(15)?,
         last_active: row.get(16)?,
+        mode: tab_mode(&row.get::<_, String>(17)?).to_string(),
     })
 }

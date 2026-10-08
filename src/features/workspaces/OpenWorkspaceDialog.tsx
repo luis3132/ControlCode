@@ -17,10 +17,10 @@ export function OpenWorkspaceDialog({ workspace, onClose }: OpenWorkspaceDialogP
   const openWorkspace = useWorkspacesStore((s) => s.openWorkspace);
   const [busy, setBusy] = useState(false);
 
-  const handleOpen = async (closeCurrent: boolean) => {
+  const handleOpen = async (where: "here" | "new") => {
     setBusy(true);
     try {
-      await openWorkspace(workspace.id, closeCurrent);
+      await openWorkspace(workspace.id, where);
       onClose();
     } finally {
       setBusy(false);
@@ -36,11 +36,11 @@ export function OpenWorkspaceDialog({ workspace, onClose }: OpenWorkspaceDialogP
       closeOnEsc
       footer={
         <>
-          <Button variant="outline" disabled={busy} onClick={() => handleOpen(false)}>
-            {t("workspace.open.keepCurrent")}
+          <Button variant="outline" disabled={busy} onClick={() => handleOpen("new")}>
+            {t("workspace.open.newWindow")}
           </Button>
-          <Button variant="primary" disabled={busy} onClick={() => handleOpen(true)}>
-            {t("workspace.open.closeCurrent")}
+          <Button variant="primary" disabled={busy} onClick={() => handleOpen("here")}>
+            {t("workspace.open.here")}
           </Button>
         </>
       }

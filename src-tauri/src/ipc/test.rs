@@ -588,6 +588,51 @@ fn las_tools_que_lanzan_agentes_no_se_permiten_con_las_de_lectura() {
     }
 }
 
+/// Una tab en modo HTML no tiene TUI que pregunte: ve el puente de permisos, y lo que
+/// manda lleva su tab, su carpeta y el id de la herramienta.
+#[test]
+fn una_tab_en_modo_html_ve_el_broker_y_pregunta_con_su_carpeta() {
+    let chat = McpContext::Chat { cwd: "/p".into(), tab: "tab-4".into() };
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let (tools, _) = mcp_session(&chat, &[list], |_, _| Ok(json!({})));
+    assert_eq!(tool_names(&tools[0])[0], "approve_tool_use");
+
+    let ask = call(2, "approve_tool_use", json!({ "tool_name": "Edit", "input": { "file_path": "/p/a" }, "tool_use_id": "toolu_1" }));
+    let (out, sent) = mcp_session(&chat, &[ask], |_, _| Ok(json!({ "allow": true })));
+    assert_eq!(sent[0].0, "run.approve");
+    assert_eq!(sent[0].1["tabId"], "tab-4");
+    assert_eq!(sent[0].1["cwd"], "/p");
+    assert_eq!(sent[0].1["toolUseId"], "toolu_1");
+    assert!(sent[0].1.get("taskId").is_none());
+    let text = out[0]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("\"behavior\":\"allow\""), "{text}");
+
+    // Una tab de consola no puede llamarla aunque sepa el nombre.
+    let ask = call(3, "approve_tool_use", json!({ "tool_name": "Edit", "input": {} }));
+    let (out, sent) = mcp_session(&McpContext::Cwd { cwd: "/p".into(), tab: Some("tab-4".into()) }, &[ask], |_, _| Ok(json!({ "allow": true })));
+    assert!(sent.is_empty());
+    assert_eq!(out[0]["result"]["isError"], true);
+}
+
+/// Lo que la app devuelve como `updatedInput` (las respuestas de una pregunta) es lo que
+/// recibe el agente; sin eso, el input tal cual lo pidió.
+#[test]
+fn el_input_aprobado_es_el_que_manda_la_app_si_manda_uno() {
+    let chat = McpContext::Chat { cwd: "/p".into(), tab: "tab-4".into() };
+    let ask = call(2, "approve_tool_use", json!({ "tool_name": "AskUserQuestion", "input": { "questions": [] } }));
+    let (out, _) = mcp_session(&chat, std::slice::from_ref(&ask), |_, _| {
+        Ok(json!({ "allow": true, "updatedInput": { "questions": [], "answers": { "q": "a" } } }))
+    });
+    let text = out[0]["result"]["content"][0]["text"].as_str().unwrap();
+    let body: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(body["updatedInput"]["answers"]["q"], "a");
+
+    let (out, _) = mcp_session(&chat, &[ask], |_, _| Ok(json!({ "allow": true, "updatedInput": null })));
+    let text = out[0]["result"]["content"][0]["text"].as_str().unwrap();
+    let body: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(body["updatedInput"], json!({ "questions": [] }));
+}
+
 /// Una tool de orquestación viaja con quién la pide y sus argumentos tal cual: la app
 /// decide sobre qué run actúa, no el agente.
 #[test]

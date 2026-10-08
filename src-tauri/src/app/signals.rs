@@ -65,6 +65,7 @@ pub(super) fn cleanup_on_signals() {
 
         crate::terminal::kill_all_sessions();
         crate::runs::kill_all_tasks();
+        crate::chat::kill_all();
         crate::ipc::cleanup();
         // Código de salida convencional para una muerte por señal, para que quien mandó el
         // kill vea lo que espera.

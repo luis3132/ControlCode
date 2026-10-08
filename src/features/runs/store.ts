@@ -39,6 +39,8 @@ interface RunsState {
   setApprovals: (approvals: PendingApproval[]) => void;
   loadApprovals: () => Promise<void>;
   decideApproval: (approvalId: string, allow: boolean, remember: boolean) => Promise<void>;
+  /** Contesta una pregunta del agente (`AskUserQuestion`). */
+  answerQuestion: (approvalId: string, answers: Record<string, string>) => Promise<void>;
 }
 
 /** La línea que se muestra para un evento. `null` = no aporta nada a la tarjeta. */
@@ -131,6 +133,11 @@ export const useRunsStore = create<RunsState>((set) => ({
     // viaje deja el botón apretado mostrando algo que ya se decidió.
     set((s) => ({ approvals: s.approvals.filter((a) => a.id !== approvalId) }));
     await ipc.decideApproval(approvalId, allow, remember);
+  },
+
+  answerQuestion: async (approvalId, answers) => {
+    set((s) => ({ approvals: s.approvals.filter((a) => a.id !== approvalId) }));
+    await ipc.answerQuestion(approvalId, answers);
   },
 
   refreshTask: async (workspaceId, taskId) => {

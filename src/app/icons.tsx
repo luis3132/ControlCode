@@ -364,3 +364,13 @@ export function ProcessIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Avisos: la campana. */
+export function BellIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z" />
+      <path d="M10 21h4" />
+    </svg>
+  );
+}

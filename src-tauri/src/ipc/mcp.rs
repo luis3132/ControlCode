@@ -52,6 +52,10 @@ pub enum McpContext {
     /// Una tab interactiva, en esta carpeta. `tab` es cuál, cuando la terminal lo supo al
     /// lanzarla: es lo que deja que cada agente tenga SU navegador, pintado de su color.
     Cwd { cwd: String, tab: Option<String> },
+    /// Una tab en modo HTML: como `Cwd` con su tab, más el puente de permisos. Ahí no hay
+    /// TUI que pregunte en pantalla, así que cada permiso pasa por `approve_tool_use` y lo
+    /// contesta la tarjeta del chat.
+    Chat { cwd: String, tab: String },
 }
 
 impl McpContext {
@@ -62,7 +66,9 @@ impl McpContext {
             // Sin `tabId` cuando no se sabe cuál es, y no `null`: la app distingue "esta
             // tab" de "el navegador que haya", y un null los confundiría.
             McpContext::Cwd { cwd, tab: None } => json!({ "cwd": cwd }),
-            McpContext::Cwd { cwd, tab: Some(tab) } => json!({ "cwd": cwd, "tabId": tab }),
+            McpContext::Cwd { cwd, tab: Some(tab) } | McpContext::Chat { cwd, tab } => {
+                json!({ "cwd": cwd, "tabId": tab })
+            }
         }
     }
 }
@@ -803,8 +809,8 @@ fn call_tool<F>(context: &McpContext, name: &str, args: Value, send: &mut F) -> 
 where
     F: FnMut(&str, Value) -> Result<Value, String>,
 {
-    if let (McpContext::Task(task_id), TOOL_NAME) = (context, name) {
-        approve(task_id, &args, send)
+    if name == TOOL_NAME && matches!(context, McpContext::Task(_) | McpContext::Chat { .. }) {
+        approve(context, &args, send)
     } else if let Some(tool) = BROWSER_TOOLS.iter().find(|t| t.name == name) {
         browser(context, tool, args, send)
     } else if let Some(tool) = ORCHESTRATION_TOOLS.iter().find(|t| t.name == name) {
@@ -993,7 +999,7 @@ fn ok(id: Value, result: Value) -> Value {
 
 fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
     let mut tools = Vec::new();
-    if matches!(context, McpContext::Task(_)) {
+    if matches!(context, McpContext::Task(_) | McpContext::Chat { .. }) {
         tools.push(approve_schema());
     }
     let schema = |name: &str, description: &str, properties: Value, required: &[&str]| {
@@ -1127,6 +1133,7 @@ fn approve_schema() -> Value {
             "properties": {
                 "tool_name": { "type": "string" },
                 "input": { "type": "object" },
+                "tool_use_id": { "type": "string" },
             },
             "required": ["tool_name", "input"],
         },
@@ -1156,28 +1163,35 @@ where
 }
 
 /// Pregunta a la app y arma el bloque que el agente espera.
-fn approve<F>(task_id: &str, args: &Value, send: &mut F) -> Value
+fn approve<F>(context: &McpContext, args: &Value, send: &mut F) -> Value
 where
     F: FnMut(&str, Value) -> Result<Value, String>,
 {
     let tool_name = args.get("tool_name").and_then(Value::as_str).unwrap_or("");
     let input = args.get("input").cloned().unwrap_or(json!({}));
 
-    let payload = json!({
-        "taskId": task_id,
-        "toolName": tool_name,
-        "input": input,
-        "timeout": APPROVAL_TIMEOUT_SECS,
-    });
+    // Quién pregunta (la tarea, o la tab y su carpeta) más el pedido. El `tool_use_id` es
+    // lo que deja al chat de una tab poner la tarjeta junto a la herramienta que la pidió.
+    let mut payload = context.scope();
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("toolName".into(), json!(tool_name));
+        object.insert("input".into(), input.clone());
+        object.insert("timeout".into(), json!(APPROVAL_TIMEOUT_SECS));
+        if let Some(id) = args.get("tool_use_id").and_then(Value::as_str) {
+            object.insert("toolUseId".into(), json!(id));
+        }
+    }
 
     match send("run.approve", payload) {
         Ok(data) => {
             let allow = data.get("allow").and_then(Value::as_bool).unwrap_or(false);
             if allow {
-                // `updatedInput` va sin tocar: el broker todavía no edita lo que el agente
-                // pidió, y devolver algo distinto de lo que se aprobó sería aprobar una
-                // cosa y ejecutar otra.
-                content(json!({ "behavior": "allow", "updatedInput": input }))
+                // `updatedInput` va sin tocar, salvo que la app mande otro: el de una
+                // pregunta (`AskUserQuestion`) lleva adentro las respuestas de la persona,
+                // que es como la herramienta las recibe. Fuera de eso, devolver algo
+                // distinto de lo que se aprobó sería aprobar una cosa y ejecutar otra.
+                let updated = data.get("updatedInput").filter(|v| v.is_object()).cloned().unwrap_or(input);
+                content(json!({ "behavior": "allow", "updatedInput": updated }))
             } else {
                 let reason = data
                     .get("reason")
@@ -1429,6 +1443,8 @@ pub(crate) fn sweep_configs_in(dir: &std::path::Path, conn: &rusqlite::Connectio
         let Some(stem) = name.strip_suffix(".json").or_else(|| name.strip_suffix(".toml")) else { continue };
         // Los de Gemini son dos por tab: `tab-<id>.gemini.json` y `.toml`.
         let stem = stem.strip_suffix(".gemini").unwrap_or(stem);
+        // El de una tab en modo HTML: `tab-<id>.chat.json`.
+        let stem = stem.strip_suffix(".chat").unwrap_or(stem);
         // La carpeta la escribe solo la app: un archivo sin tab ni tarea viva no lo apunta
         // nadie. Los de una tarea llevan su id pelado, que es como los escribe el supervisor.
         let keep = match stem.strip_prefix("tab-") {
@@ -1474,6 +1490,18 @@ pub struct TabMcp {
 fn tab_config_name(tab_id: &str) -> String {
     let safe: String = tab_id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(64).collect();
     format!("tab-{safe}")
+}
+
+/// El `--mcp-config` de una tab en modo HTML (`tab-<id>.chat.json`) y lo que se aprueba solo.
+///
+/// Es el de la tab con `--approvals`: el mismo navegador y las mismas tools, más el puente
+/// de permisos, que en la consola no hace falta porque pregunta la TUI. `None` si no hay
+/// `ccode` al lado de la app.
+pub fn chat_mcp(app: &tauri::AppHandle, cwd: &str, tab_id: &str) -> Option<(std::path::PathBuf, Vec<String>)> {
+    let args = ["mcp", "--cwd", cwd, "--tab", tab_id, "--approvals"];
+    let path = write_config(app, &format!("{}.chat", tab_config_name(tab_id)), &args)?;
+    let allowed = tab_tools().filter(|(_, auto)| *auto).map(|(name, _)| orchestration_tool_name(name)).collect();
+    Some((path, allowed))
 }
 
 #[tauri::command]

@@ -58,6 +58,11 @@ pub fn default_workspace_has_content(db: tauri::State<DbConnection>) -> Result<b
 #[tauri::command]
 pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<WorkspaceSummary>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
+    list_workspaces(&conn)
+}
+
+/// Los workspaces guardados (todos menos `default`), el más usado primero.
+pub fn list_workspaces(conn: &rusqlite::Connection) -> Result<Vec<WorkspaceSummary>, String> {
     let mut stmt = conn
         .prepare(
             // Sin filtro de is_open: esto es "lo guardado", no "lo abierto ahora mismo" —
@@ -65,7 +70,8 @@ pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<Workspac
             // tabs/cwd/scrollback persistidos, y debe seguir mostrando esos conteos.
             "SELECT w.id, w.name, w.last_active,
                     COUNT(DISTINCT win.id) AS window_count,
-                    COUNT(t.id) AS tab_count
+                    COUNT(t.id) AS tab_count,
+                    COUNT(DISTINCT CASE WHEN win.is_open = 1 THEN win.id END) AS open_window_count
              FROM workspaces w
              LEFT JOIN windows win ON win.workspace_id = w.id
              LEFT JOIN tabs t ON t.window_id = win.id
@@ -83,11 +89,31 @@ pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<Workspac
                 last_active: row.get(2)?,
                 window_count: row.get(3)?,
                 tab_count: row.get(4)?,
+                open_window_count: row.get(5)?,
+                folders: Vec::new(),
             })
         })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Vec<_>>();
+
+    // Aparte y no con `group_concat`: una ruta puede tener cualquier separador adentro.
+    let mut folders = conn
+        .prepare(
+            "SELECT t.cwd FROM tabs t JOIN windows win ON win.id = t.window_id
+             WHERE win.workspace_id = ?1
+             GROUP BY t.cwd
+             ORDER BY MIN(t.opened_at)",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut workspaces = workspaces;
+    for ws in &mut workspaces {
+        ws.folders = folders
+            .query_map([&ws.id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+    }
 
     Ok(workspaces)
 }

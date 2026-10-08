@@ -141,6 +141,7 @@ pub async fn open_workspace(
     app: tauri::AppHandle,
     workspace_id: String,
     close_current: bool,
+    close_label: Option<String>,
 ) -> Result<(), String> {
     let db = app.state::<DbConnection>();
 
@@ -169,7 +170,11 @@ pub async fn open_workspace(
     database::touch_workspace_now(&db, &workspace_id)?;
     let rows = database::db_get_all_workspace_windows(&workspace_id, &db)?;
 
-    let previously_open: Vec<String> = if close_current {
+    // "Abrir acá" (Inicio) cierra solo la ventana desde la que se pidió; `close_current`
+    // (la CLI) cierra todas las que había.
+    let previously_open: Vec<String> = if let Some(label) = close_label {
+        vec![label]
+    } else if close_current {
         app.webview_windows().into_keys().collect()
     } else {
         Vec::new()
@@ -202,17 +207,22 @@ pub async fn open_workspace(
 /// reseteado. Si el usuario quiere conservar lo que había, primero debe usar
 /// "Guardar workspace" (que mueve esas ventanas a un workspace con id propio antes
 /// de que esto las descarte).
+///
+/// La ventana nueva se crea ANTES de cerrar las viejas. Al revés, si la vieja terminaba de
+/// destruirse antes de que la nueva existiera, la app se quedaba un instante sin ventanas,
+/// Tauri pedía salir y `ExitRequested` (que solo frena con alguna ventana viva) la dejaba
+/// cerrarse. Con dos clicks seguidos en "Nuevo workspace" pasaba casi siempre.
 #[tauri::command]
 pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String> {
+    // Un segundo pedido mientras el primero sigue no es "otro workspace nuevo": es el mismo
+    // click repetido. Se ignora, en vez de cerrar a medio crear la ventana del primero.
+    let Some(_busy) = ResetGuard::take() else {
+        return Ok(());
+    };
     let default_id = database::DEFAULT_WORKSPACE_ID;
 
     let open_rows =
         database::db_get_workspace_windows(default_id.to_string(), app.state::<DbConnection>())?;
-    for w in &open_rows {
-        if let Some(win) = app.get_webview_window(&w.label) {
-            let _ = super::close_guard::close_now(&win);
-        }
-    }
 
     let db = app.state::<DbConnection>();
     database::delete_workspace_windows(&db, default_id)?;
@@ -228,8 +238,35 @@ pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String
         .build()
         .map_err(|e| e.to_string())?;
 
+    for w in open_rows.iter().filter(|w| w.label != label) {
+        if let Some(win) = app.get_webview_window(&w.label) {
+            let _ = super::close_guard::close_now(&win);
+        }
+    }
+
     let _ = app.emit("cc-workspace-changed", ());
     Ok(())
+}
+
+/// Hay un `reset_default_workspace` en curso. Se suelta solo al terminar, salga bien o mal.
+static RESETTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+struct ResetGuard;
+
+impl ResetGuard {
+    fn take() -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        RESETTING
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| ResetGuard)
+    }
+}
+
+impl Drop for ResetGuard {
+    fn drop(&mut self) {
+        RESETTING.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// Cierra la app entera ignorando el guardián de `ExitRequested` (llamado tras
@@ -289,22 +326,16 @@ pub fn focus_window(app: tauri::AppHandle, label: String) -> Result<(), String> 
     Ok(())
 }
 
-/// Abre una nueva ventana nativa de Tauri.
+/// "Nueva ventana": una ventana en blanco más en el workspace dado, con su fila, así su
+/// autosave la guarda ahí y "Guardar workspace" o abrirlo después la incluyen.
+///
+/// `spawn_blank_window` avisa `cc-workspace-changed`: las ventanas que ya estaban se
+/// enteran de que el workspace tiene una más, y su botón de cerrar empieza a ofrecer
+/// "cerrar todo el workspace" sin esperar a un refresco.
 #[tauri::command]
-pub async fn open_new_window(app: tauri::AppHandle, label: String) -> Result<(), String> {
-    tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App("/".into()))
-        .title(&label)
-        .inner_size(900.0, 650.0)
-        .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
-        .decorations(false)
-        .transparent(true)
-        .build()
-        .map_err(|e| e.to_string())?;
-    // Las ventanas que ya estaban abiertas tienen que enterarse de que el workspace pasó a
-    // tener una ventana más: es lo que hace que su botón de cerrar empiece a ofrecer
-    // "cerrar todo el workspace" sin esperar a un refresco posterior.
-    let _ = app.emit("cc-workspace-changed", ());
-    Ok(())
+pub async fn open_new_window(app: tauri::AppHandle, workspace_id: String) -> Result<(), String> {
+    let db = app.state::<DbConnection>();
+    spawn_blank_window(&app, &db, &workspace_id)
 }
 
 /// Emite un evento a todas las ventanas abiertas (estado compartido entre ventanas).
@@ -324,4 +355,17 @@ pub fn get_home_dir() -> Result<String, String> {
     dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .ok_or_else(|| "Cannot determine home directory".to_string())
+}
+
+#[cfg(test)]
+mod test {
+    use super::ResetGuard;
+
+    #[test]
+    fn un_segundo_reset_se_ignora_mientras_el_primero_sigue() {
+        let first = ResetGuard::take().expect("el primero arranca");
+        assert!(ResetGuard::take().is_none(), "el click repetido no arranca otro");
+        drop(first);
+        assert!(ResetGuard::take().is_some(), "terminado el primero, se puede volver a pedir");
+    }
 }

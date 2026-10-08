@@ -22,16 +22,18 @@ const DOT: Record<"connecting" | "exited", string> = {
  * todavía está arrancando (pantalla en negro) o que el proceso se murió (pantalla
  * congelada). Fuera de esos dos momentos, el espacio es de la TUI.
  */
-export function StatusBadge({ status, isDark }: {
+export function StatusBadge({ status, isDark, lowered = false }: {
   status: TerminalStatus;
   isDark: boolean;
+  /** Debajo del botón de modo, que ocupa la esquina. */
+  lowered?: boolean;
 }) {
   const { t } = useTranslation();
   if (status === "running") return null;
 
   return (
     <div
-      className={`absolute top-2 right-2 z-10 flex items-center gap-2 px-2 py-1 rounded-lg
+      className={`absolute ${lowered ? "top-10" : "top-2"} right-2 z-10 flex items-center gap-2 px-2 py-1 rounded-lg
         text-xs font-mono border
         ${isDark ? "bg-slate-900 border-slate-700" : "bg-white/90 border-gray-200 shadow-sm"}`}
     >

@@ -181,8 +181,8 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     // es estable y el attachment sobrevive hasta que la tab se cierra de verdad (arriba).
     for t in &state.tabs {
         conn.execute(
-            "INSERT INTO tabs (id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, account_id, prelaunch, opened_at, created_at, last_active)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
+            "INSERT INTO tabs (id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, account_id, prelaunch, opened_at, created_at, last_active, mode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16, ?17)
              ON CONFLICT(id) DO UPDATE SET
                window_id = excluded.window_id,
                title = excluded.title,
@@ -197,7 +197,8 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
                history_id = excluded.history_id,
                account_id = excluded.account_id,
                prelaunch = excluded.prelaunch,
-               last_active = excluded.last_active",
+               last_active = excluded.last_active,
+               mode = excluded.mode",
             rusqlite::params![
                 t.id,
                 window_id,
@@ -214,7 +215,8 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
                 t.account_id,
                 crate::prelaunch::steps_to_json(&t.prelaunch),
                 t.opened_at,
-                now
+                now,
+                crate::database::tab_mode(&t.mode),
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -251,7 +253,7 @@ pub fn db_load_window_state(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, account_id, prelaunch, opened_at, created_at, last_active
+            "SELECT id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, account_id, prelaunch, opened_at, created_at, last_active, mode
              FROM tabs WHERE window_id = ?1 ORDER BY tab_order ASC",
         )
         .map_err(|e| e.to_string())?;

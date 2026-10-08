@@ -35,3 +35,10 @@ export function buildResumeCommand(agentId: string, command: string, sessionId?:
   if (!args) return command;
   return `${command} ${args.split("{session}").join(sessionId)}`;
 }
+
+/** El comando con flags extra al final, citados si hace falta (lo parte `split_command` en
+ *  Rust, que entiende comillas simples y dobles). */
+export function withLaunchArgs(command: string, args?: string[]): string {
+  if (!args?.length) return command;
+  return [command, ...args.map((a) => (/[\s"']/.test(a) ? `"${a.replace(/"/g, "")}"` : a))].join(" ");
+}

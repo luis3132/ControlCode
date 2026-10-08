@@ -7,9 +7,11 @@
 mod custom;
 mod detector;
 mod registry;
+mod words;
 #[cfg(test)]
 mod test;
 
 pub use custom::*;
 pub use detector::*;
 pub use registry::*;
+pub use words::*;

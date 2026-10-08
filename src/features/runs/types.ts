@@ -105,7 +105,14 @@ export type TaskEventPayload = AgentEvent & { taskId: string };
 /** Un permiso que un agente está esperando que le contesten. */
 export interface PendingApproval {
   id: string;
-  taskId: string;
+  /** La tarea que pregunta. `null` = es de una tab en modo HTML. */
+  taskId: string | null;
+  /** La tab (modo HTML) que pregunta. `null` = es de una tarea de la flota. */
+  tabId: string | null;
+  /** La carpeta de la tab, donde "recordar" guarda la regla. */
+  cwd: string | null;
+  /** La llamada a la herramienta que lo pidió: el chat pone la tarjeta junto a ella. */
+  toolUseId: string | null;
   toolName: string;
   /** El `input` crudo de la herramienta. De acá sale el diff. */
   input: Record<string, unknown>;

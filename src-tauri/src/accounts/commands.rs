@@ -38,10 +38,19 @@ pub async fn account_capable_agents() -> Result<Vec<AccountCapableAgent>, String
     .map_err(|e| e.to_string())
 }
 
+/// Fuera del hilo principal: la piden la barra de estado, Sesiones y el wizard al montarse,
+/// y esperar el lock de la base desde ahí congelaba la interfaz.
 #[tauri::command]
-pub fn list_agent_accounts(db: tauri::State<DbConnection>) -> Result<Vec<AgentAccount>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    list_accounts(&conn)
+pub async fn list_agent_accounts(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<AgentAccount>, String> {
+    let db = (*db).clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        list_accounts(&conn)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Las cuentas creadas en la app, sobre una conexión ya tomada. Es lo que usa también el

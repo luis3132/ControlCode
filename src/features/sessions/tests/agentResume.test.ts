@@ -23,6 +23,10 @@ function registryFromRust(): AgentRegistryEntry[] {
   // Solo el cuerpo de la tabla: la struct de arriba también tiene campos `id`/`resume`
   // en sus doc-comments y confundiría al parseo.
   const table = registrySource.slice(registrySource.indexOf("pub const AGENTS"));
+  // Los alias de modelo salen de la MISMA tabla de Rust, por lo mismo: una lista copiada
+  // acá pasaría los tests estando desactualizada.
+  const claudeModels = [...registrySource.matchAll(/ModelAlias \{ id: "([^"]+)", label: "([^"]+)"/g)]
+    .map(([, id, label]) => ({ id: id!, label: label! }));
 
   return table
     .split("AgentDef {")
@@ -41,6 +45,7 @@ function registryFromRust(): AgentRegistryEntry[] {
         command,
         skillsDir,
         resume,
+        models: /\bmodels:\s*ModelSource::Aliases\(/.test(block) ? claudeModels : [],
         supportsAccounts: /\bprofile:\s*Some\(/.test(block),
         sessions: "",
         // `ClaudeFlags` en Rust sale como `claudeFlags` por el `rename_all` de serde.

@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { closePanel, fitPanels, openPanel, type PanelState, type Side } from "@/app/panels";
+
 /** Las secciones del panel derecho. */
 export type ExplorerView = "files" | "search" | "scm";
 
@@ -10,6 +12,9 @@ interface UiState {
   workspacesCollapsed: boolean;
   /** Panel derecho (explorador) plegado: queda su columna de iconos. */
   explorerCollapsed: boolean;
+  /** El último panel desplegado y el que plegó la app por falta de lugar (ver `panels`). */
+  lastOpened: Side;
+  autoCollapsed: Side | null;
   /** Qué sección del panel derecho se ve. */
   explorerView: ExplorerView;
   /** Columna de repositorios del marketplace plegada, para que las skills se lleven
@@ -56,11 +61,13 @@ function load(): Pick<UiState, "workspacesCollapsed" | "explorerCollapsed" | "ex
   return { workspacesCollapsed: false, explorerCollapsed: false, explorerView: "files", marketplaceReposCollapsed: false };
 }
 
+/** Lo que plegó la app por falta de lugar se guarda como abierto: es lo que la persona
+ *  eligió, y en el próximo arranque se vuelve a ajustar al ancho que haya. */
 function persist(state: UiState) {
   try {
     localStorage.setItem(KEY, JSON.stringify({
-      workspacesCollapsed: state.workspacesCollapsed,
-      explorerCollapsed: state.explorerCollapsed,
+      workspacesCollapsed: state.workspacesCollapsed && state.autoCollapsed !== "workspaces",
+      explorerCollapsed: state.explorerCollapsed && state.autoCollapsed !== "explorer",
       explorerView: state.explorerView,
       marketplaceReposCollapsed: state.marketplaceReposCollapsed,
     }));
@@ -69,21 +76,28 @@ function persist(state: UiState) {
   }
 }
 
+const width = () => window.innerWidth;
+
 export const useUiStore = create<UiState>((set, get) => ({
   ...load(),
+  lastOpened: "workspaces",
+  autoCollapsed: null,
   settingsOpen: false,
   accountsOpen: false,
 
   toggleWorkspaces: () => {
-    set({ workspacesCollapsed: !get().workspacesCollapsed });
+    const s = get();
+    set(s.workspacesCollapsed ? openPanel(s, "workspaces", width()) : closePanel(s, "workspaces"));
     persist(get());
   },
   toggleExplorer: () => {
-    set({ explorerCollapsed: !get().explorerCollapsed });
+    const s = get();
+    set(s.explorerCollapsed ? openPanel(s, "explorer", width()) : closePanel(s, "explorer"));
     persist(get());
   },
   openExplorer: (explorerView) => {
-    set({ explorerView, explorerCollapsed: false });
+    const s = get();
+    set({ explorerView, ...(s.explorerCollapsed ? openPanel(s, "explorer", width()) : {}) });
     persist(get());
   },
   toggleMarketplaceRepos: () => {
@@ -93,3 +107,17 @@ export const useUiStore = create<UiState>((set, get) => ({
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setAccountsOpen: (accountsOpen) => set({ accountsOpen }),
 }));
+
+/**
+ * Ajusta los paneles al ancho de la ventana ahora y cada vez que cambia. Devuelve cómo
+ * soltarlo. Arrancar con la ventana chica y los dos guardados como abiertos también cuenta.
+ */
+export function initPanelFit(): () => void {
+  const fit = () => {
+    const patch = fitPanels(useUiStore.getState() as PanelState, window.innerWidth);
+    if (Object.keys(patch).length > 0) useUiStore.setState(patch);
+  };
+  fit();
+  window.addEventListener("resize", fit);
+  return () => window.removeEventListener("resize", fit);
+}

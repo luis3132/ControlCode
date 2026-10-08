@@ -66,6 +66,56 @@
   --nui-scrim-dark: rgba(0, 0, 0, 0.65);
 }
 
+/* ── El globo de ayuda ─────────────────────────────────────────────────────
+   La librería lo pinta con `--nui-scrim`: LA MISMA variable del velo de los modales, que
+   es translúcida a propósito (45 %). Como velo está bien; como fondo de un globo de texto
+   de 11 px, no: se leía el botón de atrás a través de la etiqueta. Acá se le da fondo
+   propio y opaco en los dos temas. Va sin capa (`@layer`) para ganarle a la utilidad de
+   Tailwind que trae el componente. */
+[role="tooltip"] {
+  background-color: #111827;
+  color: #fff;
+  box-shadow:
+    0 8px 24px -10px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+
+/* ── El esfuerzo del modelo, en la barra de escribir ───────────────────────
+   Al elegir un esfuerzo, el marco del input late tres veces en el color de ese nivel y
+   después queda teñido. El latido es lo que hace notar el cambio (un borde que cambia de
+   color sin más pasa desapercibido), y que PARE es lo que lo hace tolerable: una barra
+   parpadeando para siempre al lado de lo que uno escribe es un distractor, no un dato.
+   `--cc-effort-glow` lo pone el componente según el nivel. */
+@keyframes cc-effort-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--cc-effort-glow, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px var(--cc-effort-glow, transparent);
+  }
+}
+
+.cc-effort-pulse {
+  /* El ritmo lo pone el componente según el nivel: lento abajo, apurado arriba. Un
+     esfuerzo alto cuesta más y tarda más, y el pulso lo dice sin texto. */
+  animation: cc-effort-pulse var(--cc-effort-beat, 620ms) ease-in-out 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-effort-pulse {
+    animation: none;
+  }
+}
+
+.dark [role="tooltip"] {
+  background-color: #1e242e;
+  color: #f3f4f6;
+  box-shadow:
+    0 12px 32px -12px rgba(0, 0, 0, 0.85),
+    0 0 0 1px rgba(255, 255, 255, 0.11);
+}
+
 /* ── Tipografía ────────────────────────────────────────────────────────────
    El stack nombra fuentes que EXISTEN en cada plataforma en vez de confiar en que
    `system-ui` caiga en algo bien hinteado: en Linux, `system-ui` resuelve a lo que diga

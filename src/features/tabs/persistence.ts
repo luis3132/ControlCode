@@ -152,6 +152,7 @@ async function saveNow(
       prelaunch: t.prelaunch ?? [],
       scrollback: await resolveScrollback(t.ptyId).finally(() => step({ kind: "terminal", title: t.title })),
       openedAt: t.openedAt,
+      mode: t.mode ?? "terminal",
     }))
   );
 

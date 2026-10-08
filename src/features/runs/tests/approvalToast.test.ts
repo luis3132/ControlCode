@@ -4,7 +4,7 @@ import { newApprovalIds } from "../ApprovalToast";
 import type { PendingApproval } from "../types";
 
 const approval = (id: string): PendingApproval =>
-  ({ id, taskId: "t", toolName: "Bash", input: {}, askedAt: 0, suggestedRule: null });
+  ({ id, taskId: "t", tabId: null, cwd: null, toolUseId: null, toolName: "Bash", input: {}, askedAt: 0, suggestedRule: null });
 
 describe("los pedidos de permiso nuevos", () => {
   it("son los que no estaban en la lista anterior", () => {

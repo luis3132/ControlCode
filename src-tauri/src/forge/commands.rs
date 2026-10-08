@@ -4,7 +4,8 @@ use serde::Serialize;
 use tauri::AppHandle;
 
 use super::api::{
-    normalize_state, Api, ForgeRepo, ForgeUser, Item, ItemDetail, Label, NewIssue, NewPull, NewRelease, Release,
+    normalize_state, valid_repo_name, Api, ForgeRepo, ForgeUser, Item, ItemDetail, Label, NewIssue, NewPull, NewRelease, Release,
+    RepoOwner,
 };
 use super::credentials::{api_for, blocking, git_env, git_env_for_url, target, RepoTarget};
 use super::oauth::{self, DeviceStart, Poll};
@@ -159,6 +160,78 @@ pub async fn forge_repos(app: AppHandle, account_id: String) -> Result<Vec<Forge
     let account = account(&app, &account_id)?;
     let token = super::credentials::token(&app, &account).await?;
     Api::new(account.kind, &account.host, &token)?.repos().await
+}
+
+/// Dónde puede crear repos una cuenta: ella misma y sus organizaciones o grupos.
+#[tauri::command]
+pub async fn forge_owners(app: AppHandle, account_id: String) -> Result<Vec<RepoOwner>, ForgeError> {
+    let account = account(&app, &account_id)?;
+    let token = super::credentials::token(&app, &account).await?;
+    Api::new(account.kind, &account.host, &token)?.owners().await
+}
+
+/// Crea en el host un repo para la carpeta `cwd` y la deja conectada y subida.
+///
+/// Sirve para las dos situaciones: una carpeta que todavía no es un repo (se inicializa y
+/// se hace el primer commit) y un repo local que todavía no tiene remoto. En los dos, el
+/// repo nuevo queda como `origin` por HTTPS —así se sube con la cuenta de la app y no con
+/// lo que tenga git— y la cuenta queda elegida para ese repo.
+#[tauri::command]
+pub async fn forge_create_repo(
+    app: AppHandle,
+    cwd: String,
+    account_id: String,
+    owner: Option<RepoOwner>,
+    name: String,
+    description: Option<String>,
+    private: bool,
+) -> Result<ForgeRepo, ForgeError> {
+    let name = name.trim().to_string();
+    if !valid_repo_name(&name) {
+        return Err(ForgeError::Api(format!(
+            "«{name}» no es un nombre de repositorio válido: letras, números, guiones, guiones bajos y puntos, sin empezar con punto ni guion"
+        )));
+    }
+    let account = account(&app, &account_id)?;
+    let token = super::credentials::token(&app, &account).await?;
+    let api = Api::new(account.kind, &account.host, &token)?;
+
+    // Primero lo local: si algo falla acá, no queda un repo vacío en la nube.
+    step(&app, &cwd, "local", None);
+    let local = cwd.clone();
+    let root = blocking(move || crate::scm::prepare_for_remote(&local, "Initial commit"))
+        .await?
+        .map_err(scm_to_forge)?;
+
+    step(&app, &cwd, "remote", None);
+    let repo = api.create_repo(owner.as_ref(), &name, description.as_deref().unwrap_or("").trim(), private).await?;
+    if repo.clone_url.is_empty() {
+        return Err(ForgeError::Api(format!("Se creó {} pero el host no devolvió su URL", repo.full_name)));
+    }
+
+    let (r, url) = (root.clone(), repo.clone_url.clone());
+    blocking(move || crate::scm::add_origin(&r, &url)).await?.map_err(scm_to_forge)?;
+    store::set_repo_choice(&db(&app)?.lock().unwrap(), &root, &account_id)?;
+    // Desde acá el repo YA existe: el diálogo lo muestra con su enlace mientras se sube,
+    // que en un proyecto grande puede tardar minutos.
+    step(&app, &cwd, "push", Some(&repo));
+    crate::scm::sync(&app, root, crate::scm::Sync::Push).await.map_err(|e| match scm_to_forge(e) {
+        // El repo ya existe y está conectado: lo que falló es solo subir, y se reintenta
+        // desde Cambios. Se dice así para que no lo vuelvan a crear.
+        ForgeError::Api(m) => ForgeError::Api(format!("Se creó {} y quedó como origin, pero no se pudo subir: {m}", repo.full_name)),
+        other => other,
+    })?;
+    Ok(repo)
+}
+
+/// En qué va la creación de un repo: `local` (preparar el repo y el primer commit),
+/// `remote` (crearlo en la cuenta), `push` (ya existe; se sube la rama). Sin esto el diálogo
+/// decía "Creando…" durante toda la subida, con el repo ya creado y sin forma de saberlo.
+pub const CREATE_STEP_EVENT: &str = "forge-create-step";
+
+fn step(app: &AppHandle, cwd: &str, step: &str, repo: Option<&ForgeRepo>) {
+    use tauri::Emitter;
+    let _ = app.emit(CREATE_STEP_EVENT, serde_json::json!({ "cwd": cwd, "step": step, "repo": repo }));
 }
 
 /// El nombre de carpeta que git le daría al clon: el último tramo de la URL, sin `.git`.

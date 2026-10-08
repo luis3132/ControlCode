@@ -25,6 +25,62 @@ pub struct ForgeUser {
     pub avatar_url: Option<String>,
 }
 
+/// Dónde se puede crear un repo con una cuenta: la cuenta misma, o una organización (un
+/// grupo en GitLab) donde puede crear.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoOwner {
+    /// El nombre que va en la ruta del repo (`owner/nombre`); en GitLab, la ruta completa
+    /// del grupo (`empresa/equipo`).
+    pub login: String,
+    /// `false` = la cuenta misma.
+    pub org: bool,
+    /// El id numérico del grupo: GitLab lo pide para crear adentro (`namespace_id`).
+    pub id: Option<u64>,
+}
+
+/// El nombre de un repo, como lo aceptan GitHub, GitLab y Gitea.
+pub fn valid_repo_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 100
+        && !name.starts_with(['.', '-'])
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// El pedido que crea un repo vacío (sin README: el primer commit lo pone la app, así no
+/// hay dos historias que mezclar): `(ruta, cuerpo)`, siempre un POST.
+pub(super) fn create_repo_request(
+    kind: ForgeKind,
+    owner: Option<&RepoOwner>,
+    name: &str,
+    description: &str,
+    private: bool,
+) -> (String, Value) {
+    let org = owner.filter(|o| o.org);
+    match kind {
+        ForgeKind::Gitlab => {
+            let mut body = json!({
+                "name": name,
+                "path": name,
+                "visibility": if private { "private" } else { "public" },
+                "description": description,
+            });
+            if let Some(id) = org.and_then(|o| o.id) {
+                body["namespace_id"] = json!(id);
+            }
+            ("/projects".to_string(), body)
+        }
+        // GitHub y Gitea: el mismo cuerpo; en una organización, su propio endpoint.
+        _ => {
+            let path = match org {
+                Some(o) => format!("/orgs/{}/repos", o.login),
+                None => "/user/repos".to_string(),
+            };
+            (path, json!({ "name": name, "private": private, "description": description, "auto_init": false }))
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ForgeRepo {
@@ -340,6 +396,19 @@ pub(super) fn label_from(v: &Value) -> Option<Label> {
         color: s(v, "/color").map(|c| c.trim_start_matches('#').to_string()).filter(|c| !c.is_empty()),
         description: s(v, "/description").filter(|d| !d.is_empty()),
     })
+}
+
+/// Una organización (o un grupo de GitLab) de la lista de `owners`.
+pub(super) fn owner_from(kind: ForgeKind, v: &Value) -> Option<RepoOwner> {
+    match kind {
+        ForgeKind::Gitlab => Some(RepoOwner { login: s(v, "/full_path")?, org: true, id: n(v, "/id") }),
+        // Gitea las da con `username` (y a veces solo `name`); GitHub con `login`.
+        _ => Some(RepoOwner {
+            login: s(v, "/login").or_else(|| s(v, "/username")).or_else(|| s(v, "/name"))?,
+            org: true,
+            id: n(v, "/id"),
+        }),
+    }
 }
 
 fn gl_project(repo: &str) -> String {
@@ -810,29 +879,40 @@ impl Api {
         }
     }
 
-    /// Crea un repo PRIVADO en la cuenta, vacío (sin README: el primer commit lo hace la
-    /// app, así no hay historia que mezclar).
+    /// Crea un repo PRIVADO en la cuenta, vacío. Es el de la sincronización.
     pub async fn create_private_repo(&self, name: &str, description: &str) -> Result<ForgeRepo, ForgeError> {
-        let v = match self.kind {
-            ForgeKind::Gitlab => {
-                self.call(
-                    Method::POST,
-                    "/projects",
-                    Some(json!({ "name": name, "path": name, "visibility": "private", "description": description })),
-                )
-                .await?
-            }
-            // GitHub y Gitea: el mismo endpoint y los mismos campos.
-            _ => {
-                self.call(
-                    Method::POST,
-                    "/user/repos",
-                    Some(json!({ "name": name, "private": true, "description": description, "auto_init": false })),
-                )
-                .await?
-            }
-        };
+        self.create_repo(None, name, description, true).await
+    }
+
+    /// Crea un repo vacío en la cuenta o en una de sus organizaciones (ver
+    /// [`create_repo_request`]).
+    pub async fn create_repo(
+        &self,
+        owner: Option<&RepoOwner>,
+        name: &str,
+        description: &str,
+        private: bool,
+    ) -> Result<ForgeRepo, ForgeError> {
+        let (path, body) = create_repo_request(self.kind, owner, name, description, private);
+        let v = self.call(Method::POST, &path, Some(body)).await?;
         Ok(self.repo_from(&v))
+    }
+
+    /// Dónde puede crear repos la cuenta: ella misma primero, y después sus organizaciones
+    /// (GitHub, Gitea) o los grupos donde es al menos Developer (GitLab).
+    pub async fn owners(&self) -> Result<Vec<RepoOwner>, ForgeError> {
+        let me = self.me().await?;
+        let mut out = vec![RepoOwner { login: me.login, org: false, id: None }];
+        let path = match self.kind {
+            ForgeKind::Gitlab => "/groups?min_access_level=30&per_page=100",
+            _ => "/user/orgs?per_page=100",
+        };
+        // Sin permiso para listar organizaciones (un token sin `read:org`) igual se puede
+        // crear en la cuenta: no es un error.
+        if let Ok(items) = self.get_list(path).await {
+            out.extend(items.iter().filter_map(|v| owner_from(self.kind, v)));
+        }
+        Ok(out)
     }
 
     /// El commit de la cabeza de un PR: sobre él corre el CI.

@@ -47,6 +47,8 @@ export function tokenPageUrl(kind: ForgeKind, host: string): string | null {
 export const TOKEN_SCOPES: Record<ForgeKind, string> = {
   github: "repo, read:org, workflow",
   gitlab: "api, read_user, write_repository",
-  gitea: "repository (read/write), issue (read/write), user (read)",
+  // `user` y `organization` en escritura: crear un repo va por `/user/repos` y
+  // `/orgs/{org}/repos`, que Gitea cuenta en esas categorías y no en `repository`.
+  gitea: "repository (read/write), issue (read/write), user (read/write), organization (read/write)",
   other: "",
 };

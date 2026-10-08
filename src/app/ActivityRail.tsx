@@ -1,12 +1,13 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button, Badge, BoxIcon, ClockIcon, CloudIcon, GearIcon, NetworkIcon, StackIcon, Tooltip, UserIcon } from "neogestify-ui-components";
+import { Button, AddIcon, Badge, BoxIcon, ClockIcon, CloudIcon, FolderIcon, GearIcon, NetworkIcon, Tooltip, UserIcon } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
 import { shortcutForPath } from "@/app/shortcuts";
 import { ProcessIcon, PullRequestIcon } from "@/app/icons";
 import { useRunsStore } from "@/features/runs/store";
 import { useRunningHere } from "@/features/processes/ProcessIndicator";
+import { openAddFolderWizard } from "@/features/tabs/tabActions";
 
 /** "Marketplace · Ctrl+M". El tooltip es donde alguien se entera del atajo. */
 function withShortcut(label: string, path: string | null): string {
@@ -75,8 +76,9 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const setAccountsOpen = useUiStore((s) => s.setAccountsOpen);
   const accountsOpen = useUiStore((s) => s.accountsOpen);
-  // Permisos que un agente de la flota está esperando: se ven desde cualquier pantalla.
-  const pendingApprovals = useRunsStore((s) => s.approvals.length);
+  // Permisos que un agente de la flota está esperando: se ven desde cualquier pantalla. Los
+  // de las tabs en modo HTML no: el globo lleva a la flota, y esos se contestan en su chat.
+  const pendingApprovals = useRunsStore((s) => s.approvals.filter((a) => a.taskId !== null).length);
   const runningProcs = useRunningHere();
 
   // `startsWith` y no `===`: si no, /marketplace/registries no ilumina Marketplace.
@@ -87,6 +89,21 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
       bg-gray-100 dark:bg-[#080b0f]
       border-r border-gray-200 dark:border-white/7">
 
+      {/* Plegado, el "+" de Carpetas queda escondido con el panel: baja acá, arriba de todo. */}
+      {collapsed && (
+        <>
+          <RailButton
+            label={t("folders.add")}
+            path={null}
+            active={false}
+            onClick={openAddFolderWizard}
+          >
+            <AddIcon className="w-[18px] h-[18px]" />
+          </RailButton>
+          <span className="w-5 h-px my-1 shrink-0 bg-gray-300 dark:bg-white/10" />
+        </>
+      )}
+
       <RailButton
         label={t("rail.workspaces")}
         path={null}
@@ -94,7 +111,7 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
         badge={agentCount}
         onClick={toggleWorkspaces}
       >
-        <StackIcon className="w-[18px] h-[18px]" />
+        <FolderIcon className="w-[18px] h-[18px]" />
       </RailButton>
 
       <RailButton label={t("sidebar.sessions")} path="/sessions" active={on("/sessions")} onClick={() => navigate("/sessions")}>

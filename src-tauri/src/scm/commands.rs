@@ -557,3 +557,51 @@ pub async fn scm_delete_tag(root: String, name: String) -> Result<(), ScmError> 
     })
     .await
 }
+
+/// Deja `cwd` listo para recibir un remoto nuevo y devuelve la raíz del repo.
+///
+/// - Si no es un repo, lo crea: con la rama por defecto que tenga configurada el usuario
+///   (`init.defaultBranch`), o `main`.
+/// - Si no tiene commits, hace el primero con todo lo que haya (o vacío, si no hay nada):
+///   un repo sin commits no tiene qué subir.
+/// - Si ya tiene un `origin`, se niega: no se pisa un remoto que alguien configuró.
+///
+/// Corre ANTES de crear el repo en el host: lo que puede fallar acá (git sin nombre ni
+/// email configurados, por ejemplo) no deja un repo vacío y huérfano en la nube.
+pub(crate) fn prepare_for_remote(cwd: &str, message: &str) -> Result<String, ScmError> {
+    let root = match super::git::repo_root(cwd) {
+        Some(root) => root,
+        None => {
+            let configured = run_text(cwd, &["config", "--get", "init.defaultBranch"], LOCAL)
+                .ok()
+                .map(|b| b.trim().to_string())
+                .filter(|b| !b.is_empty());
+            match configured {
+                Some(_) => run(cwd, &["init"], LOCAL)?,
+                None => run(cwd, &["init", "-b", "main"], LOCAL)?,
+            };
+            super::git::repo_root(cwd).ok_or_else(|| ScmError::Git("git init no dejó un repositorio".into()))?
+        }
+    };
+    let remotes = run_text(&root, &["remote"], LOCAL)?;
+    if remotes.lines().any(|r| r.trim() == "origin") {
+        let url = run_text(&root, &["remote", "get-url", "origin"], LOCAL).unwrap_or_default();
+        return Err(ScmError::Git(format!("Este repositorio ya tiene un remoto origin ({})", url.trim())));
+    }
+    let has_commits = run(&root, &["rev-parse", "--verify", "-q", "HEAD"], LOCAL).is_ok();
+    if !has_commits {
+        run(&root, &["add", "-A"], LOCAL)?;
+        run(&root, &["commit", "--allow-empty", "-q", "-m", message], COMMIT).map_err(|e| match e {
+            ScmError::Git(m) if m.contains("Please tell me who you are") || m.contains("empty ident") => ScmError::Git(
+                "git no sabe quién sos: configurá user.name y user.email (git config --global user.name \"…\") y probá de nuevo".into(),
+            ),
+            other => other,
+        })?;
+    }
+    Ok(root)
+}
+
+/// Agrega `origin` apuntando a `url`.
+pub(crate) fn add_origin(root: &str, url: &str) -> Result<(), ScmError> {
+    run(root, &["remote", "add", "origin", url], LOCAL).map(|_| ())
+}

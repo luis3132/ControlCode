@@ -16,6 +16,7 @@ import { GraphifySection } from "@/features/graphify/GraphifySection";
 import { SkillsShSection } from "@/features/marketplace/SkillsShSection";
 import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection";
 import { RoutingSection } from "@/features/runs/RoutingSection";
+import { WorkingWordsSetting } from "@/features/chat/WorkingWordsSetting";
 import { PrelaunchSection } from "@/features/prelaunch/PrelaunchSection";
 import { TerminalSection } from "@/features/terminal/TerminalSection";
 import { ShortcutsSection } from "@/features/settings/ShortcutsSection";
@@ -155,6 +156,7 @@ export function SettingsPage() {
                 />
               </SettingsRow>
               <RenderingSetting />
+              <WorkingWordsSetting />
             </div>
           </SettingsSection>
         )}
