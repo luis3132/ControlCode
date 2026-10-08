@@ -1519,5 +1519,9 @@
   "chat.tool.steps_one": "{{count}} step",
   "chat.tool.steps_other": "{{count}} steps",
   "chat.tool.truncated": "truncated",
-  "chat.tool.waiting": "Waiting for your permission"
+  "chat.tool.waiting": "Waiting for your permission",
+  "chat.question.several": "You can pick several",
+  "chat.question.other": "Another answer…",
+  "chat.question.answer": "Answer",
+  "chat.question.skip": "Don't answer"
 }

@@ -5,6 +5,7 @@ import { AnimateSpin, Button } from "neogestify-ui-components";
 import { useRunsStore } from "@/features/runs/store";
 import type { PendingApproval } from "@/features/runs/types";
 import { PermissionCard } from "@/features/runs/PermissionCard";
+import { QuestionCard } from "./QuestionCard";
 import { useTabsStore } from "@/features/tabs/store";
 import type { Tab } from "@/features/tabs/types";
 
@@ -144,7 +145,9 @@ export function ChatView({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 
           {loose.map((a) => (
             <div key={a.id} className="-mx-3">
-              <PermissionCard approval={a} focused={isActive} onDecide={(allow, remember) => decide(a, allow, remember)} />
+              {a.toolName === "AskUserQuestion"
+                ? <div className="mx-3"><QuestionCard approval={a} /></div>
+                : <PermissionCard approval={a} focused={isActive} onDecide={(allow, remember) => decide(a, allow, remember)} />}
             </div>
           ))}
 

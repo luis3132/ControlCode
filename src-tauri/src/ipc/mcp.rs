@@ -1186,10 +1186,12 @@ where
         Ok(data) => {
             let allow = data.get("allow").and_then(Value::as_bool).unwrap_or(false);
             if allow {
-                // `updatedInput` va sin tocar: el broker todavía no edita lo que el agente
-                // pidió, y devolver algo distinto de lo que se aprobó sería aprobar una
-                // cosa y ejecutar otra.
-                content(json!({ "behavior": "allow", "updatedInput": input }))
+                // `updatedInput` va sin tocar, salvo que la app mande otro: el de una
+                // pregunta (`AskUserQuestion`) lleva adentro las respuestas de la persona,
+                // que es como la herramienta las recibe. Fuera de eso, devolver algo
+                // distinto de lo que se aprobó sería aprobar una cosa y ejecutar otra.
+                let updated = data.get("updatedInput").filter(|v| v.is_object()).cloned().unwrap_or(input);
+                content(json!({ "behavior": "allow", "updatedInput": updated }))
             } else {
                 let reason = data
                     .get("reason")

@@ -36,7 +36,7 @@ pub(super) fn run_approve(app: &AppHandle, args: &Value) -> Result<Value, String
         }
     };
 
-    Ok(json!({ "allow": verdict.allow, "reason": verdict.reason }))
+    Ok(json!({ "allow": verdict.allow, "reason": verdict.reason, "updatedInput": verdict.updated_input }))
 }
 
 /// `run.plan`, `run.status`, `run.await`… — ver `runs::orchestration`.

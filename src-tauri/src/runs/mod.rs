@@ -768,6 +768,39 @@ pub fn run_decide_approval(
     Ok(decided)
 }
 
+/// Contesta una pregunta del agente (`AskUserQuestion`): se aprueba con las respuestas
+/// adentro del input, que es como la herramienta las recibe (`answers`: pregunta →
+/// respuesta). `false` si ya no estaba esperando.
+#[tauri::command]
+pub fn run_answer_question(
+    app: AppHandle,
+    approval_id: String,
+    answers: std::collections::HashMap<String, String>,
+) -> Result<bool, String> {
+    let Some(pending) = broker::get(&approval_id) else {
+        supervisor::notify_approvals(&app);
+        return Ok(false);
+    };
+    if !broker::is_question(&pending.tool_name) {
+        return Err(format!("'{}' no es una pregunta", pending.tool_name));
+    }
+    let decided = broker::decide_with_input(&approval_id, with_answers(&pending.input, answers));
+    supervisor::notify_approvals(&app);
+    Ok(decided)
+}
+
+/// El input de `AskUserQuestion` con las respuestas puestas.
+pub fn with_answers(
+    input: &serde_json::Value,
+    answers: std::collections::HashMap<String, String>,
+) -> serde_json::Value {
+    let mut out = input.clone();
+    if let Some(object) = out.as_object_mut() {
+        object.insert("answers".into(), serde_json::json!(answers));
+    }
+    out
+}
+
 /// Guarda la regla exacta de un pedido. Devuelve la carpeta en la que quedó.
 fn remember_rule(
     db: &DbConnection,

@@ -2284,3 +2284,39 @@ fn una_tab_en_modo_html_pide_permiso_con_su_carpeta() {
     assert_eq!(broker::drop_tab("tab-2"), 1);
     assert_eq!(h.join().unwrap().by, broker::DecidedBy::Cancelled);
 }
+
+/// `AskUserQuestion` no es un permiso sino una pregunta: ninguna regla la contesta (ni una
+/// escrita a mano para la herramienta entera), y lo que vuelve es el input con las
+/// respuestas de la persona adentro, que es como la herramienta las recibe.
+#[test]
+fn una_pregunta_del_agente_se_contesta_con_las_respuestas_en_el_input() {
+    let _serial = con_broker_limpio();
+    let db = db_compartida();
+    {
+        let conn = db.lock().unwrap();
+        store::upsert_rule(&conn, "/tmp/q", "AskUserQuestion", true).unwrap();
+    }
+    let input = serde_json::json!({"questions": [{"question": "¿Color?", "options": [{"label": "Rojo"}, {"label": "Azul"}]}]});
+    let db2 = db.clone();
+    let asked = input.clone();
+    let h = std::thread::spawn(move || {
+        broker::resolve_for_tab(&db2, "tab-q", "/tmp/q", "AskUserQuestion", asked, Some("toolu_q".into()), Duration::from_secs(5))
+    });
+    let p = loop {
+        if let Some(p) = broker::pending().into_iter().next() {
+            break p;
+        }
+        std::thread::yield_now();
+    };
+    assert_eq!(p.suggested_rule, None, "una pregunta no se recuerda");
+    // Guardar una regla no la libera: lo que falta es la respuesta.
+    assert_eq!(broker::release_matching(&db, "/tmp/q"), 0);
+
+    let answers = std::collections::HashMap::from([("¿Color?".to_string(), "Azul".to_string())]);
+    assert!(broker::decide_with_input(&p.id, super::with_answers(&p.input, answers)));
+    let verdict = h.join().unwrap();
+    assert!(verdict.allow);
+    let updated = verdict.updated_input.expect("con las respuestas");
+    assert_eq!(updated["answers"]["¿Color?"], "Azul");
+    assert_eq!(updated["questions"], input["questions"]);
+}

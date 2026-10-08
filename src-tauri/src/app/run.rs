@@ -180,6 +180,7 @@ pub fn run() {
             crate::runs::run_discard_worktree,
             crate::runs::run_pending_approvals,
             crate::runs::run_decide_approval,
+            crate::runs::run_answer_question,
             crate::runs::run_list_rules,
             crate::runs::run_add_rule,
             crate::runs::run_delete_rule,

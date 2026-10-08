@@ -94,6 +94,9 @@ pub struct Verdict {
     pub allow: bool,
     pub reason: Option<String>,
     pub by: DecidedBy,
+    /// El input con el que se aprueba, cuando no es el que pidió el agente. Hoy solo
+    /// `AskUserQuestion`: la respuesta de la persona viaja como `answers` adentro de él.
+    pub updated_input: Option<serde_json::Value>,
 }
 
 const RULE_DENIED: &str = "una regla de esta carpeta lo tiene denegado";
@@ -188,6 +191,7 @@ pub fn ask_as(
                     allow: false,
                     reason: Some("se canceló mientras esperaba".into()),
                     by: DecidedBy::Cancelled,
+                    updated_input: None,
                 };
             }
             Some(_) => {}
@@ -200,6 +204,7 @@ pub fn ask_as(
                 allow: false,
                 reason: Some("nadie contestó el pedido de permiso a tiempo".into()),
                 by: DecidedBy::Timeout,
+                updated_input: None,
             };
         }
         let (guard, _) = DECIDED
@@ -226,7 +231,19 @@ fn decide_with(id: &str, verdict: Verdict) -> bool {
 /// Contesta un pedido como decisión de una persona. `false` si ya no existe (venció, o la
 /// tarea se canceló) o si ya estaba resuelto.
 pub fn decide(id: &str, allow: bool, reason: Option<String>) -> bool {
-    decide_with(id, Verdict { allow, reason, by: DecidedBy::User })
+    decide_with(id, Verdict { allow, reason, by: DecidedBy::User, updated_input: None })
+}
+
+/// Aprueba un pedido con otro input: el de `AskUserQuestion` con las respuestas de la
+/// persona adentro. `false` si ya no existe o ya estaba resuelto.
+pub fn decide_with_input(id: &str, input: serde_json::Value) -> bool {
+    decide_with(id, Verdict { allow: true, reason: None, by: DecidedBy::User, updated_input: Some(input) })
+}
+
+/// Las herramientas que no son un permiso sino una pregunta: ninguna regla las contesta,
+/// porque lo que el agente necesita es la respuesta, no un "sí".
+pub fn is_question(tool_name: &str) -> bool {
+    tool_name == "AskUserQuestion"
 }
 
 /// Descarta lo que esté esperando de una tarea.
@@ -280,15 +297,17 @@ pub fn resolve(
     // no en su worktree; el registro guarda la ruta REAL que tocó el agente, que es lo que
     // uno quiere encontrar al revisar qué se autorizó.
     let as_project = in_project_terms(db, task_id, &input);
+    let decision =
+        if is_question(tool_name) { Decision::Ask } else { rules::decide(&rules, tool_name, &as_project) };
 
-    match rules::decide(&rules, tool_name, &as_project) {
+    match decision {
         Decision::Allow => {
             record(db, &Uuid::new_v4().to_string(), task_id, tool_name, &input, Some(true), DecidedBy::Rule);
-            Verdict { allow: true, reason: None, by: DecidedBy::Rule }
+            Verdict { allow: true, reason: None, by: DecidedBy::Rule, updated_input: None }
         }
         Decision::Deny => {
             record(db, &Uuid::new_v4().to_string(), task_id, tool_name, &input, Some(false), DecidedBy::Rule);
-            Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule }
+            Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule, updated_input: None }
         }
         Decision::Ask => {
             let id = Uuid::new_v4().to_string();
@@ -328,11 +347,12 @@ pub fn release_matching(db: &DbConnection, cwd: &str) -> usize {
 
     owned
         .into_iter()
+        .filter(|p| !is_question(&p.tool_name))
         .filter(|p| match rules::decide(&rules, &p.tool_name, &p.input) {
-            Decision::Allow => decide_with(&p.id, Verdict { allow: true, reason: None, by: DecidedBy::Rule }),
+            Decision::Allow => decide_with(&p.id, Verdict { allow: true, reason: None, by: DecidedBy::Rule, updated_input: None }),
             Decision::Deny => decide_with(
                 &p.id,
-                Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule },
+                Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule, updated_input: None },
             ),
             Decision::Ask => false,
         })
@@ -370,9 +390,10 @@ pub fn resolve_for_tab(
             .collect(),
         Err(_) => Vec::new(),
     };
-    match rules::decide(&rules, tool_name, &input) {
-        Decision::Allow => Verdict { allow: true, reason: None, by: DecidedBy::Rule },
-        Decision::Deny => Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule },
+    let decision = if is_question(tool_name) { Decision::Ask } else { rules::decide(&rules, tool_name, &input) };
+    match decision {
+        Decision::Allow => Verdict { allow: true, reason: None, by: DecidedBy::Rule, updated_input: None },
+        Decision::Deny => Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule, updated_input: None },
         Decision::Ask => {
             let owner = Owner::Tab { tab_id: tab_id.to_string(), cwd: cwd.to_string() };
             ask_as(&Uuid::new_v4().to_string(), &owner, tool_name, input, tool_use_id, timeout)

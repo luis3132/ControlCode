@@ -4,6 +4,8 @@ import { AnimateSpin, Button, CheckIcon, ChevronDownIcon, ChevronRightIcon, Erro
 
 import { Markdown } from "@/shared/ui/Markdown";
 import { PermissionCard } from "@/features/runs/PermissionCard";
+
+import { QuestionCard, questionsOf } from "./QuestionCard";
 import type { PendingApproval } from "@/features/runs/types";
 
 import type { ChatItem, ToolResult } from "./types";
@@ -79,8 +81,10 @@ export function ToolCard({ tool, running, approval, onDecide, focused, renderChi
           <ToolBody tool={tool} renderChildren={renderChildren} />
           {approval && (
             <div className="-mx-3 -mb-2.5">
-              <PermissionCard approval={approval} focused={focused} hidePreview
-                onDecide={(allow, remember) => onDecide(approval, allow, remember)} />
+              {approval.toolName === "AskUserQuestion"
+                ? <div className="mx-3 mb-2.5"><QuestionCard approval={approval} /></div>
+                : <PermissionCard approval={approval} focused={focused} hidePreview
+                  onDecide={(allow, remember) => onDecide(approval, allow, remember)} />}
             </div>
           )}
         </div>
@@ -178,6 +182,19 @@ function ToolBody({ tool, renderChildren }: { tool: Tool; renderChildren: (items
             : <div className="min-w-0"><Markdown content={result.content} /></div>)}
         </>
       );
+    case "AskUserQuestion": {
+      // Mientras espera, las preguntas las muestra la tarjeta para contestarlas; acá queda
+      // el registro de qué se preguntó y qué se respondió.
+      if (!result) return null;
+      return (
+        <>
+          <ul className="flex flex-col gap-0.5 text-[12px] text-gray-600 dark:text-white/55">
+            {questionsOf(input ?? {}).map((q) => <li key={q.question}>{q.question}</li>)}
+          </ul>
+          <Result result={result} />
+        </>
+      );
+    }
     case "Read":
       return (
         <>

@@ -42,7 +42,12 @@ export async function switchToHtml(tab: Tab): Promise<void> {
   // está matando.
   const hibernated = isHibernated(tab.id);
   if (tab.ptyId != null && hibernated) ptyKill(tab.ptyId).catch(console.error);
-  useTabsStore.getState().updateTab(tab.id, { mode: "html", ptyId: null, ...(sessionId ? { sessionId } : {}) });
+  useTabsStore.getState().updateTab(tab.id, {
+    mode: "html",
+    ptyId: null,
+    launchArgs: undefined,
+    ...(sessionId ? { sessionId } : {}),
+  });
   if (hibernated) wake(tab.id);
 
   await sleep(SETTLE_MS);
@@ -55,10 +60,13 @@ export async function switchToTerminal(tab: Tab): Promise<void> {
     await chatStop(tab.id).catch(console.error);
     for (let i = 0; i < 20 && (await chatRunning(tab.id).catch(() => false)); i++) await sleep(100);
   }
-  // Sin `ptyId` y con otro nonce, la terminal se monta de cero y lanza `claude --resume`.
+  // Sin `ptyId` y con otro nonce, la terminal se monta de cero y lanza `claude --resume`,
+  // con el modelo del chat: cambiar de vista no puede cambiar con qué se está trabajando.
+  const { model } = useChatStore.getState().get(tab.id);
   useTabsStore.getState().updateTab(tab.id, {
     mode: undefined,
     ptyId: null,
     restartNonce: (tab.restartNonce ?? 0) + 1,
+    launchArgs: model ? ["--model", model] : undefined,
   });
 }

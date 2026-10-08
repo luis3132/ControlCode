@@ -6,7 +6,7 @@ import { Terminal } from "@/features/terminal/Terminal";
 import { useTabsStore } from "@/features/tabs/store";
 import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
-import { buildResumeCommand, isResumable } from "@/features/sessions/agentResume";
+import { buildResumeCommand, isResumable, withLaunchArgs } from "@/features/sessions/agentResume";
 import { agentDef } from "@/features/agents/registry";
 import { useAgentsStore } from "@/features/agents/store";
 import { readDir } from "@/features/explorer/ipc";
@@ -208,7 +208,7 @@ export function TerminalPanel() {
               // su proceso) y monta otra, que relanza con `--resume`.
               key={`${tab.id}:${tab.restartNonce ?? 0}`}
               tabId={tab.id}
-              command={buildResumeCommand(tab.agentId, tab.command, tab.sessionId)}
+              command={withLaunchArgs(buildResumeCommand(tab.agentId, tab.command, tab.sessionId), tab.launchArgs)}
               cwd={tab.cwd}
               agentId={tab.agentId}
               accountId={tab.accountId}

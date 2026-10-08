@@ -614,6 +614,25 @@ fn una_tab_en_modo_html_ve_el_broker_y_pregunta_con_su_carpeta() {
     assert_eq!(out[0]["result"]["isError"], true);
 }
 
+/// Lo que la app devuelve como `updatedInput` (las respuestas de una pregunta) es lo que
+/// recibe el agente; sin eso, el input tal cual lo pidió.
+#[test]
+fn el_input_aprobado_es_el_que_manda_la_app_si_manda_uno() {
+    let chat = McpContext::Chat { cwd: "/p".into(), tab: "tab-4".into() };
+    let ask = call(2, "approve_tool_use", json!({ "tool_name": "AskUserQuestion", "input": { "questions": [] } }));
+    let (out, _) = mcp_session(&chat, std::slice::from_ref(&ask), |_, _| {
+        Ok(json!({ "allow": true, "updatedInput": { "questions": [], "answers": { "q": "a" } } }))
+    });
+    let text = out[0]["result"]["content"][0]["text"].as_str().unwrap();
+    let body: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(body["updatedInput"]["answers"]["q"], "a");
+
+    let (out, _) = mcp_session(&chat, &[ask], |_, _| Ok(json!({ "allow": true, "updatedInput": null })));
+    let text = out[0]["result"]["content"][0]["text"].as_str().unwrap();
+    let body: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(body["updatedInput"], json!({ "questions": [] }));
+}
+
 /// Una tool de orquestación viaja con quién la pide y sus argumentos tal cual: la app
 /// decide sobre qué run actúa, no el agente.
 #[test]
