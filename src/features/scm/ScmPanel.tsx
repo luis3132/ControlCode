@@ -9,6 +9,7 @@ import {
 import { BranchIcon, ExternalIcon, GithubIcon, GitlabIcon, PullIcon, PushIcon, UndoIcon } from "@/app/icons";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { CreateRepoDialog } from "@/features/forge/CreateRepoDialog";
 import { SignInButton } from "@/features/forge/SignInButton";
 import { useRepoTarget } from "@/features/forge/useRepoTarget";
 import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
@@ -109,6 +110,8 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
   /** Sube cada vez que se crea o sube un tag: la lista de tags y el grafo se releen. */
   const [tagsVersion, setTagsVersion] = useState(0);
   const [discard, setDiscard] = useState<{ tracked: string[]; untracked: string[]; label: string } | null>(null);
+  /** El diálogo de crear el repo en la nube: para una carpeta sin repo o un repo sin remoto. */
+  const [creatingRepo, setCreatingRepo] = useState(false);
   const busyRef = useRef(busy);
   busyRef.current = busy;
   const { target } = useRepoTarget(cwd);
@@ -216,20 +219,44 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
       </div>
     );
   }
+  // Crear el repo en GitHub/GitLab/Gitea: inicializa si hace falta, lo deja como `origin`
+  // y sube. Al terminar se relee todo, igual que después de cualquier operación.
+  const createRepoDialog = creatingRepo && (
+    <CreateRepoDialog
+      cwd={status?.root ?? cwd}
+      isRepo={!!status}
+      onClose={() => setCreatingRepo(false)}
+      onCreated={() => {
+        setCreatingRepo(false);
+        run("create", async () => {}).catch(() => {});
+      }}
+    />
+  );
+
   if (status === null) {
     return (
-      <EmptyState
-        className="m-auto px-4"
-        icon={<BranchIcon className="w-7 h-7" />}
-        title={t("scm.notRepo")}
-        description={t("scm.notRepo.desc")}
-        action={
-          <Button size="sm" variant="primary" disabled={busy !== null}
-            onClick={() => run("init", () => scmInit(cwd))}>
-            {t("scm.init")}
-          </Button>
-        }
-      />
+      <>
+        <EmptyState
+          className="m-auto px-4"
+          icon={<BranchIcon className="w-7 h-7" />}
+          title={t("scm.notRepo")}
+          description={t("scm.notRepo.desc")}
+          action={
+            <div className="flex flex-col gap-2 items-stretch">
+              <Button size="sm" variant="primary" disabled={busy !== null}
+                onClick={() => run("init", () => scmInit(cwd))}>
+                {t("scm.init")}
+              </Button>
+              <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => setCreatingRepo(true)}
+                className="flex items-center justify-center gap-1.5">
+                <PushIcon className="w-3.5 h-3.5" />
+                {t("scm.createRemote")}
+              </Button>
+            </div>
+          }
+        />
+        {createRepoDialog}
+      </>
     );
   }
 
@@ -479,11 +506,27 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
                 ? t("scm.pushing")
                 : !status.published ? t("scm.publish") : t("scm.pushCommits", { count: status.ahead })}
             </Button>
+          ) : totalChanges === 0 && status.remotes.length === 0 ? (
+            // Sin remoto, lo que sigue a commitear es publicar el repo en la nube.
+            <Button size="sm" variant="primary" fullWidth disabled={!!busy} onClick={() => setCreatingRepo(true)}
+              className="flex items-center justify-center gap-1.5">
+              <PushIcon className="w-3.5 h-3.5" />
+              {t("scm.createRemote")}
+            </Button>
           ) : (
             <Button size="sm" variant="primary" fullWidth disabled={!canCommit} onClick={commit}>
               {busy === "commit"
                 ? t("scm.committing")
                 : stagedCount === 0 && totalChanges > 0 ? t("scm.commitAll") : t("scm.commit")}
+            </Button>
+          )}
+          {/* Con cambios sin commitear y sin remoto, publicar sigue a mano: sube lo ya
+              commiteado, y lo demás queda para el próximo push. */}
+          {totalChanges > 0 && status.remotes.length === 0 && (
+            <Button size="sm" variant="outline" fullWidth disabled={!!busy} onClick={() => setCreatingRepo(true)}
+              className="flex items-center justify-center gap-1.5 mt-1.5">
+              <PushIcon className="w-3.5 h-3.5" />
+              {t("scm.createRemote")}
             </Button>
           )}
         </div>
@@ -645,6 +688,8 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
           <code className="block mt-2 text-[11px] font-mono break-all text-gray-500 dark:text-gray-400">{discard.label}</code>
         </AppDialog>
       )}
+
+      {createRepoDialog}
     </>
   );
 }

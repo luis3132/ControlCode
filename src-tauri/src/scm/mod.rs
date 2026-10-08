@@ -16,7 +16,7 @@ mod remote;
 mod test;
 
 pub use commands::*;
-pub(crate) use commands::{create_tag, push_tag, sync, Sync};
+pub(crate) use commands::{add_origin, create_tag, prepare_for_remote, push_tag, sync, Sync};
 pub(crate) use remote::{host_and_path, parse_remotes, provider_of, Provider};
 pub(crate) use git::{network, network_with, ScmError};
 

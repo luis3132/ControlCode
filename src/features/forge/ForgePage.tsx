@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, EmptyState, Skeleton } from "neogestify-ui-components";
 
-import { IssueIcon, PullRequestIcon, TagIcon } from "@/app/icons";
+import { IssueIcon, PullRequestIcon, PushIcon, TagIcon } from "@/app/icons";
 import { useShellGroups } from "@/app/shellContext";
 import { useTabsStore } from "@/features/tabs/store";
 import type { RepoGroup, WorkspaceNode } from "@/features/workspaces/workspaceTree";
 
+import { CreateRepoDialog } from "./CreateRepoDialog";
 import { ForgeItemsView, type ItemFilter } from "./ForgeItemsView";
 import { ForgeIcon } from "./forgeMeta";
 import { forgeSetRepoAccount } from "./ipc";
@@ -164,6 +165,7 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
   // Cambia cuando algo se modificó adentro de un PR o issue (comentario, fusión): la lista
   // se vuelve a montar y se relee al volver.
   const [version, setVersion] = useState(0);
+  const [creating, setCreating] = useState(false);
 
   if (target === undefined) {
     return (
@@ -172,8 +174,28 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
       </div>
     );
   }
+  // Un repo local sin remoto: se le puede crear el suyo en la nube desde acá mismo.
   if (target === null) {
-    return <EmptyState className="m-auto" icon={<PullRequestIcon className="w-8 h-8" />} title={t("forge.page.noRemote")} />;
+    return (
+      <>
+        <EmptyState
+          className="m-auto"
+          icon={<PullRequestIcon className="w-8 h-8" />}
+          title={t("forge.page.noRemote")}
+          description={t("forge.create.pageDesc")}
+          action={
+            <Button variant="primary" onClick={() => setCreating(true)} className="flex items-center gap-1.5">
+              <PushIcon className="w-3.5 h-3.5" />
+              {t("scm.createRemote")}
+            </Button>
+          }
+        />
+        {creating && (
+          <CreateRepoDialog cwd={cwd} isRepo onClose={() => setCreating(false)}
+            onCreated={() => { setCreating(false); reload(); }} />
+        )}
+      </>
+    );
   }
 
   const item = section === "releases" ? null : opened[section];

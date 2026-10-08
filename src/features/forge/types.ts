@@ -54,6 +54,14 @@ export interface ForgeRepo {
   updatedAt: string | null;
 }
 
+/** Dónde se puede crear un repo: la cuenta misma o una organización (grupo en GitLab). */
+export interface RepoOwner {
+  login: string;
+  org: boolean;
+  /** GitLab lo necesita para crear adentro de un grupo. */
+  id: number | null;
+}
+
 /** Qué repo es el del workspace y con qué cuenta se trabaja en él. */
 export interface RepoTarget {
   root: string;

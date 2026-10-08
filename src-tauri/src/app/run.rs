@@ -122,6 +122,8 @@ pub fn run() {
             crate::forge::forge_remove_account,
             crate::forge::forge_repos,
             crate::forge::forge_clone,
+            crate::forge::forge_owners,
+            crate::forge::forge_create_repo,
             crate::forge::forge_repo,
             crate::forge::forge_set_repo_account,
             crate::forge::forge_pulls,

@@ -37,7 +37,7 @@ pub(crate) use credentials::git_env;
 /// Lo que usa la sincronización (ver `crate::sync`): la API de una cuenta y cómo
 /// autenticar a git con ella, sin exponer el resto del módulo.
 pub(crate) mod for_sync {
-    pub(crate) use super::api::Api;
+    pub(crate) use super::api::{valid_repo_name, Api};
     pub(crate) use super::credentials::git_env_for_url;
     pub(crate) use super::provider::{ForgeError, ForgeKind};
     pub(crate) use super::store::GitAccount;
