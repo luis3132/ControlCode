@@ -4,6 +4,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   AddIcon, Button, ChevronDownIcon, CloseIcon, Dropdown, Kbd, Tooltip, type DropdownItem,
 } from "neogestify-ui-components";
+import { useShallow } from "zustand/react/shallow";
 
 import { dropText } from "@/features/explorer/paths";
 import type { Tab } from "@/features/tabs/types";
@@ -42,7 +43,16 @@ function readImage(file: File): Promise<ImageAttachment> {
 export function Composer({ tab, isActive }: { tab: Tab; isActive: boolean }) {
   const { t } = useTranslation();
   const tabId = tab.id;
-  const c = useChatStore((s) => s.chats[tabId]) ?? useChatStore.getState().get(tabId);
+  // Solo lo que el input usa, comparado campo por campo: suscripto al estado entero, se
+  // redibujaba (menús incluidos) con cada pedacito de texto que escribía el agente.
+  const fallback = useRef(useChatStore.getState().get(tabId)).current;
+  const c = useChatStore(useShallow((s) => {
+    const cur = s.chats[tabId] ?? fallback;
+    return {
+      info: cur.chat.info, draft: cur.draft, effort: cur.effort, images: cur.images, mode: cur.mode,
+      model: cur.model, queue: cur.queue, running: cur.running, starting: cur.starting,
+    };
+  }));
   const store = useChatStore.getState();
   const ref = useRef<HTMLTextAreaElement>(null);
   const [menuIndex, setMenuIndex] = useState(0);
@@ -98,9 +108,9 @@ export function Composer({ tab, isActive }: { tab: Tab; isActive: boolean }) {
   // Los comandos del agente: los del último arranque de esta tab o, antes del primero, los
   // que se vieron en esta carpeta.
   const commands = useMemo(() => {
-    if (c.chat.info) return { slash: c.chat.info.slashCommands, terminal: c.chat.info.terminalCommands };
+    if (c.info) return { slash: c.info.slashCommands, terminal: c.info.terminalCommands };
     return loadCommands(tab.cwd);
-  }, [c.chat.info, tab.cwd]);
+  }, [c.info, tab.cwd]);
 
   const query = slashQuery(c.draft);
   const menu = useMemo(
@@ -208,9 +218,9 @@ export function Composer({ tab, isActive }: { tab: Tab; isActive: boolean }) {
   }, [tab.accountId]);
   const models = useMemo(
     () => modelChoices(known, loadSeenModels(tab.cwd)),
-    // `c.chat.info`: al llegar el `init` puede haber aparecido un modelo nuevo en la lista.
+    // `c.info`: al llegar el `init` puede haber aparecido un modelo nuevo en la lista.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [known, tab.cwd, c.chat.info]
+    [known, tab.cwd, c.info]
   );
   const modelItems: DropdownItem[] = [
     { id: "", label: twoLines(t("chat.model.default"), t("chat.model.defaultHint")), onSelect: () => store.setModel(tabId, null) },
@@ -251,7 +261,7 @@ export function Composer({ tab, isActive }: { tab: Tab; isActive: boolean }) {
   }));
   const modelShown = c.model
     ? modelShownAs(c.model, models)
-    : modelLabel(c.chat.info?.model ?? null) ?? t("chat.model.label");
+    : modelLabel(c.info?.model ?? null) ?? t("chat.model.label");
 
   // Nombre corto arriba y para qué sirve abajo, como el menú de modos: "Resumir la
   // conversación para liberar contexto" como etiqueta es una frase, no una opción.

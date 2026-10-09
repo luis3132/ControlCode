@@ -7,32 +7,43 @@ use crate::database::DbConnection;
 use super::parse::{self, ChatEvent};
 use super::session::{self, ChatTurn};
 
+// Todos `async` y con lo que toca disco o procesos en `spawn_blocking`: un comando síncrono
+// de Tauri corre en el hilo principal, y mientras dura no se mueve nada en la ventana.
+
 /// Manda un mensaje: lanza el turno de la tab. Falla si ya tiene uno andando (el chat los
 /// pone en cola y manda el siguiente cuando termina el anterior).
 #[tauri::command]
-pub fn chat_send(app: AppHandle, turn: ChatTurn) -> Result<(), String> {
-    let name = crate::agents::agent_command("claude-code").unwrap_or("claude");
-    // La ruta completa: en Windows un `claude.cmd` de npm no se ejecuta por su nombre.
-    let program = crate::util::find_program(name).map(|p| p.into_os_string()).unwrap_or_else(|| name.into());
-    // Sin puente de permisos para una pregunta al margen: no edita (corre en modo plan),
-    // así que no tiene nada que preguntar, y una tarjeta de permiso de algo que la persona
-    // no mandó sería un susto.
-    let mcp = if turn.side { None } else { crate::ipc::mcp::chat_mcp(&app, &turn.cwd, &turn.tab_id) };
-    let args = session::claude_args(
-        &turn,
-        mcp.as_ref().map(|(path, allowed)| (path.to_str().unwrap_or_default(), allowed.as_slice())),
-    );
-    session::start(&app, turn, program, args)
+pub async fn chat_send(app: AppHandle, turn: ChatTurn) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = crate::agents::agent_command("claude-code").unwrap_or("claude");
+        // La ruta completa: en Windows un `claude.cmd` de npm no se ejecuta por su nombre.
+        let program = crate::util::find_program(name).map(|p| p.into_os_string()).unwrap_or_else(|| name.into());
+        // Sin puente de permisos para una pregunta al margen: no edita (corre en modo
+        // plan), así que no tiene nada que preguntar, y una tarjeta de permiso de algo que la
+        // persona no mandó sería un susto.
+        let mcp = if turn.side { None } else { crate::ipc::mcp::chat_mcp(&app, &turn.cwd, &turn.tab_id) };
+        let args = session::claude_args(
+            &turn,
+            mcp.as_ref().map(|(path, allowed)| (path.to_str().unwrap_or_default(), allowed.as_slice())),
+        );
+        session::start(&app, turn, program, args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
-/// Para el turno en curso. `false` si no había ninguno.
+/// Para el turno en curso. `false` si no había ninguno. Matar el árbol puede esperar (en
+/// macOS se le da un momento para cerrar antes de forzarlo), así que no va en el hilo
+/// principal.
 #[tauri::command]
-pub fn chat_stop(tab_id: String, side: Option<bool>) -> bool {
-    session::stop(&tab_id, side.unwrap_or(false))
+pub async fn chat_stop(tab_id: String, side: Option<bool>) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || session::stop(&tab_id, side.unwrap_or(false)))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn chat_running(tab_id: String) -> bool {
+pub async fn chat_running(tab_id: String) -> bool {
     session::is_running(&tab_id)
 }
 
