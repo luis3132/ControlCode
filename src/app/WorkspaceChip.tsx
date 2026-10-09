@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
@@ -49,15 +50,16 @@ function Folders({ folders }: { folders: string[] }) {
 const SECTION = "px-3 pt-2 pb-1 text-[10.5px] font-semibold uppercase tracking-wider text-gray-400 dark:text-white/35";
 
 /**
- * El workspace de esta ventana, al principio de la barra de tabs: su nombre ("Sin guardar"
- * mientras no se le dé uno) y el menú para cambiar de workspace.
+ * El workspace de esta ventana: su nombre ("Sin guardar" mientras no se le dé uno) y el
+ * menú para cambiar de workspace. Vive en el encabezado del lateral; con el lateral plegado,
+ * en el riel, como un botón con su inicial (`compact`).
  *
  * El menú es la lista de workspaces con sus carpetas: el de esta ventana arriba (con
  * "Guardar" si todavía no tiene nombre) y los demás debajo, cada uno para abrir acá o en
  * otra ventana —o ir a la suya, si ya está abierto—. Al final, crear uno nuevo, otra ventana
  * de este, y sumarle una carpeta.
  */
-export function WorkspaceChip() {
+export function WorkspaceChip({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const tabs = useTabsStore((s) => s.tabs);
@@ -71,6 +73,15 @@ export function WorkspaceChip() {
   const [open, setOpen] = useState(false);
   const [opening, setOpening] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // El menú va en un portal, con posición fija: colgado del botón quedaba recortado por el
+  // encabezado del lateral (`overflow-hidden`) o por el riel, que mide 48px.
+  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open || !ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    setAt(compact ? { top: r.top, left: r.right + 8 } : { top: r.bottom + 6, left: r.left });
+  }, [open, compact]);
 
   // El nombre sale de la lista, que puede cambiar desde otra ventana (guardar, renombrar).
   useEffect(() => {
@@ -83,7 +94,9 @@ export function WorkspaceChip() {
     if (!open) return;
     loadWorkspaces().catch(console.error);
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (ref.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", onDown);
@@ -123,25 +136,48 @@ export function WorkspaceChip() {
   const act = (fn: () => void) => () => { setOpen(false); fn(); };
 
   return (
-    <div className="relative flex items-center shrink-0 pr-1.5" ref={ref} data-tauri-drag-region="false">
-      <Button variant="custom"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className={`cc-t flex items-center gap-1.5 h-[26px] max-w-60 pl-2 pr-1.5 rounded-[7px]
-          border border-gray-200 dark:border-white/8
-          ${open ? "bg-gray-200/80 dark:bg-white/10" : "bg-white/60 dark:bg-white/4 hover:bg-gray-200/60 dark:hover:bg-white/8"}`}
-      >
-        <span className={`w-[7px] h-[7px] rounded-full shrink-0
-          ${unsaved ? "border border-gray-400 dark:border-white/40" : "bg-blue-500 dark:bg-blue-400"}`} />
-        <span className={`truncate text-xs font-semibold
-          ${unsaved ? "text-gray-500 dark:text-white/55" : "text-gray-800 dark:text-gray-100"}`}>
-          {name}
-        </span>
-        <ChevronDownIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/40" />
-      </Button>
+    <div className={`relative flex items-center min-w-0 ${compact ? "shrink-0" : ""}`} ref={ref} data-tauri-drag-region="false">
+      {compact ? (
+        // En el riel: del tamaño de sus botones, con la inicial del workspace y el punto que
+        // dice si está guardado.
+        <Tooltip content={name} placement="right" delay={400}>
+          <Button variant="custom"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-label={name}
+            className={`cc-t relative flex items-center justify-center w-9 h-9 rounded-[9px] shrink-0
+              border border-gray-200 dark:border-white/8
+              ${open ? "bg-gray-200/80 dark:bg-white/10" : "bg-white/60 dark:bg-white/4 hover:bg-gray-200/60 dark:hover:bg-white/8"}`}
+          >
+            <span className={`text-[13px] font-semibold uppercase
+              ${unsaved ? "text-gray-500 dark:text-white/55" : "text-gray-800 dark:text-gray-100"}`}>
+              {name.trim().charAt(0) || "·"}
+            </span>
+            <span className={`absolute top-1 right-1 w-[6px] h-[6px] rounded-full
+              ${unsaved ? "border border-gray-400 dark:border-white/40" : "bg-blue-500 dark:bg-blue-400"}`} />
+          </Button>
+        </Tooltip>
+      ) : (
+        <Button variant="custom"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className={`cc-t flex items-center gap-1.5 h-[26px] max-w-full min-w-0 pl-2 pr-1.5 rounded-[7px]
+            border border-gray-200 dark:border-white/8
+            ${open ? "bg-gray-200/80 dark:bg-white/10" : "bg-white/60 dark:bg-white/4 hover:bg-gray-200/60 dark:hover:bg-white/8"}`}
+        >
+          <span className={`w-[7px] h-[7px] rounded-full shrink-0
+            ${unsaved ? "border border-gray-400 dark:border-white/40" : "bg-blue-500 dark:bg-blue-400"}`} />
+          <span className={`truncate text-xs font-semibold
+            ${unsaved ? "text-gray-500 dark:text-white/55" : "text-gray-800 dark:text-gray-100"}`}>
+            {name}
+          </span>
+          <ChevronDownIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/40" />
+        </Button>
+      )}
 
-      {open && (
-        <div className="cc-rise absolute top-full left-0 mt-1.5 w-80 p-1 z-100
+      {open && at && createPortal(
+        <div ref={menuRef} style={{ position: "fixed", top: at.top, left: at.left }}
+          className="cc-rise w-80 p-1 z-100
           rounded-xl border border-gray-200 dark:border-white/10
           bg-white dark:bg-[#11161f] shadow-2xl">
 
@@ -239,7 +275,8 @@ export function WorkspaceChip() {
             label={t("folders.add")}
             onClick={act(openAddFolderWizard)}
           />
-        </div>
+        </div>,
+        document.body
       )}
 
       {dialogs}

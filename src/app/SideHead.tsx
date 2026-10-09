@@ -4,6 +4,7 @@ import { Button, Tooltip } from "neogestify-ui-components";
 import { useUiStore } from "@/app/uiStore";
 import { PanelIcon } from "@/app/icons";
 import { WindowLights } from "@/app/WindowLights";
+import { WorkspaceChip } from "@/app/WorkspaceChip";
 
 const HEAD_BUTTON = `cc-t flex items-center justify-center w-6.5 h-6.5 rounded-lg shrink-0
   text-gray-400 dark:text-white/35
@@ -16,8 +17,8 @@ const HEAD_BUTTON = `cc-t flex items-center justify-center w-6.5 h-6.5 rounded-l
  * Mide exactamente lo mismo que el riel más el panel de abajo, así la división vertical es
  * una sola línea de arriba a abajo.
  *
- * El nombre de la app y su menú se mudaron al selector de workspace de la barra de tabs
- * (`WorkspaceChip`): dice dónde se está trabajando, que es más útil que la marca.
+ * Lleva el selector de workspace (`WorkspaceChip`): dice dónde se está trabajando, arriba de
+ * las carpetas de ese workspace.
  */
 export function SideHead({ width }: { width: number }) {
   const { t } = useTranslation();
@@ -43,7 +44,12 @@ export function SideHead({ width }: { width: number }) {
           : "gap-1 pl-3.5 pr-1.5 border-b border-gray-200 dark:border-white/7"}`}
     >
       {!collapsed && <WindowLights />}
-      {!collapsed && <div className="flex-1 self-stretch" data-tauri-drag-region />}
+      {/* El workspace de esta ventana, arriba de sus carpetas. Plegado, se muda al riel. */}
+      {!collapsed && (
+        <div className="flex-1 min-w-0 flex items-center pl-1" data-tauri-drag-region>
+          <WorkspaceChip />
+        </div>
+      )}
 
       <Tooltip content={collapsed ? t("panel.expand") : t("panel.collapse")} placement={collapsed ? "right" : "bottom"}>
         <Button variant="icon"

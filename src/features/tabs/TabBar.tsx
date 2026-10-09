@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { Button, AddIcon, Tooltip } from "neogestify-ui-components";
 
 import { WindowLights } from "@/app/WindowLights";
-import { WorkspaceChip } from "@/app/WorkspaceChip";
 import { GlobeIcon, SplitRightIcon } from "@/app/icons";
 import { NotificationBell } from "@/features/notifications/NotificationBell";
 import { GroupTabStrip } from "@/features/tabs/GroupTabStrip";
@@ -63,9 +62,9 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
 
   return (
     <>
-      {/* Por encima del contenido (que tiene capas propias): si no, el menú del workspace y
-          el de los avisos, que bajan sobre él, quedaban tapados. Por debajo del encabezado
-          del lateral, que es el vecino de al lado. */}
+      {/* Por encima del contenido (que tiene capas propias): si no, el menú de los avisos,
+          que baja sobre él, quedaba tapado. Por debajo del encabezado del lateral, que es el
+          vecino de al lado. */}
       <div
         data-tauri-drag-region
         className={`flex items-stretch flex-1 min-w-0 h-9 ${STRIP_BG}`}
@@ -77,9 +76,8 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
           </div>
         )}
 
-        <div className={`flex items-center shrink-0 ${showLights ? "" : "pl-1.5"}`}>
-          <WorkspaceChip />
-        </div>
+        {/* El selector de workspace vive en el encabezado del lateral (o en el riel, plegado). */}
+        {!showLights && <div className="w-1.5 shrink-0" />}
 
         <div
           data-tauri-drag-region
