@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Kbd } from "neogestify-ui-components";
 
+import { diffLines, withContext } from "@/shared/lineDiff";
+
 import type { PendingApproval } from "./types";
 
 /**
@@ -26,14 +28,14 @@ export function buildPreview(tool: string, input: Record<string, unknown>): Prev
   const str = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : undefined);
 
   if (tool === "Edit" || tool === "NotebookEdit") {
-    const before = str("old_string") ?? "";
-    const after = str("new_string") ?? "";
+    // Solo lo que cambia, con una línea igual de cada lado para ubicarse: lo que queda
+    // igual no se pinta (issue #23), y en una tarjeta chica ni se muestra.
+    const rows = withContext(diffLines(str("old_string") ?? "", str("new_string") ?? ""), 1);
     return {
       title: `${tool}(${shortPath(str("file_path"))})`,
-      diff: [
-        ...lines(before).map((text) => ({ sign: "-" as const, text })),
-        ...lines(after).map((text) => ({ sign: "+" as const, text })),
-      ].slice(0, MAX_DIFF_LINES),
+      diff: rows
+        .map((r) => (r.sign === "gap" ? { sign: " " as const, text: "⋯" } : { sign: r.sign, text: r.text }))
+        .slice(0, MAX_DIFF_LINES),
     };
   }
 

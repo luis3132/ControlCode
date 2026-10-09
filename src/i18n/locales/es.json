@@ -1553,8 +1553,8 @@
   "chat.toast.open": "Ir al chat",
   "chat.toast.tab": "Tab «{{tab}}»",
   "chat.toggle.confirm": "¿Detener y volver?",
-  "chat.toggle.toHtml": "Modo HTML",
-  "chat.toggle.toHtmlHint": "Ver esta conversación como chat, con input y componentes en vez de la TUI",
+  "chat.toggle.toHtml": "Gráfico",
+  "chat.toggle.toHtmlHint": "Ver esta conversación en la interfaz gráfica: chat, input y componentes en vez de la TUI",
   "chat.toggle.toTerminal": "Consola",
   "chat.toggle.toTerminalHint": "Volver a la TUI con la misma conversación",
   "chat.tokens": "{{input}} entrada / {{output}} salida",
@@ -1605,5 +1605,10 @@
   "forge.create.pushFailedTitle": "Creado, pero sin subir",
   "forge.create.pushFailedBody": "El repositorio existe y quedó como origin. La subida falló: reintentala desde Cambios, no hace falta crearlo de nuevo.",
   "forge.create.finish": "Listo",
-  "forge.create.doneToast": "{{repo}} quedó como origin y la rama ya está subida."
+  "forge.create.doneToast": "{{repo}} quedó como origin y la rama ya está subida.",
+  "chat.tool.unchanged_one": "⋯ {{count}} línea sin cambios",
+  "chat.tool.unchanged_other": "⋯ {{count}} líneas sin cambios",
+  "chat.file.created": "Creado",
+  "chat.file.modified": "Modificado",
+  "chat.file.pending": "Editando"
 }

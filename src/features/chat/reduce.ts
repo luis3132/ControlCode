@@ -149,6 +149,7 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
     case "toolResult": {
       const result = {
         content: event.content, isError: event.isError, images: event.images, truncated: event.truncated,
+        patch: event.patch ?? null,
       };
       if (!findTool(state.items, event.toolUseId)) return state;
       return { ...state, items: replaceTool(state.items, event.toolUseId, (t) => ({ ...t, result })) };
