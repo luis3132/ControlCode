@@ -44,9 +44,9 @@ The **+** opens a step-by-step wizard for that folder: agent → account → ski
 
 Anything else you use can be registered as a first-class agent — see *Bring your own tool* below.
 
-### 💬 HTML mode for Claude Code
+### 💬 A graphical interface for Claude Code
 
-A Claude Code tab can drop the TUI: the **HTML mode** button in its top-right corner turns it into a chat drawn by the app, on the same conversation, and **Console** takes it back to the terminal with `--resume`. Whatever was running is stopped first, so two processes never write the same session.
+A Claude Code tab can drop the TUI: the **Graphical** button in its top-right corner turns it into a chat drawn by the app, on the same conversation, and **Console** takes it back to the terminal with `--resume`. Whatever was running is stopped first, so two processes never write the same session.
 
 - **The whole conversation**, history included: markdown, reasoning, every tool as a card with its output, edits as diffs, the todo list as a checklist, subagents nested under their task, compactions and the cost of each turn.
 - **Permissions inline**, next to the tool that asks, with *remember for this folder* — the same rules as the fleet.
@@ -388,7 +388,7 @@ Background agents, each in its own git worktree, shown in the fleet console. Wit
 | `--json-args '{...}'` | Pass raw arguments as JSON |
 | `--version` / `--help` | Version / usage |
 
-`ccode mcp` also exists, but it isn't for you: it's the `controlcode` MCP server the app attaches to its agents. With `--cwd <folder> [--tab <id>]` it gives an interactive tab its tools (the project browser, fleet orchestration, your git account, subprocesses, asking you a question) — Claude Code, Codex, OpenCode and Gemini CLI each receive it in their own format; Kimi Code can't receive one per launch; with `--task <id>` it's also the permission server a background agent asks before using a tool, and `--tab <id> --approvals` makes it the one a tab in HTML mode asks. It speaks JSON-RPC on stdin/stdout instead of printing one JSON line.
+`ccode mcp` also exists, but it isn't for you: it's the `controlcode` MCP server the app attaches to its agents. With `--cwd <folder> [--tab <id>]` it gives an interactive tab its tools (the project browser, fleet orchestration, your git account, subprocesses, asking you a question) — Claude Code, Codex, OpenCode and Gemini CLI each receive it in their own format; Kimi Code can't receive one per launch; with `--task <id>` it's also the permission server a background agent asks before using a tool, and `--tab <id> --approvals` makes it the one a tab in the graphical interface asks. It speaks JSON-RPC on stdin/stdout instead of printing one JSON line.
 
 ### Exit codes
 
