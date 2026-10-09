@@ -1,3 +1,5 @@
+import type { PatchHunk } from "@/shared/lineDiff";
+
 /** Lo que manda el backend del modo HTML. Ver `src-tauri/src/chat/parse.rs`. */
 export type ChatEvent =
   | { kind: "init"; sessionId: string | null; model: string | null; permissionMode: string | null;
@@ -11,7 +13,7 @@ export type ChatEvent =
   | { kind: "thinking"; text: string; parent: string | null }
   | { kind: "toolUse"; id: string; name: string; input: Record<string, unknown>; label: string; parent: string | null }
   | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; images: number;
-      truncated: boolean; parent: string | null }
+      truncated: boolean; parent: string | null; patch: PatchHunk[] | null }
   | { kind: "user"; text: string; images: number }
   | { kind: "command"; name: string; args: string }
   | { kind: "commandOutput"; text: string }
@@ -32,6 +34,8 @@ export interface ToolResult {
   isError: boolean;
   images: number;
   truncated: boolean;
+  /** El diff que hizo la CLI contra el archivo real, cuando la herramienta edita. */
+  patch?: PatchHunk[] | null;
 }
 
 /** Una cosa dibujada en la conversación. */

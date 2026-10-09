@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimateSpin, Button, ChevronDownIcon, ChevronRightIcon } from "neogestify-ui-components";
 
@@ -18,16 +18,23 @@ export interface ItemsProps {
 }
 
 /** La conversación, una cosa debajo de la otra. También dibuja lo de un subagente. */
-export function ChatItems(props: ItemsProps) {
-  const { items } = props;
+export function ChatItems({ items, ...rest }: ItemsProps) {
   return (
     <>
-      {items.map((item) => <Item key={item.id} item={item} {...props} />)}
+      {items.map((item) => <Item key={item.id} item={item} {...rest} />)}
     </>
   );
 }
 
-function Item({ item, ...props }: ItemsProps & { item: ChatItem }) {
+type ItemProps = Omit<ItemsProps, "items"> & { item: ChatItem };
+
+/**
+ * Una cosa de la conversación. Memoizada: mientras el agente escribe, el reductor deja
+ * intactas (la misma referencia) todas menos la que crece, así que solo esa se redibuja. Sin
+ * esto, cada pedacito de texto volvía a armar el Markdown de la conversación entera y la
+ * ventana se congelaba.
+ */
+const Item = memo(function Item({ item, ...props }: ItemProps) {
   const { t } = useTranslation();
   switch (item.kind) {
     case "user":
@@ -96,7 +103,7 @@ function Item({ item, ...props }: ItemsProps & { item: ChatItem }) {
         </div>
       );
   }
-}
+});
 
 /**
  * Una pregunta al margen (`/btw`): se contesta sobre una COPIA de la conversación, así que
@@ -105,7 +112,7 @@ function Item({ item, ...props }: ItemsProps & { item: ChatItem }) {
  * Va con su propio marco y no como un mensaje más para que se entienda de un vistazo que
  * eso NO es parte de la conversación: el agente, cuando siga, no se acuerda de esto.
  */
-function SideQuestion({ item, ...props }: ItemsProps & { item: Extract<ChatItem, { kind: "side" }> }) {
+function SideQuestion({ item, ...props }: Omit<ItemsProps, "items"> & { item: Extract<ChatItem, { kind: "side" }> }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(true);
   return (

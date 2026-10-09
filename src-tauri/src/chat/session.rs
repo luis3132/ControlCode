@@ -219,6 +219,34 @@ pub fn user_line(content: &[Value]) -> String {
     json!({ "type": "user", "message": { "role": "user", "content": content } }).to_string()
 }
 
+/// Cada cuánto sale una tanda de eventos al chat mientras el agente escribe: lo bastante
+/// seguido para que el texto se vea fluir, lo bastante espaciado para no redibujar el chat
+/// decenas de veces por segundo.
+const FLUSH_EVERY: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Agrega eventos a una tanda, pegando los pedacitos de texto (o de razonamiento) seguidos
+/// del mismo origen en uno solo: el chat los dibuja igual, y son muchas menos operaciones.
+pub fn push_merged(batch: &mut Vec<ChatEvent>, events: Vec<ChatEvent>) {
+    for event in events {
+        match (batch.last_mut(), event) {
+            (
+                Some(ChatEvent::TextDelta { text: acc, parent: p0 }),
+                ChatEvent::TextDelta { text, parent },
+            ) if *p0 == parent => acc.push_str(&text),
+            (
+                Some(ChatEvent::ThinkingDelta { text: acc, parent: p0 }),
+                ChatEvent::ThinkingDelta { text, parent },
+            ) if *p0 == parent => acc.push_str(&text),
+            // El uso que va subiendo: solo importa el último de cada tanda.
+            (Some(ChatEvent::Usage { input_tokens: i0, output_tokens: o0 }), ChatEvent::Usage { input_tokens, output_tokens }) => {
+                *i0 = input_tokens.or(*i0);
+                *o0 = output_tokens.or(*o0);
+            }
+            (_, event) => batch.push(event),
+        }
+    }
+}
+
 /// Las últimas `max` letras: el final de un stderr es donde está el error.
 fn tail(s: &str, max: usize) -> String {
     let n = s.chars().count();
@@ -318,12 +346,42 @@ async fn run<R: Runtime>(
     });
 
     if let Some(out) = stdout {
+        // En tandas y no línea por línea: con `--include-partial-messages` llegan decenas
+        // de pedacitos de texto por segundo, y un evento por cada uno hacía redibujar el
+        // chat otras tantas veces. Se junta lo que llega en `FLUSH_EVERY` y se manda junto,
+        // con los pedacitos de texto seguidos ya pegados.
         let mut lines = BufReader::new(out).lines();
-        while let Ok(Some(l)) = lines.next_line().await {
-            let events = parse::parse_line(&l);
-            if !events.is_empty() {
+        let mut batch: Vec<ChatEvent> = Vec::new();
+        let mut since = tokio::time::Instant::now();
+        loop {
+            let wait = FLUSH_EVERY.saturating_sub(since.elapsed());
+            let next = if batch.is_empty() {
+                lines.next_line().await.map(Some)
+            } else {
+                match tokio::time::timeout(wait, lines.next_line()).await {
+                    Ok(read) => read.map(Some),
+                    // Pasó el tiempo sin nada nuevo: lo juntado sale ya.
+                    Err(_) => Ok(None),
+                }
+            };
+            match next {
+                Ok(Some(Some(l))) => {
+                    if batch.is_empty() {
+                        since = tokio::time::Instant::now();
+                    }
+                    push_merged(&mut batch, parse::parse_line(&l));
+                }
+                Ok(None) => {}
+                // Se cerró stdout (o falló la lectura): lo que quede sale y se termina.
+                Ok(Some(None)) | Err(_) => break,
+            }
+            if !batch.is_empty() && since.elapsed() >= FLUSH_EVERY {
+                let events = std::mem::take(&mut batch);
                 let _ = app.emit(&name, ChatEnvelope::Events { events, side });
             }
+        }
+        if !batch.is_empty() {
+            let _ = app.emit(&name, ChatEnvelope::Events { events: batch, side });
         }
     }
 

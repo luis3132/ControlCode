@@ -62,6 +62,10 @@ pub enum ChatEvent {
         images: usize,
         truncated: bool,
         parent: Option<String>,
+        /// El diff que hizo la CLI contra el archivo de verdad (Edit, MultiEdit, Write sobre
+        /// uno que existía): con líneas de contexto y números de línea. `None` = la
+        /// herramienta no edita, o la CLI no lo mandó; el chat lo calcula del input.
+        patch: Option<Vec<PatchHunk>>,
     },
     /// Lo que escribió la persona. En el stream no vuelve (el chat ya lo dibujó al
     /// mandarlo); sale del historial.
@@ -247,6 +251,7 @@ fn user(v: &Value, parent: Option<String>) -> Vec<ChatEvent> {
                             images,
                             truncated,
                             parent: parent.clone(),
+                            patch: patch_of(v),
                         });
                     }
                     Some("text") => {
@@ -270,6 +275,48 @@ fn user(v: &Value, parent: Option<String>) -> Vec<ChatEvent> {
         }
         _ => Vec::new(),
     }
+}
+
+/// Un tramo del diff de una edición, como lo arma la CLI: cada línea empieza con ` `, `-`
+/// o `+`.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchHunk {
+    pub old_start: i64,
+    pub new_start: i64,
+    pub lines: Vec<String>,
+}
+
+/// Tope de líneas de un diff: un `Write` que reescribe un archivo enorme no viaja entero.
+pub const MAX_PATCH_LINES: usize = 3_000;
+
+/// El `structuredPatch` del resultado de una herramienta. Viene al lado del mensaje: en el
+/// stream como `tool_use_result`, en el `.jsonl` como `toolUseResult`.
+fn patch_of(v: &Value) -> Option<Vec<PatchHunk>> {
+    let result = v.get("tool_use_result").or_else(|| v.get("toolUseResult"))?;
+    let hunks = result.get("structuredPatch")?.as_array()?;
+    let mut budget = MAX_PATCH_LINES;
+    let out: Vec<PatchHunk> = hunks
+        .iter()
+        .filter_map(|h| {
+            let lines: Vec<String> = h
+                .get("lines")?
+                .as_array()?
+                .iter()
+                .filter_map(Value::as_str)
+                .take(budget)
+                .map(str::to_string)
+                .collect();
+            budget = budget.saturating_sub(lines.len());
+            Some(PatchHunk {
+                old_start: h.get("oldStart").and_then(Value::as_i64).unwrap_or(1),
+                new_start: h.get("newStart").and_then(Value::as_i64).unwrap_or(1),
+                lines,
+            })
+        })
+        .filter(|h| !h.lines.is_empty())
+        .collect();
+    (!out.is_empty()).then_some(out)
 }
 
 /// Un mensaje de texto de la persona, o un comando de `/` y su salida, que la CLI guarda

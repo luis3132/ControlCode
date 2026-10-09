@@ -8,8 +8,9 @@ const delta = (t: string): ChatEvent => ({ kind: "textDelta", text: t, parent: n
 const toolUse = (id: string, parent: string | null = null): ChatEvent => ({
   kind: "toolUse", id, name: "Bash", input: { command: "ls" }, label: "Bash(ls)", parent,
 });
-const result = (id: string): ChatEvent => ({
+const result = (id: string, patch: { oldStart: number; newStart: number; lines: string[] }[] | null = null): ChatEvent => ({
   kind: "toolResult", toolUseId: id, content: "a.txt", isError: false, images: 0, truncated: false, parent: null,
+  patch,
 });
 
 describe("reduceChat", () => {
@@ -74,5 +75,12 @@ describe("reduceChat", () => {
       { kind: "user", id: 2, text: "otra cosa", images: 1 },
     ]);
     expect(settleStreaming(s)).toBe(s);
+  });
+
+  it("el diff que hizo la CLI llega a la tarjeta de la herramienta", () => {
+    const patch = [{ oldStart: 3, newStart: 3, lines: [" a", "-b", "+B"] }];
+    const s = reduceAll(emptyChat(), [toolUse("t1"), result("t1", patch)]);
+    const tool = s.items[0]!;
+    expect(tool.kind === "tool" && tool.result?.patch).toEqual(patch);
   });
 });

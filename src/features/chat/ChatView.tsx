@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimateSpin, Button, ChevronDownIcon, ChevronUpIcon, Tooltip } from "neogestify-ui-components";
 
@@ -13,6 +13,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import type { Tab } from "@/features/tabs/types";
 
 import { ChatItems } from "./ChatItems";
+import { ChatCwd } from "./ToolCard";
 import { agentWords, chatDefaults, chatModels, type ChatDefaults } from "./ipc";
 import { useWorkingWords } from "./workingWords";
 import { modelChoices, modelShownAs } from "./message";
@@ -20,6 +21,10 @@ import { Composer } from "./Composer";
 import { chatStop, onChatEvent } from "./ipc";
 import { useChatStore } from "./store";
 import type { ChatItem, LiveUsage } from "./types";
+
+/** La lista vacía, siempre la misma: una nueva en cada render haría que el valor diferido
+ *  "cambiara" todo el tiempo. */
+const NO_ITEMS: ChatItem[] = [];
 
 /** Cuántas cosas se dibujan de entrada; las anteriores, a pedido. Una sesión larga tiene
  *  miles, y cada una es Markdown o una tarjeta. */
@@ -72,28 +77,37 @@ export function ChatView({ tab, isActive }: { tab: Tab; isActive: boolean }) {
     };
   }, [tabId]);
 
-  const items = c?.chat.items ?? [];
+  // Diferida: React dibuja la conversación con prioridad baja y la interrumpe si llega algo
+  // más urgente (una tecla, un click, otra tab). Mientras el agente escribe, el texto nuevo
+  // llega varias veces por segundo, y dibujarlo en el acto, en el hilo de la página, era lo
+  // que dejaba la ventana sin responder.
+  const items = useDeferredValue(c?.chat.items ?? NO_ITEMS);
   const busy = !!c && (c.running || c.starting);
 
   // Los permisos de esta tab, junto a la herramienta que los pidió. Uno que no se puede
   // ubicar (llegó antes que su herramienta) va al final, para que nunca quede sin verse.
-  const { byTool, loose } = useMemo(() => {
-    const mine = allApprovals.filter((a) => a.tabId === tabId);
-    const known = toolIds(items);
-    const byTool = new Map<string, PendingApproval>();
-    const loose: PendingApproval[] = [];
-    for (const a of mine) {
-      if (a.toolUseId && known.has(a.toolUseId) && !byTool.has(a.toolUseId)) byTool.set(a.toolUseId, a);
-      else loose.push(a);
+  //
+  // El mapa depende solo de los permisos, no de la conversación: si se rehiciera con cada
+  // pedacito de texto, cada mensaje memoizado recibiría uno nuevo y se redibujaría igual.
+  const byTool = useMemo(() => {
+    const map = new Map<string, PendingApproval>();
+    for (const a of allApprovals) {
+      if (a.tabId === tabId && a.toolUseId && !map.has(a.toolUseId)) map.set(a.toolUseId, a);
     }
-    return { byTool, loose };
-  }, [allApprovals, tabId, items]);
+    return map;
+  }, [allApprovals, tabId]);
+  const loose = useMemo(() => {
+    const mine = allApprovals.filter((a) => a.tabId === tabId);
+    if (mine.length === 0) return mine;
+    const known = toolIds(items);
+    return mine.filter((a) => !a.toolUseId || !known.has(a.toolUseId) || byTool.get(a.toolUseId) !== a);
+  }, [allApprovals, tabId, items, byTool]);
 
-  const decide = (approval: PendingApproval, allow: boolean, remember: boolean) => {
+  const decide = useCallback((approval: PendingApproval, allow: boolean, remember: boolean) => {
     decideApproval(approval.id, allow, remember).catch((e) =>
       useChatStore.getState().notice(tabId, "error", String(e))
     );
-  };
+  }, [decideApproval, tabId]);
 
   // Abajo de todo se queda abajo mientras llega lo nuevo; si la persona subió a leer, no
   // se la arrastra. Por tamaño y no por cambio de datos: el Markdown, una tarjeta que se
@@ -170,7 +184,9 @@ export function ChatView({ tab, isActive }: { tab: Tab; isActive: boolean }) {
             <StartBanner tab={tab} model={c?.model ?? null} effort={c?.effort ?? null} />
           )}
 
-          <ChatItems items={shown} running={busy} approvals={byTool} onDecide={decide} focused={isActive} />
+          <ChatCwd.Provider value={tab.cwd}>
+            <ChatItems items={shown} running={busy} approvals={byTool} onDecide={decide} focused={isActive} />
+          </ChatCwd.Provider>
 
           {loose.map((a) => (
             <div key={a.id} className="-mx-3">

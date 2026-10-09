@@ -1553,8 +1553,8 @@
   "chat.toast.open": "Go to the chat",
   "chat.toast.tab": "Tab “{{tab}}”",
   "chat.toggle.confirm": "Stop and go back?",
-  "chat.toggle.toHtml": "HTML mode",
-  "chat.toggle.toHtmlHint": "See this conversation as a chat, with an input and components instead of the TUI",
+  "chat.toggle.toHtml": "Graphical",
+  "chat.toggle.toHtmlHint": "See this conversation in the graphical interface: a chat, an input and components instead of the TUI",
   "chat.toggle.toTerminal": "Console",
   "chat.toggle.toTerminalHint": "Back to the TUI with the same conversation",
   "chat.tokens": "{{input}} in / {{output}} out",
@@ -1605,5 +1605,10 @@
   "forge.create.pushFailedTitle": "Created, but not pushed",
   "forge.create.pushFailedBody": "The repository exists and is set as origin. The push failed: retry it from Changes, no need to create it again.",
   "forge.create.finish": "Done",
-  "forge.create.doneToast": "{{repo}} is now origin and the branch is pushed."
+  "forge.create.doneToast": "{{repo}} is now origin and the branch is pushed.",
+  "chat.tool.unchanged_one": "⋯ {{count}} unchanged line",
+  "chat.tool.unchanged_other": "⋯ {{count}} unchanged lines",
+  "chat.file.created": "Created",
+  "chat.file.modified": "Updated",
+  "chat.file.pending": "Editing"
 }

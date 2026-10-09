@@ -263,15 +263,19 @@ fn un_turno_con_un_proceso_falso_emite_y_termina() {
     });
 
     let seen = seen.lock().unwrap();
-    let kinds: Vec<&str> = seen.iter().map(|v| v["type"].as_str().unwrap()).collect();
-    assert_eq!(kinds, ["events", "events", "ended"]);
-    assert_eq!(seen[0]["events"][0]["kind"], "text");
-    assert_eq!(seen[0]["events"][0]["text"], "eco");
-    assert_eq!(seen[1]["events"][0]["costUsd"], 0.01);
-    assert_eq!(seen[2]["code"], 0);
-    assert_eq!(seen[2]["stopped"], false);
+    // En cuántas tandas llegan depende del tiempo entre líneas (con la máquina cargada
+    // pueden ser dos): lo que importa es qué llegó, en orden, y que el cierre va último.
+    let (ended, batches) = seen.split_last().expect("algo llegó");
+    assert!(batches.iter().all(|v| v["type"] == "events"));
+    let events: Vec<&serde_json::Value> = batches.iter().flat_map(|b| b["events"].as_array().unwrap()).collect();
+    assert_eq!(events[0]["kind"], "text");
+    assert_eq!(events[0]["text"], "eco");
+    assert_eq!(events[1]["costUsd"], 0.01);
+    assert_eq!(ended["type"], "ended");
+    assert_eq!(ended["code"], 0);
+    assert_eq!(ended["stopped"], false);
     // stdin recibió la línea del mensaje.
-    assert!(seen[2]["stderr"].as_str().unwrap().contains("\"text\":\"hola\""));
+    assert!(ended["stderr"].as_str().unwrap().contains("\"text\":\"hola\""));
 }
 
 #[cfg(unix)]
@@ -459,4 +463,110 @@ fn el_catalogo_de_modelos_sale_del_binario_con_su_version() {
     // Lo que usaron las sesiones, de su `.jsonl` (el fixture real), sin `<synthetic>`.
     let used = used_in(include_str!("fixtures/claude_model_session.jsonl"));
     assert_eq!(used, ["claude-haiku-5-5", "claude-sonnet-5-5"]);
+}
+
+/// El diff que hizo la CLI viaja con el resultado de la herramienta, del stream
+/// (`tool_use_result`) y del historial (`toolUseResult`), para que el chat pinte solo lo que
+/// cambió (issue #23).
+#[test]
+fn el_resultado_de_una_edicion_trae_el_diff_de_la_cli() {
+    use super::parse::PatchHunk;
+    let block = json!([{"type":"tool_result","tool_use_id":"t1","content":"ok"}]);
+    let patch = json!([{"oldStart":7,"oldLines":2,"newStart":7,"newLines":2,"lines":[" igual","-sale","+entra"]}]);
+    let expected = Some(vec![PatchHunk {
+        old_start: 7,
+        new_start: 7,
+        lines: vec![" igual".into(), "-sale".into(), "+entra".into()],
+    }]);
+
+    for key in ["tool_use_result", "toolUseResult"] {
+        let line = json!({"type":"user","message":{"content":block}, key: {"structuredPatch": patch}});
+        match &parse_line(&line.to_string())[0] {
+            ChatEvent::ToolResult { patch, .. } => assert_eq!(patch, &expected, "{key}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // Un Bash no trae diff.
+    let bash = json!({"type":"user","message":{"content":block},"tool_use_result":{"stdout":"x"}});
+    assert!(matches!(&parse_line(&bash.to_string())[0], ChatEvent::ToolResult { patch: None, .. }));
+
+    // Un Write enorme no viaja entero.
+    let huge: Vec<String> = (0..super::parse::MAX_PATCH_LINES + 50).map(|i| format!("+{i}")).collect();
+    let line = json!({"type":"user","message":{"content":block},
+        "toolUseResult":{"structuredPatch":[{"oldStart":1,"newStart":1,"lines":huge}]}});
+    match &parse_line(&line.to_string())[0] {
+        ChatEvent::ToolResult { patch: Some(p), .. } => assert_eq!(p[0].lines.len(), super::parse::MAX_PATCH_LINES),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Los pedacitos de texto que llegan en la misma tanda se pegan: el chat dibuja lo mismo con
+/// muchas menos operaciones. Los de otro origen (un subagente) o de otro tipo no se mezclan.
+#[test]
+fn los_pedacitos_de_texto_de_una_tanda_se_pegan() {
+    use super::session::push_merged;
+    let delta = |t: &str, p: Option<&str>| ChatEvent::TextDelta { text: t.into(), parent: p.map(str::to_string) };
+    let mut batch = Vec::new();
+    push_merged(&mut batch, vec![delta("Ho", None), delta("la", None)]);
+    push_merged(&mut batch, vec![delta(" mundo", None), delta("sub", Some("task"))]);
+    push_merged(&mut batch, vec![ChatEvent::Usage { input_tokens: Some(10), output_tokens: Some(1) }]);
+    push_merged(&mut batch, vec![ChatEvent::Usage { input_tokens: None, output_tokens: Some(5) }]);
+    push_merged(&mut batch, vec![delta("!", None)]);
+    assert_eq!(
+        batch,
+        vec![
+            delta("Hola mundo", None),
+            delta("sub", Some("task")),
+            ChatEvent::Usage { input_tokens: Some(10), output_tokens: Some(5) },
+            delta("!", None),
+        ]
+    );
+}
+
+/// Un proceso que escribe muchas líneas seguidas manda pocas tandas, y lo que queda al
+/// final sale aunque no llegue nada más.
+#[cfg(unix)]
+#[test]
+fn muchas_lineas_seguidas_salen_en_pocas_tandas() {
+    use std::sync::{Arc, Mutex};
+    use tauri::Listener;
+
+    let app = tauri::test::mock_app();
+    let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
+    let sink = seen.clone();
+    app.listen(super::session::event_name("tab-burst"), move |e| {
+        sink.lock().unwrap().push(serde_json::from_str(e.payload()).unwrap());
+    });
+    let dir = std::env::temp_dir().join(format!("cc-chat-burst-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("burst.sh");
+    std::fs::write(
+        &script,
+        "read line\n\
+         i=0; while [ $i -lt 200 ]; do echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"a\"}}}'; i=$((i+1)); done\n",
+    )
+    .unwrap();
+    let mut t = turn(true);
+    t.tab_id = "tab-burst".into();
+    t.cwd = dir.to_string_lossy().into_owned();
+    tauri::async_runtime::block_on(async {
+        super::session::start(app.handle(), t, "sh".into(), vec![script.to_string_lossy().into_owned()]).unwrap();
+        for _ in 0..200 {
+            if !super::session::is_running("tab-burst") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    });
+    let seen = seen.lock().unwrap();
+    let batches: Vec<&serde_json::Value> = seen.iter().filter(|v| v["type"] == "events").collect();
+    let text: String = batches
+        .iter()
+        .flat_map(|b| b["events"].as_array().unwrap())
+        .map(|e| e["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(text, "a".repeat(200), "no se pierde nada");
+    assert!(batches.len() < 20, "200 líneas no pueden ser 200 redibujados: fueron {}", batches.len());
 }

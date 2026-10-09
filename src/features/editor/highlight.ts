@@ -35,6 +35,14 @@ export async function highlightLines(code: string, language: string, dark: boole
   return lines;
 }
 
+/** Lo mismo, eligiendo la gramática por el nombre del archivo (`app.tsx`, `Cargo.toml`).
+ *  `null` = no hay una para ese archivo. */
+export async function highlightFile(code: string, path: string, dark: boolean): Promise<Span[][] | null> {
+  const name = path.split(/[\\/]/).pop() ?? path;
+  const description = LanguageDescription.matchFilename(languages, name);
+  return description ? highlightLines(code, description.name, dark) : null;
+}
+
 const mountedStyles = new Set<HighlightStyle>();
 
 /** Las clases de un estilo existen recién cuando su hoja está en el documento. El editor
