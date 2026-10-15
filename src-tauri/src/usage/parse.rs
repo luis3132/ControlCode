@@ -114,7 +114,7 @@ pub(super) fn parse_usage_screen(raw: &str) -> LiveUsage {
         session,
         week,
         week_models: models,
-        problem: (!available).then(|| "No se encontró el panel de consumo en la salida".to_string()),
+        problem: (!available).then(|| "accounts.plan.problem.panelMissing".to_string()),
         ..Default::default()
     }
 }

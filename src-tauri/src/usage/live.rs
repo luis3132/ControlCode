@@ -17,6 +17,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
+use crate::terminal::containment::ProcessGroup;
+
 use crate::database::DbConnection;
 use serde::{Deserialize, Serialize};
 
@@ -100,6 +102,22 @@ impl LiveUsage {
     }
 }
 
+/// La sesión de la cuenta venció o nunca se inició: se dice eso, en vez de esperar un panel
+/// que no va a salir y terminar en un «no llegó a tiempo» que no explica nada.
+pub(super) fn capture_problem(raw: &str) -> Option<&'static str> {
+    let screen = super::screen::render(raw).to_lowercase();
+    if screen.contains("oauth session expired") || screen.contains("oauth token expired") {
+        Some("accounts.auth.expired")
+    } else if screen.contains("not logged in")
+        || screen.contains("please run /login")
+        || screen.contains("failed to authenticate")
+    {
+        Some("accounts.auth.required")
+    } else {
+        None
+    }
+}
+
 /// Abre `claude` en una PTY, le manda `/usage` y devuelve lo que dibujó.
 ///
 /// No es privada para poder probarla contra la TUI instalada (ver `contra_la_tui_de_verdad`).
@@ -124,8 +142,11 @@ pub(super) fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Res
         cmd.env(k, v);
     }
 
-    let mut child = pty.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let child = pty.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pty.slave);
+    // El grupo es el de las tabs: al cortar el sondeo mueren el `claude` y lo que haya
+    // lanzado (sus servidores MCP), no solo el hijo directo. El `Drop` cubre los `?`.
+    let mut probe = UsageProbe::new(child);
 
     let mut reader = pty.master.try_clone_reader().map_err(|e| e.to_string())?;
     let mut writer = pty.master.take_writer().map_err(|e| e.to_string())?;
@@ -154,10 +175,17 @@ pub(super) fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Res
         }
         let text = String::from_utf8_lossy(&raw);
 
+        if let Some(problem) = capture_problem(&text) {
+            break Err(problem.to_string());
+        }
+
         // La carpeta no está entre las de confianza y la TUI está esperando una respuesta.
-        // No se contesta por el usuario: se corta y se dice.
-        if text.contains("Is this a project you created") || text.contains("trust this folder") {
-            break Err("La TUI pidió confirmar que confiás en la carpeta".to_string());
+        // No se contesta por el usuario: se corta y se dice. Se mira sin espacios: la TUI
+        // arma las columnas moviendo el cursor, así que en crudo viene como
+        // «Isthisaprojectyoucreated», y con espacios el sondeo esperaba hasta vencer.
+        let squeezed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        if squeezed.contains("Isthisaprojectyoucreated") || squeezed.contains("trustthisfolder") {
+            break Err("accounts.plan.problem.trustRequired".to_string());
         }
 
         if !sent && start.elapsed() > SETTLE {
@@ -181,16 +209,59 @@ pub(super) fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Res
             break if panel {
                 Ok(text.into_owned())
             } else if sent {
-                Err("La TUI no mostró el panel de consumo a tiempo".to_string())
+                Err("accounts.plan.problem.timeout".to_string())
             } else {
-                Err("La TUI no llegó a arrancar".to_string())
+                Err("accounts.plan.problem.startup".to_string())
             };
         }
     };
 
+    // Para cuando cambie el panel de la TUI y el parseo deje de encontrarlo: con
+    // `CC_USAGE_DUMP=<archivo>` se guarda lo crudo que se vio.
+    if let Ok(path) = std::env::var("CC_USAGE_DUMP") {
+        let _ = std::fs::write(path, &raw);
+    }
+
+    probe.release();
+    result
+}
+
+/// El hijo de `/usage` y todo lo que haya alcanzado a lanzar.
+struct UsageProbe {
+    group: ProcessGroup,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    released: bool,
+}
+
+impl UsageProbe {
+    fn new(child: Box<dyn portable_pty::Child + Send + Sync>) -> Self {
+        let mut group = ProcessGroup::new(0);
+        group.adopt(&*child);
+        Self { group, child, released: false }
+    }
+
+    fn release(&mut self) {
+        if std::mem::replace(&mut self.released, true) {
+            return;
+        }
+        release_usage_process(&mut self.group, &mut *self.child);
+    }
+}
+
+impl Drop for UsageProbe {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+/// Mata el grupo entero y recién después al hijo directo.
+pub(super) fn release_usage_process(
+    group: &mut ProcessGroup,
+    child: &mut (dyn portable_pty::Child + Send + Sync),
+) {
+    group.kill_all();
     let _ = child.kill();
     let _ = child.wait();
-    result
 }
 
 /// ¿Ya está todo lo que interesa?
@@ -218,6 +289,9 @@ pub async fn claude_live_usage(
     env: HashMap<String, String>,
     // `force`: volver a preguntar aunque haya algo guardado. Es el botón de refrescar.
     force: bool,
+    // `cacheOnly`: devolver lo guardado o nada, sin levantar la TUI. Es lo de arrancar la
+    // app, para llenar la barra sin un proceso por cuenta.
+    cache_only: Option<bool>,
     db: tauri::State<'_, DbConnection>,
 ) -> Result<LiveUsage, String> {
     // Sin `force` se devuelve lo guardado TAL CUAL, viejo o no. Quien decide si hace falta
@@ -240,11 +314,16 @@ pub async fn claude_live_usage(
         }
     }
 
+    // Nada guardado: vacío y sin problema (`fetchedAt` 0), que no es lo mismo que un fallo.
+    if cache_only == Some(true) {
+        return Ok(LiveUsage::default());
+    }
+
     let Some(command) = crate::agents::agent_command("claude-code") else {
-        return Ok(LiveUsage::failed("No se conoce el comando de Claude Code"));
+        return Ok(LiveUsage::failed("accounts.plan.problem.commandUnknown"));
     };
     if !crate::agents::command_exists(command) {
-        return Ok(LiveUsage::failed("Claude Code no está instalado"));
+        return Ok(LiveUsage::failed("accounts.plan.problem.notInstalled"));
     }
 
     // El sondeo se abre SIEMPRE en la misma carpeta: una vacía de la app, que la app
@@ -252,14 +331,14 @@ pub async fn claude_live_usage(
     // de encontrar alguna carpeta que la cuenta ya hubiera aceptado, y una cuenta nueva no
     // tiene ninguna.
     let Some(config_path) = config_file(env.get("CLAUDE_CONFIG_DIR").map(String::as_str)) else {
-        return Ok(LiveUsage::failed("No se pudo resolver la configuración de la cuenta"));
+        return Ok(LiveUsage::failed("accounts.plan.problem.configUnavailable"));
     };
     let cwd = match probe_dir() {
         Ok(dir) => dir,
         Err(problem) => return Ok(LiveUsage::failed(problem)),
     };
     let Some(cwd) = cwd.to_str().map(str::to_string) else {
-        return Ok(LiveUsage::failed("La carpeta del sondeo tiene un nombre ilegible"));
+        return Ok(LiveUsage::failed("accounts.plan.problem.probePath"));
     };
     if let Err(problem) = trust_dir(&config_path, &cwd) {
         return Ok(LiveUsage::failed(problem));
