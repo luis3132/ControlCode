@@ -42,14 +42,16 @@ describe("target del build", () => {
     expect(() => runStrict(code)).not.toThrow();
   });
 
-  it("con safari13 se rompe (si esto falla, esbuild lo arregló y el test ya no prueba nada)", async () => {
+  it("ni con safari13 se rompe: esbuild lo arregló en la 0.28.2", async () => {
+    // Hasta la 0.28.1 esto tiraba ReferenceError. Si vuelve a tirarlo, esbuild bajó de
+    // versión o volvió el bug: el `build.target` de vite.config.ts es lo que lo cubre.
     const code = await minify(XTERM_PATTERN, "safari13");
-    expect(() => runStrict(code)).toThrow(ReferenceError);
+    expect(() => runStrict(code)).not.toThrow();
   });
 
   it("xterm entero, minificado para WebKit, no trae asignaciones rotas", async () => {
-    // Primero, que el detector encuentre lo que tiene que encontrar: con safari13 está.
-    expect(await minify(xtermSource, "safari13")).toMatch(BROKEN);
+    // Primero, que el detector reconozca lo que dejaba la 0.28.1.
+    expect("let r;f(void 0||(r={}))").toMatch(BROKEN);
     expect(await minify(xtermSource, await webkitTarget())).not.toMatch(BROKEN);
   }, 30_000);
 });
