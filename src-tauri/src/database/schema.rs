@@ -267,6 +267,21 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              closed_at    INTEGER NOT NULL
          );
 
+         -- Las páginas del canvas de cada workspace (ver `features/canvas`). Una fila por
+         -- página y no un JSON por workspace: mover un nodo reescribe solo su página.
+         -- `workspace` es la carpeta en forma comparable, la misma clave con la que el
+         -- frontend agrupa las tabs. `data` es el JSON de sus nodos y su viewport, que
+         -- solo entiende el frontend.
+         CREATE TABLE IF NOT EXISTS canvas_pages (
+             id         TEXT PRIMARY KEY,
+             workspace  TEXT NOT NULL,
+             name       TEXT NOT NULL,
+             position   INTEGER NOT NULL DEFAULT 0,
+             data       TEXT NOT NULL DEFAULT '{}',
+             updated_at INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_canvas_pages_workspace ON canvas_pages(workspace);
+
          -- TUIs que el usuario agrega a mano (las soportadas de fábrica están hardcodeadas
          -- en `agents::AGENTS`). Vive en SQLite y no en el frontend porque Rust necesita
          -- consultarla sin que haya una ventana involucrada: la reconciliación de symlinks

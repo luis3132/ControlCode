@@ -4,6 +4,7 @@ mod agents;
 mod app;
 mod ask;
 mod browser;
+mod canvas;
 mod dispatch;
 mod shared;
 mod runs;

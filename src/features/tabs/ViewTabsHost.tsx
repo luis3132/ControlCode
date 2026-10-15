@@ -4,7 +4,7 @@ import { useLocation } from "react-router-dom";
 import { BrowserTab } from "@/features/browser/BrowserTab";
 import { DiffTab } from "@/features/editor/DiffTab";
 import { FileTab } from "@/features/editor/FileTab";
-import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
+import { focusGroup, focusPlacement, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { viewKey } from "@/features/tabs/layout/layoutTree";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { useDocumentVisible } from "@/shared/useDocumentVisible";
@@ -43,8 +43,9 @@ export function ViewTabsHost() {
       const frame = document.activeElement;
       if (frame?.tagName !== "IFRAME") return;
       const key = frame.closest<HTMLElement>("[data-view-key]")?.dataset.viewKey;
-      const groupId = key ? placementsRef.current.get(key)?.groupId : undefined;
-      if (groupId) focusGroup(groupId);
+      const placement = key ? placementsRef.current.get(key) : undefined;
+      if (placement?.focus) placement.focus();
+      else if (placement?.groupId) focusGroup(placement.groupId);
     }, 0);
     window.addEventListener("blur", onBlur);
     return () => window.removeEventListener("blur", onBlur);
@@ -71,9 +72,9 @@ export function ViewTabsHost() {
               // recarga en caliente seguiría dibujando detrás). Conserva su tamaño, así la
               // página no recibe un resize ni pierde su estado.
               contentVisibility: shown && onWorkspace ? undefined : "hidden",
-              pointerEvents: shown ? "auto" : "none",
+              pointerEvents: shown && !placement.inert ? "auto" : "none",
             }}
-            onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
+            onPointerDownCapture={() => focusPlacement(placement)}
           >
             {view.kind === "file" && <FileTab view={view} active={shown && onWorkspace} focused={focused} />}
             {view.kind === "diff" && <DiffTab view={view} active={shown && onWorkspace} />}

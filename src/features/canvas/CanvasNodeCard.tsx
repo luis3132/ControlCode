@@ -1,0 +1,213 @@
+import { memo, useEffect, useRef, useState } from "react";
+import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
+import { useTranslation } from "react-i18next";
+import { CloseIcon } from "neogestify-ui-components";
+
+import { GlobeIcon, NoteIcon, ZoomInIcon } from "@/app/icons";
+import { agentIcon } from "@/features/agents/agentIcons";
+import { agentPaint } from "@/features/browser/agentPaint";
+import { useDormant, useHibernation } from "@/features/terminal/hibernation";
+import { useTabsStore } from "@/features/tabs/store";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
+
+import { centerOn, focusNode, placementKey } from "./actions";
+import { MIN_SIZE, NODE_HEADER, type CanvasNode } from "./model";
+import { PRESENCE_MS, dispatchCanvas, useCanvasStore } from "./store";
+
+export interface CanvasNodeData extends Record<string, unknown> {
+  node: CanvasNode;
+  workspace: string;
+  pageId: string;
+  /** Se ve su terminal o su navegador (en pantalla y con zoom suficiente). */
+  live: boolean;
+  /** Con zoom distinto de 100%: se ve, pero el puntero va al nodo y no a la terminal. */
+  inert: boolean;
+  /** Las otras páginas, para "mover a". */
+  pages: { id: string; name: string }[];
+}
+
+export type CanvasFlowNode = Node<CanvasNodeData, "card">;
+
+/**
+ * Un nodo del canvas: una cabecera por donde se agarra y, abajo, su contenido.
+ *
+ * El contenido de un agente o un navegador NO se dibuja acá: es un hueco sobre el que
+ * `TerminalPanel` o `ViewTabsHost` ponen la terminal o la página (ver `placements.ts`).
+ * Lo que sí se dibuja es lo que se ve cuando no están: lejos, con poco zoom, o un agente
+ * que todavía no arrancó.
+ */
+export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
+  const { t } = useTranslation();
+  const { node, workspace, pageId, live, inert, pages } = data;
+  const tab = useTabsStore((s) => (node.kind === "agent" ? s.tabs.find((x) => x.id === node.ref) : undefined));
+  const view = useViewTabsStore((s) => {
+    const found = node.kind === "browser" ? s.views.find((v) => v.id === node.ref) : undefined;
+    return found?.kind === "browser" ? found : undefined;
+  });
+  const dormant = useDormant((s) => (node.ref ? s.ids.has(node.ref) : false));
+  const hibernated = useHibernation((s) => (node.ref ? s.ids.has(node.ref) : false));
+  const presence = useCanvasStore((s) => s.presence[node.id]);
+  const focused = useCanvasStore((s) => s.focusedItem !== null && s.focusedItem === placementKey(node));
+  const [menu, setMenu] = useState(false);
+
+  // De quién es: el color del agente (o del que maneja el navegador). Quien acaba de tocar
+  // el nodo lo pinta encima con el suyo mientras dure.
+  const ownerId = node.kind === "agent" ? node.ref : view?.owner?.id;
+  const own = ownerId ? agentPaint(ownerId).hex : null;
+  const touching = presence && Date.now() - presence.at < PRESENCE_MS ? presence : null;
+  const ring = touching ? agentPaint(touching.id).hex : null;
+
+  const missing = (node.kind === "agent" && !tab) || (node.kind === "browser" && !view);
+  const title = node.title
+    ?? (node.kind === "agent" ? tab?.title : node.kind === "browser" ? view?.title || view?.url || t("browser.newTab") : t("canvas.note"))
+    ?? t("canvas.node.closed");
+  const Icon = node.kind === "agent" ? agentIcon(tab?.agentId ?? "bash", tab?.command ?? "") : node.kind === "browser" ? GlobeIcon : NoteIcon;
+  const state = node.kind !== "agent" || !tab ? null
+    : tab.ptyId != null ? (hibernated ? t("canvas.agent.sleeping") : t("canvas.agent.running"))
+    : dormant ? t("canvas.agent.dormant") : t("canvas.agent.starting");
+
+  const remove = () => dispatchCanvas(workspace, [{ op: "node.remove", page: pageId, id: node.id }]);
+  const moveTo = (to: string) => {
+    setMenu(false);
+    dispatchCanvas(workspace, [{ op: "node.toPage", page: pageId, id: node.id, to }]);
+  };
+
+  return (
+    <div
+      className={`group relative h-full w-full flex flex-col rounded-lg overflow-hidden
+        bg-white dark:bg-surface-sunken shadow-sm
+        ${selected || focused ? "ring-2 ring-accent-500/70" : "ring-1 ring-gray-300 dark:ring-white/10"}`}
+      style={ring ? { boxShadow: `0 0 0 3px ${ring}, 0 0 24px ${ring}55` } : undefined}
+    >
+      <NodeResizer
+        isVisible={selected}
+        minWidth={MIN_SIZE[node.kind].w}
+        minHeight={MIN_SIZE[node.kind].h}
+        lineClassName="!border-accent-500/60"
+        handleClassName="!w-2.5 !h-2.5 !rounded-sm !bg-accent-500 !border-0"
+      />
+
+      <div
+        className="cc-drag flex items-center gap-2 px-2.5 shrink-0 cursor-grab active:cursor-grabbing select-none
+          border-b border-gray-200 dark:border-white/8 bg-gray-50 dark:bg-surface"
+        style={{ height: NODE_HEADER, ...(own ? { boxShadow: `inset 3px 0 0 ${own}` } : {}) }}
+        onDoubleClick={() => centerOn(workspace, pageId, node.id)}
+      >
+        <Icon className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-white/50" />
+        <span className="truncate text-xs font-medium text-gray-700 dark:text-white/80">{title}</span>
+        {state && <span className="shrink-0 text-[10px] text-gray-400 dark:text-white/35">{state}</span>}
+        {touching && (
+          <span className="shrink-0 px-1.5 rounded text-[10px] font-medium text-white" style={{ background: ring! }}>
+            {touching.label}
+          </span>
+        )}
+        <div className="flex-1" />
+        <div className="nodrag flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {node.kind !== "note" && (
+            <HeaderButton label={t("canvas.node.focus")} onClick={() => centerOn(workspace, pageId, node.id)}>
+              <ZoomInIcon className="w-3.5 h-3.5" />
+            </HeaderButton>
+          )}
+          {pages.length > 0 && (
+            <div className="relative">
+              <HeaderButton label={t("canvas.node.moveTo")} onClick={() => setMenu((m) => !m)}>
+                <span className="text-[11px] leading-none">⇄</span>
+              </HeaderButton>
+              {menu && (
+                <div className="absolute right-0 top-6 z-10 min-w-36 py-1 rounded-md shadow-lg
+                  bg-white dark:bg-surface-raised ring-1 ring-gray-200 dark:ring-white/10">
+                  {pages.map((p) => (
+                    <button key={p.id} onClick={() => moveTo(p.id)}
+                      className="block w-full text-left px-3 py-1 text-xs text-gray-700 dark:text-white/75 hover:bg-gray-100 dark:hover:bg-white/8">
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <HeaderButton label={t("canvas.node.remove")} onClick={remove}>
+            <CloseIcon className="w-3.5 h-3.5" />
+          </HeaderButton>
+        </div>
+      </div>
+
+      <div className="relative flex-1 min-h-0">
+        {node.kind === "note" ? (
+          <NoteBody node={node} workspace={workspace} pageId={pageId} />
+        ) : (
+          // El hueco: con la terminal o la página encima no se ve. Con zoom, la terminal no
+          // recibe el puntero (xterm mide mal el mouse escalado) y el click cae acá.
+          <button
+            className={`absolute inset-0 flex items-center justify-center p-4 text-center text-xs
+              text-gray-400 dark:text-white/30 bg-gray-100 dark:bg-surface-deep ${inert || !live ? "cursor-pointer" : ""}`}
+            onClick={() => (live ? focusNode(node) : centerOn(workspace, pageId, node.id))}
+          >
+            {missing ? t("canvas.node.closed") : live ? "" : node.kind === "agent" && dormant ? t("canvas.node.wakeOnShow") : t("canvas.node.zoomIn")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+});
+
+function HeaderButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      title={label}
+      aria-label={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="flex items-center justify-center w-5 h-5 rounded text-gray-400 dark:text-white/40
+        hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10"
+    >
+      {children}
+    </button>
+  );
+}
+
+/** El texto de una nota: se edita ahí mismo y se guarda al dejar de escribir. */
+function NoteBody({ node, workspace, pageId }: { node: CanvasNode; workspace: string; pageId: string }) {
+  const { t } = useTranslation();
+  const [text, setText] = useState(node.text ?? "");
+  const editing = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Lo que escribe un agente llega mientras no se esté escribiendo acá.
+  useEffect(() => {
+    if (!editing.current) setText(node.text ?? "");
+  }, [node.text]);
+
+  const commit = (value: string) => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    if (value === (node.text ?? "")) return;
+    try {
+      dispatchCanvas(workspace, [{ op: "node.update", page: pageId, id: node.id, patch: { text: value } }]);
+    } catch {
+      /* el nodo se borró mientras se escribía */
+    }
+  };
+
+  return (
+    <textarea
+      value={text}
+      placeholder={t("canvas.note.placeholder")}
+      onFocus={() => (editing.current = true)}
+      onBlur={(e) => {
+        editing.current = false;
+        commit(e.target.value);
+      }}
+      onChange={(e) => {
+        const value = e.target.value;
+        setText(value);
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => commit(value), 600);
+      }}
+      className="nodrag nowheel absolute inset-0 w-full h-full resize-none p-3 text-[13px] leading-relaxed outline-none
+        bg-amber-50 text-gray-800 dark:bg-surface dark:text-white/85 placeholder:text-gray-400 dark:placeholder:text-white/25"
+    />
+  );
+}

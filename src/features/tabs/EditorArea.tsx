@@ -5,6 +5,10 @@ import { useTranslation } from "react-i18next";
 import { Button, AddIcon, CloseIcon } from "neogestify-ui-components";
 
 import { GlobeIcon, SplitDownIcon, SplitRightIcon } from "@/app/icons";
+import { CanvasChrome } from "@/features/canvas/CanvasChrome";
+import { CanvasView } from "@/features/canvas/CanvasView";
+import { useCanvasLayer } from "@/features/canvas/placements";
+import { useCanvasStore } from "@/features/canvas/store";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { GroupTabStrip } from "@/features/tabs/GroupTabStrip";
 import {
@@ -16,6 +20,7 @@ import { openNewAgentWizard } from "@/features/tabs/tabActions";
 import { STRIP_BG } from "@/features/tabs/tabStyle";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
+import { comparablePath } from "@/features/tabs/viewTabs";
 
 /**
  * El área de tabs, dividida en grupos como los editores de VS Code.
@@ -32,10 +37,39 @@ import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
  * Por eso la capa del árbol va ARRIBA y no deja pasar el puntero salvo en sus partes
  * (tiras, divisores, grupos vacíos): los huecos son transparentes a los clicks, que llegan
  * a la terminal o al navegador de abajo.
+ *
+ * ## O un canvas
+ *
+ * Un workspace puede mostrarse como canvas (ver `features/canvas`): el árbol se va, y en su
+ * lugar el canvas dice dónde va cada terminal y cada navegador, en sus coordenadas. Las dos
+ * capas siguen siendo las mismas —por eso la capa que las contiene se dibuja SIEMPRE, en
+ * los dos modos: cambiarla de lugar en el árbol de React remontaría todas las terminales—
+ * y en modo canvas lleva la traslación y el zoom de la vista.
  */
 export function EditorArea() {
   const layout = useWorkspaceLayout();
   const containerRef = useRef<HTMLDivElement>(null);
+  const layerRef = useRef<HTMLDivElement>(null);
+  const activeCwd = useTabsStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null);
+  const canvasOn = useCanvasStore((s) => (activeCwd ? !!s.canvasMode[comparablePath(activeCwd)] : false));
+  const canvasLive = useCanvasLayer((s) => s.workspace !== null && activeCwd !== null && s.workspace === comparablePath(activeCwd));
+
+  // La capa sigue al viewport sin pasar por React: un paneo cambia una sola propiedad.
+  useLayoutEffect(() => {
+    const layer = layerRef.current;
+    if (!layer) return;
+    if (!canvasLive) {
+      layer.style.transform = "";
+      return;
+    }
+    const apply = ({ x, y, zoom }: { x: number; y: number; zoom: number }) => {
+      layer.style.transform = `translate(${x}px, ${y}px) scale(${zoom})`;
+    };
+    apply(useCanvasLayer.getState().viewport);
+    return useCanvasLayer.subscribe((state, prev) => {
+      if (state.viewport !== prev.viewport) apply(state.viewport);
+    });
+  }, [canvasLive]);
   const groups = layout ? allGroups(layout.root) : [];
   const groupIds = groups.map((g) => g.id).join("|");
 
@@ -72,18 +106,28 @@ export function EditorArea() {
   }, [groupIds, measure]);
 
   return (
-    <div ref={containerRef} data-editor-area className="absolute inset-0">
-      {/* TerminalPanel siempre montado para preservar PTYs */}
-      <TerminalPanel />
-      {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. */}
-      <ViewTabsHost />
-      <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
-        {layout ? (
-          <NodeView node={layout.root} focused={layout.focused} divided={groups.length > 1} />
-        ) : (
-          <div data-slot="" className="h-full" />
-        )}
+    <div ref={containerRef} data-editor-area className={`absolute inset-0 ${canvasOn ? "overflow-hidden" : ""}`}>
+      {canvasOn && activeCwd && <CanvasView cwd={activeCwd} />}
+      <div
+        ref={layerRef}
+        className="absolute inset-0"
+        style={canvasLive ? { zIndex: 1, transformOrigin: "0 0", pointerEvents: "none" } : undefined}
+      >
+        {/* TerminalPanel siempre montado para preservar PTYs */}
+        <TerminalPanel />
+        {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. */}
+        <ViewTabsHost />
       </div>
+      {!canvasOn && (
+        <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
+          {layout ? (
+            <NodeView node={layout.root} focused={layout.focused} divided={groups.length > 1} />
+          ) : (
+            <div data-slot="" className="h-full" />
+          )}
+        </div>
+      )}
+      {canvasOn && activeCwd && <CanvasChrome cwd={activeCwd} />}
       <TabDragOverlay />
     </div>
   );

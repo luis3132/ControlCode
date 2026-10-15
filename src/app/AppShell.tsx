@@ -17,6 +17,7 @@ import { RouteModal } from "@/app/RouteModal";
 import { EditorArea } from "@/features/tabs/EditorArea";
 import { initLayoutSync } from "@/features/tabs/layout/layoutStore";
 import { initViewTabsPersistence } from "@/features/tabs/viewStore";
+import { initCanvasPersistence } from "@/features/canvas/store";
 import { initPanelFit, useUiStore } from "@/app/uiStore";
 import { buildWorkspaceTree } from "@/features/workspaces/workspaceTree";
 import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
@@ -152,6 +153,7 @@ export function AppShell() {
     initTabsPersistence();
     const myLabel = getCurrentWindow().label;
     initViewTabsPersistence(myLabel);
+    initCanvasPersistence(myLabel);
     // Después de las vistas: el árbol guardado se contrasta contra las tabs que existen.
     initLayoutSync(myLabel);
     loadWindowState(myLabel)

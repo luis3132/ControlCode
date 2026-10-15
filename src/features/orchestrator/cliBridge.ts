@@ -6,6 +6,7 @@ import { useAgentsStore } from "@/features/agents/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { runBrowserRequest, type BrowserRequest } from "@/features/browser/agentBridge";
+import { runCanvasRequest, type CanvasRequest } from "@/features/canvas/agentBridge";
 import type { ViewOwner } from "@/features/tabs/viewTabs";
 import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
@@ -154,6 +155,19 @@ async function handleBrowser(args: Record<string, unknown>): Promise<unknown> {
   return { text: await runBrowserRequest(cwd, request, ownerOf(args)) };
 }
 
+/** Un agente manejando el canvas de su workspace, desde el MCP (`canvas_*`). */
+async function handleCanvas(args: Record<string, unknown>): Promise<unknown> {
+  const cwd = str(args, "cwd");
+  if (!cwd) throw new Error("Falta la carpeta del proyecto");
+  const request = args.request as CanvasRequest | undefined;
+  if (!request || typeof request.op !== "string") throw new Error("Falta qué hacer en el canvas");
+  const text = await runCanvasRequest(cwd, request, ownerOf(args), {
+    // Igual que `ccode tab create`: sus skills en disco antes de que arranque.
+    createTab: async (agent) => ((await handleCreateTab({ cwd, agent })) as { tabId: string }).tabId,
+  });
+  return { text };
+}
+
 /**
  * Un agente preguntándole algo a la persona. Se resuelve cuando contesta (o cuando cierra
  * la tarjeta, que también es una respuesta) — del otro lado el agente está esperando.
@@ -204,6 +218,7 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "tab.close": return handleCloseTab(args);
     case "tab.ptyId": return handlePtyId(args);
     case "browser.run": return handleBrowser(args);
+    case "canvas.run": return handleCanvas(args);
     case "user.ask": return handleAsk(args);
     default: throw new Error(`El frontend no sabe atender '${command}'`);
   }

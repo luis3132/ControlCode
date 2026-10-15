@@ -57,6 +57,10 @@ pub fn run() {
             crate::database::list_workspace_snapshots,
             crate::database::take_workspace_snapshot,
             crate::database::forget_workspace_snapshot,
+            // Las páginas del canvas
+            crate::database::canvas_pages_load,
+            crate::database::canvas_page_save,
+            crate::database::canvas_page_delete,
             crate::database::find_open_tab_for_session,
             // Persistencia SQLite — ventanas y tabs
             crate::database::db_save_window_state,
