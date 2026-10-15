@@ -16,7 +16,7 @@ mod broker;
 mod context;
 pub mod orchestration;
 mod plan;
-mod quota;
+pub(crate) mod quota;
 mod roster;
 mod routing;
 mod rules;

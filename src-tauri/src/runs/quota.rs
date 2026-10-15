@@ -30,6 +30,10 @@ pub struct QuotaWindow {
     pub utilization: f64,
     /// Cuándo se reinicia, en epoch de segundos. Pasado ese momento el dato ya no dice nada.
     pub resets_at: Option<i64>,
+    /// Cuánto dura la ventana, en minutos, si se sabe. Codex lo dice (300, 10080, y 43200
+    /// en el plan gratis); sin esto una ventana de un mes se mostraba como «semanal».
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_mins: Option<i64>,
 }
 
 impl QuotaWindow {
@@ -90,6 +94,7 @@ pub fn parse_rate_limit(v: &serde_json::Value) -> Option<Quota> {
     let window = |key: &str| -> Option<QuotaWindow> {
         let w = info.pointer(&format!("/unifiedWindows/{key}"))?;
         Some(QuotaWindow {
+            window_mins: None,
             utilization: w.get("utilization")?.as_f64()?,
             resets_at: w.get("resetsAt").and_then(|r| r.as_i64()),
         })
@@ -112,8 +117,59 @@ pub fn parse_rate_limit(v: &serde_json::Value) -> Option<Quota> {
         .then_some(quota)
 }
 
+/// Traduce la respuesta de `account/rateLimits/read` del `codex app-server`. Mismo modelo que
+/// el de Claude: Codex informa porcentaje en vez de fracción y cada ventana dice cuánto dura,
+/// así que la de 300 minutos es la corta y la de 10080 la semanal, sin suponer cuál es
+/// `primary` y cuál `secondary`.
+///
+/// Verificado contra la 0.159 (cuenta Plus):
+///
+/// ```json
+/// {"ordinaryUsageAllowed":true,"rateLimits":{"limitId":"codex",
+///  "primary":{"usedPercent":0,"windowDurationMins":300,"resetsAt":1790962038},
+///  "secondary":{"usedPercent":49,"windowDurationMins":10080,"resetsAt":1791400111},
+///  "credits":{"hasCredits":false,"unlimited":false,"balance":"0"},
+///  "rateLimitReachedType":null}}
+/// ```
+pub fn parse_codex_rate_limits(result: &serde_json::Value) -> Option<Quota> {
+    let limits = result.get("rateLimits")?;
+    let mut quota = Quota::default();
+    for key in ["primary", "secondary"] {
+        let Some(w) = limits.get(key).filter(|w| !w.is_null()) else { continue };
+        let Some(used) = w.get("usedPercent").and_then(|u| u.as_f64()) else { continue };
+        let mins = w.get("windowDurationMins").and_then(|m| m.as_i64());
+        let window = QuotaWindow {
+            utilization: used / 100.0,
+            resets_at: w.get("resetsAt").and_then(|r| r.as_i64()),
+            window_mins: mins,
+        };
+        match mins {
+            Some(mins) if mins <= 24 * 60 => quota.five_hour = Some(window),
+            Some(_) => quota.seven_day = Some(window),
+            None => {}
+        }
+    }
+    let reached = limits.get("rateLimitReachedType").is_some_and(|r| !r.is_null());
+    let blocked = result.get("ordinaryUsageAllowed").and_then(|a| a.as_bool()) == Some(false);
+    quota.rejected = reached || blocked;
+    if quota.rejected {
+        // Se libera cuando se reinicia la ventana que está llena (la más cercana que lo esté).
+        quota.rejected_until = [&quota.five_hour, &quota.seven_day]
+            .into_iter()
+            .flatten()
+            .filter(|w| w.utilization >= 1.0)
+            .filter_map(|w| w.resets_at)
+            .min();
+    }
+    // Con créditos comprados (o ilimitados) Codex sigue pasado el 100 %: es el excedente.
+    let credits = limits.get("credits");
+    quota.overage = credits.and_then(|c| c.get("unlimited")).and_then(|u| u.as_bool()).unwrap_or(false)
+        || credits.and_then(|c| c.get("hasCredits")).and_then(|h| h.as_bool()).unwrap_or(false);
+    (quota.five_hour.is_some() || quota.seven_day.is_some() || quota.rejected).then_some(quota)
+}
+
 /// La clave con la que se identifica una cuenta: la misma que usa el panel de consumo
-/// (`AccountUsagePopover`), para que las dos fuentes hablen de la misma cosa.
+/// (`UsageBoard`), para que las dos fuentes hablen de la misma cosa.
 pub fn account_key(agent_id: &str, account_id: Option<&str>) -> String {
     match account_id {
         Some(id) => id.to_string(),
