@@ -40,8 +40,8 @@ function RailButton({
       {/* El acento va contra el borde exterior de la ventana, como en cualquier riel. */}
       {active && (
         <span className="absolute -left-1.5 top-2 w-0.5 h-5 rounded-sm
-          bg-linear-to-b from-blue-500 to-violet-500
-          dark:from-blue-400 dark:to-violet-400" />
+          bg-linear-to-b from-accent-500 to-violet-500
+          dark:from-accent-400 dark:to-violet-400" />
       )}
       {children}
       {badge != null && badge > 0 && (
@@ -87,7 +87,7 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
 
   return (
     <nav className="flex flex-col items-center gap-0.5 w-12 shrink-0 py-1.5
-      bg-gray-100 dark:bg-[#080b0f]
+      bg-gray-100 dark:bg-surface-deep
       border-r border-gray-200 dark:border-white/7">
 
       {/* Plegado, el selector de workspace y el "+" de Carpetas quedan escondidos con el

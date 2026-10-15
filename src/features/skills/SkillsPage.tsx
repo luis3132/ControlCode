@@ -49,7 +49,7 @@ function SkillRow({ skill, selected, rowRef, onSelect, onOpen }: {
       onDoubleClick={onOpen}
       className={`cc-t flex items-center gap-3 h-[42px] mx-1.5 px-2.5 rounded-lg cursor-pointer
         ${selected
-          ? "bg-blue-500/12 dark:bg-blue-400/13 shadow-[inset_0_0_0_1px_rgba(88,166,255,0.24)]"
+          ? "bg-accent-500/12 dark:bg-accent-400/13 shadow-[inset_0_0_0_1px_rgba(88,166,255,0.24)]"
           : "hover:bg-gray-100 dark:hover:bg-white/5"}`}
     >
       <span className="flex items-center justify-center w-6 h-6 rounded-md shrink-0
@@ -277,7 +277,7 @@ export function SkillsPage() {
               action={
                 <Button variant="custom"
                   onClick={() => setQuery("")}
-                  className="cc-t text-[11.5px] text-blue-500 dark:text-blue-400 hover:underline inline-block"
+                  className="cc-t text-[11.5px] text-accent-500 dark:text-accent-400 hover:underline inline-block"
                 >
                   {t("sessions.filters.clear")}
                 </Button>

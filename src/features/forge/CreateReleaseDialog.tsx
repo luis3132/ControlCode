@@ -116,7 +116,7 @@ export function CreateReleaseDialog({ cwd, target, kind, onClose, onCreated }: {
       disabled={busy}
       className={`cc-t inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full border text-[11.5px]
         ${trimmed === value
-          ? "border-blue-500/50 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+          ? "border-accent-500/50 bg-accent-500/10 text-accent-700 dark:text-accent-300"
           : "border-gray-200 dark:border-white/10 text-gray-600 dark:text-white/60 hover:border-gray-300 dark:hover:border-white/25"}`}
     >
       <span className="font-mono">{value}</span>

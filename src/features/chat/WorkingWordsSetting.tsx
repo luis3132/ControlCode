@@ -91,7 +91,7 @@ export function WorkingWordsSetting() {
           className="flex-1 min-w-0 h-7 px-2 rounded-md outline-none text-[11.5px]
             bg-white dark:bg-white/5
             border border-gray-200 dark:border-white/10
-            focus:border-blue-400 dark:focus:border-blue-500
+            focus:border-accent-400 dark:focus:border-accent-500
             text-gray-800 dark:text-gray-200"
         />
         <Button variant="ghost" size="sm" disabled={!draft.trim()} onClick={add}>

@@ -66,7 +66,7 @@ function ProcessRow({ proc, usage, selected, now, onSelect }: {
     <Button variant="custom"
       onClick={onSelect}
       className={`cc-t flex flex-col gap-1 w-full px-3 py-2 rounded-lg text-left
-        ${selected ? "bg-blue-500/12 dark:bg-blue-400/13" : "hover:bg-gray-200/60 dark:hover:bg-white/5"}`}
+        ${selected ? "bg-accent-500/12 dark:bg-accent-400/13" : "hover:bg-gray-200/60 dark:hover:bg-white/5"}`}
     >
       <span className="flex items-center gap-2 w-full min-w-0">
         <StatusDot proc={proc} />
@@ -355,7 +355,7 @@ export function ProcessesPage() {
                   </ToolbarButton>
                 )}
               </div>
-              <div className="flex-1 min-h-0 p-2 bg-gray-50 dark:bg-[#0d1117]">
+              <div className="flex-1 min-h-0 p-2 bg-gray-50 dark:bg-surface">
                 {/* La key por PTY: reiniciar es otro proceso y otra salida. */}
                 <ProcessTerminal key={selected.ptyId} ptyId={selected.ptyId} running={selected.status === "running"} />
               </div>

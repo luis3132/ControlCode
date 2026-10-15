@@ -146,7 +146,7 @@ export function SkillDetailPage() {
           aria-label={t("skills.detail.name")}
           className="flex-1 min-w-0 bg-transparent outline-none text-[13.5px] font-bold
             text-gray-900 dark:text-white
-            border-b border-transparent focus:border-blue-400"
+            border-b border-transparent focus:border-accent-400"
         />
         {dirty && (
           <span className="shrink-0 text-[10px] text-amber-600 dark:text-amber-400">
@@ -188,7 +188,7 @@ export function SkillDetailPage() {
               href={meta.homepage}
               target="_blank"
               rel="noreferrer"
-              className="max-w-[14rem] truncate text-[10px] text-blue-500 dark:text-blue-400 hover:underline"
+              className="max-w-[14rem] truncate text-[10px] text-accent-500 dark:text-accent-400 hover:underline"
             >
               {meta.homepage}
             </a>

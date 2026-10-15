@@ -27,7 +27,7 @@ export function SkillResultRow({
       onDoubleClick={() => { if (!installed && !installing) onInstall(); }}
       className={`cc-t flex items-center gap-3 h-[42px] mx-1.5 px-2.5 rounded-lg cursor-pointer
         ${selected
-          ? "bg-blue-500/12 dark:bg-blue-400/13 shadow-[inset_0_0_0_1px_rgba(88,166,255,0.24)]"
+          ? "bg-accent-500/12 dark:bg-accent-400/13 shadow-[inset_0_0_0_1px_rgba(88,166,255,0.24)]"
           : "hover:bg-gray-100 dark:hover:bg-white/5"}`}
     >
       <span

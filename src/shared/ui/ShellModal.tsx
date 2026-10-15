@@ -55,7 +55,7 @@ export function ShellModal({ title, icon, width = "max-w-4xl", onClose, children
 
       <div ref={frameRef} tabIndex={-1} className={`outline-none cc-rise relative flex flex-col w-full ${width} h-full max-h-[42rem]
         rounded-2xl overflow-hidden
-        bg-gray-50 dark:bg-[#0d1117]
+        bg-gray-50 dark:bg-surface
         border border-gray-200 dark:border-white/12
         shadow-2xl`}>
 

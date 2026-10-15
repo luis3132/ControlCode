@@ -100,8 +100,8 @@ export function PrelaunchSection() {
             editingId === preset.id ? (
               <div
                 key={preset.id}
-                className="px-4 py-3 rounded-xl border border-blue-300 dark:border-blue-500/40
-                  bg-blue-50/40 dark:bg-blue-500/5"
+                className="px-4 py-3 rounded-xl border border-accent-300 dark:border-accent-500/40
+                  bg-accent-50/40 dark:bg-accent-500/5"
               >
                 <PresetForm
                   initial={preset}

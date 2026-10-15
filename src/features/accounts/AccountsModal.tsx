@@ -38,7 +38,7 @@ function NavItem({ active, onClick, icon, label, count, title }: {
       title={title}
       className={`cc-t flex items-center gap-2 w-full h-8 px-2 rounded-lg text-left
         ${active
-          ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-900 dark:text-white font-semibold"
+          ? "bg-accent-500/12 dark:bg-accent-400/13 text-gray-900 dark:text-white font-semibold"
           : "text-gray-600 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-white/6"}`}
     >
       {icon}
@@ -95,7 +95,7 @@ export function AccountsModal({ onClose, initial }: { onClose: () => void; initi
   return (
     <ShellModal
       title={t("settings.accounts")}
-      icon={<UserIcon className="w-[15px] h-[15px] shrink-0 text-blue-500 dark:text-blue-400" />}
+      icon={<UserIcon className="w-[15px] h-[15px] shrink-0 text-accent-500 dark:text-accent-400" />}
       width="max-w-3xl"
       onClose={onClose}
     >

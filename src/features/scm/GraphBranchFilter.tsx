@@ -132,7 +132,7 @@ export function GraphBranchFilter({ root, value, onChange, onClose }: {
           ${on ? "text-gray-900 dark:text-white" : "text-gray-700 dark:text-gray-300"}`}
       >
         <span className={`flex items-center justify-center w-3.5 h-3.5 shrink-0 rounded-full border
-          ${on ? "border-blue-500 bg-blue-500" : "border-gray-300 dark:border-white/25"}`}>
+          ${on ? "border-accent-500 bg-accent-500" : "border-gray-300 dark:border-white/25"}`}>
           {on && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
         </span>
         <span className="flex-1 min-w-0 truncate text-[11.5px] font-medium">{label}</span>
@@ -144,7 +144,7 @@ export function GraphBranchFilter({ root, value, onChange, onClose }: {
   return (
     <div ref={ref}
       className="cc-rise absolute left-2 right-2 bottom-full mb-1 z-30 flex flex-col max-h-96 rounded-xl overflow-hidden
-        bg-white dark:bg-[#0d1117] border border-gray-200 dark:border-white/12 shadow-2xl"
+        bg-white dark:bg-surface border border-gray-200 dark:border-white/12 shadow-2xl"
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
       }}
@@ -179,7 +179,7 @@ export function GraphBranchFilter({ root, value, onChange, onClose }: {
               className="flex items-center gap-2 w-full h-7 px-3 text-left hover:bg-gray-100 dark:hover:bg-white/5"
             >
               <span className={`flex items-center justify-center w-3.5 h-3.5 shrink-0 rounded border
-                ${on ? "border-blue-500 bg-blue-500 text-white" : "border-gray-300 dark:border-white/25"}`}>
+                ${on ? "border-accent-500 bg-accent-500 text-white" : "border-gray-300 dark:border-white/25"}`}>
                 {on && <CheckIcon className="w-2.5 h-2.5" />}
               </span>
               {b.remote
@@ -202,7 +202,7 @@ export function GraphBranchFilter({ root, value, onChange, onClose }: {
             {t("scm.graph.refs.count", { count: value.length })}
           </span>
           <Button variant="custom" onClick={() => onChange("current")}
-            className="text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline inline-block">
+            className="text-[10.5px] text-accent-600 dark:text-accent-400 hover:underline inline-block">
             {t("scm.graph.refs.reset")}
           </Button>
         </div>

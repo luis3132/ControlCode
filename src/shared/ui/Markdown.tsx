@@ -132,7 +132,7 @@ export function Markdown({ content, loadImage }: { content: string; loadImage?: 
           a: ({ href, children }) => (
             <Button variant="custom"
               onClick={() => { if (href) openUrl(href).catch(console.error); }}
-              className="text-blue-600 dark:text-blue-400 hover:underline text-left inline-block"
+              className="text-accent-600 dark:text-accent-400 hover:underline text-left inline-block"
             >
               {children}
             </Button>

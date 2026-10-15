@@ -425,7 +425,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
             className={`cc-t flex items-center gap-0.5 h-5.5 px-1 rounded-md shrink-0
               hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent
               ${status.ahead > 0 || (!status.published && status.branch)
-                ? "text-blue-600 dark:text-blue-400"
+                ? "text-accent-600 dark:text-accent-400"
                 : "text-gray-400 dark:text-white/40 hover:text-gray-800 dark:hover:text-white"} py-0`}
           >
             <PushIcon className="w-3.5 h-3.5" />
@@ -446,8 +446,8 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
       </div>
 
       {busy && (
-        <div className="h-0.5 shrink-0 overflow-hidden bg-blue-500/15">
-          <div className="h-full w-1/3 bg-blue-500 animate-[cc-indeterminate_1.1s_ease-in-out_infinite]" />
+        <div className="h-0.5 shrink-0 overflow-hidden bg-accent-500/15">
+          <div className="h-full w-1/3 bg-accent-500 animate-[cc-indeterminate_1.1s_ease-in-out_infinite]" />
         </div>
       )}
 
@@ -498,7 +498,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
             spellCheck={false}
             className="w-full resize-none px-2.5 py-1.5 rounded-lg outline-none text-[12px] leading-relaxed
               bg-white dark:bg-white/4 border border-gray-200 dark:border-white/10
-              focus:border-blue-500 dark:focus:border-blue-400
+              focus:border-accent-500 dark:focus:border-accent-400
               text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/25"
           />
           {/* Con el árbol limpio no hay nada que commitear, y lo que sigue es subir: publicar
@@ -597,7 +597,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
               className={`cc-t flex items-center gap-1 max-w-[9rem] h-5 px-1.5 rounded-md text-[10px] font-medium
                 ${graphRefs === "current"
                   ? "text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white/80 hover:bg-gray-200 dark:hover:bg-white/10"
-                  : "bg-blue-500/12 text-blue-700 dark:text-blue-300 hover:bg-blue-500/20"}`}
+                  : "bg-accent-500/12 text-accent-700 dark:text-accent-300 hover:bg-accent-500/20"}`}
             >
               <BranchIcon className="w-3 h-3 shrink-0" />
               <span className="truncate">{graphLabel}</span>
@@ -626,7 +626,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
                 {log.length >= logLimit && (
                   <Button variant="custom"
                     onClick={() => setLogLimit((n) => n + LOG_PAGE)}
-                    className="w-full h-6 text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline block"
+                    className="w-full h-6 text-[10.5px] text-accent-600 dark:text-accent-400 hover:underline block"
                   >
                     {t("scm.graph.more")}
                   </Button>

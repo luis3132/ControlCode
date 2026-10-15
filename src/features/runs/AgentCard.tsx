@@ -48,7 +48,7 @@ const BADGE: Record<TaskStatus, string> = {
   done: "text-gray-500 dark:text-white/40 bg-gray-200/70 dark:bg-white/8",
   failed: "text-red-600 dark:text-red-400 bg-red-500/12",
   cancelled: "text-gray-500 dark:text-white/35 bg-gray-200/70 dark:bg-white/8",
-  handed_off: "text-blue-700 dark:text-blue-300 bg-blue-500/12",
+  handed_off: "text-accent-700 dark:text-accent-300 bg-accent-500/12",
 };
 
 /**

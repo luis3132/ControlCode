@@ -25,12 +25,12 @@ export function HomePage() {
   });
 
   return (
-    <div className="cc-scroll h-full bg-gray-50 dark:bg-[#0d1117]">
+    <div className="cc-scroll h-full bg-gray-50 dark:bg-surface">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 pt-16 pb-10">
 
         <header className="flex flex-col gap-2">
           <span className="w-fit text-[11px] font-bold uppercase tracking-[0.14em] bg-clip-text text-transparent
-            bg-linear-to-r from-blue-600 to-violet-600 dark:from-blue-400 dark:to-violet-400">
+            bg-linear-to-r from-accent-600 to-violet-600 dark:from-accent-400 dark:to-violet-400">
             Control Code
           </span>
           <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">

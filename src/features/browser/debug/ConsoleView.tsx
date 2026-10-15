@@ -24,7 +24,7 @@ const TONE: Record<string, string> = {
 };
 
 const MARK: Record<string, string> = {
-  error: "bg-red-500", warn: "bg-amber-500", info: "bg-blue-400", log: "bg-gray-300 dark:bg-white/20", debug: "bg-transparent",
+  error: "bg-red-500", warn: "bg-amber-500", info: "bg-accent-400", log: "bg-gray-300 dark:bg-white/20", debug: "bg-transparent",
 };
 
 function matches(entry: LoggedConsole, level: Level): boolean {
@@ -169,7 +169,7 @@ export function ConsoleView({ viewId, channel }: { viewId: string; channel: Page
       </div>
 
       <div className="flex items-start gap-2 shrink-0 px-3 py-1.5 border-t border-gray-200 dark:border-white/7">
-        <span className="pt-[3px] font-mono text-[12px] text-blue-600 dark:text-blue-400">›</span>
+        <span className="pt-[3px] font-mono text-[12px] text-accent-600 dark:text-accent-400">›</span>
         <textarea
           value={code}
           rows={Math.min(6, code.split("\n").length)}

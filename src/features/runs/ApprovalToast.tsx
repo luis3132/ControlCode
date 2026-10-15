@@ -106,7 +106,7 @@ export function ApprovalToast() {
       role="alertdialog"
       aria-label={t("fleet.toast.title")}
       className="cc-rise w-[360px] max-w-[calc(100vw-2rem)] rounded-xl shadow-2xl overflow-hidden
-        border border-amber-300/70 dark:border-amber-500/30 bg-white dark:bg-[#11161d]"
+        border border-amber-300/70 dark:border-amber-500/30 bg-white dark:bg-surface-raised"
     >
       <div className="flex items-start gap-2.5 px-4 pt-3">
         <span className="relative flex w-2 h-2 mt-1.5 shrink-0">
@@ -166,7 +166,7 @@ export function ApprovalToast() {
       <div className="flex items-center gap-1.5 px-4 py-3">
         <Button variant="custom"
           onClick={goTo}
-          className="mr-auto text-[11.5px] text-blue-600 dark:text-blue-400 hover:underline inline-block"
+          className="mr-auto text-[11.5px] text-accent-600 dark:text-accent-400 hover:underline inline-block"
         >
           {current.tabId
             ? t("chat.toast.open")

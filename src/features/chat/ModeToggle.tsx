@@ -55,7 +55,7 @@ export function ModeToggle({ tab }: { tab: Tab }) {
             ${confirm
               ? "bg-amber-500 text-white border-amber-500 hover:bg-amber-600"
               : `bg-white/95 text-gray-600 border-gray-200 hover:text-gray-900 hover:border-gray-300
-                 dark:bg-[#161b22]/95 dark:text-white/60 dark:border-white/10
+                 dark:bg-surface-raised/95 dark:text-white/60 dark:border-white/10
                  dark:hover:text-white dark:hover:border-white/20`}`}
         >
           {label}

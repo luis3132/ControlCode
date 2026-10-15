@@ -71,7 +71,7 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
                   if (e.key === "Escape") { setNameDraft(r.name); setEditing(false); }
                 }}
                 className="min-w-0 max-w-[16rem] bg-transparent outline-none
-                  border-b border-blue-400 text-[12.5px] font-semibold
+                  border-b border-accent-400 text-[12.5px] font-semibold
                   text-gray-900 dark:text-white"
               />
             ) : (

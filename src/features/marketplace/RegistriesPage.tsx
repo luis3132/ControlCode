@@ -67,7 +67,7 @@ export function RegistriesPage() {
             <ArrowLeftIcon className="w-3.5 h-3.5" />
           </Button>
         </Tooltip>
-        <CloudIcon className="w-[15px] h-[15px] shrink-0 text-blue-500 dark:text-blue-400" />
+        <CloudIcon className="w-[15px] h-[15px] shrink-0 text-accent-500 dark:text-accent-400" />
         <span className="flex-1 min-w-0 truncate text-[13.5px] font-bold
           text-gray-900 dark:text-white">
           {t("marketplace.registries.pageTitle")}

@@ -63,7 +63,7 @@ export function ToolCard({ tool, running, approval, onDecide, focused, renderChi
       <Button variant="custom" onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 w-full px-3 h-9 text-left hover:bg-gray-100 dark:hover:bg-white/[0.045]">
         <span className="w-3.5 h-3.5 shrink-0 flex items-center justify-center">
-          {state === "running" && <AnimateSpin className="w-3 h-3 text-blue-500" />}
+          {state === "running" && <AnimateSpin className="w-3 h-3 text-accent-500" />}
           {state === "ok" && <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />}
           {state === "error" && <ErrorIcon className="w-3.5 h-3.5 text-red-500" />}
           {state === "cut" && <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-white/30" />}
@@ -163,10 +163,10 @@ function ToolBody({ tool, renderChildren }: { tool: Tool; renderChildren: (items
                   ${status === "completed"
                     ? "bg-emerald-500 border-emerald-500"
                     : status === "in_progress"
-                      ? "border-blue-500"
+                      ? "border-accent-500"
                       : "border-gray-300 dark:border-white/25"}`}>
                   {status === "completed" && <CheckIcon className="w-2.5 h-2.5 text-white" />}
-                  {status === "in_progress" && <span className="w-1.5 h-1.5 rounded-sm bg-blue-500" />}
+                  {status === "in_progress" && <span className="w-1.5 h-1.5 rounded-sm bg-accent-500" />}
                 </span>
                 <span className={status === "completed"
                   ? "line-through text-gray-400 dark:text-white/35"
@@ -365,7 +365,7 @@ function Diff({ before, after, patch, path, numbered = false }: {
   return (
     <div className="flex flex-col min-w-0">
       <div className="max-h-[28rem] overflow-auto rounded-md border border-gray-200/70 dark:border-white/5
-        bg-white dark:bg-[#0d1117] py-1">
+        bg-white dark:bg-surface py-1">
         {(cut ? rows.slice(0, PREVIEW_LINES) : rows).map((row, i) => {
           if (row.sign === "gap") {
             return (
@@ -477,7 +477,7 @@ function Params({ input }: { input: Record<string, unknown> | null }) {
             <dd className="min-w-0">
               {long
                 ? <Block text={text} tone="input" />
-                : <span className={`break-words ${typeof value === "string" ? "text-gray-800 dark:text-gray-200" : "font-mono text-blue-700 dark:text-blue-300"}`}>{text}</span>}
+                : <span className={`break-words ${typeof value === "string" ? "text-gray-800 dark:text-gray-200" : "font-mono text-accent-700 dark:text-accent-300"}`}>{text}</span>}
             </dd>
           </div>
         );

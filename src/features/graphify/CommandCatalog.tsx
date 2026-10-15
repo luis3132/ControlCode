@@ -169,7 +169,7 @@ export function CommandCatalog({ cwd, onRun }: {
                   </span>
                   {command.kind === "skill" && (
                     <span className="shrink-0 px-1.5 rounded text-[9.5px]
-                      bg-blue-500/10 text-blue-600 dark:bg-blue-400/15 dark:text-blue-300">
+                      bg-accent-500/10 text-accent-600 dark:bg-accent-400/15 dark:text-accent-300">
                       {t("settings.graphify.inAssistant")}
                     </span>
                   )}
@@ -217,7 +217,7 @@ export function CommandCatalog({ cwd, onRun }: {
                             onClick={() => toggleFlag(command, flag.id)}
                             className={`cc-t px-2 py-0.5 rounded font-mono text-[10px]
                               ${choice.flags.includes(flag.id)
-                                ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-800 dark:text-white"
+                                ? "bg-accent-500/12 dark:bg-accent-400/13 text-gray-800 dark:text-white"
                                 : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10"} inline-block`}
                           >
                             {flag.text.replace(/\{\w+\}/g, "…")}

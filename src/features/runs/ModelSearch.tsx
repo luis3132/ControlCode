@@ -147,7 +147,7 @@ export function ModelSearch({ agents, value, onChange, exclude = [], allowDefaul
                     onClick={() => onChange(pick)}
                     className={`flex items-center gap-2 w-full px-3 py-1.5 text-left rounded-none
                       ${i === active ? "bg-gray-100 dark:bg-white/6" : ""}
-                      ${selected ? "text-blue-700 dark:text-blue-300" : "text-gray-700 dark:text-gray-200"}`}
+                      ${selected ? "text-accent-700 dark:text-accent-300" : "text-gray-700 dark:text-gray-200"}`}
                   >
                     <span className="w-3.5 shrink-0 flex">
                       {selected && <CheckIcon className="w-3.5 h-3.5" />}

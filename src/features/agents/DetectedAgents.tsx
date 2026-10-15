@@ -94,7 +94,7 @@ export function DetectedAgents() {
         <div className="flex flex-col gap-1.5">
           <Button variant="custom"
             onClick={() => setShowPath((v) => !v)}
-            className="cc-t self-start text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline inline-block"
+            className="cc-t self-start text-[10.5px] text-accent-600 dark:text-accent-400 hover:underline inline-block"
           >
             {showPath ? t("settings.tuis.path.hide") : t("settings.tuis.path.show")}
           </Button>

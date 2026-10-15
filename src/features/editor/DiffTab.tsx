@@ -137,7 +137,7 @@ export function DiffTab({ view, active }: { view: DiffView; active: boolean }) {
   }, [theme]);
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-gray-50 dark:bg-[#0d1117]">
+    <div className="flex flex-col h-full min-h-0 bg-gray-50 dark:bg-surface">
       <div className="flex items-center gap-2 h-8 shrink-0 pl-4 pr-2 border-b border-gray-200 dark:border-white/7">
         <span className="min-w-0 truncate font-mono text-[11px] text-gray-500 dark:text-white/40" title={abs}>
           {view.path}

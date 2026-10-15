@@ -41,7 +41,7 @@ export function AdvancedOptions({
         {t("wizard.advanced")}
         {!open && prelaunch.length > 0 && (
           <span className="normal-case tracking-normal px-1.5 py-0.5 rounded-full
-            bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px]">
+            bg-accent-500/10 text-accent-600 dark:text-accent-400 text-[10px]">
             {t("prelaunch.stepCount", { count: prelaunch.length })}
           </span>
         )}

@@ -81,11 +81,11 @@ function Tile({ icon, title, body, onClick }: {
       onClick={onClick}
       className="cc-t flex items-start justify-start gap-3 p-4 rounded-xl text-left
         border border-gray-200 dark:border-white/8 bg-white dark:bg-white/[0.02]
-        hover:border-blue-400/60 dark:hover:border-blue-400/35
-        hover:bg-blue-50/50 dark:hover:bg-blue-400/[0.04]"
+        hover:border-accent-400/60 dark:hover:border-accent-400/35
+        hover:bg-accent-50/50 dark:hover:bg-accent-400/[0.04]"
     >
       <span className="flex items-center justify-center w-9 h-9 rounded-lg shrink-0
-        bg-blue-500/10 text-blue-600 dark:bg-blue-400/12 dark:text-blue-400">
+        bg-accent-500/10 text-accent-600 dark:bg-accent-400/12 dark:text-accent-400">
         {icon}
       </span>
       <span className="flex flex-col gap-0.5 min-w-0">

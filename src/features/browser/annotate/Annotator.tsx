@@ -88,7 +88,7 @@ export function AnnotationBar({ session, compact, busy, onCancel, onDone }: {
       <div className="cc-scroll-x flex items-center gap-1 flex-1 min-w-0">
         {!compact && (
           <span className="shrink-0 mr-1 px-2 h-6 rounded-full flex items-center text-[11px] font-semibold
-            bg-blue-500/12 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300">
+            bg-accent-500/12 text-accent-700 dark:bg-accent-400/15 dark:text-accent-300">
             {t("browser.annotate.frozen")}
           </span>
         )}
@@ -161,7 +161,7 @@ function ColorSwatch({ id, value, selected, onSelect }: {
       aria-pressed={selected}
       title={label}
       className={`cc-t flex items-center justify-center w-7 h-7 p-0 shrink-0 rounded-full
-        ${selected ? "ring-2 ring-blue-500 dark:ring-blue-400" : "hover:bg-gray-200 dark:hover:bg-white/10"}`}
+        ${selected ? "ring-2 ring-accent-500 dark:ring-accent-400" : "hover:bg-gray-200 dark:hover:bg-white/10"}`}
     >
       <span className="w-4 h-4 rounded-full border border-black/20 dark:border-white/25" style={{ background: value }} />
     </Button>
@@ -183,7 +183,7 @@ function SizeButton({ size, label, selected, onClick }: {
       aria-pressed={selected}
       title={label}
       className={`cc-t flex items-center justify-center w-7 h-7 p-0 shrink-0 rounded-lg
-        ${selected ? "bg-blue-500/15 dark:bg-blue-400/20" : "hover:bg-gray-200 dark:hover:bg-white/10"}`}
+        ${selected ? "bg-accent-500/15 dark:bg-accent-400/20" : "hover:bg-gray-200 dark:hover:bg-white/10"}`}
     >
       <span className="rounded-full bg-gray-700 dark:bg-gray-200" style={{ width: dot, height: dot }} />
     </Button>
@@ -230,7 +230,7 @@ function ColorPopover({ anchor, label, children }: { anchor: HTMLElement | null;
       role="group"
       aria-label={label}
       className="fixed z-50 flex items-center gap-1 p-1.5 rounded-xl shadow-lg
-        bg-white dark:bg-[#161b22] border border-gray-200 dark:border-white/10"
+        bg-white dark:bg-surface-raised border border-gray-200 dark:border-white/10"
       style={{ left: box.left, top: box.bottom + 6 }}
     >
       {children}
@@ -403,7 +403,7 @@ export function AnnotationCanvas({ frozen, session, active, onCancel }: {
     >
       {paper && (
         <div
-          className="absolute ring-1 ring-blue-500/60"
+          className="absolute ring-1 ring-accent-500/60"
           style={{ left: paper.left, top: paper.top, width: paper.width, height: paper.height }}
         >
           <canvas ref={base} width={image.width} height={image.height} className="absolute inset-0 w-full h-full" />
@@ -438,7 +438,7 @@ export function AnnotationCanvas({ frozen, session, active, onCancel }: {
               rows={Math.max(1, draft.text.split("\n").length)}
               spellCheck={false}
               className="absolute m-0 p-0 border-0 bg-transparent resize-none overflow-hidden
-                outline-1 outline-dashed outline-offset-2 outline-blue-500 placeholder:text-current placeholder:opacity-50"
+                outline-1 outline-dashed outline-offset-2 outline-accent-500 placeholder:text-current placeholder:opacity-50"
               style={{
                 left: (draft.at.x / image.width) * paper.width,
                 // El texto del lienzo se apoya en el borde de arriba de la letra; el del

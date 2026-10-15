@@ -62,7 +62,7 @@ export function SkillFilePickerStep({ initialPath, onPathChange }: SkillFilePick
       </div>
 
       {initialPath && (
-        <p className="text-xs font-mono text-blue-400 truncate">
+        <p className="text-xs font-mono text-accent-400 truncate">
           ✓ {initialPath}
         </p>
       )}

@@ -213,7 +213,7 @@ export function SkillPalette({ target: initial, onClose }: {
 
       <div className="cc-rise relative flex w-full max-w-4xl h-[30rem]
         rounded-2xl overflow-hidden
-        bg-white dark:bg-[#0a0f16]
+        bg-white dark:bg-surface-sunken
         border border-gray-200 dark:border-white/12 shadow-2xl">
 
         <div className="flex flex-col flex-1 min-w-0">
@@ -221,7 +221,7 @@ export function SkillPalette({ target: initial, onClose }: {
             border-b border-gray-200 dark:border-white/8">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
-              className="shrink-0 text-blue-500 dark:text-blue-400">
+              className="shrink-0 text-accent-500 dark:text-accent-400">
               <path d="M5 7l5 5-5 5M13 17h6" />
             </svg>
             <input
@@ -294,7 +294,7 @@ export function SkillPalette({ target: initial, onClose }: {
                     onDoubleClick={() => !busy && apply(row)}
                     className={`cc-t flex items-center gap-3 h-[42px] mx-1.5 px-2.5 rounded-lg cursor-pointer
                       ${row.key === selected
-                        ? "bg-blue-500/12 dark:bg-blue-400/13 shadow-[inset_0_0_0_1px_rgba(88,166,255,0.24)]"
+                        ? "bg-accent-500/12 dark:bg-accent-400/13 shadow-[inset_0_0_0_1px_rgba(88,166,255,0.24)]"
                         : "hover:bg-gray-100 dark:hover:bg-white/5"}`}
                   >
                     <span className={`flex items-center justify-center w-6 h-6 rounded-md shrink-0

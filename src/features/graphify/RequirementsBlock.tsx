@@ -76,7 +76,7 @@ export function RequirementsBlock({ onRun, running }: {
               </span>
               <Button variant="custom"
                 onClick={() => openUrl(item.docsUrl)}
-                className="cc-t shrink-0 text-[10.5px] text-blue-600 dark:text-blue-400 hover:underline inline-block"
+                className="cc-t shrink-0 text-[10.5px] text-accent-600 dark:text-accent-400 hover:underline inline-block"
               >
                 {t("settings.graphify.req.docs")}
               </Button>

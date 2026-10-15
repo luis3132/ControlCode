@@ -62,7 +62,7 @@ export function AgentPicker({ agents, value, onChange, compact }: {
         className={`cc-t flex items-center gap-2 w-full h-8 px-2.5 rounded-lg border text-[12px]
           border-gray-300 dark:border-white/15 bg-white dark:bg-white/4
           text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-white/8
-          ${open ? "border-blue-500 dark:border-blue-400" : ""}`}
+          ${open ? "border-accent-500 dark:border-accent-400" : ""}`}
       >
         {chosen
           ? <AgentRow tab={chosen} index={agents.indexOf(chosen)} />
@@ -78,7 +78,7 @@ export function AgentPicker({ agents, value, onChange, compact }: {
         <div
           role="listbox"
           className="fixed z-50 py-1 rounded-xl shadow-lg overflow-auto
-            bg-white dark:bg-[#161b22] border border-gray-200 dark:border-white/10"
+            bg-white dark:bg-surface-raised border border-gray-200 dark:border-white/10"
           style={{
             left: rect.left,
             width: Math.max(rect.width, compact ? 200 : 240),
@@ -101,7 +101,7 @@ export function AgentPicker({ agents, value, onChange, compact }: {
               }}
               className={`cc-t flex items-center gap-2 w-full px-2.5 py-1.5 text-left text-[12px]
                 ${tab.id === value
-                  ? "bg-blue-500/10 text-gray-900 dark:text-white"
+                  ? "bg-accent-500/10 text-gray-900 dark:text-white"
                   : "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/8"}`}
             >
               <AgentRow tab={tab} index={i} />

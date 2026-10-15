@@ -55,7 +55,7 @@ export function SessionFilters({ entries, value, onChange }: SessionFiltersProps
         className={`cc-t flex items-center gap-1.5 h-[30px] px-[11px] rounded-full shrink-0
           text-[12px] font-medium border
           ${on
-            ? "border-blue-500/45 bg-blue-500/12 text-blue-700 dark:border-blue-400/45 dark:bg-blue-400/14 dark:text-blue-200"
+            ? "border-accent-500/45 bg-accent-500/12 text-accent-700 dark:border-accent-400/45 dark:bg-accent-400/14 dark:text-accent-200"
             : "border-gray-200 dark:border-white/12 text-gray-600 dark:text-white/72 hover:bg-gray-100 dark:hover:bg-white/5"}`}
       >
         {label}

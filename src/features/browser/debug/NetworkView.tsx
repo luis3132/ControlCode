@@ -27,7 +27,7 @@ function nameOf(row: RequestRow, targetOrigin: string | null): { name: string; h
 
 function statusTone(row: RequestRow): string {
   if (isFailed(row)) return "text-red-600 dark:text-red-400";
-  if (row.status !== null && row.status >= 300) return "text-blue-600 dark:text-blue-400";
+  if (row.status !== null && row.status >= 300) return "text-accent-600 dark:text-accent-400";
   return "text-gray-500 dark:text-white/45";
 }
 
@@ -135,7 +135,7 @@ export function NetworkView({ viewId, proxyOrigin, targetOrigin }: {
             <Empty>{rows.length === 0 ? t("browser.debug.network.empty") : t("browser.debug.noMatches")}</Empty>
           ) : (
             <table className={`w-full border-collapse text-[11.5px] ${compact ? "" : "min-w-[640px]"}`}>
-              <thead className="sticky top-0 z-[1] bg-gray-50 dark:bg-[#10141b]">
+              <thead className="sticky top-0 z-[1] bg-gray-50 dark:bg-surface-sunken">
                 <tr className="text-left text-[10.5px] font-semibold text-gray-500 dark:text-white/40">
                   <th className="w-12 pl-3 pr-1 py-1 font-semibold">{t("browser.debug.network.status")}</th>
                   {!compact && <th className="w-14 px-1 py-1 font-semibold">{t("browser.debug.network.method")}</th>}
@@ -157,7 +157,7 @@ export function NetworkView({ viewId, proxyOrigin, targetOrigin }: {
                     <tr key={row.key} onClick={() => setSelected(open ? null : row.key)}
                       title={row.statusText ? `${row.status} ${row.statusText}` : row.error ?? undefined}
                       className={`cursor-pointer border-b border-gray-100 dark:border-white/5
-                        ${open ? "bg-blue-100/70 dark:bg-blue-500/15" : "hover:bg-gray-100/70 dark:hover:bg-white/4"}`}>
+                        ${open ? "bg-accent-100/70 dark:bg-accent-500/15" : "hover:bg-gray-100/70 dark:hover:bg-white/4"}`}>
                       <td className={`pl-3 pr-1 py-[3px] font-mono tabular-nums ${row.pending ? "text-gray-400 dark:text-white/35" : statusTone(row)}`}>
                         {statusLabel(row)}
                       </td>
@@ -179,7 +179,7 @@ export function NetworkView({ viewId, proxyOrigin, targetOrigin }: {
                               </span>
                               <span className="flex-1 h-1.5 rounded-full bg-gray-200/70 dark:bg-white/6 overflow-hidden">
                                 <span
-                                  className={`block h-full rounded-full ${isFailed(row) ? "bg-red-400" : row.pending ? "bg-gray-400/60 animate-pulse" : "bg-blue-400/80"}`}
+                                  className={`block h-full rounded-full ${isFailed(row) ? "bg-red-400" : row.pending ? "bg-gray-400/60 animate-pulse" : "bg-accent-400/80"}`}
                                   style={{ width: `${Math.max(3, ((row.durationMs ?? 0) / slowest) * 100)}%` }}
                                 />
                               </span>
