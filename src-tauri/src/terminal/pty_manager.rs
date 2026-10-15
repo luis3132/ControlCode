@@ -49,6 +49,9 @@ lazy_static::lazy_static! {
     static ref PTY_REGISTRY: PtyRegistry = Arc::new(Mutex::new(HashMap::new()));
     static ref PTY_BUFFERS: PtyBuffers = Arc::new(Mutex::new(HashMap::new()));
     static ref PTY_COUNTER: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
+    /// Qué ventana tiene cada PTY de tab. Solo los de tabs: los subprocesos de `procs` no
+    /// son de ninguna ventana y siguen vivos aunque se cierre la que los estaba mirando.
+    static ref PTY_OWNERS: Mutex<HashMap<u32, String>> = Mutex::new(HashMap::new());
 }
 
 // Los tres mutex globales guardan colecciones que no quedan a medio escribir si un
@@ -255,11 +258,48 @@ pub async fn pty_create(
     // módulo `prelaunch`). Vacío = se lanza igual que siempre, sin ningún intermediario.
     prelaunch: Option<Vec<String>>,
     app: AppHandle,
+    window: tauri::Window,
 ) -> Result<u32, String> {
     // La terminal pelada se resuelve acá y no en el catálogo: así también una tab guardada
     // con `bash` abre PowerShell en Windows (ver `shell::resolve`).
     let launch = build_launch(&super::shell::resolve(&command), &prelaunch.unwrap_or_default());
-    spawn(&app, SpawnOptions { label: &command, launch, cwd: &cwd, cols, rows, env: env.unwrap_or_default() })
+    let id = spawn(&app, SpawnOptions { label: &command, launch, cwd: &cwd, cols, rows, env: env.unwrap_or_default() })?;
+    owners().insert(id, window.label().to_string());
+    Ok(id)
+}
+
+fn owners() -> std::sync::MutexGuard<'static, HashMap<u32, String>> {
+    PTY_OWNERS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Una tab que se pasa de ventana se reengancha a su PTY desde la nueva: desde ahí es de
+/// esa. Un PTY sin dueño (un subproceso) sigue sin dueño.
+fn claim(id: u32, label: &str) {
+    if let Some(owner) = owners().get_mut(&id) {
+        *owner = label.to_string();
+    }
+}
+
+/// Los PTYs de tab que siguen siendo de `label`.
+pub(crate) fn owned_by(label: &str) -> Vec<u32> {
+    owners().iter().filter(|(_, owner)| owner.as_str() == label).map(|(id, _)| *id).collect()
+}
+
+/// Mata los PTYs de las tabs de una ventana que ya no existe.
+///
+/// Al cerrarse una ventana su webview se destruye sin desmontar nada, así que sus
+/// terminales no llegaban a pedir `pty_kill`: los agentes quedaban corriendo sin nadie que
+/// los mire, cientos de MB cada uno, y al reabrir el workspace se lanzaba OTRO proceso
+/// sobre la misma sesión. Se espera un momento antes de matar: una tab que se pasa a otra
+/// ventana se reengancha desde allá (ver `claim`) y deja de ser de ésta.
+pub fn kill_window_ptys_later(label: String) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        for id in owned_by(&label) {
+            let _ = terminate(id);
+            release(id);
+        }
+    });
 }
 
 /// Lo que hace falta para lanzar un proceso en un PTY.
@@ -438,7 +478,8 @@ fn exit_hooks(id: u32, code: i32) {
 /// También sirve para un PTY que ya terminó y cuya tab sigue abierta (una terminal
 /// hibernada que se despierta tarde): `exitCode` dice cómo terminó.
 #[tauri::command]
-pub async fn pty_attach(id: u32) -> Result<PtyAttach, String> {
+pub async fn pty_attach(id: u32, window: tauri::Window) -> Result<PtyAttach, String> {
+    claim(id, window.label());
     let buffers = buffers();
     let buf = buffers.get(&id).ok_or_else(|| format!("PTY session {id} not found"))?;
     Ok(PtyAttach {
@@ -549,6 +590,7 @@ pub fn terminate(id: u32) -> Result<(), String> {
 /// Suelta el scrollback de un PTY que ya no se va a mirar.
 pub fn release(id: u32) {
     buffers().remove(&id);
+    owners().remove(&id);
 }
 
 /// El pid del proceso que lanzó el PTY, mientras corre.
@@ -589,4 +631,25 @@ pub fn kill_all_sessions() {
         let _ = session.killer.wait();
     }
     buffers().clear();
+}
+
+#[cfg(test)]
+mod owners_test {
+    use super::*;
+
+    #[test]
+    fn una_tab_que_cambia_de_ventana_pasa_a_ser_de_la_nueva() {
+        owners().insert(9_001, "w-a".into());
+        owners().insert(9_002, "w-a".into());
+        claim(9_002, "w-b");
+        // Un subproceso no tiene dueño, y engancharse a él no le da uno.
+        claim(9_003, "w-a");
+        let mut a = owned_by("w-a");
+        a.retain(|id| *id >= 9_000);
+        assert_eq!(a, vec![9_001]);
+        assert!(owned_by("w-b").contains(&9_002));
+        release(9_001);
+        release(9_002);
+        assert!(!owned_by("w-a").contains(&9_001));
+    }
 }
