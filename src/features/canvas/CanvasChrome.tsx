@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AddIcon, CloseIcon } from "neogestify-ui-components";
 
-import { ArrangeIcon, FitIcon, GlobeIcon, NoteIcon } from "@/app/icons";
+import { ArrangeIcon, DiagramIcon, FitIcon, GlobeIcon, NoteIcon } from "@/app/icons";
+import { freeDiagramPath } from "@/features/diagram/paths";
+import { createDiagram } from "@/features/diagram/store";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { agentPaint } from "@/features/browser/agentPaint";
 import { useDormant } from "@/features/terminal/hibernation";
@@ -227,6 +229,15 @@ function AddMenu({ cwd, workspace, page, pages, align }: {
               openNewAgentWizard();
             }}
           />
+          <MenuItem icon={<DiagramIcon className="w-4 h-4" />} label={t("canvas.add.diagram")} onClick={() => {
+            setOpen(false);
+            // Un archivo nuevo en docs/diagrams/, que se versiona con el proyecto.
+            (async () => {
+              const path = await freeDiagramPath(cwd, t("diagram.defaultName"));
+              await createDiagram(path);
+              done(addNode(workspace, page.id, { kind: "diagram", ref: path }));
+            })().catch(console.error);
+          }} />
           <MenuItem icon={<GlobeIcon className="w-4 h-4" />} label={t("canvas.add.browser")} onClick={() => done(addBrowser(cwd, page.id, ""))} />
           <MenuItem icon={<NoteIcon className="w-4 h-4" />} label={t("canvas.add.note")} onClick={() => {
             setOpen(false);

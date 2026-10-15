@@ -39,6 +39,11 @@ pub async fn explorer_write_file(path: String, content: String, expected_mtime: 
 }
 
 #[tauri::command]
+pub async fn explorer_write_bytes(path: String, text: Option<String>, base64: Option<String>) -> Result<i64, String> {
+    blocking(move || super::explorer_write_bytes(path, text, base64)).await
+}
+
+#[tauri::command]
 pub async fn explorer_create_file(dir: String, name: String) -> Result<String, String> {
     blocking(move || super::explorer_create_file(dir, name)).await
 }

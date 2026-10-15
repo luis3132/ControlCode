@@ -1,18 +1,19 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, memo, useEffect, useRef, useState } from "react";
 import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
 import { useTranslation } from "react-i18next";
 import { CloseIcon } from "neogestify-ui-components";
 
-import { GlobeIcon, NoteIcon, ZoomInIcon } from "@/app/icons";
+import { DiagramIcon, ExternalIcon, GlobeIcon, NoteIcon, ZoomInIcon } from "@/app/icons";
+import { useDiagramStore } from "@/features/diagram/store";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { agentPaint } from "@/features/browser/agentPaint";
 import { useDormant, useHibernation } from "@/features/terminal/hibernation";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 
-import { centerOn, focusNode, placementKey } from "./actions";
+import { agentsOf, centerOn, focusNode, placementKey } from "./actions";
 import { MIN_SIZE, NODE_HEADER, type CanvasNode } from "./model";
-import { PRESENCE_MS, dispatchCanvas, useCanvasStore } from "./store";
+import { PRESENCE_MS, dispatchCanvas, setCanvasMode, useCanvasStore } from "./store";
 
 export interface CanvasNodeData extends Record<string, unknown> {
   node: CanvasNode;
@@ -27,6 +28,9 @@ export interface CanvasNodeData extends Record<string, unknown> {
 }
 
 export type CanvasFlowNode = Node<CanvasNodeData, "card">;
+
+// React Flow y ELK solo se bajan cuando hay un diagrama a la vista.
+const DiagramEditor = lazy(() => import("@/features/diagram/DiagramEditor").then((m) => ({ default: m.DiagramEditor })));
 
 /**
  * Un nodo del canvas: una cabecera por donde se agarra y, abajo, su contenido.
@@ -49,6 +53,7 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
   const presence = useCanvasStore((s) => s.presence[node.id]);
   const focused = useCanvasStore((s) => s.focusedItem !== null && s.focusedItem === placementKey(node));
   const [menu, setMenu] = useState(false);
+  const diagramTitle = useDiagramStore((s) => (node.kind === "diagram" && node.ref ? s.docs[node.ref]?.diagram.title : undefined));
 
   // De quién es: el color del agente (o del que maneja el navegador). Quien acaba de tocar
   // el nodo lo pinta encima con el suyo mientras dure.
@@ -59,9 +64,13 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
 
   const missing = (node.kind === "agent" && !tab) || (node.kind === "browser" && !view);
   const title = node.title
-    ?? (node.kind === "agent" ? tab?.title : node.kind === "browser" ? view?.title || view?.url || t("browser.newTab") : t("canvas.note"))
+    ?? (node.kind === "agent" ? tab?.title
+      : node.kind === "browser" ? view?.title || view?.url || t("browser.newTab")
+      : node.kind === "diagram" ? diagramTitle ?? node.ref?.split(/[\\/]/).pop()
+      : t("canvas.note"))
     ?? t("canvas.node.closed");
-  const Icon = node.kind === "agent" ? agentIcon(tab?.agentId ?? "bash", tab?.command ?? "") : node.kind === "browser" ? GlobeIcon : NoteIcon;
+  const Icon = node.kind === "agent" ? agentIcon(tab?.agentId ?? "bash", tab?.command ?? "")
+    : node.kind === "browser" ? GlobeIcon : node.kind === "diagram" ? DiagramIcon : NoteIcon;
   const state = node.kind !== "agent" || !tab ? null
     : tab.ptyId != null ? (hibernated ? t("canvas.agent.sleeping") : t("canvas.agent.running"))
     : dormant ? t("canvas.agent.dormant") : t("canvas.agent.starting");
@@ -103,6 +112,11 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
         )}
         <div className="flex-1" />
         <div className="nodrag flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {node.kind === "diagram" && node.ref && (
+            <HeaderButton label={t("canvas.node.openTab")} onClick={() => openInTab(workspace, node.ref!)}>
+              <ExternalIcon className="w-3.5 h-3.5" />
+            </HeaderButton>
+          )}
           {node.kind !== "note" && (
             <HeaderButton label={t("canvas.node.focus")} onClick={() => centerOn(workspace, pageId, node.id)}>
               <ZoomInIcon className="w-3.5 h-3.5" />
@@ -135,6 +149,24 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
       <div className="relative flex-1 min-h-0">
         {node.kind === "note" ? (
           <NoteBody node={node} workspace={workspace} pageId={pageId} />
+        ) : node.kind === "diagram" && node.ref ? (
+          // El diagrama se dibuja acá mismo. Con zoom no responde al puntero (React Flow mide
+          // mal dentro de algo escalado): un click lo lleva a 100%, donde se edita.
+          <>
+            {live && (
+              <Suspense fallback={null}>
+                <DiagramEditor path={node.ref} interactive={!inert} />
+              </Suspense>
+            )}
+            {(inert || !live) && (
+              <button
+                className="absolute inset-0 flex items-center justify-center text-xs text-gray-400"
+                onClick={() => centerOn(workspace, pageId, node.id)}
+              >
+                {!live && t("canvas.node.zoomIn")}
+              </button>
+            )}
+          </>
         ) : (
           // El hueco: con la terminal o la página encima no se ve. Con zoom, la terminal no
           // recibe el puntero (xterm mide mal el mouse escalado) y el click cae acá.
@@ -150,6 +182,14 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
     </div>
   );
 });
+
+/** Abre el diagrama en una tab de archivo (que lo muestra como diagrama), y pasa a las
+ *  tabs para verla. */
+function openInTab(workspace: string, path: string) {
+  const cwd = agentsOf(workspace)[0]?.cwd ?? workspace;
+  setCanvasMode(workspace, false);
+  useViewTabsStore.getState().openFile(cwd, path);
+}
 
 function HeaderButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
   return (

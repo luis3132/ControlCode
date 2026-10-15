@@ -366,6 +366,8 @@ export function focusPlacement(placement: Placement | undefined): void {
   else if (placement.groupId) focusGroup(placement.groupId);
 }
 
+const NOTHING = new Map<string, Placement>();
+
 /** Dónde se dibuja cada tab visible y cuál tiene el foco. Sin árbol (las tabs todavía no
  *  cargaron) se comporta como antes de que existieran los grupos. */
 export function usePlacements(): Placements {
@@ -385,11 +387,15 @@ export function usePlacements(): Placements {
   const canvasWorkspace = useCanvasLayer((s) => s.workspace);
   const canvasVisible = useCanvasLayer((s) => s.visible);
   const canvasFocus = useCanvasStore((s) => s.focusedItem);
+  const canvasOn = useCanvasStore((s) => (activeCwd ? !!s.canvasMode[activeCwd] : false));
 
-  // En modo canvas lo que se ve lo decide la página activa (ver `features/canvas`).
-  if (canvasWorkspace !== null && canvasWorkspace === activeCwd) {
-    const focusedItem = canvasFocus && canvasVisible.has(canvasFocus) ? canvasFocus : null;
-    return { visible: canvasVisible, focusedItem, canvas: true };
+  // En modo canvas lo que se ve lo decide la página activa (ver `features/canvas`). Hasta que
+  // el canvas dice qué se ve, no se ve nada: si en ese primer cuadro valieran los grupos, la
+  // tab activa se mostraría un instante y eso alcanza para lanzar su agente dormido.
+  if (canvasOn || (canvasWorkspace !== null && canvasWorkspace === activeCwd)) {
+    const visible = canvasWorkspace === activeCwd ? canvasVisible : NOTHING;
+    const focusedItem = canvasFocus && visible.has(canvasFocus) ? canvasFocus : null;
+    return { visible, focusedItem, canvas: true };
   }
   if (!layout) {
     const focusedItem = activeViewId ? viewKey(activeViewId) : activeTabId ? agentKey(activeTabId) : null;

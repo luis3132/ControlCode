@@ -12,12 +12,13 @@
  * Puro: sin stores ni IPC, se prueba en Node (`tests/model.test.ts`).
  */
 
-export type CanvasNodeKind = "agent" | "browser" | "note";
+export type CanvasNodeKind = "agent" | "browser" | "note" | "diagram";
 
 export interface CanvasNode {
   id: string;
   kind: CanvasNodeKind;
-  /** La tab de agente (`agent`) o la vista de navegador (`browser`) que muestra. */
+  /** La tab de agente (`agent`), la vista de navegador (`browser`) o la ruta del archivo
+   *  (`diagram`) que muestra. */
   ref?: string;
   /** El texto de una nota. */
   text?: string;
@@ -92,6 +93,7 @@ export const DEFAULT_SIZE: Record<CanvasNodeKind, { w: number; h: number }> = {
   agent: { w: 760, h: 460 },
   browser: { w: 960, h: 620 },
   note: { w: 280, h: 200 },
+  diagram: { w: 900, h: 600 },
 };
 
 /** El alto de la cabecera de un nodo, por donde se agarra. Lo de abajo es su contenido. */
@@ -105,6 +107,7 @@ export const MIN_SIZE: Record<CanvasNodeKind, { w: number; h: number }> = {
   agent: { w: 320, h: 180 },
   browser: { w: 320, h: 220 },
   note: { w: 140, h: 90 },
+  diagram: { w: 320, h: 220 },
 };
 
 export const EMPTY_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
@@ -267,7 +270,7 @@ export function applyOps(pages: CanvasPage[], ops: CanvasOp[]): ApplyResult {
       case "node.add": {
         const page = requirePage(next, op.page);
         const { spec } = op;
-        if ((spec.kind === "agent" || spec.kind === "browser") && !spec.ref) {
+        if (spec.kind !== "note" && !spec.ref) {
           throw new Error(`Un nodo '${spec.kind}' necesita qué mostrar`);
         }
         // Un agente está en una sola página: agregarlo donde ya está devuelve ese nodo, y
@@ -365,7 +368,7 @@ export function parsePage(id: string, name: string, data: string): CanvasPage {
   } catch {
     /* una página ilegible se abre vacía */
   }
-  const kinds: CanvasNodeKind[] = ["agent", "browser", "note"];
+  const kinds: CanvasNodeKind[] = ["agent", "browser", "note", "diagram"];
   const nodes = (Array.isArray(raw.nodes) ? raw.nodes : []).filter((n): n is CanvasNode => {
     const node = n as Partial<CanvasNode> | null;
     return !!node && typeof node.id === "string" && kinds.includes(node.kind as CanvasNodeKind)

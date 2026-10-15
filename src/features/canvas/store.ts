@@ -42,7 +42,8 @@ interface CanvasState {
   /** Los workspaces que esta ventana muestra como canvas. */
   canvasMode: Record<string, boolean>;
   activePage: Record<string, string>;
-  /** Lo que tocó un agente hace poco, por id de nodo. */
+  /** Lo que tocó un agente hace poco: por id de nodo del canvas, o `<ruta>#<id>` para lo de
+   *  un diagrama. */
   presence: Record<string, Presence>;
   /** El nodo que recibe el teclado, como clave de placements (`a:<tab>` / `v:<vista>`). */
   focusedItem: string | null;
@@ -136,6 +137,14 @@ function prunePresence() {
   presenceTimer = Object.keys(alive).length > 0 ? setTimeout(prunePresence, 1000) : null;
 }
 
+/** Pinta esas claves del color de `actor` por un rato (ver `PRESENCE_MS`). */
+export function markPresence(keys: string[], actor: CanvasActor) {
+  if (keys.length === 0) return;
+  const at = Date.now();
+  useCanvasStore.setState((s) => ({ presence: { ...s.presence, ...Object.fromEntries(keys.map((k) => [k, { ...actor, at }])) } }));
+  if (!presenceTimer) presenceTimer = setTimeout(prunePresence, 1000);
+}
+
 /**
  * Aplica operaciones al canvas de un workspace. Tira el error de la que falle sin aplicar
  * ninguna. Con `actor`, lo que tocó queda pintado de su color un rato.
@@ -152,12 +161,8 @@ export function dispatchCanvas(workspace: string, ops: CanvasOp[], actor: Canvas
     else delete activePage[workspace];
     patch.activePage = activePage;
   }
-  if (actor && result.touched.length > 0) {
-    const at = Date.now();
-    patch.presence = { ...useCanvasStore.getState().presence, ...Object.fromEntries(result.touched.map((id) => [id, { ...actor, at }])) };
-    if (!presenceTimer) presenceTimer = setTimeout(prunePresence, 1000);
-  }
   useCanvasStore.setState(patch);
+  if (actor) markPresence(result.touched, actor);
   persistDiff(workspace, before, result.pages);
   return result;
 }

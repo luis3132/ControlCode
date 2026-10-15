@@ -93,6 +93,7 @@ pub fn run() {
             // Tabs de archivo
             crate::explorer::commands::explorer_read_file,
             crate::explorer::commands::explorer_write_file,
+            crate::explorer::commands::explorer_write_bytes,
             crate::explorer::commands::explorer_file_stat,
             // Control de versiones (panel derecho)
             crate::scm::scm_status,

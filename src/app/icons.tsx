@@ -427,3 +427,14 @@ export function ZoomInIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Dos cajas unidas por una flecha en escalera: un diagrama. */
+export function DiagramIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="3" y="4" width="7" height="5" rx="1.2" />
+      <rect x="14" y="15" width="7" height="5" rx="1.2" />
+      <path d="M6.5 9v4.5h11V15" />
+    </svg>
+  );
+}

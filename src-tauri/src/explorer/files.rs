@@ -148,6 +148,26 @@ pub fn explorer_write_file(
     Ok(WriteOutcome::Saved { mtime: mtime_ms(&meta) })
 }
 
+/// Escribe un archivo nuevo o lo reemplaza, creando las carpetas que falten: lo que exporta
+/// un diagrama (PNG, PDF) o un diagrama recién creado en `docs/diagrams/`. `base64` para lo
+/// binario; `text` para lo demás. Devuelve el mtime con que quedó.
+pub fn explorer_write_bytes(path: String, text: Option<String>, base64: Option<String>) -> Result<i64, String> {
+    let bytes = match (text, base64) {
+        (Some(text), _) => text.into_bytes(),
+        (None, Some(data)) => base64::engine::general_purpose::STANDARD
+            .decode(data.as_bytes())
+            .map_err(|e| format!("base64 inválido: {e}"))?,
+        (None, None) => return Err("Falta el contenido".to_string()),
+    };
+    let target = Path::new(&path);
+    if let Some(parent) = target.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| format!("no se pudo crear {}: {e}", parent.display()))?;
+    }
+    write_atomic(target, &bytes)?;
+    let meta = std::fs::metadata(target).map_err(|e| e.to_string())?;
+    Ok(mtime_ms(&meta))
+}
+
 /// Temporal al lado y `rename`: un corte a mitad de camino deja el original intacto. El
 /// temporal hereda los permisos del original, o un script ejecutable dejaría de serlo.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {

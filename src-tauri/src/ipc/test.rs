@@ -446,11 +446,15 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
 #[test]
 fn el_canvas_se_aprueba_solo_salvo_lanzar_un_agente() {
     use super::mcp::{annotations, auto_approved};
-    for name in ["canvas_read", "canvas_pages", "canvas_add", "canvas_update", "canvas_arrange", "canvas_view"] {
+    for name in [
+        "canvas_read", "canvas_pages", "canvas_add", "canvas_update", "canvas_arrange", "canvas_view",
+        "diagram_create", "diagram_read", "diagram_edit", "diagram_export",
+    ] {
         assert!(auto_approved(name), "{name}");
     }
     assert!(!auto_approved("canvas_spawn"));
     assert_eq!(annotations("canvas_read")["readOnlyHint"], json!(true));
+    assert_eq!(annotations("diagram_read")["readOnlyHint"], json!(true));
     assert_eq!(annotations("canvas_add")["readOnlyHint"], json!(false));
     assert_eq!(annotations("canvas_spawn")["destructiveHint"], json!(false));
 }

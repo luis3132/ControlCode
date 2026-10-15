@@ -165,6 +165,11 @@ export async function runCanvasRequest(cwd: string, request: CanvasRequest, owne
     }
 
     default:
+      if (request.op.startsWith("diagram.")) {
+        // Diferido: los diagramas traen ELK y React Flow, y no hace falta cargarlos para el canvas.
+        const { runDiagramRequest } = await import("@/features/diagram/agentBridge");
+        return runDiagramRequest(cwd, request, actor);
+      }
       throw new Error(`El canvas no sabe hacer '${request.op}'`);
   }
 }

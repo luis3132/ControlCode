@@ -125,10 +125,15 @@ function PageFlow({ workspace, page, pages }: { workspace: string; page: CanvasP
     const bottom = (size.height - v.y) / v.zoom + margin;
     const isInert = Math.abs(v.zoom - 1) > 0.01;
     for (const node of boxes) {
-      const key = placementKey(node);
-      if (!key || !node.ref || !existing.has(node.ref)) continue;
       const onScreen = node.x < right && node.x + node.w > left && node.y < bottom && node.y + node.h > top;
       if (!onScreen || v.zoom < LIVE_MIN_ZOOM || size.width === 0) continue;
+      // Un diagrama se dibuja adentro de su nodo: solo hace falta saber que está a la vista.
+      if (node.kind === "diagram") {
+        liveNow.add(node.id);
+        continue;
+      }
+      const key = placementKey(node);
+      if (!key || !node.ref || !existing.has(node.ref)) continue;
       liveNow.add(node.id);
       visible.set(key, {
         groupId: "",
@@ -179,11 +184,12 @@ function PageFlow({ workspace, page, pages }: { workspace: string; page: CanvasP
     const nextDrafts = { ...drafts };
     let draftsChanged = false;
     let nextSelection: Set<string> | null = null;
+    const resizingIds = new Set(changes.flatMap((c) => (c.type === "dimensions" && c.resizing ? [c.id] : [])));
     for (const change of changes) {
       if (change.type === "position" && change.position) {
         // Agrandar desde la izquierda o desde arriba también mueve el nodo, sin `dragging`:
         // eso es parte del mismo gesto y se guarda al soltar.
-        const resizing = nextDrafts[change.id]?.w !== undefined;
+        const resizing = resizingIds.has(change.id) || nextDrafts[change.id]?.w !== undefined;
         if (change.dragging || resizing) {
           nextDrafts[change.id] = { ...nextDrafts[change.id], x: change.position.x, y: change.position.y };
         } else {
