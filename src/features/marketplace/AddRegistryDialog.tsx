@@ -137,7 +137,7 @@ export function AddRegistryDialog({ onClose }: AddRegistryDialogProps) {
               disabled={busy}
             />
             {resolved ? (
-              <p className="text-xs font-mono text-blue-500 dark:text-blue-400 truncate">→ {resolved}</p>
+              <p className="text-xs font-mono text-accent-500 dark:text-accent-400 truncate">→ {resolved}</p>
             ) : (
               <p className="text-xs text-gray-400 dark:text-white/40">
                 {t("marketplace.add.skillsShHelper")}
@@ -157,7 +157,7 @@ export function AddRegistryDialog({ onClose }: AddRegistryDialogProps) {
             {resolved && resolved !== location.trim() ? (
               // El link se entendió y se guardará en forma corta — mostrarlo evita la duda
               // de "¿habrá tomado bien la subcarpeta?" al pegar una URL de navegación.
-              <p className="text-xs font-mono text-blue-500 dark:text-blue-400 truncate">
+              <p className="text-xs font-mono text-accent-500 dark:text-accent-400 truncate">
                 → {resolved}
               </p>
             ) : (
@@ -179,7 +179,7 @@ export function AddRegistryDialog({ onClose }: AddRegistryDialogProps) {
               disabled={busy}
             />
             {resolved && (
-              <p className="text-xs font-mono text-blue-500 dark:text-blue-400 truncate">✓ {resolved}</p>
+              <p className="text-xs font-mono text-accent-500 dark:text-accent-400 truncate">✓ {resolved}</p>
             )}
           </div>
         )}

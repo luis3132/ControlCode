@@ -34,7 +34,7 @@ function AgentRow({ agent, onClick, onContextMenu }: {
       className={`flex items-center gap-2 h-[25px] pl-1.5 pr-1 rounded-md w-full text-left
         transition-colors duration-150
         ${agent.isActive
-          ? "bg-blue-500/12 dark:bg-blue-400/13"
+          ? "bg-accent-500/12 dark:bg-accent-400/13"
           : "hover:bg-gray-200/60 dark:hover:bg-white/5"}`}
     >
       <RunningIcon
@@ -47,7 +47,7 @@ function AgentRow({ agent, onClick, onContextMenu }: {
       </span>
       <span className={`flex-1 min-w-0 truncate text-[11px]
         ${agent.isActive
-          ? "text-gray-900 dark:text-blue-100"
+          ? "text-gray-900 dark:text-accent-100"
           : "text-gray-600 dark:text-gray-400"}`}>
         {agent.title}
       </span>
@@ -140,7 +140,7 @@ function WorkspaceItem({ ws, expanded, onActivate, onOpenAgent, onWorkspaceMenu,
           con el nombre de la carpeta, que es como el usuario llama al workspace. */}
       <div className="flex items-center gap-2 pl-[18px]">
         <span className="flex items-center gap-1.5 min-w-0 flex-1">
-          <BranchIcon className="w-3 h-3 shrink-0 text-blue-500 dark:text-blue-400" />
+          <BranchIcon className="w-3 h-3 shrink-0 text-accent-500 dark:text-accent-400" />
           <span className="truncate font-mono text-[10px] text-gray-500 dark:text-white/45">
             {ws.isWorktree && (
               <span className="text-gray-400 dark:text-white/25">worktree · </span>
@@ -304,7 +304,7 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
     <aside
       style={{ width }}
       className="cc-fade flex flex-col shrink-0 min-h-0
-        bg-gray-50 dark:bg-[#0a0f16]
+        bg-gray-50 dark:bg-surface-sunken
         border-r border-gray-200 dark:border-white/7"
     >
       <div className="flex items-center gap-2 h-8 shrink-0 pl-3 pr-1.5

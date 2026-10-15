@@ -82,12 +82,12 @@ export function QuestionCard({ approval }: { approval: PendingApproval }) {
   };
 
   return (
-    <div className="flex flex-col gap-3 p-3 rounded-lg border border-blue-300/70 dark:border-blue-500/30
-      bg-blue-50/60 dark:bg-blue-500/[0.06]">
+    <div className="flex flex-col gap-3 p-3 rounded-lg border border-accent-300/70 dark:border-accent-500/30
+      bg-accent-50/60 dark:bg-accent-500/[0.06]">
       {questions.map((q) => (
         <div key={q.question} className="flex flex-col gap-1.5">
           {q.header && (
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-accent-700 dark:text-accent-300">
               {q.header}
             </span>
           )}
@@ -103,7 +103,7 @@ export function QuestionCard({ approval }: { approval: PendingApproval }) {
                   aria-pressed={on}
                   className={`cc-t w-full flex flex-col items-start gap-0.5 px-2.5 py-1.5 rounded-md text-left border
                     ${on
-                      ? "border-blue-500 bg-blue-500/10"
+                      ? "border-accent-500 bg-accent-500/10"
                       : "border-gray-200 dark:border-white/10 hover:bg-white dark:hover:bg-white/5"}`}>
                   <span className="text-[12.5px] text-gray-800 dark:text-gray-100">{o.label}</span>
                   {o.description && (

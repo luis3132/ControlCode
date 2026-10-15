@@ -164,7 +164,7 @@ export function MarkdownField({ label, value, onChange, disabled, rows = 8, plac
           className="w-full resize-y rounded-lg border border-gray-200 dark:border-white/10 bg-transparent
             px-3 py-2 text-[12.5px] leading-relaxed font-mono text-gray-800 dark:text-gray-100
             placeholder:text-gray-400 dark:placeholder:text-white/30
-            focus:outline-none focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/20
+            focus:outline-none focus:border-accent-500/60 focus:ring-2 focus:ring-accent-500/20
             disabled:opacity-60"
           style={{ minHeight, maxHeight: "22rem" }}
         />
@@ -186,7 +186,7 @@ export function FieldAction({ onClick, disabled, children, title }: {
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className="cc-t max-w-[60%] truncate text-[11.5px] text-blue-600 dark:text-blue-400 hover:underline
+      className="cc-t max-w-[60%] truncate text-[11.5px] text-accent-600 dark:text-accent-400 hover:underline
         disabled:opacity-50 disabled:no-underline inline-block"
     >
       {children}

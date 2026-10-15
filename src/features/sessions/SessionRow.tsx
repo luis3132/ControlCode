@@ -48,7 +48,7 @@ export const SessionRow = memo(function SessionRow({
         aria-current={selected || undefined}
         className={`cc-t flex items-center gap-3 w-full min-h-[54px] px-3 py-2 rounded-[10px] text-left
           ${selected
-            ? "bg-blue-500/12 dark:bg-blue-400/12 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.35)] dark:shadow-[inset_0_0_0_1px_rgba(96,165,250,0.35)]"
+            ? "bg-accent-500/12 dark:bg-accent-400/12 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.35)] dark:shadow-[inset_0_0_0_1px_rgba(96,165,250,0.35)]"
             : "hover:bg-gray-100 dark:hover:bg-white/5"}`}
       >
         <span className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0
@@ -70,7 +70,7 @@ export const SessionRow = memo(function SessionRow({
                   text-[10.5px] font-medium
                   ${account === "gone"
                     ? "bg-orange-500/12 text-orange-700 dark:text-orange-300"
-                    : "bg-blue-500/12 text-blue-700 dark:text-blue-300"}`}
+                    : "bg-accent-500/12 text-accent-700 dark:text-accent-300"}`}
               >
                 <span className="w-[5px] h-[5px] rounded-full bg-current" />
                 {account === "gone" ? t("sessions.account.gone") : account.name}

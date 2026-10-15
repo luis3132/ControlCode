@@ -34,19 +34,19 @@ export function terminalFontSize(zoom: number): number {
 }
 
 /**
- * Paletas de la terminal, una por tema. Son GitHub Dark y GitHub Light: el resto de la app
- * ya venía con la oscura, y usar el par oficial mantiene los 16 colores ANSI coherentes
- * entre sí en vez de aclarar la oscura a ojo (que deja los colores brillantes ilegibles
- * sobre blanco — un amarillo #e3b341 sobre fondo claro no se lee).
+ * Paletas de la terminal, una por tema. Fondo, texto, cursor y selección son los de la
+ * paleta de la app (grafito y acento acero; ver `@theme` en App.css — xterm no lee
+ * variables CSS, por eso van en hex). Los colores ANSI se mantienen los de GitHub
+ * Dark/Light: son un par probado, coherente entre sí y legible en los dos fondos.
  */
 export const TERMINAL_THEMES = {
   dark: {
-    background: "#0d1117",
-    foreground: "#e6edf3",
-    cursor: "#58a6ff",
-    selectionBackground: "#388bfd40",
-    black: "#0d1117",
-    brightBlack: "#6e7681",
+    background: "#101012",
+    foreground: "#e6e7ea",
+    cursor: "#8cb0ca",
+    selectionBackground: "#8cb0ca40",
+    black: "#101012",
+    brightBlack: "#707276",
     red: "#ff7b72",
     brightRed: "#ffa198",
     green: "#3fb950",
@@ -59,14 +59,14 @@ export const TERMINAL_THEMES = {
     brightMagenta: "#d2a8ff",
     cyan: "#39c5cf",
     brightCyan: "#56d4dd",
-    white: "#b1bac4",
-    brightWhite: "#f0f6fc",
+    white: "#d3d5d8",
+    brightWhite: "#f9fafb",
     // La barra de scroll de xterm por defecto es el color del texto al 20% — sobre este
     // fondo, indistinguible. Estos valores la hacen visible sin que compita con el
     // contenido, y suben al agarrarla para dar respuesta al arrastre.
-    scrollbarSliderBackground: "rgba(230, 237, 243, 0.30)",
-    scrollbarSliderHoverBackground: "rgba(230, 237, 243, 0.45)",
-    scrollbarSliderActiveBackground: "rgba(230, 237, 243, 0.60)",
+    scrollbarSliderBackground: "rgba(236, 236, 240, 0.30)",
+    scrollbarSliderHoverBackground: "rgba(236, 236, 240, 0.45)",
+    scrollbarSliderActiveBackground: "rgba(236, 236, 240, 0.60)",
   },
   light: {
     // Gris, no blanco puro. El blanco a pantalla completa es agresivo en una superficie que
@@ -74,9 +74,9 @@ export const TERMINAL_THEMES = {
     // `bg-gray-100` que ya usa el panel que la contiene (ver TerminalPanel), así que la
     // terminal se integra con la app en vez de recortarse como un rectángulo blanco.
     background: "#f3f4f6",
-    foreground: "#1f2328",
-    cursor: "#0550ae",
-    selectionBackground: "#0969da33",
+    foreground: "#17181b",
+    cursor: "#496e87",
+    selectionBackground: "#496e8733",
     // Cada color cumple contraste sobre el fondo POR SÍ MISMO, conservando su tono. Esto
     // evita pedirle a xterm que corrija el contraste en caliente: esa corrección, para
     // llegar al ratio, arrastra el color hacia el negro y le borra el matiz — todo
@@ -111,9 +111,9 @@ export const TERMINAL_THEMES = {
     // desaparecen — y es justo lo que más usan los agentes para su texto principal.
     white: "#4a5058",
     brightWhite: "#24292f",
-    scrollbarSliderBackground: "rgba(31, 35, 40, 0.28)",
-    scrollbarSliderHoverBackground: "rgba(31, 35, 40, 0.42)",
-    scrollbarSliderActiveBackground: "rgba(31, 35, 40, 0.55)",
+    scrollbarSliderBackground: "rgba(30, 30, 34, 0.28)",
+    scrollbarSliderHoverBackground: "rgba(30, 30, 34, 0.42)",
+    scrollbarSliderActiveBackground: "rgba(30, 30, 34, 0.55)",
   },
 } as const;
 
@@ -134,4 +134,4 @@ export const MIN_CONTRAST = { dark: 1, light: 2 } as const;
 
 /** Color de las líneas de corte (ver `terminalMarks`). Tenue a propósito: separa sin
  *  competir con el contenido, que es lo que se está leyendo. */
-export const MARK_LINE = { dark: "rgba(88, 166, 255, 0.35)", light: "rgba(9, 105, 218, 0.28)" } as const;
+export const MARK_LINE = { dark: "rgba(140, 176, 202, 0.35)", light: "rgba(73, 110, 135, 0.28)" } as const;

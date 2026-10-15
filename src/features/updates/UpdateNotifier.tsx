@@ -41,7 +41,7 @@ export function UpdateNotifier() {
 
   return (
     <div className="w-[360px] max-w-[calc(100vw-2rem)] rounded-xl shadow-2xl
-      border border-gray-200 dark:border-white/10 bg-white dark:bg-[#11161d]">
+      border border-gray-200 dark:border-white/10 bg-white dark:bg-surface-raised">
       <div className="flex items-start gap-2 px-4 pt-3">
         <div className="flex flex-col gap-0.5 flex-1 min-w-0">
           <span className="text-[13px] font-semibold text-gray-900 dark:text-white">
@@ -62,7 +62,7 @@ export function UpdateNotifier() {
 
       {info.notes && (
         <div className="px-4 pt-2">
-          <Button variant="custom" onClick={() => setNotesOpen((v) => !v)} className="text-[11.5px] text-blue-600 dark:text-blue-400 hover:underline inline-block">
+          <Button variant="custom" onClick={() => setNotesOpen((v) => !v)} className="text-[11.5px] text-accent-600 dark:text-accent-400 hover:underline inline-block">
             {notesOpen ? t("updates.hideNotes") : t("updates.showNotes")}
           </Button>
           {notesOpen && (

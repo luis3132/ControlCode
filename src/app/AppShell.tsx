@@ -37,6 +37,7 @@ import { useProcessEvents } from "@/features/processes/useProcessEvents";
 import { initNotifications } from "@/features/notifications/watch";
 import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
+import { markDormant } from "@/features/terminal/hibernation";
 
 /** Las rutas que se muestran como modal encima de las terminales en vez de reemplazarlas. */
 const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/forge", "/processes"];
@@ -162,6 +163,8 @@ export function AppShell() {
           // siempre, no solo cuando trae tabs.
           setWorkspaceId(restored.window.workspaceId);
           if (restored.tabs.length > 0) {
+            // Se lanzan recién cuando se muestran: ver `useDormant`.
+            markDormant(restored.tabs.map((row) => row.id));
             hydrateFromBackend(restored.tabs.map(toFrontendTab));
             navigate("/workspace");
           }
@@ -204,8 +207,8 @@ export function AppShell() {
   }, [tabs.length, isWorkspace, navigate]);
 
   return (
-    <div className={`flex flex-col h-screen overflow-hidden
-      bg-gray-50 dark:bg-[#0d1117]
+    <div className={`cc-clip flex flex-col h-screen min-w-0
+      bg-gray-50 dark:bg-surface
       text-gray-900 dark:text-white
       ${isMaximized ? "" : "rounded-xl"}`}>
 
@@ -226,19 +229,19 @@ export function AppShell() {
       {/* Fila 0: encabezado del lateral (controles de ventana + nombre) y, a partir de
           donde ese lateral termina, las tabs de agente. Nada más — lo que antes vivía a
           la derecha de la barra de título se mudó al riel y a la barra de abajo. */}
-      <div className="flex shrink-0">
+      <div className="cc-clip flex shrink-0 min-w-0">
         <SideHead width={sideWidth} />
         <TabBar showLights={workspacesCollapsed} />
       </div>
 
-      <div className="flex flex-1 min-h-0">
+      <div className="cc-clip flex flex-1 min-h-0 min-w-0">
         {/* Izquierda: los AGENTES. Es lo primero que se ve porque en un entorno de
             desarrollo para agentes lo primero es qué está corriendo; el árbol de
             archivos es el panel secundario y va del otro lado. */}
         <ActivityRail agentCount={tabs.length} />
         {!workspacesCollapsed && <WorkspacesPanel groups={groups} width={PANEL_W} />}
 
-        <div className="relative flex-1 min-w-0 overflow-hidden">
+        <div className="cc-clip relative flex-1 min-w-0">
           {/* Las terminales y las demás tabs, siempre montadas para preservar los PTYs, en
               los grupos de la pantalla dividida. */}
           <div

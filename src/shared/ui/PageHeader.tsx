@@ -16,8 +16,8 @@ export function PageHeader({ icon, title, subtitle, action }: PageHeaderProps) {
     <div className="flex items-center justify-between gap-3 mb-8">
       <div className="flex items-center gap-3 min-w-0">
         <span className="flex items-center justify-center w-10 h-10 rounded-xl shrink-0
-          bg-linear-to-br from-blue-50 to-violet-50 dark:from-blue-500/10 dark:to-violet-500/10
-          text-blue-600 dark:text-blue-400">
+          bg-linear-to-br from-accent-50 to-violet-50 dark:from-accent-500/10 dark:to-violet-500/10
+          text-accent-600 dark:text-accent-400">
           {icon}
         </span>
         <div className="min-w-0">

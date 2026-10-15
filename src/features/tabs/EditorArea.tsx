@@ -177,7 +177,7 @@ function Sash({ split, index, containerRef }: {
         onPointerDown={onPointerDown}
         onDoubleClick={onDoubleClick}
         className={`absolute pointer-events-auto z-10 transition-colors duration-150 delay-75
-          ${dragging ? "bg-blue-500/70" : "hover:bg-blue-500/50"}`}
+          ${dragging ? "bg-accent-500/70" : "hover:bg-accent-500/50"}`}
         style={row ? { top: 0, bottom: 0, left: -3, width: 7, cursor } : { left: 0, right: 0, top: -3, height: 7, cursor }}
       />
       {/* Mientras se arrastra, una capa encima de todo: sin ella, pasar sobre el navegador de
@@ -224,7 +224,7 @@ function GroupView({ group, focused, divided }: { group: GroupNode; focused: boo
       <div data-slot={group.id} className="relative flex-1 min-h-0">
         {empty && (
           <div className="absolute inset-0 pointer-events-auto flex flex-col items-center justify-center gap-4 px-6 text-center
-            bg-gray-50 dark:bg-[#0d1117]">
+            bg-gray-50 dark:bg-surface">
             <p className="text-sm text-gray-500 dark:text-white/40">{t("tabs.group.empty")}</p>
             <div className="flex flex-wrap items-center justify-center gap-2">
               <EmptyAction
@@ -298,12 +298,12 @@ function TabDragOverlay() {
     <div style={{ position: "fixed", inset: 0, zIndex: 2147483000, pointerEvents: "none", cursor: "grabbing" }}>
       {target?.kind === "zone" && (
         <div
-          className="rounded-md border-2 border-blue-500/70 bg-blue-500/15 transition-all duration-100"
+          className="rounded-md border-2 border-accent-500/70 bg-accent-500/15 transition-all duration-100"
           style={{ position: "fixed", left: target.rect.left, top: target.rect.top, width: target.rect.width, height: target.rect.height }}
         />
       )}
       {target?.kind === "strip" && (
-        <div className="bg-blue-500" style={{ position: "fixed", left: target.lineX - 1, top: target.top + 6, width: 2, height: target.height - 12 }} />
+        <div className="bg-accent-500" style={{ position: "fixed", left: target.lineX - 1, top: target.top + 6, width: 2, height: target.height - 12 }} />
       )}
       <div
         className="max-w-56 truncate px-2.5 py-1 rounded-md text-xs shadow-lg bg-gray-900 text-white dark:bg-white dark:text-gray-900"

@@ -487,3 +487,24 @@ fn una_cuenta_sin_archivo_todavia_lo_estrena() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn en_windows_la_carpeta_de_confianza_se_anota_con_barras_normales() {
+    use super::trust::{project_key, with_trusted};
+    assert_eq!(project_key(r"C:\Users\ana\.controlcode\usage-probe"), "C:/Users/ana/.controlcode/usage-probe");
+    assert_eq!(project_key(r"\\server\share\x"), "//server/share/x");
+    assert_eq!(project_key("/home/ana/x"), "/home/ana/x");
+
+    let config = with_trusted(&serde_json::json!({}), r"C:\Users\ana\probe").unwrap();
+    assert_eq!(config["projects"]["C:/Users/ana/probe"]["hasTrustDialogAccepted"], true);
+    // Ya anotada con barras normales: no se vuelve a escribir.
+    assert!(with_trusted(&config, r"C:\Users\ana\probe").is_none());
+}
+
+#[test]
+fn una_sesion_vencida_se_dice_en_vez_de_esperar_el_panel() {
+    use super::live::capture_problem;
+    assert_eq!(capture_problem("OAuth token expired. Please run /login"), Some("accounts.auth.expired"));
+    assert_eq!(capture_problem("Not logged in · Please run /login"), Some("accounts.auth.required"));
+    assert_eq!(capture_problem("Current session  12% used"), None);
+}

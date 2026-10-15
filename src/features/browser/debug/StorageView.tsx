@@ -32,7 +32,7 @@ function Section({ title, count, actions, children }: {
 }) {
   return (
     <section className="border-b border-gray-200 dark:border-white/7">
-      <header className="flex items-center gap-2 h-8 px-3 sticky top-0 z-[1] bg-gray-50 dark:bg-[#10141b]">
+      <header className="flex items-center gap-2 h-8 px-3 sticky top-0 z-[1] bg-gray-50 dark:bg-surface-sunken">
         <h3 className="text-[11px] font-semibold text-gray-700 dark:text-gray-300">{title}</h3>
         {count !== undefined && <span className="text-[10.5px] tabular-nums text-gray-400 dark:text-white/30">{count}</span>}
         <div className="flex-1" />
@@ -239,9 +239,9 @@ function StorageSection({ area, items, onRemove, onClear, onAdd }: {
           }}
         >
           <input value={key} onChange={(e) => setKey(e.target.value)} placeholder={t("browser.debug.storage.key")} spellCheck={false}
-            className="w-[30%] h-6 px-2 rounded-md outline-none font-mono text-[11px] bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 focus:border-blue-500 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/25" />
+            className="w-[30%] h-6 px-2 rounded-md outline-none font-mono text-[11px] bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 focus:border-accent-500 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/25" />
           <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={t("browser.debug.storage.value")} spellCheck={false}
-            className="flex-1 min-w-0 h-6 px-2 rounded-md outline-none font-mono text-[11px] bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 focus:border-blue-500 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/25" />
+            className="flex-1 min-w-0 h-6 px-2 rounded-md outline-none font-mono text-[11px] bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 focus:border-accent-500 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/25" />
           <Button variant="custom" type="submit" disabled={!key.trim()}
             className="cc-t inline-block shrink-0 h-6 px-2 rounded-md text-[11px] font-medium text-gray-600 dark:text-white/55
               hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent">

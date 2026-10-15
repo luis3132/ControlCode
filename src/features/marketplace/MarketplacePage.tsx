@@ -178,7 +178,7 @@ export function MarketplacePage() {
           border-b border-gray-200 dark:border-white/8">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
-            className="shrink-0 text-blue-500 dark:text-blue-400">
+            className="shrink-0 text-accent-500 dark:text-accent-400">
             <path d="M5 7l5 5-5 5M13 17h6" />
           </svg>
           <input

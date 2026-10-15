@@ -566,7 +566,7 @@ export function BrowserTab({ view, active, shown = active }: { view: BrowserView
         spellCheck={false}
         className="w-full h-8 px-3.5 rounded-full outline-none font-mono text-[12px]
           bg-white dark:bg-white/6 border border-gray-300 dark:border-white/12
-          focus:border-blue-500 dark:focus:border-blue-400
+          focus:border-accent-500 dark:focus:border-accent-400
           text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/35"
       />
     </form>
@@ -597,7 +597,7 @@ export function BrowserTab({ view, active, shown = active }: { view: BrowserView
         {t("browser.composer.label")}
         {attachments > 0 && (
           <span className={`min-w-4.5 h-4.5 px-1 rounded-full text-[10px] font-bold leading-[18px] text-center tabular-nums
-            ${composerOpen ? "bg-white text-blue-600" : "bg-blue-600 text-white"}`}>
+            ${composerOpen ? "bg-white text-accent-600" : "bg-accent-600 text-white"}`}>
             {attachments}
           </span>
         )}
@@ -653,7 +653,7 @@ export function BrowserTab({ view, active, shown = active }: { view: BrowserView
           onClick={() => setActionsOpen((v) => !v)}>
           <DotsIcon className="w-4 h-4" />
           {pendingAttention && (
-            <span className={`absolute top-1 right-1 w-2 h-2 rounded-full ${errors > 0 ? "bg-red-600" : "bg-blue-600"}`} />
+            <span className={`absolute top-1 right-1 w-2 h-2 rounded-full ${errors > 0 ? "bg-red-600" : "bg-accent-600"}`} />
           )}
         </ToolButton>
       </div>
@@ -683,7 +683,7 @@ export function BrowserTab({ view, active, shown = active }: { view: BrowserView
     .join(" · ");
 
   return (
-    <div ref={root} className="flex flex-col h-full min-h-0 bg-gray-50 dark:bg-[#0d1117]">
+    <div ref={root} className="flex flex-col h-full min-h-0 bg-gray-50 dark:bg-surface">
       {toolbar}
 
       {viewport && (
@@ -701,7 +701,7 @@ export function BrowserTab({ view, active, shown = active }: { view: BrowserView
 
       {picking && (
         <div className={`shrink-0 px-3 py-1 text-[11px] text-center text-white
-          ${agentAsking ? "bg-violet-600 dark:bg-violet-700" : "bg-blue-500 dark:bg-blue-600"}`}>
+          ${agentAsking ? "bg-violet-600 dark:bg-violet-700" : "bg-accent-500 dark:bg-accent-600"}`}>
           {agentAsking ? t("browser.pick.agentAsking") : t("browser.pick.hint")}
         </div>
       )}
@@ -728,10 +728,10 @@ export function BrowserTab({ view, active, shown = active }: { view: BrowserView
             />
             </ResponsiveStage>
           ) : (
-            <div className="flex flex-1 items-center justify-center p-8 bg-gray-50 dark:bg-[#0d1117]">
+            <div className="flex flex-1 items-center justify-center p-8 bg-gray-50 dark:bg-surface">
               <div className="flex flex-col items-center gap-4 max-w-sm text-center">
                 <span className="flex items-center justify-center w-12 h-12 rounded-2xl
-                  bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                  bg-accent-500/10 text-accent-600 dark:text-accent-400">
                   <GlobeIcon className="w-6 h-6" />
                 </span>
                 <div>
@@ -746,7 +746,7 @@ export function BrowserTab({ view, active, shown = active }: { view: BrowserView
                       <Button variant="custom" key={url} onClick={() => go(url)}
                         className="cc-t inline-block px-3 h-7 rounded-full font-mono text-[11.5px]
                           bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10
-                          text-gray-700 dark:text-gray-300 hover:border-blue-500 dark:hover:border-blue-400">
+                          text-gray-700 dark:text-gray-300 hover:border-accent-500 dark:hover:border-accent-400">
                         {url.replace("http://", "")}
                       </Button>
                     ))}
@@ -810,7 +810,7 @@ export function BrowserTab({ view, active, shown = active }: { view: BrowserView
                         border border-gray-200 dark:border-white/8 ${compact ? "w-44" : ""}`}>
                       <img src={c.thumb} alt="" className="block w-full max-h-36 object-contain bg-gray-100 dark:bg-black/30" />
                       <div className="flex items-center gap-1.5 min-w-0 px-2 py-1.5">
-                        <PenIcon className="w-3 h-3 shrink-0 text-blue-600 dark:text-blue-400" />
+                        <PenIcon className="w-3 h-3 shrink-0 text-accent-600 dark:text-accent-400" />
                         <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-gray-500 dark:text-white/45" title={c.path}>
                           {c.url}
                         </span>
@@ -830,7 +830,7 @@ export function BrowserTab({ view, active, shown = active }: { view: BrowserView
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="shrink-0 text-[10px] tabular-nums text-gray-400">{i + 1}</span>
                         <span className="min-w-0 truncate font-mono text-[11.5px] font-semibold text-gray-800 dark:text-gray-100">
-                          {`<${p.tag}>`}{p.component && <span className="text-blue-600 dark:text-blue-400"> {p.component.name}</span>}
+                          {`<${p.tag}>`}{p.component && <span className="text-accent-600 dark:text-accent-400"> {p.component.name}</span>}
                         </span>
                         <div className="flex-1" />
                         <Button variant="icon" onClick={() => setPicks((prev) => prev.filter((_, j) => j !== i))}
@@ -871,7 +871,7 @@ export function BrowserTab({ view, active, shown = active }: { view: BrowserView
                 placeholder={t("browser.note")}
                 className="w-full resize-none px-2.5 py-1.5 rounded-lg outline-none text-[12px] leading-relaxed
                   bg-white dark:bg-white/4 border border-gray-200 dark:border-white/10
-                  focus:border-blue-500 dark:focus:border-blue-400
+                  focus:border-accent-500 dark:focus:border-accent-400
                   text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/25"
               />
               <div className={compact ? "flex items-center gap-2" : "flex flex-col gap-2"}>

@@ -62,7 +62,7 @@ export function BranchMenu({ root, onPick, onClose }: {
   return (
     <div ref={ref}
       className="cc-rise absolute left-2 right-2 top-9 z-30 flex flex-col max-h-80 rounded-xl overflow-hidden
-        bg-white dark:bg-[#0d1117] border border-gray-200 dark:border-white/12 shadow-2xl">
+        bg-white dark:bg-surface border border-gray-200 dark:border-white/12 shadow-2xl">
       <input
         ref={inputRef}
         value={query}
@@ -80,7 +80,7 @@ export function BranchMenu({ root, onPick, onClose }: {
             onClick={() => onPick(name, true, false)}
             className="flex items-center gap-2 w-full h-7 px-3 text-left hover:bg-gray-100 dark:hover:bg-white/5"
           >
-            <AddIcon className="w-3.5 h-3.5 shrink-0 text-blue-500 dark:text-blue-400" />
+            <AddIcon className="w-3.5 h-3.5 shrink-0 text-accent-500 dark:text-accent-400" />
             <span className="truncate text-[11.5px] text-gray-700 dark:text-gray-300">
               {t("scm.branch.create", { name })}
             </span>

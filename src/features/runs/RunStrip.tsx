@@ -48,7 +48,7 @@ export function RunStrip({ summaries, selected, onSelect, onCancel }: {
               title={s.run.objective}
               className={`cc-t shrink-0 flex items-center gap-2 max-w-[18rem] h-7 pl-2 pr-2.5 rounded-lg border text-[11px]
                 ${on
-                  ? "border-blue-400/60 bg-blue-500/10 text-blue-800 dark:text-blue-200"
+                  ? "border-accent-400/60 bg-accent-500/10 text-accent-800 dark:text-accent-200"
                   : "border-gray-200 dark:border-white/10 text-gray-600 dark:text-white/55 hover:bg-gray-100 dark:hover:bg-white/5"}`}
             >
               <span className={`w-1.5 h-1.5 shrink-0 rounded-full ${DOT[s.run.status] ?? DOT.done}`} />
@@ -68,7 +68,7 @@ export function RunStrip({ summaries, selected, onSelect, onCancel }: {
 
       {current && (
         <div className="flex items-center gap-3 min-h-9 px-4 py-1.5 text-[11px]
-          bg-blue-50/60 dark:bg-blue-500/5 border-t border-blue-100 dark:border-blue-500/10">
+          bg-accent-50/60 dark:bg-accent-500/5 border-t border-accent-100 dark:border-accent-500/10">
           <span className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-gray-600 dark:text-white/55">
             <span className="tabular-nums">{t("fleet.runs.progress", { done: current.done, total: current.total })}</span>
             {current.active > 0 && <span className="tabular-nums">{t("fleet.runs.active", { n: current.active })}</span>}

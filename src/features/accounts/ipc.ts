@@ -9,7 +9,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { AccountCapableAgent, AgentAccount } from "./types";
+import type { AccountCapableAgent, AgentAccount, CodexUsage } from "./types";
 
 export const listAccounts = () => invoke<AgentAccount[]>("list_agent_accounts");
 
@@ -24,3 +24,10 @@ export const deleteAccount = (id: string, deleteFiles: boolean) =>
 /** Variables con las que hay que lanzar un proceso para que corra con esta cuenta. */
 export const accountEnv = (accountId: string) =>
   invoke<Record<string, string>>("agent_account_env", { accountId });
+
+/**
+ * El cupo de una cuenta de Codex. Sin `force` devuelve lo guardado (o uno vacío, con
+ * `fetchedAt` 0); con `force` le pregunta al `app-server` de Codex, que no gasta cupo.
+ */
+export const codexAccountUsage = (accountId: string, force = true) =>
+  invoke<CodexUsage>("codex_account_usage", { accountId, force });

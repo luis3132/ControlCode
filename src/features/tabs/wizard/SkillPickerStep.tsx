@@ -45,7 +45,7 @@ function SkillRow({ skill, checked, onToggle }: {
       aria-pressed={checked}
       className={`cc-t flex items-center gap-3 w-full h-[42px] px-2.5 rounded-lg text-left
         ${checked
-          ? "bg-blue-500/12 dark:bg-blue-400/13 shadow-[inset_0_0_0_1px_rgba(88,166,255,0.24)]"
+          ? "bg-accent-500/12 dark:bg-accent-400/13 shadow-[inset_0_0_0_1px_rgba(88,166,255,0.24)]"
           : "hover:bg-gray-100 dark:hover:bg-white/5"}`}
     >
       <span className={`flex items-center justify-center w-6 h-6 rounded-md shrink-0

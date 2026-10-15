@@ -135,7 +135,7 @@ export function RoutingSection() {
                     className={`cc-t flex items-center gap-1 h-7 px-2 rounded-md text-[11px]
                       border border-dashed border-gray-300 dark:border-white/15
                       ${adding === c
-                        ? "text-blue-600 dark:text-blue-400 border-blue-400/60"
+                        ? "text-accent-600 dark:text-accent-400 border-accent-400/60"
                         : "text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white"}`}
                   >
                     + {t("settings.routing.add")}

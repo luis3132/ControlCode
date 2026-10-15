@@ -70,8 +70,8 @@ export function NotificationBell({ className }: { className: string }) {
         >
           <BellIcon className="w-[15px] h-[15px]" />
           {unread > 0 && (
-            <span className="absolute top-1 right-1 w-[7px] h-[7px] rounded-full bg-blue-500
-              ring-2 ring-gray-100 dark:ring-[#080b0f]" />
+            <span className="absolute top-1 right-1 w-[7px] h-[7px] rounded-full bg-accent-500
+              ring-2 ring-gray-100 dark:ring-surface-deep" />
           )}
         </Button>
       </Tooltip>
@@ -79,7 +79,7 @@ export function NotificationBell({ className }: { className: string }) {
       {open && (
         <div className="cc-rise absolute top-full right-0 mt-1.5 w-80 z-100 overflow-hidden
           rounded-xl border border-gray-200 dark:border-white/10
-          bg-white dark:bg-[#11161f] shadow-2xl">
+          bg-white dark:bg-surface-raised shadow-2xl">
           <div className="flex items-center h-9 pl-3 pr-1.5 border-b border-gray-200 dark:border-white/8">
             <span className="flex-1 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-white/40">
               {t("notifications.title")}

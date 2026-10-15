@@ -96,10 +96,10 @@ export default function MarkdownPreview({ source, path, cwd }: { source: string;
 
   return (
     <Env.Provider value={env}>
-      <div ref={scroller} tabIndex={-1} className="h-full overflow-auto outline-none bg-white dark:bg-[#0d1117]">
+      <div ref={scroller} tabIndex={-1} className="h-full overflow-auto outline-none bg-white dark:bg-surface">
         {hasRemoteImages && !remoteImages && (
           <div className="sticky top-0 z-10 flex items-center gap-3 px-6 py-1.5 text-[11.5px]
-            bg-gray-50/95 dark:bg-[#0a0f16]/95 backdrop-blur
+            bg-gray-50/95 dark:bg-surface-sunken/95 backdrop-blur
             text-gray-500 dark:text-white/45 border-b border-gray-200 dark:border-white/7">
             <span className="flex-1 min-w-0">{t("editor.preview.remoteImages")}</span>
             <Button size="sm" variant="ghost" onClick={() => setRemoteImages(true)}>
@@ -159,7 +159,7 @@ function PreviewLink({ href, children, node: _node, ...rest }: Props<"a">) {
         event.preventDefault();
         follow(href);
       }}
-      className="text-blue-600 dark:text-[#4493f8] underline-offset-2 hover:underline"
+      className="text-accent-600 dark:text-[#4493f8] underline-offset-2 hover:underline"
     >
       {children}
     </a>
@@ -292,7 +292,7 @@ function CodeBlock({ node }: Props<"pre">) {
         className="cc-t absolute top-2 right-2 flex items-center justify-center w-7 h-7 p-0 rounded-md
           opacity-0 group-hover:opacity-100 focus-visible:opacity-100
           text-gray-500 dark:text-white/50 hover:text-gray-900 dark:hover:text-white
-          bg-white/90 dark:bg-[#0d1117]/90 border border-gray-200 dark:border-white/10"
+          bg-white/90 dark:bg-surface/90 border border-gray-200 dark:border-white/10"
       >
         {copied ? <CheckIcon className="w-3.5 h-3.5 text-emerald-500" /> : <CopyIcon className="w-3.5 h-3.5" />}
       </Button>
@@ -325,7 +325,7 @@ const COMPONENTS: Components = {
   ),
   ol: ({ node: _n, ...p }) => <ol {...p} className="my-3 pl-6 space-y-1 list-decimal [&_ul]:my-1 [&_ol]:my-1"/>,
   li: ({ node: _n, ...p }) => <li {...p} className="pl-0.5 marker:text-gray-400 dark:marker:text-white/35"/>,
-  input: ({ node: _n, ...p }) => <input {...p} className="mr-2 align-middle cursor-pointer accent-blue-600 disabled:cursor-default" />,
+  input: ({ node: _n, ...p }) => <input {...p} className="mr-2 align-middle cursor-pointer accent-accent-600 disabled:cursor-default" />,
   blockquote: ({ node: _n, ...p }) => (
     <blockquote {...p} className="my-4 pl-4 border-l-4 border-gray-300 dark:border-white/15 text-gray-500 dark:text-white/55"/>
   ),

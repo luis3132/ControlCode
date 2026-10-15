@@ -180,11 +180,11 @@ export function SessionsPage() {
 
         <div className="flex items-center gap-2 flex-wrap">
           <label className="flex items-center gap-2.5 flex-[1_1_320px] min-w-0 h-[38px] px-3 rounded-[10px]
-            bg-white dark:bg-[#0a0f16]
+            bg-white dark:bg-surface-sunken
             border border-gray-200 dark:border-white/10
-            focus-within:border-blue-500/60 dark:focus-within:border-blue-400/45
+            focus-within:border-accent-500/60 dark:focus-within:border-accent-400/45
             focus-within:shadow-[0_0_0_3px_rgba(59,130,246,0.12)]">
-            <SearchIcon className="w-[15px] h-[15px] shrink-0 text-blue-500 dark:text-blue-400" />
+            <SearchIcon className="w-[15px] h-[15px] shrink-0 text-accent-500 dark:text-accent-400" />
             <span className="sr-only">{t("sessions.filters.search")}</span>
             <input
               ref={inputRef}
@@ -226,7 +226,7 @@ export function SessionsPage() {
                     filtered ? (
                       <Button variant="custom"
                         onClick={() => setFilters(EMPTY_FILTERS)}
-                        className="cc-t text-[12px] text-blue-600 dark:text-blue-400 hover:underline inline-block"
+                        className="cc-t text-[12px] text-accent-600 dark:text-accent-400 hover:underline inline-block"
                       >
                         {t("sessions.filters.clear")}
                       </Button>
@@ -276,7 +276,7 @@ export function SessionsPage() {
             <aside
               aria-label={t("sessions.detail.label")}
               className="shrink-0 min-h-0 max-h-[40%] @[860px]:max-h-none @[860px]:w-[min(400px,40%)] cc-scroll
-                bg-gray-50 dark:bg-[#0a0f16]
+                bg-gray-50 dark:bg-surface-sunken
                 border-t @[860px]:border-t-0 @[860px]:border-l border-gray-200 dark:border-white/8"
             >
               {selected ? (

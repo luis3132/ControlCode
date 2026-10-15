@@ -15,7 +15,7 @@ type DetailTab = "headers" | "payload" | "response" | "cookies" | "timing";
 const STATUS_TONE: Record<string, string> = {
   info: "text-gray-500 dark:text-white/50",
   success: "text-emerald-600 dark:text-emerald-400",
-  redirect: "text-blue-600 dark:text-blue-400",
+  redirect: "text-accent-600 dark:text-accent-400",
   client: "text-amber-600 dark:text-amber-400",
   server: "text-red-600 dark:text-red-400",
 };
@@ -198,7 +198,7 @@ export function RequestDetailPane({ detail, loading, onClose }: {
           <Button variant="custom" key={id} role="tab" aria-selected={current === id} onClick={() => setTab(id)}
             className={`cc-t relative inline-block shrink-0 h-8 px-2 text-[11px] font-medium
               ${current === id
-                ? "text-gray-900 dark:text-white after:absolute after:inset-x-1.5 after:bottom-0 after:h-0.5 after:rounded-full after:bg-blue-500"
+                ? "text-gray-900 dark:text-white after:absolute after:inset-x-1.5 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent-500"
                 : "text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white"}`}>
             {t(`browser.debug.network.tab.${id}`)}
           </Button>
@@ -341,7 +341,7 @@ function Timing({ detail }: { detail: RequestDetail }) {
       ) : (
         <>
           {bar(t("browser.debug.network.timingWaiting"), waiting, 0, "bg-emerald-500/80")}
-          {bar(t("browser.debug.network.timingDownload"), download, waiting ?? 0, "bg-blue-500/80")}
+          {bar(t("browser.debug.network.timingDownload"), download, waiting ?? 0, "bg-accent-500/80")}
           <div className="h-px bg-gray-200 dark:bg-white/7" />
           {bar(t("browser.debug.network.timingTotal"), total, 0, "bg-gray-500/70")}
         </>

@@ -1,3 +1,5 @@
+import type { Quota } from "@/features/runs/types";
+
 /** Ver `accounts::AgentAccount` en Rust. */
 export interface AgentAccount {
   id: string;
@@ -22,4 +24,16 @@ export interface AccountCapableAgent {
   label: string;
   envVar: string;
   installed: boolean;
+}
+
+/** El cupo de una cuenta de Codex, según su `app-server` (ver `accounts/codex_usage.rs`). */
+export interface CodexUsage {
+  email: string | null;
+  /** `plus`, `pro`, `free`… */
+  plan: string | null;
+  /** `chatgpt` o `apiKey`. Con API key no hay ventanas: se cobra por uso. */
+  auth: string | null;
+  quota: Quota | null;
+  /** Epoch en segundos de la consulta. 0 = nunca se preguntó. */
+  fetchedAt: number;
 }

@@ -68,7 +68,7 @@ export function DebugPanel({ viewId, channel, proxyOrigin, targetOrigin, docId, 
     <div style={{ height }} className="relative flex flex-col shrink-0 min-h-0 bg-gray-50 dark:bg-[#0b0f15]
       border-t border-gray-300 dark:border-white/10">
       <div role="separator" aria-orientation="horizontal" onPointerDown={startResize}
-        className="absolute -top-1 inset-x-0 h-2 z-10 cursor-ns-resize touch-none hover:bg-blue-500/30" />
+        className="absolute -top-1 inset-x-0 h-2 z-10 cursor-ns-resize touch-none hover:bg-accent-500/30" />
       {dragging && <div className="fixed inset-0 z-50" style={{ cursor: "ns-resize" }} />}
 
       <div role="tablist" className="flex items-center gap-0.5 h-8 shrink-0 px-1.5 border-b border-gray-200 dark:border-white/7">
@@ -81,7 +81,7 @@ export function DebugPanel({ viewId, channel, proxyOrigin, targetOrigin, docId, 
             onClick={() => onTab(id)}
             className={`cc-t relative flex items-center gap-1.5 h-8 px-2.5 text-[11.5px] font-medium
               ${tab === id
-                ? "text-gray-900 dark:text-white after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-blue-500"
+                ? "text-gray-900 dark:text-white after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent-500"
                 : "text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white"}`}
           >
             {t(`browser.debug.tab.${id}`)}

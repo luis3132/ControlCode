@@ -50,7 +50,7 @@ export function SearchField({ value, onChange, placeholder }: {
         spellCheck={false}
         className="w-full h-6 pl-6 pr-2 rounded-md outline-none text-[11.5px]
           bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10
-          focus:border-blue-500 dark:focus:border-blue-400
+          focus:border-accent-500 dark:focus:border-accent-400
           text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/30"
       />
     </label>

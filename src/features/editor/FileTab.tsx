@@ -188,7 +188,7 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
   const rel = relativeTo(view.path, view.cwd);
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-gray-50 dark:bg-[#0d1117]">
+    <div className="flex flex-col h-full min-h-0 bg-gray-50 dark:bg-surface">
       <div className="flex items-center gap-2 h-8 shrink-0 pl-4 pr-2 border-b border-gray-200 dark:border-white/7">
         <span className="flex-1 min-w-0 truncate font-mono text-[11px] text-gray-500 dark:text-white/40" title={view.path}>
           {rel}
@@ -309,7 +309,7 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
 
 function PreviewSkeleton() {
   return (
-    <div className="flex flex-col gap-2 h-full p-8 bg-white dark:bg-[#0d1117]">
+    <div className="flex flex-col gap-2 h-full p-8 bg-white dark:bg-surface">
       {[35, 80, 70, 75, 45].map((w, i) => <Skeleton key={i} variant="text" height={12} width={`${w}%`} />)}
     </div>
   );

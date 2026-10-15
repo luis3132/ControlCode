@@ -4,7 +4,11 @@ import { Button } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { systemAccounts } from "@/features/accounts/usage";
-import { AccountUsagePopover } from "@/features/accounts/AccountUsagePopover";
+import { UsageBoard } from "@/features/accounts/UsageBoard";
+import { LoginTerminal } from "@/features/accounts/LoginTerminal";
+import { Ring, agentColor, usageColor } from "@/features/accounts/Ring";
+import { measurable, useHeadline, useUsageStore } from "@/features/accounts/usageStore";
+import { AppDialog } from "@/shared/ui/AppDialog";
 import type { AgentAccount } from "@/features/accounts/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { agentIcon } from "@/features/agents/agentIcons";
@@ -24,6 +28,36 @@ import type { RepoInfo } from "@/features/explorer/types";
  * de por medio. No tiene fila en la base (existía antes que esta app), así que hasta ahora
  * la barra mostraba los perfiles alternativos y escondía justo la que se usa siempre.
  */
+/** Un chip de cuenta: el anillo dice cuánto lleva la ventana corta, si se sabe. */
+function AccountChip({ account, active, onClick }: { account: AgentAccount; active: boolean; onClick: () => void }) {
+  const percent = useHeadline(account);
+  const Icon = agentIcon(account.agentId, account.agentId);
+  return (
+    <Button variant="custom"
+      onClick={onClick}
+      title={percent === null ? account.label ?? account.name : `${account.label ?? account.name} · ${percent}%`}
+      className={`cc-t flex items-center gap-1.5 h-5 shrink-0 pl-1.5 pr-2 rounded-full max-w-52
+        ${active
+          ? "bg-gray-300/80 dark:bg-white/12"
+          : "bg-gray-200/70 dark:bg-white/5 hover:bg-gray-300/70 dark:hover:bg-white/10"}`}
+    >
+      <Icon className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
+      <span className="truncate text-[10px] font-medium text-gray-700 dark:text-gray-300">
+        {account.label ?? account.name}
+      </span>
+      {measurable(account.agentId) ? (
+        <span className="text-gray-400 dark:text-white">
+          <Ring percent={percent} size={11} stroke={2}
+            color={percent === null ? agentColor(account.agentId) : usageColor(percent, account.agentId)} />
+        </span>
+      ) : (
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0
+          ${account.loggedIn ? "bg-emerald-500" : "bg-gray-400 dark:bg-white/25"}`} />
+      )}
+    </Button>
+  );
+}
+
 export function StatusBar({ repo }: { repo: RepoInfo | null }) {
   const { t } = useTranslation();
   const profiles = useAccountsStore((s) => s.accounts);
@@ -33,6 +67,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const [system, setSystem] = useState<AgentAccount[]>([]);
   const [open, setOpen] = useState<string | null>(null);
+  const [loginFor, setLoginFor] = useState<AgentAccount | null>(null);
   const popRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,47 +87,97 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
   // La principal de cada TUI instalada, más los perfiles con sesión iniciada: un perfil
   // creado y nunca logueado no dice nada acá y solo llenaría la barra.
   const shown = [...system, ...profiles.filter((a) => a.loggedIn)];
+  const shownKey = shown.map((a) => a.id).join("|");
+
+  // Al arrancar, solo lo guardado: llena los anillos sin levantar ninguna TUI.
+  useEffect(() => {
+    const { refresh } = useUsageStore.getState();
+    for (const a of shown) if (measurable(a.agentId)) void refresh(a, "cache");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownKey]);
+
+  // Con el panel abierto se pregunta lo que venció, y de nuevo cada cinco minutos. Las de
+  // Claude de a una: cada consulta levanta una TUI entera.
+  const panelOpen = open !== null;
+  useEffect(() => {
+    if (!panelOpen) return;
+    const sweep = async () => {
+      const { refresh } = useUsageStore.getState();
+      const list = shown.filter((a) => measurable(a.agentId));
+      await Promise.all(list.filter((a) => a.agentId !== "claude-code").map((a) => refresh(a, "stale")));
+      for (const a of list.filter((x) => x.agentId === "claude-code")) await refresh(a, "stale");
+    };
+    void sweep();
+    const timer = window.setInterval(() => void sweep(), 5 * 60 * 1000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelOpen, shownKey]);
+
+  // La cuenta que se tocó queda a la vista dentro del panel.
+  useEffect(() => {
+    if (!open) return;
+    popRef.current?.querySelector(`[data-account="${CSS.escape(open)}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [open]);
 
   return (
     <footer className="relative flex items-center gap-2.5 h-[26px] shrink-0 px-3
-      bg-gray-100 dark:bg-[#0a0f16]
+      bg-gray-100 dark:bg-surface-sunken
       border-t border-gray-200 dark:border-white/7
       text-[10.5px] tabular-nums text-gray-500 dark:text-gray-400 select-none">
 
-      {shown.map((account) => {
-        const Icon = agentIcon(account.agentId, account.agentId);
-        return (
-          <Button variant="custom"
-            key={account.id}
-            onClick={() => setOpen((current) => (current === account.id ? null : account.id))}
-            title={account.label ?? account.name}
-            className={`cc-t flex items-center gap-1.5 h-5 shrink-0 pl-1.5 pr-2.5 rounded-full max-w-52
-              ${open === account.id
-                ? "bg-gray-300/80 dark:bg-white/12"
-                : "bg-gray-200/70 dark:bg-white/5 hover:bg-gray-300/70 dark:hover:bg-white/10"}`}
-          >
-            <Icon className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
-            <span className="truncate text-[10px] font-medium text-gray-700 dark:text-gray-300">
-              {account.label ?? account.name}
-            </span>
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0
-              ${account.loggedIn ? "bg-emerald-500" : "bg-gray-400 dark:bg-white/25"}`} />
-          </Button>
-        );
-      })}
+      {shown.map((account) => (
+        <AccountChip
+          key={account.id}
+          account={account}
+          active={open === account.id}
+          onClick={() => setOpen((current) => (current === account.id ? null : account.id))}
+        />
+      ))}
 
       {/* El panel se abre HACIA ARRIBA: la barra es lo último de la ventana. */}
       {open && (
         <div
           ref={popRef}
-          className="cc-rise absolute bottom-[30px] left-3 z-50
+          className="cc-rise absolute bottom-[30px] left-3 z-50 w-[22rem] max-w-[calc(100vw-1.5rem)]
+            flex flex-col max-h-[min(36rem,calc(100vh-5rem))]
             rounded-xl overflow-hidden
-            bg-white dark:bg-[#0d1117]
+            bg-white dark:bg-surface
             border border-gray-200 dark:border-white/12
             shadow-2xl"
         >
-          <AccountUsagePopover account={shown.find((a) => a.id === open)!} />
+          <div className="shrink-0 px-4 py-2.5 border-b border-gray-100 dark:border-white/6
+            text-[12px] font-semibold text-gray-900 dark:text-white">
+            {t("accounts.usage.title")}
+          </div>
+          <div className="overflow-y-auto">
+            <UsageBoard accounts={shown} onLogin={(a) => { setOpen(null); setLoginFor(a); }} />
+          </div>
         </div>
+      )}
+
+      {loginFor && (
+        <AppDialog
+          title={t("settings.accounts.login.title", { name: loginFor.name })}
+          onClose={() => setLoginFor(null)}
+          size="lg"
+          closeOnBackdrop={false}
+          closeOnEsc={false}
+          footer={
+            <Button variant="primary" onClick={() => {
+              const account = loginFor;
+              setLoginFor(null);
+              load().catch(console.error);
+              void useUsageStore.getState().refresh(account, "force");
+            }}>
+              {t("settings.accounts.login.done")}
+            </Button>
+          }
+        >
+          <p className="text-xs text-gray-500 dark:text-white/50 mb-3">
+            {t("settings.accounts.login.helper", { command: loginFor.loginCommand })}
+          </p>
+          <LoginTerminal account={loginFor} />
+        </AppDialog>
       )}
 
       <div className="flex-1" />

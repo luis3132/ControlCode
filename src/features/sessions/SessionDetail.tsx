@@ -159,7 +159,7 @@ export function SessionDetail({
           <Button variant="custom"
             onClick={() => onResume(entry)}
             className="cc-t flex-1 flex items-center justify-center gap-2 h-[38px] rounded-[9px]
-              bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-semibold"
+              bg-accent-600 hover:bg-accent-700 text-white text-[13px] font-semibold"
           >
             {t("sessions.resume")}
             <kbd className="font-mono text-[10.5px] px-[5px] py-px rounded bg-white/20">↵</kbd>
@@ -243,7 +243,7 @@ export function SessionDetail({
           <section className="flex flex-col gap-2">
             <SectionTitle>{t("sessions.detail.prelaunch")}</SectionTitle>
             <div className="flex flex-col gap-1 px-3 py-2.5 rounded-lg
-              bg-gray-50 dark:bg-[#080b0f] border border-gray-200 dark:border-white/7">
+              bg-gray-50 dark:bg-surface-deep border border-gray-200 dark:border-white/7">
               {entry.prelaunch.map((step, i) => {
                 const command = stepCommand(step, presets);
                 const label = stepLabel(step, presets);

@@ -100,7 +100,7 @@ export function ResponsiveStage({ viewport, onResize, children }: {
             <Handle edge="xy" onPointerDown={startDrag("xy")} />
             <div className="absolute left-0 right-0 top-full mt-2.5 flex justify-center pointer-events-none">
               <span className={`px-2 h-5 rounded-full font-mono text-[10.5px] leading-5 tabular-nums
-                ${drag ? "bg-blue-600 text-white" : "bg-white/90 dark:bg-white/8 text-gray-600 dark:text-white/55 ring-1 ring-gray-200 dark:ring-white/10"}`}>
+                ${drag ? "bg-accent-600 text-white" : "bg-white/90 dark:bg-white/8 text-gray-600 dark:text-white/55 ring-1 ring-gray-200 dark:ring-white/10"}`}>
                 {shown.width} × {shown.height}
                 <span className="opacity-60"> · {breakpointOf(shown.width)}{scale < 1 ? ` · ${Math.round(scale * 100)}%` : ""}</span>
               </span>
@@ -125,7 +125,7 @@ function Handle({ edge, onPointerDown }: { edge: Edge; onPointerDown: (e: React.
   return (
     <div role="separator" aria-orientation={edge === "y" ? "horizontal" : "vertical"} onPointerDown={onPointerDown}
       className={`group absolute z-10 touch-none ${place}`}>
-      <span className={`block rounded-full bg-gray-400/70 dark:bg-white/25 group-hover:bg-blue-500 ${grip}
+      <span className={`block rounded-full bg-gray-400/70 dark:bg-white/25 group-hover:bg-accent-500 ${grip}
         ${edge === "xy" ? "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" : ""}`} />
     </div>
   );

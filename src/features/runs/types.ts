@@ -146,6 +146,8 @@ export interface QuotaWindow {
   utilization: number;
   /** Epoch en segundos. Pasado ese momento, la ventana ya se reinició. */
   resetsAt: number | null;
+  /** Cuánto dura, en minutos, si se sabe (Codex lo dice: 300, 10080, 43200). */
+  windowMins?: number | null;
 }
 
 /** Lo último que informó una tarea sobre el cupo de su cuenta. */

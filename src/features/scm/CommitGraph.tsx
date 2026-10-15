@@ -50,7 +50,7 @@ function GraphCell({ row, width, commit }: { row: GraphRow; width: number; commi
         r={head ? 4.5 : merge ? 3 : 3.6}
         stroke={colorOf(row.color)}
         strokeWidth={head || commit.incoming ? 2 : 1.4}
-        className={commit.incoming || head ? "fill-gray-50 dark:fill-[#0a0f16]" : ""}
+        className={commit.incoming || head ? "fill-gray-50 dark:fill-surface-sunken" : ""}
         fill={commit.incoming || head ? undefined : colorOf(row.color)}
       />
     </svg>
@@ -58,8 +58,8 @@ function GraphCell({ row, width, commit }: { row: GraphRow; width: number; commi
 }
 
 const CHIP: Record<CommitRef["kind"], string> = {
-  head: "bg-blue-600 text-white dark:bg-blue-500",
-  local: "border border-blue-500/50 text-blue-600 dark:text-blue-300",
+  head: "bg-accent-600 text-white dark:bg-accent-500",
+  local: "border border-accent-500/50 text-accent-600 dark:text-accent-300",
   remote: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
   tag: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
 };
@@ -141,7 +141,7 @@ export function CommitGraph({ cwd, root, commits, onTag }: {
               onClick={() => toggle(c)}
               title={tip}
               className={`group flex items-center gap-1.5 w-full pr-3 text-left
-                ${isOpen ? "bg-blue-500/10 dark:bg-blue-400/10" : "hover:bg-gray-200/50 dark:hover:bg-white/4"}`}
+                ${isOpen ? "bg-accent-500/10 dark:bg-accent-400/10" : "hover:bg-gray-200/50 dark:hover:bg-white/4"}`}
               style={{ height: ROW }}
             >
               <GraphCell row={row} width={width} commit={c} />
@@ -173,7 +173,7 @@ export function CommitGraph({ cwd, root, commits, onTag }: {
               )}
               {c.outgoing && (
                 <Tooltip content={t("scm.graph.outgoing")} placement="left">
-                  <span><PushIcon className="w-3 h-3 shrink-0 text-blue-500 dark:text-blue-400" /></span>
+                  <span><PushIcon className="w-3 h-3 shrink-0 text-accent-500 dark:text-accent-400" /></span>
                 </Tooltip>
               )}
               {c.incoming && (

@@ -85,7 +85,7 @@ export function PrelaunchChain({ value, onChange, agentCommand }: PrelaunchChain
 
                 <div className="min-w-0 flex-1">
                   {label && (
-                    <div className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 truncate">
+                    <div className="text-[10px] font-semibold text-accent-600 dark:text-accent-400 truncate">
                       {label}
                     </div>
                   )}
@@ -178,7 +178,7 @@ export function PrelaunchChain({ value, onChange, agentCommand }: PrelaunchChain
                 className="px-2 py-0.5 rounded-full border border-dashed
                   border-gray-300 dark:border-white/15 text-[11px]
                   text-gray-600 dark:text-gray-300
-                  hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 inline-block"
+                  hover:border-accent-400 hover:text-accent-600 dark:hover:text-accent-400 inline-block"
               >
                 + {preset.name}
               </Button>

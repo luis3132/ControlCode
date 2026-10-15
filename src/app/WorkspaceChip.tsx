@@ -154,7 +154,7 @@ export function WorkspaceChip({ compact = false }: { compact?: boolean }) {
               {name.trim().charAt(0) || "·"}
             </span>
             <span className={`absolute top-1 right-1 w-[6px] h-[6px] rounded-full
-              ${unsaved ? "border border-gray-400 dark:border-white/40" : "bg-blue-500 dark:bg-blue-400"}`} />
+              ${unsaved ? "border border-gray-400 dark:border-white/40" : "bg-accent-500 dark:bg-accent-400"}`} />
           </Button>
         </Tooltip>
       ) : (
@@ -166,7 +166,7 @@ export function WorkspaceChip({ compact = false }: { compact?: boolean }) {
             ${open ? "bg-gray-200/80 dark:bg-white/10" : "bg-white/60 dark:bg-white/4 hover:bg-gray-200/60 dark:hover:bg-white/8"}`}
         >
           <span className={`w-[7px] h-[7px] rounded-full shrink-0
-            ${unsaved ? "border border-gray-400 dark:border-white/40" : "bg-blue-500 dark:bg-blue-400"}`} />
+            ${unsaved ? "border border-gray-400 dark:border-white/40" : "bg-accent-500 dark:bg-accent-400"}`} />
           <span className={`truncate text-xs font-semibold
             ${unsaved ? "text-gray-500 dark:text-white/55" : "text-gray-800 dark:text-gray-100"}`}>
             {name}
@@ -179,7 +179,7 @@ export function WorkspaceChip({ compact = false }: { compact?: boolean }) {
         <div ref={menuRef} style={{ position: "fixed", top: at.top, left: at.left }}
           className="cc-rise w-80 p-1 z-100
           rounded-xl border border-gray-200 dark:border-white/10
-          bg-white dark:bg-[#11161f] shadow-2xl">
+          bg-white dark:bg-surface-raised shadow-2xl">
 
           <div className={SECTION}>{t("workspace.menu.this")}</div>
           <div className="flex flex-col gap-1 mx-1 px-2.5 py-2 rounded-lg bg-gray-100 dark:bg-white/5">
@@ -192,7 +192,7 @@ export function WorkspaceChip({ compact = false }: { compact?: boolean }) {
                 <Button variant="custom"
                   onClick={act(saveWorkspace)}
                   className="cc-t flex items-center gap-1 h-6 px-2 rounded-md shrink-0 text-[11px] font-medium
-                    text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                    text-white bg-accent-600 hover:bg-accent-700 dark:bg-accent-500 dark:hover:bg-accent-600"
                 >
                   <SaveIcon className="w-3 h-3" />
                   {t("workspace.menu.save")}
@@ -206,7 +206,7 @@ export function WorkspaceChip({ compact = false }: { compact?: boolean }) {
             <div className={SECTION}>{t("workspace.menu.others")}</div>
             <Button variant="custom"
               onClick={act(() => navigate("/workspaces"))}
-              className="text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline"
+              className="text-[11px] font-medium text-accent-600 dark:text-accent-400 hover:underline"
             >
               {t("workspace.manage.link")}
             </Button>

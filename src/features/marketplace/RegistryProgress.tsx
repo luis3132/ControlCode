@@ -48,7 +48,7 @@ export function RegistryProgressBar({ progress, compact = false }: RegistryProgr
         ${compact ? "text-[11px]" : "text-xs"}`}>
         {done
           ? <CheckIcon className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-          : <AnimateSpin className="w-3.5 h-3.5 text-blue-500 shrink-0" />}
+          : <AnimateSpin className="w-3.5 h-3.5 text-accent-500 shrink-0" />}
         <span className="font-medium truncate">{t(`marketplace.add.phase.${phase}`)}</span>
         {pct !== null && (
           <span className="ml-auto font-mono tabular-nums text-gray-400 dark:text-white/35 shrink-0">

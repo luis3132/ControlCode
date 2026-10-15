@@ -108,11 +108,11 @@ function TargetRow({ target, selected, state, onSelect }: {
       onClick={onSelect}
       className={`cc-t flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-left
         ${selected
-          ? "bg-blue-500/12 dark:bg-blue-400/13"
+          ? "bg-accent-500/12 dark:bg-accent-400/13"
           : "bg-gray-100/70 dark:bg-white/4 hover:bg-gray-100 dark:hover:bg-white/6"}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full shrink-0
-        ${selected ? "bg-blue-500" : "bg-gray-300 dark:bg-white/20"}`} />
+        ${selected ? "bg-accent-500" : "bg-gray-300 dark:bg-white/20"}`} />
       <span className="flex flex-col gap-px min-w-0 flex-1">
         <span className="truncate text-[12px] text-gray-800 dark:text-gray-100">{target.label}</span>
         <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/35">
@@ -287,7 +287,7 @@ export function GraphifySection() {
               onClick={() => setView(value)}
               className={`cc-t px-2.5 py-1 rounded-lg text-[11.5px]
                 ${view === value
-                  ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-900 dark:text-white font-semibold"
+                  ? "bg-accent-500/12 dark:bg-accent-400/13 text-gray-900 dark:text-white font-semibold"
                   : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10"} inline-block`}
             >
               {t(`settings.graphify.view.${value}`)}
@@ -325,7 +325,7 @@ export function GraphifySection() {
                 onClick={() => setCommand("cli", alt)}
                 className={`cc-t px-2 py-0.5 rounded font-mono text-[10px]
                   ${commands.cli === alt
-                    ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-800 dark:text-white"
+                    ? "bg-accent-500/12 dark:bg-accent-400/13 text-gray-800 dark:text-white"
                     : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10"} inline-block`}
               >
                 {alt}
@@ -341,7 +341,7 @@ export function GraphifySection() {
                 onClick={() => toggleExtra(extra)}
                 className={`cc-t px-1.5 py-0.5 rounded text-[10px]
                   ${extras.includes(extra)
-                    ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-800 dark:text-white"
+                    ? "bg-accent-500/12 dark:bg-accent-400/13 text-gray-800 dark:text-white"
                     : "bg-gray-100 dark:bg-white/5 text-gray-400 dark:text-white/35 hover:bg-gray-200 dark:hover:bg-white/10"} inline-block`}
               >
                 {extra}
@@ -368,7 +368,7 @@ export function GraphifySection() {
                   disabled={value === "project" && !cwd}
                   className={`cc-t px-2.5 py-1 rounded-lg text-[11px] disabled:opacity-40
                     ${scope === value
-                      ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-900 dark:text-white font-semibold"
+                      ? "bg-accent-500/12 dark:bg-accent-400/13 text-gray-900 dark:text-white font-semibold"
                       : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/40 hover:bg-gray-200 dark:hover:bg-white/10"} inline-block`}
                 >
                   {t(`settings.graphify.scope.${value}`)}

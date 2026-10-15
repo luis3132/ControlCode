@@ -122,7 +122,7 @@ export function RulesDialog({ cwd, onClose }: { cwd: string; onClose: () => void
               className="flex-1 min-w-0 rounded-lg px-2.5 h-8 outline-none font-mono text-[11.5px]
                 bg-gray-100 dark:bg-white/5
                 border border-gray-200 dark:border-white/10
-                focus:border-blue-400 dark:focus:border-blue-500
+                focus:border-accent-400 dark:focus:border-accent-500
                 text-gray-800 dark:text-gray-200"
             />
             <div className="flex shrink-0 rounded-lg overflow-hidden

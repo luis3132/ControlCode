@@ -285,17 +285,17 @@ export function Composer({ tab, isActive }: { tab: Tab; isActive: boolean }) {
   const tone = c.effort ? EFFORT_TONE[c.effort] : null;
 
   return (
-    <div className="shrink-0 bg-white dark:bg-[#0d1117]">
+    <div className="shrink-0 bg-white dark:bg-surface">
       <div className="relative w-full px-5 lg:px-8 pt-1 pb-3 flex flex-col gap-1.5">
         {menu.length > 0 && (
           <div role="listbox" className="absolute left-5 lg:left-8 right-5 lg:right-8 max-w-md bottom-full mb-1 z-20 max-h-72 overflow-y-auto
-            rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-[#161b22] shadow-xl py-1">
+            rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-surface-raised shadow-xl py-1">
             {menu.map((entry, i) => (
               <Button key={entry.name} variant="custom" role="option" aria-selected={i === menuIndex}
                 onMouseEnter={() => setMenuIndex(i)}
                 onClick={() => pick(entry.name, entry.builtin)}
                 className={`w-full flex items-center gap-2 px-3 h-8 text-left text-[12px]
-                  ${i === menuIndex ? "bg-blue-50 dark:bg-blue-500/15" : ""}`}>
+                  ${i === menuIndex ? "bg-accent-50 dark:bg-accent-500/15" : ""}`}>
                 <span className="font-mono text-gray-800 dark:text-gray-100">/{entry.name}</span>
                 <span className="truncate text-[11px] text-gray-400 dark:text-white/35">
                   {entry.builtin ? t(`chat.cmd.${entry.name}`) : t("chat.cmd.agent")}
@@ -342,7 +342,7 @@ export function Composer({ tab, isActive }: { tab: Tab; isActive: boolean }) {
           className={`flex flex-col rounded-2xl border transition-colors
             bg-white dark:bg-white/[0.03]
             ${tone ? tone.border : "border-gray-200 dark:border-white/10"}
-            ${tone ? "" : "focus-within:border-blue-400 dark:focus-within:border-blue-500/60"}
+            ${tone ? "" : "focus-within:border-accent-400 dark:focus-within:border-accent-500/60"}
             ${pulse ? "cc-effort-pulse" : ""}
             shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:shadow-none`}>
           {/* Un `textarea` pelado y no el de la librería: sus variantes traen borde propio
@@ -430,7 +430,7 @@ export function Composer({ tab, isActive }: { tab: Tab; isActive: boolean }) {
             ) : (
               <Button variant="custom" onClick={submit} disabled={!canSend} aria-label={t("chat.send")}
                 className="cc-t w-8 h-8 rounded-full flex items-center justify-center shrink-0
-                  bg-blue-600 text-white hover:bg-blue-700
+                  bg-accent-600 text-white hover:bg-accent-700
                   disabled:bg-gray-100 disabled:text-gray-400 disabled:hover:bg-gray-100
                   dark:disabled:bg-white/[0.08] dark:disabled:text-white/25 dark:disabled:hover:bg-white/[0.08]">
                 <SendArrow />

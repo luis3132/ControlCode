@@ -13,7 +13,7 @@ import { readDir } from "@/features/explorer/ipc";
 import {
   dropFilesOnTab, setFileDropTarget, terminalTabAt, TERMINAL_TAB_ATTR, useFileDropTarget,
 } from "@/features/terminal/fileDrop";
-import { dueForHibernation, hibernate, useHibernation, wake } from "@/features/terminal/hibernation";
+import { dueForHibernation, hibernate, rouse, useDormant, useHibernation, wake } from "@/features/terminal/hibernation";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { setTerminalWaker } from "@/features/terminal/terminalRegistry";
 import { ptyKill } from "@/features/terminal/ipc";
@@ -48,6 +48,7 @@ export function TerminalPanel() {
   const customLoaded = useAgentsStore((s) => s.loaded);
   const docVisible = useDocumentVisible();
   const hibernated = useHibernation((s) => s.ids);
+  const dormant = useDormant((s) => s.ids);
   const hibernateMinutes = useTerminalPrefsStore((s) => s.hibernateMinutes);
 
   // ── Ahorro de energía ────────────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ export function TerminalPanel() {
       if (shownNow.has(tab.id)) {
         hiddenSince.current.delete(tab.id);
         wake(tab.id);
+        rouse(tab.id);
       } else if (!hiddenSince.current.has(tab.id)) {
         hiddenSince.current.set(tab.id, now);
       }
@@ -100,10 +102,10 @@ export function TerminalPanel() {
     ptyOf.current = now;
   }, [tabs]);
 
-  // Pegarle algo a una hibernada (soltarle un archivo, mandarle un elemento del navegador)
-  // la despierta; lo pegado sale cuando se reconecta.
+  // Pegarle algo a una hibernada o a una dormida (soltarle un archivo, mandarle un elemento
+  // del navegador) la despierta; lo pegado sale cuando se conecta.
   useEffect(() => {
-    setTerminalWaker((tabId) => wake(tabId));
+    setTerminalWaker((tabId) => wake(tabId) || rouse(tabId));
     return () => setTerminalWaker(null);
   }, []);
 
@@ -157,7 +159,7 @@ export function TerminalPanel() {
   return (
     // h-full en lugar de flex-1: el padre es position:absolute;inset:0 (no flex),
     // así que h-full es la única forma de darle altura real al panel.
-    <div className="relative h-full w-full overflow-hidden bg-gray-100 dark:bg-[#0d1117]">
+    <div className="relative h-full w-full overflow-hidden bg-gray-100 dark:bg-surface-deep">
       {tabs.map((tab) => {
         // El resume del agente ya reconstruye su propia conversación; reproducir
         // también el scrollback crudo aquí duplicaría/ensuciaría la salida.
@@ -194,16 +196,16 @@ export function TerminalPanel() {
           >
             {dropTarget === tab.id && (
               <div className="absolute inset-1 z-10 pointer-events-none flex items-end justify-center pb-6
-                rounded-lg border-2 border-dashed border-blue-500/70 bg-blue-500/8">
+                rounded-lg border-2 border-dashed border-accent-500/70 bg-accent-500/8">
                 <span className="px-3 py-1.5 rounded-md text-[12px] font-medium shadow-lg
-                  bg-blue-600 text-white">
+                  bg-accent-600 text-white">
                   {t("terminal.dropHint")}
                 </span>
               </div>
             )}
             {toggleable && <ModeToggle tab={tab} />}
             {html && <ChatView tab={tab} isActive={key === focusedItem && onWorkspace} />}
-            {!html && (customLoaded || agentDef(tab.agentId)) && !hibernated.has(tab.id) && <Terminal
+            {!html && (customLoaded || agentDef(tab.agentId)) && !hibernated.has(tab.id) && !dormant.has(tab.id) && <Terminal
               // El nonce en la key: reiniciar el agente desmonta esta terminal (lo que mata
               // su proceso) y monta otra, que relanza con `--resume`.
               key={`${tab.id}:${tab.restartNonce ?? 0}`}

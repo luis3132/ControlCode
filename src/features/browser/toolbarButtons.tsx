@@ -27,7 +27,7 @@ export function ToolButton({ label, onClick, disabled, active, plain, children }
       className={`cc-t relative flex items-center justify-center w-8 h-8 p-0 rounded-lg shrink-0
         disabled:opacity-100 disabled:cursor-default disabled:text-gray-400 dark:disabled:text-white/30 disabled:hover:bg-transparent
         ${active
-          ? "bg-blue-500/15 text-blue-600 dark:bg-blue-400/20 dark:text-blue-300"
+          ? "bg-accent-500/15 text-accent-600 dark:bg-accent-400/20 dark:text-accent-300"
           : "text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10"}`}
     >
       {children}
@@ -57,7 +57,7 @@ export function ActionButton({ hint, onClick, disabled, active, plain, children 
       className={`cc-t flex items-center gap-1.5 h-8 px-2.5 rounded-lg shrink-0 border text-[12px] font-semibold
         disabled:opacity-45 disabled:hover:bg-transparent
         ${active
-          ? "bg-blue-600 border-blue-600 text-white hover:bg-blue-500"
+          ? "bg-accent-600 border-accent-600 text-white hover:bg-accent-500"
           : "border-gray-300 dark:border-white/15 text-gray-800 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-white/10"}`}
     >
       {children}

@@ -150,7 +150,11 @@ async function saveNow(
       historyId: t.historyId ?? null,
       accountId: t.accountId ?? null,
       prelaunch: t.prelaunch ?? [],
-      scrollback: await resolveScrollback(t.ptyId).finally(() => step({ kind: "terminal", title: t.title })),
+      // Sin proceso todavía (una tab dormida, ver `useDormant`) se guarda el que trajo al
+      // restaurarse: si no, el primer guardado le borraba el historial a una que no se miró.
+      scrollback: t.ptyId == null
+        ? (step({ kind: "terminal", title: t.title }), t.scrollback ?? null)
+        : await resolveScrollback(t.ptyId).finally(() => step({ kind: "terminal", title: t.title })),
       openedAt: t.openedAt,
       mode: t.mode ?? "terminal",
     }))

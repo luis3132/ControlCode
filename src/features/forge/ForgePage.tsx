@@ -49,7 +49,7 @@ function RepoRow({ repo, active, onClick }: { repo: OpenRepo; active: boolean; o
       onClick={onClick}
       className={`cc-t flex items-start gap-2.5 w-full px-2.5 py-2 rounded-lg text-left
         ${active
-          ? "bg-blue-500/12 dark:bg-blue-400/13"
+          ? "bg-accent-500/12 dark:bg-accent-400/13"
           : "hover:bg-gray-200/60 dark:hover:bg-white/5"}`}
     >
       <ForgeIcon kind={target?.kind ?? null} className="w-4 h-4 mt-0.5 shrink-0 text-gray-500 dark:text-white/45" />

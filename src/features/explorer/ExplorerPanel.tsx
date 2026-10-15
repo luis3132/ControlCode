@@ -38,7 +38,7 @@ function SectionButton({ view, Icon, label, active, changes, placement }: {
         aria-pressed={active && !collapsed}
         className={`cc-t relative flex items-center justify-center w-8 h-8 rounded-lg shrink-0
           ${active && !collapsed
-            ? "bg-blue-500/12 dark:bg-blue-400/13 text-blue-600 dark:text-blue-400"
+            ? "bg-accent-500/12 dark:bg-accent-400/13 text-accent-600 dark:text-accent-400"
             : "text-gray-500 dark:text-white/40 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200/60 dark:hover:bg-white/8"} p-0`}
       >
         <Icon className="w-4 h-4" />
@@ -78,7 +78,7 @@ export function ExplorerPanel({ cwd, repo, title }: {
   if (collapsed) {
     return (
       <aside className="cc-fade flex flex-col items-center gap-1 w-11 shrink-0 pt-2
-        bg-gray-50 dark:bg-[#0a0f16]
+        bg-gray-50 dark:bg-surface-sunken
         border-l border-gray-200 dark:border-white/7">
         {SECTIONS.map((s) => (
           <SectionButton key={s.view} {...s} active={false} changes={changes} placement="left" />
@@ -89,7 +89,7 @@ export function ExplorerPanel({ cwd, repo, title }: {
 
   return (
     <aside className="cc-fade flex flex-col shrink-0 min-h-0 w-72
-      bg-gray-50 dark:bg-[#0a0f16]
+      bg-gray-50 dark:bg-surface-sunken
       border-l border-gray-200 dark:border-white/7">
 
       <div className="flex items-center gap-1 h-10 shrink-0 pl-2 pr-1.5

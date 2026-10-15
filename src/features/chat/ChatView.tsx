@@ -164,7 +164,7 @@ export function ChatView({ tab, isActive }: { tab: Tab; isActive: boolean }) {
         : word;
 
   return (
-    <div className="absolute inset-0 flex flex-col bg-white dark:bg-[#0d1117]">
+    <div className="absolute inset-0 flex flex-col bg-white dark:bg-surface">
       <div
         ref={scroller}
         onScroll={(e) => {
@@ -211,7 +211,7 @@ export function ChatView({ tab, isActive }: { tab: Tab; isActive: boolean }) {
         <div className="absolute right-2.5 top-1/2 -translate-y-1/2 z-10 flex flex-col
           rounded-full overflow-hidden opacity-45 hover:opacity-100 transition-opacity
           border border-gray-200 dark:border-white/10
-          bg-white/95 dark:bg-[#161b22]/95 shadow-sm backdrop-blur">
+          bg-white/95 dark:bg-surface-raised/95 shadow-sm backdrop-blur">
           <Tooltip content={t("chat.jump.prev")} placement="left">
             <Button variant="custom" onClick={() => jump(-1)} aria-label={t("chat.jump.prev")} className={JUMP}>
               <ChevronUpIcon className="w-3.5 h-3.5" />

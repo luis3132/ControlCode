@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
+import { agentTile, agentVendor } from "@/features/agents/agentTile";
 import type { AgentInfo } from "@/features/tabs/types";
 
 interface AgentPickerStepProps {
@@ -45,28 +46,31 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
             type="button"
             onClick={() => onSelect(agent)}
             aria-pressed={isSelected}
+            title={agent.version ?? undefined}
             className={`
-              group flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left
+              group relative flex items-center gap-3 h-16 px-3.5 rounded-[10px] border text-left
               transition-colors duration-200
               ${isSelected
-                ? "border-blue-500 bg-linear-to-br from-blue-50 to-violet-50 dark:from-blue-500/10 dark:to-violet-500/10 shadow-sm"
-                : "border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] hover:border-gray-300 dark:hover:border-white/20 hover:shadow-sm"}
+                ? "border-accent-500 bg-accent-500/10 dark:bg-accent-500/16"
+                : "border-transparent bg-black/[0.04] dark:bg-surface-raised hover:bg-black/[0.06] dark:hover:bg-surface-overlay"}
             `}
           >
-            <span className={`shrink-0 flex items-center justify-center w-9 h-9 rounded-lg
-              transition-colors duration-200
-              ${isSelected
-                ? "bg-blue-500/10 text-blue-600 dark:bg-blue-400/15 dark:text-blue-300"
-                : "bg-gray-200/70 text-gray-500 dark:bg-white/6 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-200"}`}>
-              <AgentIcon className="w-5 h-5" />
+            {/* El color de la marca: se reconoce el agente antes de leer el nombre. */}
+            <span className="shrink-0 flex items-center justify-center w-[30px] h-[30px] rounded-lg text-white
+              shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.18)]"
+              style={{ background: agentTile(agent.id) }}>
+              <AgentIcon className="w-4 h-4" />
             </span>
+            {isSelected && (
+              <span aria-hidden className="absolute top-2 right-2 flex h-4 w-4 items-center justify-center rounded-full bg-accent-500 text-white">
+                <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth={2}
+                  strokeLinecap="round" strokeLinejoin="round"><path d="m2.5 6.2 2.3 2.3 4.7-4.9" /></svg>
+              </span>
+            )}
 
-            <span className="flex flex-col gap-0.5 min-w-0">
+            <span className="flex flex-col min-w-0">
               <span className="flex items-center gap-1.5 min-w-0">
-                <span className={`truncate text-[12.5px] font-semibold transition-colors
-                  ${isSelected
-                    ? "text-blue-700 dark:text-blue-300"
-                    : "text-gray-800 dark:text-gray-100 group-hover:text-gray-900 dark:group-hover:text-white"}`}>
+                <span className="truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-gray-50">
                   {agent.label}
                 </span>
                 {agent.isCustom && (
@@ -76,17 +80,9 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
                   </span>
                 )}
               </span>
-              <span className={`truncate font-mono text-[10.5px] transition-colors
-                ${isSelected
-                  ? "text-blue-500/70 dark:text-blue-400/70"
-                  : "text-gray-400 dark:text-white/35"}`}>
-                {agent.command}
+              <span className="truncate text-[11px] leading-[14px] text-gray-500 dark:text-white/60">
+                {agentVendor(agent.id, agent.command, t)}
               </span>
-              {agent.version && (
-                <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400/80">
-                  {agent.version}
-                </span>
-              )}
             </span>
           </Button>
         );

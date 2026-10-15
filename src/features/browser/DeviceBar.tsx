@@ -34,7 +34,7 @@ function SideInput({ value, label, onCommit }: { value: number; label: string; o
       }}
       className="w-14 h-6 px-1.5 rounded-md text-center font-mono text-[11.5px] tabular-nums outline-none
         bg-white dark:bg-white/6 border border-gray-300 dark:border-white/12
-        focus:border-blue-500 dark:focus:border-blue-400 text-gray-900 dark:text-gray-100"
+        focus:border-accent-500 dark:focus:border-accent-400 text-gray-900 dark:text-gray-100"
     />
   );
 }
@@ -95,7 +95,7 @@ export function DeviceBar({ viewport, touch, onChange, onTouch, onClose }: {
         <Button variant="custom" onClick={() => onTouch(!touch)} aria-pressed={touch}
           className={`cc-t inline-block h-6 px-2 rounded-md shrink-0 text-[10.5px] border
             ${touch
-              ? "bg-blue-600 border-blue-600 text-white"
+              ? "bg-accent-600 border-accent-600 text-white"
               : "border-gray-200 dark:border-white/10 text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/8"}`}>
           {t("browser.viewport.touch")}
         </Button>
@@ -115,7 +115,7 @@ export function DeviceBar({ viewport, touch, onChange, onTouch, onClose }: {
               aria-pressed={current === name}
               className={`cc-t inline-block h-6 px-2 font-mono text-[10.5px] border-r last:border-r-0 border-gray-200 dark:border-white/10
                 ${current === name
-                  ? "bg-blue-600 text-white"
+                  ? "bg-accent-600 text-white"
                   : "text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/8 hover:text-gray-900 dark:hover:text-white"}`}
             >
               {name}

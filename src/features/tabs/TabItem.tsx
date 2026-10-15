@@ -177,7 +177,7 @@ function ChatStatus({ tabId }: { tabId: string }) {
     );
   }
   if (finished) {
-    return <span title={t("tabs.status.finished")} className="w-1.5 h-1.5 rounded-full shrink-0 bg-blue-500" />;
+    return <span title={t("tabs.status.finished")} className="w-1.5 h-1.5 rounded-full shrink-0 bg-accent-500" />;
   }
   return <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-emerald-500" />;
 }

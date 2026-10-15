@@ -8,9 +8,8 @@ use crate::database::DbConnection;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db_conn = crate::database::init_db().expect("Failed to initialize SQLite database");
-    // Antes de construir Tauri, porque WebKitGTK decide cómo componer al inicializarse; y
-    // antes del hilo de señales, porque toca el entorno del proceso (ver `configure`).
-    super::rendering::configure(&db_conn);
+    // Antes de construir Tauri, porque GTK lee la variable al inicializarse; y antes del
+    // hilo de señales, porque toca el entorno del proceso (ver `configure_scrollbars`).
     super::rendering::configure_scrollbars();
     // El PATH real del usuario, no el del escritorio: sin esto, en Ubuntu (y en macOS desde
     // el Dock) no se encontraban las TUIs instaladas en el home. Mismo requisito que el de
@@ -199,6 +198,7 @@ pub fn run() {
             crate::accounts::delete_agent_account,
             crate::accounts::agent_account_env,
             crate::accounts::system_accounts,
+            crate::accounts::codex_account_usage,
             crate::usage::agent_account_usage,
             crate::usage::claude_live_usage,
             // Comandos previos al lanzamiento del agente (entornos aislados)
@@ -314,6 +314,8 @@ pub fn run() {
                 let _ = window.app_handle().emit("cc-workspace-changed", ());
                 // Su panel ya no va a pedir dejar de vigilar: se suelta acá.
                 crate::explorer::watch::forget_window(window.label());
+                // Sus terminales no van a pedir que las maten: se matan acá.
+                crate::terminal::kill_window_ptys_later(window.label().to_string());
             }
             tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
                 let _ = window.emit("cc-window-bounds-changed", ());

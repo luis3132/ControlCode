@@ -24,7 +24,7 @@ function OptionToggle({ label, title, on, onToggle }: {
         className={`cc-t flex items-center justify-center min-w-5.5 h-5.5 px-1 rounded-md shrink-0
           font-mono text-[10.5px] font-semibold
           ${on
-            ? "bg-blue-500/15 text-blue-600 dark:bg-blue-400/20 dark:text-blue-300 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.45)]"
+            ? "bg-accent-500/15 text-accent-600 dark:bg-accent-400/20 dark:text-accent-300 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.45)]"
             : "text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10"} gap-0`}
       >
         {label}
@@ -100,7 +100,7 @@ export function SearchPanel({ cwd }: { cwd: string | null }) {
         <div className="flex items-center gap-0.5 h-8 pl-2.5 pr-1 rounded-lg
           bg-white dark:bg-white/4
           border border-gray-200 dark:border-white/10
-          focus-within:border-blue-500 dark:focus-within:border-blue-400">
+          focus-within:border-accent-500 dark:focus-within:border-accent-400">
           <input
             ref={inputRef}
             value={query}
@@ -134,7 +134,7 @@ export function SearchPanel({ cwd }: { cwd: string | null }) {
               aria-pressed={showFilters}
               className={`cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
                 ${showFilters || options.include || options.exclude
-                  ? "text-blue-600 dark:text-blue-400"
+                  ? "text-accent-600 dark:text-accent-400"
                   : "text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white"}
                 hover:bg-gray-200 dark:hover:bg-white/10 p-0`}
             >
@@ -156,7 +156,7 @@ export function SearchPanel({ cwd }: { cwd: string | null }) {
                   spellCheck={false}
                   className="h-7 px-2 rounded-md outline-none font-mono text-[11px]
                     bg-white dark:bg-white/4 border border-gray-200 dark:border-white/10
-                    focus:border-blue-500 dark:focus:border-blue-400
+                    focus:border-accent-500 dark:focus:border-accent-400
                     text-gray-900 dark:text-white placeholder:text-gray-300 dark:placeholder:text-white/20"
                 />
               </label>
@@ -206,7 +206,7 @@ export function SearchPanel({ cwd }: { cwd: string | null }) {
                   onClick={() => openFile(cwd, file.path, { line: m.line, column: m.column }, { transient: true })}
                   onDoubleClick={() => openFile(cwd, file.path, { line: m.line, column: m.column })}
                   className="flex items-center gap-2 w-full h-[22px] pl-9 pr-2 text-left
-                    hover:bg-blue-500/8 dark:hover:bg-blue-400/8"
+                    hover:bg-accent-500/8 dark:hover:bg-accent-400/8"
                 >
                   <span className="shrink-0 w-7 text-right font-mono text-[10px] tabular-nums text-gray-300 dark:text-white/20">
                     {m.line}

@@ -177,6 +177,80 @@ fn recent_transcripts(root: &Path, since: i64) -> Vec<PathBuf> {
     out
 }
 
+/// Un mensaje con consumo, reducido a lo que suman las ventanas.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct UsageRecord {
+    pub at: i64,
+    pub input: u64,
+    pub output: u64,
+    pub cache_write: u64,
+    pub cache_read: u64,
+    pub session: Option<std::sync::Arc<str>>,
+}
+
+/// Lo ya leído de un transcript: hasta dónde, y lo que se sacó de ahí.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FileScan {
+    /// Hasta el final de la última línea completa leída.
+    offset: u64,
+    pub records: Vec<UsageRecord>,
+    /// Avisos de límite del servidor: `(cuándo se vio, cuándo se reinicia)`.
+    pub quotas: Vec<(i64, i64)>,
+}
+
+lazy_static::lazy_static! {
+    /// Los transcripts solo crecen (JSONL que se agrega al final): lo leído no se vuelve a
+    /// leer. Antes, abrir el panel de consumo releía la semana entera de cada cuenta, que
+    /// en un historial grande son cientos de megas.
+    static ref SCANS: std::sync::Mutex<std::collections::HashMap<PathBuf, FileScan>> = Default::default();
+}
+
+/// Lee lo que `path` agregó desde `previous` (o todo, si no hay, o si el archivo se achicó:
+/// lo reescribieron y lo leído ya no vale). Se detiene en la última línea completa: una
+/// línea a medio escribir se lee entera la próxima vez.
+pub(crate) fn scan_file(path: &Path, previous: Option<FileScan>) -> FileScan {
+    use std::io::{Read, Seek, SeekFrom};
+    let len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let mut scan = previous.filter(|p| p.offset <= len).unwrap_or_default();
+    if scan.offset == len {
+        return scan;
+    }
+    let Ok(mut file) = std::fs::File::open(path) else { return scan };
+    if file.seek(SeekFrom::Start(scan.offset)).is_err() {
+        return FileScan::default();
+    }
+    let mut bytes = Vec::new();
+    if file.read_to_end(&mut bytes).is_err() {
+        return scan;
+    }
+    let Some(end) = bytes.iter().rposition(|b| *b == b'\n') else { return scan };
+    let chunk = String::from_utf8_lossy(&bytes[..end]);
+    for line in chunk.lines() {
+        // Las dos cosas que interesan: el consumo de un mensaje, y el aviso de límite del
+        // servidor. El resto de las líneas no se parsea.
+        if !line.contains(USAGE_MARK) && !line.contains(QUOTA_MARK) {
+            continue;
+        }
+        let Ok(parsed) = serde_json::from_str::<Line>(line) else { continue };
+        let Some(at) = parsed.timestamp.as_deref().and_then(parse_ts) else { continue };
+        if let Some(resets) = parsed.quota.as_ref().and_then(|q| q.resets_at) {
+            scan.quotas.push((at, resets));
+        }
+        if let Some(usage) = parsed.message.and_then(|m| m.usage) {
+            scan.records.push(UsageRecord {
+                at,
+                input: usage.input_tokens,
+                output: usage.output_tokens,
+                cache_write: usage.cache_creation_input_tokens,
+                cache_read: usage.cache_read_input_tokens,
+                session: parsed.session_id.map(std::sync::Arc::from),
+            });
+        }
+    }
+    scan.offset += end as u64 + 1;
+    scan
+}
+
 /// El consumo real de una cuenta, por ventana de tiempo.
 #[tauri::command]
 pub async fn agent_account_usage(
@@ -217,47 +291,47 @@ pub async fn agent_account_usage(
         let mut recent_stamps: Vec<i64> = Vec::new();
         let mut server_reset: Option<(i64, i64)> = None;
 
-        for path in files {
-            let Ok(raw) = std::fs::read_to_string(&path) else { continue };
-            for line in raw.lines() {
-                // Las dos cosas que interesan: el consumo de un mensaje, y el aviso de
-                // límite del servidor. El resto de las líneas no se parsea.
-                let has_usage = line.contains(USAGE_MARK);
-                if !has_usage && !line.contains(QUOTA_MARK) {
-                    continue;
-                }
-                let Ok(parsed) = serde_json::from_str::<Line>(line) else { continue };
+        // Lo leído antes se reusa; de cada archivo solo se lee lo que creció. Los que ya
+        // salieron de la semana se olvidan, para que el cache no crezca con el historial.
+        let scans: Vec<FileScan> = {
+            let mut cache = SCANS.lock().unwrap_or_else(|e| e.into_inner());
+            let wanted: HashSet<&PathBuf> = files.iter().collect();
+            cache.retain(|p, _| !p.starts_with(&root) || wanted.contains(p));
+            files
+                .iter()
+                .map(|path| {
+                    let scan = scan_file(path, cache.remove(path));
+                    cache.insert(path.clone(), scan.clone());
+                    scan
+                })
+                .collect()
+        };
 
-                if let (Some(quota), Some(at)) =
-                    (parsed.quota.as_ref(), parsed.timestamp.as_deref().and_then(parse_ts))
-                {
-                    if let Some(resets) = quota.resets_at {
-                        // Gana el aviso más reciente: los viejos hablan de ventanas que ya
-                        // se reabrieron.
-                        if server_reset.is_none_or(|(seen, _)| at > seen) {
-                            server_reset = Some((at, resets));
-                        }
-                    }
+        for scan in &scans {
+            for &(at, resets) in &scan.quotas {
+                // Gana el aviso más reciente: los viejos hablan de ventanas que ya se
+                // reabrieron.
+                if server_reset.is_none_or(|(seen, _)| at > seen) {
+                    server_reset = Some((at, resets));
                 }
-                let Some(usage) = parsed.message.and_then(|m| m.usage) else { continue };
-                let Some(at) = parsed.timestamp.as_deref().and_then(parse_ts) else { continue };
-
+            }
+            for record in &scan.records {
+                let at = record.at;
                 last_activity = Some(last_activity.map_or(at, |prev: i64| prev.max(at)));
                 if at >= now - 86_400 {
                     recent_stamps.push(at);
                 }
-
                 for (i, (_, secs)) in WINDOWS.iter().enumerate() {
                     if at < now - secs {
                         continue;
                     }
                     let w = &mut totals[i];
-                    w.input_tokens += usage.input_tokens;
-                    w.output_tokens += usage.output_tokens;
-                    w.cache_write_tokens += usage.cache_creation_input_tokens;
-                    w.cache_read_tokens += usage.cache_read_input_tokens;
+                    w.input_tokens += record.input;
+                    w.output_tokens += record.output;
+                    w.cache_write_tokens += record.cache_write;
+                    w.cache_read_tokens += record.cache_read;
                     w.messages += 1;
-                    if let Some(id) = parsed.session_id.as_deref() {
+                    if let Some(id) = record.session.as_deref() {
                         sessions[i].insert(id.to_string());
                     }
                 }

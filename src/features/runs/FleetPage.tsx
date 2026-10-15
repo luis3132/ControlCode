@@ -168,7 +168,7 @@ export function FleetPage() {
               className={`cc-t flex items-center gap-1.5 px-2 h-6 rounded-full text-[10.5px]
                 disabled:opacity-30
                 ${group === g
-                  ? "bg-blue-500/15 text-blue-700 dark:text-blue-300"
+                  ? "bg-accent-500/15 text-accent-700 dark:text-accent-300"
                   : "text-gray-500 dark:text-white/45 hover:bg-gray-200 dark:hover:bg-white/8"}`}
             >
               {t(`fleet.group.${g}`)}

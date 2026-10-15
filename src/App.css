@@ -9,6 +9,61 @@
 
 @variant dark (&:where(.dark, .dark *)) {}
 
+/* ── La paleta ─────────────────────────────────────────────────────────────
+   Entera acá. Los componentes usan las clases de siempre (`gray-*`, `accent-*`,
+   `surface*`) y nunca un hex: cambiar la identidad es cambiar este bloque.
+
+   - `gray` es grafito neutro: las mismas luminosidades de la escala de Tailwind (el
+     contraste entre escalones no cambia), sin el tono azulado.
+   - `accent` es un azul acero, poco saturado: marca selección, foco y enlaces sin
+     competir con el contenido. Los semánticos (red, amber, emerald) quedan como están.
+   - `violet` es el secundario que distingue categorías, con el mismo tono contenido.
+   - `surface*` son los fondos del modo oscuro, del más hundido al más elevado. */
+@theme {
+  --color-gray-50: oklch(0.985 0 0);
+  --color-gray-100: oklch(0.967 0 0);
+  --color-gray-200: oklch(0.925 0.001 286);
+  --color-gray-300: oklch(0.87 0.002 286);
+  --color-gray-400: oklch(0.71 0.004 286);
+  --color-gray-500: oklch(0.555 0.005 286);
+  --color-gray-600: oklch(0.45 0.005 286);
+  --color-gray-700: oklch(0.37 0.004 286);
+  --color-gray-800: oklch(0.29 0.003 286);
+  --color-gray-900: oklch(0.215 0.002 286);
+  --color-gray-950: oklch(0.15 0.002 286);
+
+  --color-accent-50: oklch(0.97 0.016 255);
+  --color-accent-100: oklch(0.94 0.035 255);
+  --color-accent-200: oklch(0.88 0.07 255);
+  --color-accent-300: oklch(0.8 0.11 255);
+  --color-accent-400: oklch(0.72 0.155 255);
+  --color-accent-500: oklch(0.63 0.19 255);
+  --color-accent-600: oklch(0.57 0.2 257);
+  --color-accent-700: oklch(0.5 0.18 258);
+  --color-accent-800: oklch(0.42 0.15 260);
+  --color-accent-900: oklch(0.35 0.11 262);
+  --color-accent-950: oklch(0.26 0.08 264);
+
+  --color-violet-50: oklch(0.975 0.01 300);
+  --color-violet-100: oklch(0.945 0.02 300);
+  --color-violet-200: oklch(0.89 0.035 300);
+  --color-violet-300: oklch(0.82 0.05 300);
+  --color-violet-400: oklch(0.74 0.065 300);
+  --color-violet-500: oklch(0.62 0.075 300);
+  --color-violet-600: oklch(0.52 0.072 300);
+  --color-violet-700: oklch(0.45 0.062 300);
+  --color-violet-800: oklch(0.38 0.05 300);
+  --color-violet-900: oklch(0.31 0.04 300);
+  --color-violet-950: oklch(0.22 0.03 300);
+
+  --color-surface-deep: #0f0f11;
+  --color-surface-sunken: #151517;
+  --color-surface: #1c1c1e;
+  --color-surface-raised: #2c2c2e;
+  --color-surface-overlay: #3a3a3c;
+
+}
+
 /* ── La paleta de la librería ──────────────────────────────────────────────
    `neogestify-ui-components` pinta sus superficies, bordes y textos con variables
    `--nui-*` que traen un valor por defecto. Esos valores son grises de Tailwind
@@ -28,42 +83,42 @@
 :root {
   /* Superficies. `surface` es el panel de un modal y va igual que el shell; las bandas de
      cabecera y pie se HUNDEN respecto del panel, no se elevan. */
-  --nui-surface-dark: #0d1117;
-  --nui-surface-muted-dark: #0a0f16;
-  --nui-surface-sunken-dark: #080b0f;
-  --nui-surface-band-dark: #0a0f16;
+  --nui-surface-dark: var(--color-surface);
+  --nui-surface-muted-dark: var(--color-surface-sunken);
+  --nui-surface-sunken-dark: var(--color-surface-deep);
+  --nui-surface-band-dark: var(--color-surface-sunken);
   --nui-surface-hover-dark: rgba(255, 255, 255, 0.06);
   --nui-skeleton-dark: rgba(255, 255, 255, 0.08);
-  --nui-surface-band: rgba(243, 244, 246, 0.6);
+  --nui-surface-band: color-mix(in oklab, var(--color-gray-100) 60%, transparent);
 
   /* Bordes: los mismos `white/8` y `white/12` que usan los paneles de la app. */
-  --nui-border-dark: rgba(255, 255, 255, 0.12);
+  --nui-border-dark: rgba(255, 255, 255, 0.1);
   --nui-border-subtle-dark: rgba(255, 255, 255, 0.08);
 
   /* Texto, en la misma escala que el resto de la UI. */
-  --nui-text-dark: #f9fafb;
-  --nui-text-muted-dark: #d1d5db;
+  --nui-text-dark: var(--color-gray-50);
+  --nui-text-muted-dark: var(--color-gray-300);
   --nui-text-subtle-dark: rgba(255, 255, 255, 0.45);
   --nui-text-faint-dark: rgba(255, 255, 255, 0.3);
 
-  /* Acento: la librería viene en índigo y la app es azul. Se cambia en los dos temas —
+  /* Acento: la librería viene en índigo; apunta a la escala `accent` de la paleta. Se cambia en los dos temas —
      un botón primario índigo al lado de una fila seleccionada azul se ve como un error. */
-  --nui-accent: #2563eb;
-  --nui-accent-hover: #1d4ed8;
-  --nui-accent-text: #2563eb;
-  --nui-accent-text-hover: #1d4ed8;
-  --nui-accent-soft: rgba(59, 130, 246, 0.1);
-  --nui-ring: #3b82f6;
-  --nui-accent-dark: #3b82f6;
-  --nui-accent-hover-dark: #2563eb;
-  --nui-accent-text-dark: #60a5fa;
-  --nui-accent-text-hover-dark: #93c5fd;
-  --nui-accent-soft-dark: rgba(96, 165, 250, 0.13);
-  --nui-ring-dark: #60a5fa;
+  --nui-accent: var(--color-accent-600);
+  --nui-accent-hover: var(--color-accent-700);
+  --nui-accent-text: var(--color-accent-600);
+  --nui-accent-text-hover: var(--color-accent-700);
+  --nui-accent-soft: color-mix(in oklab, var(--color-accent-500) 10%, transparent);
+  --nui-ring: var(--color-accent-500);
+  --nui-accent-dark: var(--color-accent-500);
+  --nui-accent-hover-dark: var(--color-accent-600);
+  --nui-accent-text-dark: var(--color-accent-400);
+  --nui-accent-text-hover-dark: var(--color-accent-300);
+  --nui-accent-soft-dark: color-mix(in oklab, var(--color-accent-400) 13%, transparent);
+  --nui-ring-dark: var(--color-accent-400);
 
   /* El velo detrás de un diálogo, igual que el de `ShellModal` y `RouteModal`. */
-  --nui-scrim: rgba(17, 24, 39, 0.45);
-  --nui-scrim-dark: rgba(0, 0, 0, 0.65);
+  --nui-scrim: rgba(20, 20, 24, 0.45);
+  --nui-scrim-dark: rgba(0, 0, 0, 0.5);
 }
 
 /* ── El globo de ayuda ─────────────────────────────────────────────────────
@@ -146,18 +201,22 @@ body,
 #root {
   height: 100%;
   width: 100%;
+  /* `clip` y no solo `hidden`: lo oculto con `hidden` se puede desplazar igual (el foco de
+     un input cortado, arrastrar una selección), y la app entera quedaba corrida a un lado
+     sin barra para volver. `hidden` queda de respaldo para un WebKit que no conozca `clip`. */
   overflow: hidden;
+  overflow: clip;
   /* Transparente: la ventana nativa es transparent:true (ver tauri.conf.json) para que
      las esquinas redondeadas del panel (AppShell) no queden recortadas en cuadrado por
      un fondo opaco detrás — el color real de fondo vive en AppShell, no acá. */
   background: transparent;
-  color: #111827;
+  color: var(--color-gray-900);
 }
 
 html.dark,
 html.dark body,
 html.dark #root {
-  color: #f9fafb;
+  color: var(--color-gray-50);
 }
 
 /* ── Scroll ────────────────────────────────────────────────────────────────
@@ -459,4 +518,21 @@ html:not(.dark) .cc-tui-rail.dragging .cc-tui-rail-thumb {
   transition-property: color, background-color, border-color, opacity, box-shadow;
   transition-duration: var(--cc-fast);
   transition-timing-function: var(--cc-ease);
+}
+
+/* Un contenedor que recorta sin poder desplazarse (ver `html, body, #root`). */
+.cc-clip {
+  overflow: hidden;
+  overflow: clip;
+}
+
+/* El minificador quita el `hidden` de respaldo de arriba (cree que todos entienden `clip`).
+   Un Safari 15 —un macOS viejo— no lo entiende y se quedaría sin recortar nada. */
+@supports not (overflow: clip) {
+  html,
+  body,
+  #root,
+  .cc-clip {
+    overflow: hidden;
+  }
 }

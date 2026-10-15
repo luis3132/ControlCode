@@ -251,7 +251,7 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
             {tokenUrl && (
               <Button variant="custom"
                 onClick={() => openUrl(tokenUrl).catch(console.error)}
-                className="self-start flex items-center gap-1 text-[11.5px] text-blue-600 dark:text-blue-400 hover:underline"
+                className="self-start flex items-center gap-1 text-[11.5px] text-accent-600 dark:text-accent-400 hover:underline"
               >
                 <ExternalIcon className="w-3 h-3" />
                 {t("forge.add.createToken", { host: host.trim() })}

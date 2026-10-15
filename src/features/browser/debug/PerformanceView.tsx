@@ -183,7 +183,7 @@ export function PerformanceView({ channel, docId }: { channel: PageChannel; docI
               <Metric label={t("browser.debug.perf.growth")} value={`${growth > 0 ? "+" : ""}${growth}`}
                 tone={growth > 500 ? "poor" : growth > 100 ? "fair" : null} />
             </div>
-            <Sparkline values={nodes} tone="text-blue-500" />
+            <Sparkline values={nodes} tone="text-accent-500" />
           </Card>
 
           <Card title={t("browser.debug.perf.longTasks")}>

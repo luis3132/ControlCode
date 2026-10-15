@@ -195,7 +195,7 @@ export function SkillsShSection() {
           )}
           <p className="text-[10.5px] leading-relaxed text-gray-500 dark:text-white/40">
             {t("settings.skillssh.afterInstall")}{" "}
-            <Button variant="custom" onClick={() => openUrl(install.docsUrl)} className="cc-t text-blue-600 dark:text-blue-400 hover:underline inline-block">
+            <Button variant="custom" onClick={() => openUrl(install.docsUrl)} className="cc-t text-accent-600 dark:text-accent-400 hover:underline inline-block">
               {t("settings.skillssh.docs")}
             </Button>
           </p>

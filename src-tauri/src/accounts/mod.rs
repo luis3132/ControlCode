@@ -28,11 +28,13 @@
 //! poder mostrar "trabajo → vos@empresa.com" en vez de un nombre suelto.
 
 
+mod codex_usage;
 mod commands;
 mod profiles;
 mod store;
 #[cfg(test)]
 mod test;
 
+pub use codex_usage::*;
 pub use commands::*;
 pub use store::*;

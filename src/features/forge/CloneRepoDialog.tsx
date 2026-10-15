@@ -177,7 +177,7 @@ export function CloneRepoDialog({ onClose, onCloned }: {
                   onClick={() => setPicked(r)}
                   className={`flex flex-col gap-0.5 w-full px-3 py-1.5 text-left
                     ${picked?.fullName === r.fullName
-                      ? "bg-blue-500/12 dark:bg-blue-400/13"
+                      ? "bg-accent-500/12 dark:bg-accent-400/13"
                       : "hover:bg-gray-100 dark:hover:bg-white/4"}`}
                 >
                   <span className="flex items-center gap-1.5 min-w-0">
