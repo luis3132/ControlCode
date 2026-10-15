@@ -31,6 +31,11 @@ export function LoginTerminal({ account }: LoginTerminalProps) {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    // La principal (`system:*`) no tiene perfil: la TUI usa su configuración de siempre.
+    if (account.id.startsWith("system:")) {
+      setEnv({});
+      return;
+    }
     envFor(account.id).then(setEnv).catch((e) => setError(String(e)));
   }, [account.id, envFor]);
 
