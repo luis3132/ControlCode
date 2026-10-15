@@ -7,6 +7,7 @@ import { loadAgentRegistry } from "@/features/agents/registry";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { renderingInfo } from "@/shared/ipc/settings";
 import { installWheelScrollX } from "@/shared/wheelScrollX";
+import { installRootScrollPin } from "@/shared/pinRootScroll";
 
 // El menú de click derecho del webview (Atrás, Recargar, Inspeccionar…) es del navegador,
 // no de la app: recargar tira las terminales vivas. Se deja solo donde se escribe texto,
@@ -23,6 +24,9 @@ document.addEventListener("contextmenu", (e) => {
 
 // La barra de tabs desborda al costado: la rueda la corre en horizontal, sin Shift.
 installWheelScrollX();
+
+// La raíz no se desplaza nunca, ni por un input enfocado al nacer la ventana.
+installRootScrollPin();
 
 // El tema inicial (default "dark") ya lo resolvió y persistió el script inline de
 // index.html, que corre antes del primer pintado — repetirlo aquí llegaría tarde.
