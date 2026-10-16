@@ -442,3 +442,15 @@ mod utf8_split {
         assert_eq!(utf8_split_point(&[]), 0);
     }
 }
+
+/// El título que pone una TUI (OSC 0/2) es lo que dice en qué está un agente que no se ve.
+/// Se toma el último completo del tramo, sin el spinner de adelante.
+#[test]
+fn el_titulo_de_la_tui_dice_en_que_esta() {
+    use super::pty_manager::last_title;
+    assert_eq!(last_title(b"\x1b]0;\xe2\x9c\xb3 Arreglando los tests\x07"), Some("Arreglando los tests".into()));
+    assert_eq!(last_title(b"x\x1b]2;uno\x1b\\y\x1b]0;dos\x07"), Some("dos".into()));
+    // Sin terminar (llega en el próximo tramo) o sin título, nada.
+    assert_eq!(last_title(b"\x1b]0;a medias"), None);
+    assert_eq!(last_title(b"texto comun \x1b[31mrojo"), None);
+}

@@ -1721,5 +1721,13 @@
   "diagram.edge.dashed": "Dashed",
   "diagram.edge.orthogonal": "Elbow",
   "diagram.edge.straight": "Straight",
-  "diagram.edge.curved": "Curved"
+  "diagram.edge.curved": "Curved",
+  "background.count_one": "{{count}} agent in the background",
+  "background.count_other": "{{count}} agents in the background",
+  "background.expand": "Show the agents working in the background",
+  "background.collapse": "Collapse",
+  "background.working": "Working…",
+  "background.fleet": "Fleet task",
+  "background.waiting": "Waiting for you: asked for permission",
+  "background.more": "and {{count}} more"
 }

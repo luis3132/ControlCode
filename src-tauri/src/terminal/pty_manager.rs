@@ -29,6 +29,13 @@ struct PtyBuffer {
     /// cierra la tab (`pty_kill`): una terminal hibernada que se despierta después de que
     /// su proceso salió tiene que poder mostrar lo que escribió.
     exit_code: Option<i32>,
+    /// Cuándo escribió por última vez (epoch ms). Una TUI que trabaja redibuja su spinner sin
+    /// parar; esperando al usuario se queda quieta. Es lo que dice si un agente que no se ve
+    /// está ocupado (ver `pty_activity`).
+    last_output_ms: i64,
+    /// El último título que puso el proceso (OSC 0/2). Claude Code escribe ahí en qué está
+    /// trabajando.
+    title: Option<String>,
 }
 
 type PtyRegistry = Arc<Mutex<HashMap<u32, PtySession>>>;
@@ -121,10 +128,36 @@ fn append_to_buffer(id: u32, chunk: &[u8]) {
     let buf = buffers.entry(id).or_default();
     buf.data.extend_from_slice(chunk);
     buf.total_bytes += chunk.len() as u64;
+    buf.last_output_ms = crate::util::now_ms();
+    if let Some(title) = last_title(chunk) {
+        buf.title = Some(title);
+    }
     if buf.data.len() > MAX_BUFFER_BYTES + TRIM_MARGIN_BYTES {
         let excess = buf.data.len() - MAX_BUFFER_BYTES;
         buf.data.drain(0..excess);
     }
+}
+
+/// El último título de ventana que pone este tramo de salida (`ESC ] 0 ;` o `ESC ] 2 ;`,
+/// terminado en BEL o `ESC \\`), sin los adornos de adelante: las TUIs le ponen un spinner
+/// o un símbolo (`✳ Arreglando los tests`). `None` si el tramo no trae ninguno completo.
+pub(crate) fn last_title(chunk: &[u8]) -> Option<String> {
+    let mut found = None;
+    let mut i = 0;
+    while i + 4 <= chunk.len() {
+        if chunk[i] == 0x1b && chunk[i + 1] == b']' && (chunk[i + 2] == b'0' || chunk[i + 2] == b'2') && chunk[i + 3] == b';' {
+            let start = i + 4;
+            let end = (start..chunk.len()).find(|&j| chunk[j] == 0x07 || (chunk[j] == 0x1b && chunk.get(j + 1) == Some(&b'\\')));
+            let Some(end) = end else { break };
+            let text = String::from_utf8_lossy(&chunk[start..end]);
+            let clean = text.trim_start_matches(|c: char| !c.is_alphanumeric()).trim();
+            found = Some(clean.chars().take(120).collect::<String>());
+            i = end + 1;
+        } else {
+            i += 1;
+        }
+    }
+    found
 }
 
 /// Arma el script que ejecuta la cadena de pre-lanzamiento y termina en el agente.
@@ -510,6 +543,35 @@ pub fn is_running(id: u32) -> bool {
 pub fn pty_output_totals(ids: Vec<u32>) -> HashMap<u32, u64> {
     let buffers = buffers();
     ids.into_iter().filter_map(|id| buffers.get(&id).map(|b| (id, b.total_bytes))).collect()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PtyActivity {
+    /// Hace cuánto escribió por última vez, en ms.
+    pub idle_ms: i64,
+    pub title: Option<String>,
+    pub running: bool,
+}
+
+/// Qué está haciendo cada PTY: hace cuánto escribió y su último título. Barato: lo consulta
+/// el aviso de agentes en segundo plano cada pocos segundos.
+#[tauri::command]
+pub fn pty_activity(ids: Vec<u32>) -> HashMap<u32, PtyActivity> {
+    let now = crate::util::now_ms();
+    let running: Vec<u32> = {
+        let registry = registry();
+        ids.iter().copied().filter(|id| registry.contains_key(id)).collect()
+    };
+    let buffers = buffers();
+    ids.into_iter()
+        .filter_map(|id| {
+            buffers.get(&id).map(|b| {
+                let idle_ms = if b.last_output_ms == 0 { i64::MAX } else { now - b.last_output_ms };
+                (id, PtyActivity { idle_ms, title: b.title.clone().filter(|t| !t.is_empty()), running: running.contains(&id) })
+            })
+        })
+        .collect()
 }
 
 /// Scrollback acumulado de un PTY vivo, sin exigir que el llamador sea el frontend.

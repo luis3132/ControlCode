@@ -10,3 +10,12 @@ pub fn now_ts() -> i64 {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }
+
+/// Milisegundos desde epoch, para lo que mide segundos sueltos (hace cuánto escribió una
+/// terminal). Mismo resguardo que `now_ts`.
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}

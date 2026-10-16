@@ -1721,5 +1721,13 @@
   "diagram.edge.dashed": "Tratteggiato",
   "diagram.edge.orthogonal": "A gomito",
   "diagram.edge.straight": "Dritto",
-  "diagram.edge.curved": "Curvo"
+  "diagram.edge.curved": "Curvo",
+  "background.count_one": "{{count}} agente in background",
+  "background.count_other": "{{count}} agenti in background",
+  "background.expand": "Mostra gli agenti che lavorano in background",
+  "background.collapse": "Comprimi",
+  "background.working": "Al lavoro…",
+  "background.fleet": "Attività della flotta",
+  "background.waiting": "Ti aspetta: ha chiesto un permesso",
+  "background.more": "e altri {{count}}"
 }

@@ -33,6 +33,7 @@ pub fn run() {
             crate::terminal::pty_create,
             crate::terminal::pty_attach,
             crate::terminal::pty_output_totals,
+            crate::terminal::pty_activity,
             // Subprocesos: los procesos largos que corren los agentes
             crate::procs::procs_list,
             crate::procs::procs_start,

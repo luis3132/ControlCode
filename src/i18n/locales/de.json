@@ -1721,5 +1721,13 @@
   "diagram.edge.dashed": "Gestrichelt",
   "diagram.edge.orthogonal": "Rechtwinklig",
   "diagram.edge.straight": "Gerade",
-  "diagram.edge.curved": "Gebogen"
+  "diagram.edge.curved": "Gebogen",
+  "background.count_one": "{{count}} Agent im Hintergrund",
+  "background.count_other": "{{count}} Agenten im Hintergrund",
+  "background.expand": "Agenten anzeigen, die im Hintergrund arbeiten",
+  "background.collapse": "Einklappen",
+  "background.working": "Arbeitet…",
+  "background.fleet": "Flotten-Aufgabe",
+  "background.waiting": "Wartet auf dich: hat um Erlaubnis gebeten",
+  "background.more": "und {{count}} weitere"
 }

@@ -1721,5 +1721,13 @@
   "diagram.edge.dashed": "Pointillé",
   "diagram.edge.orthogonal": "En équerre",
   "diagram.edge.straight": "Droit",
-  "diagram.edge.curved": "Courbe"
+  "diagram.edge.curved": "Courbe",
+  "background.count_one": "{{count}} agent en arrière-plan",
+  "background.count_other": "{{count}} agents en arrière-plan",
+  "background.expand": "Voir les agents qui travaillent en arrière-plan",
+  "background.collapse": "Réduire",
+  "background.working": "Au travail…",
+  "background.fleet": "Tâche de la flotte",
+  "background.waiting": "Vous attend : a demandé une permission",
+  "background.more": "et {{count}} de plus"
 }

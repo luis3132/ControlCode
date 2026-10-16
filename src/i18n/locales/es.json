@@ -1721,5 +1721,13 @@
   "diagram.edge.dashed": "Punteado",
   "diagram.edge.orthogonal": "En escalera",
   "diagram.edge.straight": "Recto",
-  "diagram.edge.curved": "Curvo"
+  "diagram.edge.curved": "Curvo",
+  "background.count_one": "{{count}} agente en segundo plano",
+  "background.count_other": "{{count}} agentes en segundo plano",
+  "background.expand": "Ver los agentes que trabajan en segundo plano",
+  "background.collapse": "Plegar",
+  "background.working": "Trabajando…",
+  "background.fleet": "Tarea de la flota",
+  "background.waiting": "Te espera: pidió permiso",
+  "background.more": "y {{count}} más"
 }
