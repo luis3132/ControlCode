@@ -1,6 +1,6 @@
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import type { ViewOwner } from "@/features/tabs/viewTabs";
+import { relativeTo, type ViewOwner } from "@/features/tabs/viewTabs";
 import { useDormant } from "@/features/terminal/hibernation";
 
 import { activePageOf, addBrowser, addNode, agentsOf, defaultPageName, workspaceOf } from "./actions";
@@ -98,11 +98,18 @@ export async function runCanvasRequest(cwd: string, request: CanvasRequest, owne
         const id = addBrowser(cwd, page.id, str(request, "url") ?? "", { owner: owner ?? undefined, actor, box: { ...boxOf(request), title } });
         return `Added a browser to page "${page.name}" as node ${id}. It is your browser: browser_* tools drive it.`;
       }
+      if (kind === "diagram" || kind === "doc") {
+        const path = str(request, "path");
+        if (!path) throw new Error(`Falta 'path': el archivo del ${kind === "doc" ? "documento" : "diagrama"}`);
+        const { resolveInProject } = await import("@/features/diagram/paths");
+        const id = addNode(workspace, page.id, { ...boxOf(request), kind, ref: resolveInProject(cwd, path), title }, actor);
+        return `Added ${path} to page "${page.name}" as node ${id}.`;
+      }
       if (kind === "note") {
         const id = addNode(workspace, page.id, { ...boxOf(request), kind: "note", text: str(request, "text") ?? "", title }, actor);
         return `Added a note to page "${page.name}" as node ${id}.`;
       }
-      throw new Error("'kind' tiene que ser agent, browser o note");
+      throw new Error("'kind' tiene que ser agent, browser, note, diagram o doc");
     }
 
     case "update": {
@@ -165,6 +172,10 @@ export async function runCanvasRequest(cwd: string, request: CanvasRequest, owne
     }
 
     default:
+      if (request.op.startsWith("doc.") || request.op.startsWith("asset.")) {
+        const { runDocRequest } = await import("@/features/docs/agentBridge");
+        return runDocRequest(cwd, request, owner, actor);
+      }
       if (request.op.startsWith("diagram.")) {
         // Diferido: los diagramas traen ELK y React Flow, y no hace falta cargarlos para el canvas.
         const { runDiagramRequest } = await import("@/features/diagram/agentBridge");
@@ -209,6 +220,9 @@ function describe(workspace: string, page: CanvasPage, owner: ViewOwner | null):
       const whose = view?.kind === "browser" && view.owner ? ` owned by ${view.owner.id === owner?.id ? "you" : view.owner.label}` : "";
       return `- ${n.id} browser${title} ${url}${whose} ${box}`;
     }
+    if (n.kind === "diagram" || n.kind === "doc") {
+      return `- ${n.id} ${n.kind}${title} ${n.ref ? relativeTo(n.ref, cwdOf(workspace)) : "?"} ${box}`;
+    }
     const text = (n.text ?? "").replace(/\s+/g, " ").slice(0, 120);
     return `- ${n.id} note${title} "${text}" ${box}`;
   };
@@ -224,4 +238,9 @@ function describe(workspace: string, page: CanvasPage, owner: ViewOwner | null):
       : "Every agent tab of the workspace is on some page.",
   ];
   return lines.join("\n");
+}
+
+/** La carpeta real del workspace (la de alguna de sus tabs), para mostrar rutas relativas. */
+function cwdOf(workspace: string): string {
+  return agentsOf(workspace)[0]?.cwd ?? workspace;
 }

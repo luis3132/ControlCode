@@ -127,8 +127,9 @@ function PageFlow({ workspace, page, pages }: { workspace: string; page: CanvasP
     for (const node of boxes) {
       const onScreen = node.x < right && node.x + node.w > left && node.y < bottom && node.y + node.h > top;
       if (!onScreen || v.zoom < LIVE_MIN_ZOOM || size.width === 0) continue;
-      // Un diagrama se dibuja adentro de su nodo: solo hace falta saber que está a la vista.
-      if (node.kind === "diagram") {
+      // Un diagrama o un documento se dibuja adentro de su nodo: solo hace falta saber que
+      // está a la vista.
+      if (node.kind === "diagram" || node.kind === "doc") {
         liveNow.add(node.id);
         continue;
       }

@@ -21,7 +21,7 @@ export function exportPath(path: string, format: ExportFormat): string {
   return `${path.replace(/\.diagram\.json$/i, "").replace(/\.json$/i, "")}.${format}`;
 }
 
-async function svgToPng(svg: string, scale: number): Promise<{ bytes: Uint8Array; width: number; height: number }> {
+export async function svgToPng(svg: string, scale: number): Promise<{ bytes: Uint8Array; width: number; height: number }> {
   const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   try {

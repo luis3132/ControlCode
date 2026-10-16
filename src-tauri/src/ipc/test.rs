@@ -449,6 +449,7 @@ fn el_canvas_se_aprueba_solo_salvo_lanzar_un_agente() {
     for name in [
         "canvas_read", "canvas_pages", "canvas_add", "canvas_update", "canvas_arrange", "canvas_view",
         "diagram_create", "diagram_read", "diagram_edit", "diagram_export",
+        "doc_create", "doc_write", "doc_export", "asset_capture",
     ] {
         assert!(auto_approved(name), "{name}");
     }

@@ -1729,5 +1729,11 @@
   "background.working": "Trabajando…",
   "background.fleet": "Tarea de la flota",
   "background.waiting": "Te espera: pidió permiso",
-  "background.more": "y {{count}} más"
+  "background.more": "y {{count}} más",
+  "canvas.add.doc": "Nuevo documento",
+  "doc.defaultName": "Documento",
+  "doc.exportPdf": "Exportar a PDF",
+  "doc.exporting": "Exportando…",
+  "doc.exported": "Guardado: {{file}}",
+  "doc.lastEdit": "Lo escribió {{who}}"
 }

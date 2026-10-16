@@ -438,3 +438,13 @@ export function DiagramIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Una hoja con renglones: un documento. */
+export function DocIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M14 3v4h4M9 12h6M9 15.5h6M9 9h2" />
+    </svg>
+  );
+}

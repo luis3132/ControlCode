@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AddIcon, CloseIcon } from "neogestify-ui-components";
 
-import { ArrangeIcon, DiagramIcon, FitIcon, GlobeIcon, NoteIcon } from "@/app/icons";
-import { freeDiagramPath } from "@/features/diagram/paths";
+import { ArrangeIcon, DiagramIcon, DocIcon, FitIcon, GlobeIcon, NoteIcon } from "@/app/icons";
+import { createDoc } from "@/features/docs/store";
+import { freeDiagramPath, freeProjectPath } from "@/features/diagram/paths";
 import { createDiagram } from "@/features/diagram/store";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { agentPaint } from "@/features/browser/agentPaint";
@@ -236,6 +237,15 @@ function AddMenu({ cwd, workspace, page, pages, align }: {
               const path = await freeDiagramPath(cwd, t("diagram.defaultName"));
               await createDiagram(path);
               done(addNode(workspace, page.id, { kind: "diagram", ref: path }));
+            })().catch(console.error);
+          }} />
+          <MenuItem icon={<DocIcon className="w-4 h-4" />} label={t("canvas.add.doc")} onClick={() => {
+            setOpen(false);
+            (async () => {
+              const title = t("doc.defaultName");
+              const path = await freeProjectPath(cwd, "docs", title, ".md");
+              await createDoc(path, `# ${title}\n`);
+              done(addNode(workspace, page.id, { kind: "doc", ref: path }));
             })().catch(console.error);
           }} />
           <MenuItem icon={<GlobeIcon className="w-4 h-4" />} label={t("canvas.add.browser")} onClick={() => done(addBrowser(cwd, page.id, ""))} />

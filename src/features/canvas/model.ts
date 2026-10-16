@@ -12,13 +12,13 @@
  * Puro: sin stores ni IPC, se prueba en Node (`tests/model.test.ts`).
  */
 
-export type CanvasNodeKind = "agent" | "browser" | "note" | "diagram";
+export type CanvasNodeKind = "agent" | "browser" | "note" | "diagram" | "doc";
 
 export interface CanvasNode {
   id: string;
   kind: CanvasNodeKind;
   /** La tab de agente (`agent`), la vista de navegador (`browser`) o la ruta del archivo
-   *  (`diagram`) que muestra. */
+   *  (`diagram`, `doc`) que muestra. */
   ref?: string;
   /** El texto de una nota. */
   text?: string;
@@ -94,6 +94,7 @@ export const DEFAULT_SIZE: Record<CanvasNodeKind, { w: number; h: number }> = {
   browser: { w: 960, h: 620 },
   note: { w: 280, h: 200 },
   diagram: { w: 900, h: 600 },
+  doc: { w: 640, h: 780 },
 };
 
 /** El alto de la cabecera de un nodo, por donde se agarra. Lo de abajo es su contenido. */
@@ -108,6 +109,7 @@ export const MIN_SIZE: Record<CanvasNodeKind, { w: number; h: number }> = {
   browser: { w: 320, h: 220 },
   note: { w: 140, h: 90 },
   diagram: { w: 320, h: 220 },
+  doc: { w: 280, h: 220 },
 };
 
 export const EMPTY_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
@@ -368,7 +370,7 @@ export function parsePage(id: string, name: string, data: string): CanvasPage {
   } catch {
     /* una página ilegible se abre vacía */
   }
-  const kinds: CanvasNodeKind[] = ["agent", "browser", "note", "diagram"];
+  const kinds: CanvasNodeKind[] = ["agent", "browser", "note", "diagram", "doc"];
   const nodes = (Array.isArray(raw.nodes) ? raw.nodes : []).filter((n): n is CanvasNode => {
     const node = n as Partial<CanvasNode> | null;
     return !!node && typeof node.id === "string" && kinds.includes(node.kind as CanvasNodeKind)

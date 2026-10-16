@@ -30,12 +30,16 @@ export function slugify(text: string): string {
   return slug || "diagrama";
 }
 
-/** Una ruta libre en `docs/diagrams/` para un diagrama con ese nombre. */
-export async function freeDiagramPath(cwd: string, name: string): Promise<string> {
-  const base = resolveInProject(cwd, `${DIAGRAMS_DIR}/${slugify(name)}`);
+/** Una ruta libre en `dir` (relativa al proyecto) para un archivo con ese nombre:
+ *  `docs/diagrams/arquitectura.diagram.json`, o `-2`, `-3`… si ya existe. */
+export async function freeProjectPath(cwd: string, dir: string, name: string, ext: string): Promise<string> {
+  const base = resolveInProject(cwd, `${dir}/${slugify(name)}`);
   for (let i = 1; i < 1000; i++) {
-    const path = `${base}${i === 1 ? "" : `-${i}`}.diagram.json`;
+    const path = `${base}${i === 1 ? "" : `-${i}`}${ext}`;
     if (!(await fileStat(path).catch(() => null))) return path;
   }
-  throw new Error("No hay un nombre libre para el diagrama");
+  throw new Error(`No hay un nombre libre en ${dir}`);
 }
+
+/** Una ruta libre en `docs/diagrams/` para un diagrama con ese nombre. */
+export const freeDiagramPath = (cwd: string, name: string) => freeProjectPath(cwd, DIAGRAMS_DIR, name, ".diagram.json");

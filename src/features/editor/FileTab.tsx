@@ -50,6 +50,8 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<Banner>(null);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exported, setExported] = useState<string | null>(null);
   const editor = useRef<EditorHandle | null>(null);
   const mtime = useRef<number | null>(null);
   const dirty = useRef(false);
@@ -219,6 +221,31 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
               { value: "preview", label: t(diagramFile ? "editor.view.diagram" : "editor.view.preview") },
             ]}
           />
+        )}
+        {markdown && content?.kind === "text" && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={exporting}
+            title={t("doc.exportPdf")}
+            onClick={async () => {
+              // Lo que se exporta es lo del disco: con cambios sin guardar, se guardan antes.
+              setExporting(true);
+              try {
+                if (dirty.current) await save();
+                const { exportDocPdf } = await import("@/features/docs/export");
+                const out = await exportDocPdf(view.path, view.cwd);
+                setExported(out.split(/[\\/]/).pop() ?? out);
+                setTimeout(() => setExported(null), 5000);
+              } catch (e) {
+                setError(String(e));
+              } finally {
+                setExporting(false);
+              }
+            }}
+          >
+            {exporting ? t("doc.exporting") : exported ? t("doc.exported", { file: exported }) : "PDF"}
+          </Button>
         )}
         {view.dirty && (
           <Button size="sm" variant="primary" onClick={() => save()} disabled={saving}>
