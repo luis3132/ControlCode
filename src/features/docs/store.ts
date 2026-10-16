@@ -94,3 +94,8 @@ export async function editDoc(path: string, edit: DocEdit, actor: CanvasActor | 
   if (actor) markPresence([docPresenceKey(path)], actor);
   return next;
 }
+
+/** Lo que acaba de guardar el editor del nodo: así la vista previa no espera a releerlo. */
+export function setDocText(path: string, text: string, mtime: number) {
+  useDocsStore.setState((s) => ({ texts: { ...s.texts, [path]: { text, mtime } } }));
+}

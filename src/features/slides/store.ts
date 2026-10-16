@@ -5,9 +5,12 @@ import { writeNewFile } from "@/features/diagram/files";
 import { fileStat, readFile } from "@/features/editor/ipc";
 import { resolveDocPath } from "@/features/editor/markdown";
 
+import { trashPaths } from "@/features/explorer/ipc";
+
 import {
-  DECK_FILE, DEFAULT_THEME, composeSlide, deckCss, inlineRefs, joinPath, parseDeck, relativeRefs, runnerHtml,
-  safeSlideName, serializeDeck, slideDocument, type Deck,
+  DECK_FILE, DEFAULT_THEME, composeSlide, deckCss, inlineRefs, joinPath, layoutBody, newSlideName, parseDeck,
+  relativeRefs, replaceBody, restoreRefs, runnerHtml, safeSlideName, serializeDeck, slideDocument, themeCss,
+  type Deck, type LayoutTexts, type SlideLayout,
 } from "./deck";
 
 /**
@@ -104,7 +107,7 @@ export const present = (dir: string | null) => useSlidesStore.setState({ present
 
 // ── Componer una hoja para mostrarla ────────────────────────────────
 
-const composed = new Map<string, { key: string; html: string }>();
+const composed = new Map<string, { key: string; html: string; refs: Map<string, string> }>();
 
 const toDataUrl = async (path: string): Promise<string | null> => {
   const file = await readFile(path).catch(() => null);
@@ -119,6 +122,12 @@ const toDataUrl = async (path: string): Promise<string | null> => {
  * cambió la hoja, el tema o el tamaño; `null` si la hoja no existe (todavía).
  */
 export async function composedSlide(dir: string, name: string): Promise<string | null> {
+  return (await composedSlideWithRefs(dir, name))?.html ?? null;
+}
+
+/** Ídem, con qué imagen se metió en lugar de cada ruta: lo necesita el editor para guardar
+ *  las rutas y no los `data:`. */
+export async function composedSlideWithRefs(dir: string, name: string): Promise<{ html: string; refs: Map<string, string> } | null> {
   const [slide, theme, size] = await Promise.all([
     readText(joinPath(dir, name)),
     readText(joinPath(dir, "theme.css")),
@@ -128,7 +137,7 @@ export async function composedSlide(dir: string, name: string): Promise<string |
   const key = `${slide.mtime}:${theme?.mtime ?? 0}:${size?.mtime ?? 0}`;
   const path = joinPath(dir, name);
   const cached = composed.get(path);
-  if (cached?.key === key) return cached.html;
+  if (cached?.key === key) return cached;
   const refs = relativeRefs(slide.text);
   const resolved = new Map<string, string>();
   await Promise.all(refs.map(async (ref) => {
@@ -136,8 +145,9 @@ export async function composedSlide(dir: string, name: string): Promise<string |
     if (data) resolved.set(ref, data);
   }));
   const html = composeSlide(inlineRefs(slide.text, resolved), size?.text ?? "", theme?.text ?? "");
-  composed.set(path, { key, html });
-  return html;
+  const entry = { key, html, refs: resolved };
+  composed.set(path, entry);
+  return entry;
 }
 
 // ── Escribir ────────────────────────────────────────────────────────
@@ -245,3 +255,75 @@ export function cancelExport() {
 export async function slideText(dir: string, name: string): Promise<string> {
   return (await readText(joinPath(dir, name)))?.text ?? "";
 }
+
+// ── Lo que hace el usuario con el editor ────────────────────────────
+
+/** Guarda lo que se editó sobre la hoja: solo su cuerpo, con las imágenes de vuelta a su ruta. */
+export async function saveSlideBody(dir: string, name: string, body: string, refs: Map<string, string>) {
+  const path = joinPath(dir, safeSlideName(name));
+  const current = await readText(path);
+  await writeNewFile(path, { text: replaceBody(current?.text ?? slideDocument(""), restoreRefs(body, refs)) });
+}
+
+/** Una hoja nueva con un diseño, después de la actual (o al final). */
+export async function addLayoutSlide(dir: string, layout: SlideLayout, texts: LayoutTexts, after?: number): Promise<number> {
+  const deck = await loadDeck(dir);
+  const name = newSlideName(deck, layout);
+  return writeSlide(dir, name, layoutBody(layout, texts), { insertAt: after === undefined ? undefined : after + 1 });
+}
+
+export async function duplicateSlide(dir: string, index: number): Promise<number> {
+  const deck = await loadDeck(dir);
+  const name = deck.slides[index];
+  if (!name) throw new Error("No hay esa hoja");
+  const text = (await readText(joinPath(dir, name)))?.text ?? "";
+  const copy = newSlideName(deck, name.replace(/^\d+-/, "").replace(/\.html$/, ""));
+  return writeSlide(dir, copy, text, { insertAt: index + 1 });
+}
+
+/** Quita la hoja de la presentación; el archivo va a la papelera, de donde se puede recuperar. */
+export async function removeSlide(dir: string, index: number) {
+  const deck = await loadDeck(dir);
+  const name = deck.slides[index];
+  if (!name) return;
+  await saveDeck(dir, { ...deck, slides: deck.slides.filter((_, i) => i !== index) });
+  await trashPaths([joinPath(dir, name)]).catch(console.error);
+  goTo(dir, Math.min(index, deck.slides.length - 2));
+}
+
+export async function reorderSlide(dir: string, from: number, to: number) {
+  const deck = await loadDeck(dir);
+  const slides = [...deck.slides];
+  const [moved] = slides.splice(from, 1);
+  if (!moved) return;
+  slides.splice(Math.max(0, Math.min(slides.length, to)), 0, moved);
+  await saveDeck(dir, { ...deck, slides });
+  goTo(dir, slides.indexOf(moved));
+}
+
+export const applyTheme = (dir: string, name: string) => writeTheme(dir, themeCss(name));
+
+export async function resizeDeck(dir: string, size: Deck["size"]) {
+  const deck = await loadDeck(dir);
+  await saveDeck(dir, { ...deck, size }, true);
+}
+
+/** Copia una imagen de afuera a `assets/` de la presentación. Devuelve su ruta relativa y su
+ *  `data:` para mostrarla ya. */
+export async function importImage(dir: string, source: string): Promise<{ ref: string; data: string }> {
+  const file = await readFile(source);
+  const base = (source.split(/[\\/]/).pop() ?? "imagen").replace(/[^\w.-]+/g, "-");
+  const ref = `assets/${Date.now().toString(36)}-${base}`;
+  let data: string;
+  if (file.kind === "image") {
+    data = file.dataUrl;
+    await writeNewFile(joinPath(dir, ref), { base64: data.slice(data.indexOf(",") + 1) });
+  } else if (file.kind === "text" && /\.svg$/i.test(source)) {
+    data = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(file.content)}`;
+    await writeNewFile(joinPath(dir, ref), { text: file.content });
+  } else {
+    throw new Error("No es una imagen");
+  }
+  return { ref, data };
+}
+

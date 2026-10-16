@@ -151,6 +151,26 @@ html {
 `;
 }
 
+/** Los colores de cada tema prearmado; el resto del CSS es el mismo. */
+export const THEME_COLORS: Record<string, { bg: string; ink: string; muted: string; accent: string; soft: string }> = {
+  light: { bg: "#ffffff", ink: "#0f172a", muted: "#475569", accent: "#2563eb", soft: "#eff6ff" },
+  dark: { bg: "#111827", ink: "#f3f4f6", muted: "#9ca3af", accent: "#60a5fa", soft: "#1f2937" },
+  ocean: { bg: "#0b3b5b", ink: "#f0f9ff", muted: "#bae6fd", accent: "#fbbf24", soft: "#0e4a70" },
+  warm: { bg: "#fffbf5", ink: "#292524", muted: "#78716c", accent: "#c2410c", soft: "#ffedd5" },
+  mono: { bg: "#fafafa", ink: "#171717", muted: "#737373", accent: "#171717", soft: "#e5e5e5" },
+};
+
+export const THEMES = Object.keys(THEME_COLORS);
+
+/** Un tema prearmado completo. */
+export function themeCss(name: string): string {
+  const c = THEME_COLORS[name] ?? THEME_COLORS.light!;
+  return DEFAULT_THEME.replace(
+    /:root \{[\s\S]*?\}/,
+    `:root {\n  --bg: ${c.bg};\n  --ink: ${c.ink};\n  --muted: ${c.muted};\n  --accent: ${c.accent};\n  --soft: ${c.soft};\n}`
+  );
+}
+
 export const DEFAULT_THEME = `/* El estilo de todas las hojas. Cambialo con libertad. */
 :root {
   --bg: #ffffff;
@@ -180,6 +200,14 @@ code { font-family: ui-monospace, "JetBrains Mono", monospace; background: var(-
 .title { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 1rem; }
 .title h1 { font-size: 3.4rem; }
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; }
+.section { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+.section h1 { color: var(--accent); }
+blockquote { flex: 1; margin: 0; display: flex; flex-direction: column; justify-content: center; gap: 1rem; }
+blockquote p { font-size: 1.9rem; line-height: 1.3; }
+cite { color: var(--muted); font-style: normal; }
+.picture { flex: 1; min-height: 0; margin: 0; display: flex; align-items: center; justify-content: center; }
+.picture img { max-height: 100%; }
+.placeholder { width: 70%; height: 70%; border: 0.1rem dashed var(--muted); border-radius: 0.5rem; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 `;
 
 /** Una hoja como documento completo. Si el contenido ya es un documento, se le agregan los
@@ -203,6 +231,63 @@ ${content.trim()}
 </body>
 </html>
 `;
+}
+
+/** El cuerpo de una hoja: lo que va entre `<body>` y `</body>`, o todo si es un fragmento. */
+export function bodyOf(html: string): string {
+  return /<body[^>]*>([\s\S]*)<\/body>/i.exec(html)?.[1]?.trim() ?? html.trim();
+}
+
+/** La hoja con otro cuerpo, sin tocar su `<head>` (sus CSS, su título, lo que haya puesto
+ *  quien la escribió). */
+export function replaceBody(html: string, body: string): string {
+  if (!/<body[^>]*>[\s\S]*<\/body>/i.test(html)) return slideDocument(body);
+  return html.replace(/(<body[^>]*>)[\s\S]*(<\/body>)/i, (_, open: string, close: string) => `${open}\n${body.trim()}\n${close}`);
+}
+
+/** Las imágenes que se metieron como `data:` para mostrar la hoja, devueltas a su ruta. */
+export function restoreRefs(html: string, resolved: Map<string, string>): string {
+  let out = html;
+  for (const [ref, data] of resolved) out = out.split(data).join(ref);
+  return out;
+}
+
+// ── Diseños de hoja ─────────────────────────────────────────────────
+
+export type SlideLayout = "title" | "text" | "columns" | "image" | "quote" | "section";
+
+export const SLIDE_LAYOUTS: SlideLayout[] = ["title", "text", "columns", "image", "quote", "section"];
+
+/** Los textos de ejemplo de cada diseño, en el idioma de la interfaz (los pone quien llama). */
+export interface LayoutTexts {
+  title: string;
+  subtitle: string;
+  heading: string;
+  point: (n: number) => string;
+  quote: string;
+  author: string;
+  caption: string;
+}
+
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+/** El cuerpo de una hoja nueva con ese diseño, listo para escribirle encima. */
+export function layoutBody(layout: SlideLayout, tx: LayoutTexts, image?: string): string {
+  const points = [1, 2, 3].map((n) => `    <li>${esc(tx.point(n))}</li>`).join("\n");
+  switch (layout) {
+    case "title":
+      return `<section class="title">\n  <h1>${esc(tx.title)}</h1>\n  <p class="muted">${esc(tx.subtitle)}</p>\n</section>`;
+    case "text":
+      return `<h2>${esc(tx.heading)}</h2>\n<ul>\n${points}\n</ul>`;
+    case "columns":
+      return `<h2>${esc(tx.heading)}</h2>\n<div class="cols">\n  <div>\n    <h3>${esc(tx.point(1))}</h3>\n    <p>${esc(tx.subtitle)}</p>\n  </div>\n  <div>\n    <h3>${esc(tx.point(2))}</h3>\n    <p>${esc(tx.subtitle)}</p>\n  </div>\n</div>`;
+    case "image":
+      return `<h2>${esc(tx.heading)}</h2>\n<figure class="picture">\n  ${image ? `<img src="${esc(image)}" alt="">` : `<div class="placeholder">${esc(tx.caption)}</div>`}\n</figure>`;
+    case "quote":
+      return `<blockquote>\n  <p>${esc(tx.quote)}</p>\n  <cite>${esc(tx.author)}</cite>\n</blockquote>`;
+    case "section":
+      return `<section class="section">\n  <h1>${esc(tx.heading)}</h1>\n</section>`;
+  }
 }
 
 /** Lo que la app muestra de una hoja: con sus CSS adentro (un iframe aislado no puede leer

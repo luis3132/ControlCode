@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  SLIDE_LAYOUTS, bodyOf, layoutBody, replaceBody, restoreRefs, themeCss,
   composeSlide, deckCss, deckDirOf, findSlide, inlineRefs, isDeckFile, moveSlide, newSlideName, parseDeck, parseSize,
   relativeRefs, runnerHtml, safeSlideName, serializeDeck, slideDocument, type Deck,
 } from "../deck";
@@ -74,5 +75,34 @@ describe("deck", () => {
     const runner = runnerHtml(deck(["01-a.html", "02-b.html"]));
     expect(runner).toContain('"slides":["01-a.html","02-b.html"]');
     expect(runner).not.toMatch(/<\/script>[\s\S]*<\/script>/);
+  });
+});
+
+describe("editar hojas a mano", () => {
+  it("cambia solo el cuerpo y respeta el head de la hoja", () => {
+    const file = '<!doctype html><html><head><link rel="stylesheet" href="theme.css"><style>.x{}</style></head><body>\n<h1>Viejo</h1>\n</body></html>';
+    const out = replaceBody(file, "<h1>Nuevo</h1>");
+    expect(out).toContain("<style>.x{}</style>");
+    expect(bodyOf(out)).toBe("<h1>Nuevo</h1>");
+    expect(replaceBody("<p>suelto</p>", "<p>x</p>")).toContain('href="deck.css"');
+  });
+
+  it("las imágenes vuelven a su ruta al guardar", () => {
+    const shown = '<img src="data:image/png;base64,AA"><div style="background:url(data:image/png;base64,AA)"></div>';
+    expect(restoreRefs(shown, new Map([["assets/a.png", "data:image/png;base64,AA"]]))).toBe('<img src="assets/a.png"><div style="background:url(assets/a.png)"></div>');
+  });
+
+  it("cada diseño arma su hoja, con los textos de quien lo pide y sin dejarlos sin escapar", () => {
+    const tx = { title: "<T>", subtitle: "s", heading: "h", point: (n: number) => `p${n}`, quote: "q", author: "a", caption: "c" };
+    for (const layout of SLIDE_LAYOUTS) expect(layoutBody(layout, tx).length).toBeGreaterThan(10);
+    expect(layoutBody("title", tx)).toContain("&lt;T>");
+    expect(layoutBody("image", tx, "assets/x.png")).toContain('src="assets/x.png"');
+    expect(layoutBody("text", tx)).toContain("<li>p3</li>");
+  });
+
+  it("los temas prearmados cambian solo los colores", () => {
+    const dark = themeCss("dark");
+    expect(dark).toContain("--bg: #111827");
+    expect(dark.replace(/:root \{[\s\S]*?\}/, "")).toBe(themeCss("light").replace(/:root \{[\s\S]*?\}/, ""));
   });
 });
