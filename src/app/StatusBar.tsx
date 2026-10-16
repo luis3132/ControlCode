@@ -6,8 +6,8 @@ import { useAccountsStore } from "@/features/accounts/store";
 import { systemAccounts } from "@/features/accounts/usage";
 import { UsageBoard } from "@/features/accounts/UsageBoard";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
-import { Ring, agentColor, usageColor } from "@/features/accounts/Ring";
-import { measurable, useHeadline, useUsageStore } from "@/features/accounts/usageStore";
+import { DualRing } from "@/features/accounts/Ring";
+import { measurable, useUsageStore, useUsageWindows } from "@/features/accounts/usageStore";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import type { AgentAccount } from "@/features/accounts/types";
 import { useTabsStore } from "@/features/tabs/store";
@@ -28,14 +28,23 @@ import type { RepoInfo } from "@/features/explorer/types";
  * de por medio. No tiene fila en la base (existía antes que esta app), así que hasta ahora
  * la barra mostraba los perfiles alternativos y escondía justo la que se usa siempre.
  */
-/** Un chip de cuenta: el anillo dice cuánto lleva la ventana corta, si se sabe. */
+/** Un chip de cuenta: el anillo dice cuánto lleva la sesión (afuera) y la semana (adentro). */
 function AccountChip({ account, active, onClick }: { account: AgentAccount; active: boolean; onClick: () => void }) {
-  const percent = useHeadline(account);
+  const { t } = useTranslation();
+  const { session, week } = useUsageWindows(account);
   const Icon = agentIcon(account.agentId, account.agentId);
+  const name = account.label ?? account.name;
+  // Sin ventana corta (Codex en el plan gratis) la de afuera es la única que hay.
+  const outer = session ?? week;
+  const inner = session !== null ? week : null;
+  const parts = [
+    session !== null && t("accounts.ring.session", { n: session }),
+    week !== null && t("accounts.ring.week", { n: week }),
+  ].filter(Boolean);
   return (
     <Button variant="custom"
       onClick={onClick}
-      title={percent === null ? account.label ?? account.name : `${account.label ?? account.name} · ${percent}%`}
+      title={parts.length ? `${name} · ${parts.join(" · ")}` : name}
       className={`cc-t flex items-center gap-1.5 h-5 shrink-0 pl-1.5 pr-2 rounded-full max-w-52
         ${active
           ? "bg-gray-300/80 dark:bg-white/12"
@@ -47,8 +56,7 @@ function AccountChip({ account, active, onClick }: { account: AgentAccount; acti
       </span>
       {measurable(account.agentId) ? (
         <span className="text-gray-400 dark:text-white">
-          <Ring percent={percent} size={11} stroke={2}
-            color={percent === null ? agentColor(account.agentId) : usageColor(percent, account.agentId)} />
+          <DualRing outer={outer} inner={inner} agentId={account.agentId} size={14} />
         </span>
       ) : (
         <span className={`w-1.5 h-1.5 rounded-full shrink-0

@@ -1787,5 +1787,7 @@
   "slides.sizes.wide": "16:9 (écran)",
   "slides.sizes.standard": "4:3",
   "slides.sizes.a4": "A4 portrait",
-  "slides.sizes.a4Landscape": "A4 paysage"
+  "slides.sizes.a4Landscape": "A4 paysage",
+  "accounts.ring.session": "session {{n}} %",
+  "accounts.ring.week": "semaine {{n}} %"
 }

@@ -1787,5 +1787,7 @@
   "slides.sizes.wide": "16:9 (pantalla)",
   "slides.sizes.standard": "4:3",
   "slides.sizes.a4": "A4 vertical",
-  "slides.sizes.a4Landscape": "A4 horizontal"
+  "slides.sizes.a4Landscape": "A4 horizontal",
+  "accounts.ring.session": "sesión {{n}}%",
+  "accounts.ring.week": "semana {{n}}%"
 }
