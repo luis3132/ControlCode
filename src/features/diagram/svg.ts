@@ -40,7 +40,7 @@ export function edgeSvg(edge: DiagramEdge, nodes: Map<string, DiagramNode>): str
   const a = nodes.get(edge.from);
   const b = nodes.get(edge.to);
   if (!a || !b) return "";
-  const geo = edgeGeometry(a, b, edge.route);
+  const geo = edgeGeometry(a, b, edge.route, edge);
   const color = edgeColor(edge);
   const dash = edge.style === "dashed" ? ` stroke-dasharray="6 5"` : "";
   const end = arrowAtEnd(edge.arrow) ? ` marker-end="url(#${markerId(color, false)})"` : "";

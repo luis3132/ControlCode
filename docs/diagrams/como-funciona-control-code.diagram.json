@@ -1,0 +1,553 @@
+{
+  "version": 1,
+  "title": "Cómo funciona Control Code",
+  "nodes": [
+    {
+      "id": "user",
+      "shape": "actor",
+      "label": "Usuario",
+      "x": 123,
+      "y": 12,
+      "w": 70,
+      "h": 110
+    },
+    {
+      "id": "open",
+      "shape": "ellipse",
+      "label": "Abre un workspace\n(una carpeta)",
+      "x": 83,
+      "y": 202,
+      "w": 150,
+      "h": 80
+    },
+    {
+      "id": "mode",
+      "shape": "diamond",
+      "label": "¿Tabs o canvas?",
+      "x": 83,
+      "y": 362,
+      "w": 150,
+      "h": 100,
+      "color": "violet"
+    },
+    {
+      "id": "tabs",
+      "shape": "rounded",
+      "label": "Grupos de tabs\n(pantalla dividida)",
+      "x": 53,
+      "y": 644,
+      "w": 160,
+      "h": 70,
+      "color": "violet"
+    },
+    {
+      "id": "canvas",
+      "shape": "rounded",
+      "label": "Páginas del canvas\n(solo la activa está viva)",
+      "x": 263,
+      "y": 644,
+      "w": 160,
+      "h": 70,
+      "color": "violet"
+    },
+    {
+      "id": "wizard",
+      "shape": "rounded",
+      "label": "Nuevo agente:\nTUI, cuenta y skills",
+      "x": 80,
+      "y": 794,
+      "w": 160,
+      "h": 70,
+      "color": "violet"
+    },
+    {
+      "id": "pty",
+      "shape": "rounded",
+      "label": "Rust: lanza la TUI en un PTY\ncon su MCP (ccode mcp)",
+      "x": 55,
+      "y": 944,
+      "w": 210,
+      "h": 70,
+      "color": "blue"
+    },
+    {
+      "id": "work",
+      "shape": "rounded",
+      "label": "El agente trabaja",
+      "x": 80,
+      "y": 1094,
+      "w": 160,
+      "h": 70,
+      "color": "green"
+    },
+    {
+      "id": "need",
+      "shape": "diamond",
+      "label": "¿Necesita una\nherramienta?",
+      "x": 70,
+      "y": 1346,
+      "w": 150,
+      "h": 100,
+      "color": "green"
+    },
+    {
+      "id": "ipc",
+      "shape": "parallelogram",
+      "label": "MCP → IPC local\n(TCP + token)",
+      "x": 60,
+      "y": 1628,
+      "w": 170,
+      "h": 70,
+      "color": "blue"
+    },
+    {
+      "id": "dispatch",
+      "shape": "diamond",
+      "label": "¿Quién lo\nresuelve?",
+      "x": 70,
+      "y": 1778,
+      "w": 150,
+      "h": 100,
+      "color": "blue"
+    },
+    {
+      "id": "direct",
+      "shape": "rounded",
+      "label": "Rust: git con tu cuenta,\nsubprocesos, SQLite",
+      "x": 13,
+      "y": 2083,
+      "w": 190,
+      "h": 70,
+      "color": "blue"
+    },
+    {
+      "id": "live",
+      "shape": "rounded",
+      "label": "Interfaz: navegador, canvas,\ndiagramas, docs y slides\ncambian en vivo",
+      "x": 253,
+      "y": 2078,
+      "w": 200,
+      "h": 80,
+      "color": "violet"
+    },
+    {
+      "id": "fleet",
+      "shape": "rounded",
+      "label": "Rust: flota de agentes\nen worktrees",
+      "x": 503,
+      "y": 2083,
+      "w": 180,
+      "h": 70,
+      "color": "blue"
+    },
+    {
+      "id": "result",
+      "shape": "rounded",
+      "label": "El agente recibe\nel resultado",
+      "x": 273,
+      "y": 2238,
+      "w": 160,
+      "h": 70,
+      "color": "green"
+    },
+    {
+      "id": "corner",
+      "shape": "rounded",
+      "label": "Esquina: agentes\nen segundo plano",
+      "x": 513,
+      "y": 2238,
+      "w": 160,
+      "h": 70,
+      "color": "violet"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "user",
+      "to": "open",
+      "points": [
+        {
+          "x": 158,
+          "y": 122
+        },
+        {
+          "x": 158,
+          "y": 202
+        }
+      ]
+    },
+    {
+      "id": "e2",
+      "from": "open",
+      "to": "mode",
+      "points": [
+        {
+          "x": 158,
+          "y": 282
+        },
+        {
+          "x": 158,
+          "y": 362
+        }
+      ]
+    },
+    {
+      "id": "e3",
+      "from": "mode",
+      "to": "tabs",
+      "label": "tabs",
+      "points": [
+        {
+          "x": 133,
+          "y": 462
+        },
+        {
+          "x": 133,
+          "y": 644
+        }
+      ],
+      "labelAt": {
+        "x": 111,
+        "y": 553
+      }
+    },
+    {
+      "id": "e4",
+      "from": "mode",
+      "to": "canvas",
+      "label": "canvas",
+      "points": [
+        {
+          "x": 183,
+          "y": 462
+        },
+        {
+          "x": 183,
+          "y": 492
+        },
+        {
+          "x": 343,
+          "y": 492
+        },
+        {
+          "x": 343,
+          "y": 644
+        }
+      ],
+      "labelAt": {
+        "x": 375,
+        "y": 553
+      }
+    },
+    {
+      "id": "e5",
+      "from": "tabs",
+      "to": "wizard",
+      "points": [
+        {
+          "x": 133,
+          "y": 714
+        },
+        {
+          "x": 133,
+          "y": 794
+        }
+      ]
+    },
+    {
+      "id": "e6",
+      "from": "canvas",
+      "to": "wizard",
+      "points": [
+        {
+          "x": 343,
+          "y": 714
+        },
+        {
+          "x": 343,
+          "y": 744
+        },
+        {
+          "x": 187,
+          "y": 744
+        },
+        {
+          "x": 187,
+          "y": 794
+        }
+      ]
+    },
+    {
+      "id": "e7",
+      "from": "wizard",
+      "to": "pty",
+      "points": [
+        {
+          "x": 160,
+          "y": 864
+        },
+        {
+          "x": 160,
+          "y": 944
+        }
+      ]
+    },
+    {
+      "id": "e8",
+      "from": "pty",
+      "to": "work",
+      "points": [
+        {
+          "x": 160,
+          "y": 1014
+        },
+        {
+          "x": 160,
+          "y": 1094
+        }
+      ]
+    },
+    {
+      "id": "e9",
+      "from": "work",
+      "to": "need",
+      "points": [
+        {
+          "x": 120,
+          "y": 1164
+        },
+        {
+          "x": 120,
+          "y": 1346
+        }
+      ]
+    },
+    {
+      "id": "e10",
+      "from": "need",
+      "to": "work",
+      "label": "no",
+      "style": "dashed",
+      "points": [
+        {
+          "x": 170,
+          "y": 1346
+        },
+        {
+          "x": 170,
+          "y": 1296
+        },
+        {
+          "x": 160,
+          "y": 1296
+        },
+        {
+          "x": 160,
+          "y": 1164
+        }
+      ],
+      "labelAt": {
+        "x": 178,
+        "y": 1255
+      }
+    },
+    {
+      "id": "e11",
+      "from": "need",
+      "to": "ipc",
+      "label": "sí (MCP)",
+      "points": [
+        {
+          "x": 145,
+          "y": 1446
+        },
+        {
+          "x": 145,
+          "y": 1628
+        }
+      ],
+      "labelAt": {
+        "x": 106,
+        "y": 1537
+      }
+    },
+    {
+      "id": "e12",
+      "from": "ipc",
+      "to": "dispatch",
+      "points": [
+        {
+          "x": 145,
+          "y": 1698
+        },
+        {
+          "x": 145,
+          "y": 1778
+        }
+      ]
+    },
+    {
+      "id": "e13",
+      "from": "dispatch",
+      "to": "direct",
+      "label": "git, procesos",
+      "points": [
+        {
+          "x": 108,
+          "y": 1878
+        },
+        {
+          "x": 108,
+          "y": 2083
+        }
+      ],
+      "labelAt": {
+        "x": 59,
+        "y": 1978
+      }
+    },
+    {
+      "id": "e14",
+      "from": "dispatch",
+      "to": "live",
+      "label": "navegador, canvas,\ndiagramas, docs",
+      "points": [
+        {
+          "x": 145,
+          "y": 1878
+        },
+        {
+          "x": 145,
+          "y": 1918
+        },
+        {
+          "x": 353,
+          "y": 1918
+        },
+        {
+          "x": 353,
+          "y": 2078
+        }
+      ],
+      "labelAt": {
+        "x": 285,
+        "y": 1978
+      }
+    },
+    {
+      "id": "e15",
+      "from": "dispatch",
+      "to": "fleet",
+      "label": "run_plan",
+      "points": [
+        {
+          "x": 183,
+          "y": 1878
+        },
+        {
+          "x": 183,
+          "y": 1908
+        },
+        {
+          "x": 593,
+          "y": 1908
+        },
+        {
+          "x": 593,
+          "y": 2083
+        }
+      ],
+      "labelAt": {
+        "x": 557,
+        "y": 1978
+      }
+    },
+    {
+      "id": "e16",
+      "from": "fleet",
+      "to": "corner",
+      "style": "dashed",
+      "points": [
+        {
+          "x": 593,
+          "y": 2153
+        },
+        {
+          "x": 593,
+          "y": 2238
+        }
+      ]
+    },
+    {
+      "id": "e17",
+      "from": "direct",
+      "to": "result",
+      "points": [
+        {
+          "x": 108,
+          "y": 2153
+        },
+        {
+          "x": 108,
+          "y": 2188
+        },
+        {
+          "x": 313,
+          "y": 2188
+        },
+        {
+          "x": 313,
+          "y": 2238
+        }
+      ]
+    },
+    {
+      "id": "e18",
+      "from": "live",
+      "to": "result",
+      "points": [
+        {
+          "x": 353,
+          "y": 2158
+        },
+        {
+          "x": 353,
+          "y": 2238
+        }
+      ]
+    },
+    {
+      "id": "e19",
+      "from": "result",
+      "to": "work",
+      "style": "dashed",
+      "points": [
+        {
+          "x": 393,
+          "y": 2238
+        },
+        {
+          "x": 393,
+          "y": 2188
+        },
+        {
+          "x": 713,
+          "y": 2188
+        },
+        {
+          "x": 713,
+          "y": 1194
+        },
+        {
+          "x": 200,
+          "y": 1194
+        },
+        {
+          "x": 200,
+          "y": 1164
+        }
+      ]
+    }
+  ]
+}

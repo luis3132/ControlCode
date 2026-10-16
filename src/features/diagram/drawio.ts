@@ -32,6 +32,13 @@ function nodeStyle(node: DiagramNode): string {
   return `${SHAPE_STYLE[node.shape]}${paint}`;
 }
 
+/** La geometría de una flecha: con los quiebres que calculó el acomodado, si los tiene. */
+function edgeGeometryXml(points: { x: number; y: number }[] | undefined): string {
+  const bends = points && points.length > 2 ? points.slice(1, -1) : [];
+  if (bends.length === 0) return '<mxGeometry relative="1" as="geometry"/>';
+  return `<mxGeometry relative="1" as="geometry"><Array as="points">${bends.map((p) => `<mxPoint x="${p.x}" y="${p.y}"/>`).join("")}</Array></mxGeometry>`;
+}
+
 export function toDrawio(diagram: Diagram): string {
   const byId = new Map(diagram.nodes.map((n) => [n.id, n]));
   // Los ids de mxGraph: "0" y "1" son las capas raíz; los nuestros van con prefijo para no chocar.
@@ -57,7 +64,7 @@ export function toDrawio(diagram: Diagram): string {
     const color = edge.color ? PALETTE[edge.color].stroke : edgeColor(edge);
     cells.push(
       `<mxCell id="${esc(cell(edge.id))}" value="${esc(edge.label ?? "")}" style="${route}html=1;${end}${start}${dashed}strokeColor=${color};" edge="1" parent="1" source="${esc(cell(edge.from))}" target="${esc(cell(edge.to))}">`
-        + '<mxGeometry relative="1" as="geometry"/></mxCell>'
+        + `${edgeGeometryXml(edge.points)}</mxCell>`
     );
   }
 

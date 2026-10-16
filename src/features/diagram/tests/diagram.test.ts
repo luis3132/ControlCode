@@ -213,3 +213,51 @@ describe("lo que manda un agente", () => {
     expect(text).toContain('- e1 api → db "SQL" dashed');
   });
 });
+
+describe("el recorrido que calcula el acomodado", () => {
+  const chain = () => build(
+    { op: "node.add", node: { id: "a", x: 0, y: 0 } },
+    { op: "node.add", node: { id: "b", x: 0, y: 0 } },
+    { op: "node.add", node: { id: "c", x: 0, y: 0 } },
+    { op: "edge.add", edge: { from: "a", to: "b", label: "sí" } },
+    { op: "edge.add", edge: { from: "b", to: "c" } },
+    { op: "edge.add", edge: { from: "c", to: "a", label: "vuelve" } },
+  );
+
+  it("cada flecha sale y entra por el borde de sus cajas, y su etiqueta tiene lugar", async () => {
+    const out = await layoutDiagram(chain(), "TB");
+    const byId = new Map(out.nodes.map((n) => [n.id, n]));
+    for (const e of out.edges) {
+      expect(e.points!.length).toBeGreaterThanOrEqual(2);
+      const touches = (p: { x: number; y: number }, id: string) => {
+        const n = byId.get(id)!;
+        return p.x >= n.x - 1 && p.x <= n.x + n.w + 1 && p.y >= n.y - 1 && p.y <= n.y + n.h + 1;
+      };
+      expect(touches(e.points![0]!, e.from)).toBe(true);
+      expect(touches(e.points![e.points!.length - 1]!, e.to)).toBe(true);
+    }
+    expect(out.edges.find((e) => e.label === "sí")!.labelAt).toBeDefined();
+  });
+
+  it("con un ciclo, el flujo sigue el orden en que se escribió", async () => {
+    const out = await layoutDiagram(chain(), "TB");
+    const y = (id: string) => out.nodes.find((n) => n.id === id)!.y;
+    expect(y("a")).toBeLessThan(y("b"));
+    expect(y("b")).toBeLessThan(y("c"));
+  });
+
+  it("mover una caja descarta el recorrido de sus flechas, y solo de las suyas", async () => {
+    const out = await layoutDiagram(chain(), "TB");
+    const moved = applyDiagramOps(out, [{ op: "node.update", id: "a", patch: { x: 999 } }]).diagram;
+    expect(moved.edges.find((e) => e.from === "b" && e.to === "c")!.points).toBeDefined();
+    expect(moved.edges.filter((e) => e.from === "a" || e.to === "a").every((e) => !e.points)).toBe(true);
+  });
+
+  it("se guarda y se dibuja por sus quiebres", async () => {
+    const out = await layoutDiagram(chain(), "TB");
+    expect(parseDiagram(serializeDiagram(out))).toEqual(out);
+    const e = out.edges[0]!;
+    const geo = edgeGeometry(out.nodes[0]!, out.nodes[1]!, "orthogonal", e);
+    expect(geo.path.split("L")).toHaveLength(e.points!.length);
+  });
+});
