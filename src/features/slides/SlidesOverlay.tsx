@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { canvasToPng, freezePage } from "@/features/browser/annotate/capture";
 
 import { SlideFrame } from "./SlideFrame";
-import { mountedAround, useBox } from "./SlidesView";
+import { mountedAround, useBox } from "./frame";
 import { cancelExport, goTo, present, registerCapture, useSlidesStore, watchDeck } from "./store";
 
 /**

@@ -9,30 +9,13 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 
 import { SIZE_PRESETS, SLIDE_LAYOUTS, THEMES, joinPath, layoutBody, newSlideName, type LayoutTexts, type SlideLayout } from "./deck";
 import { EditableSlide, type EditableSlideHandle } from "./EditableSlide";
+import { mountedAround, useBox } from "./frame";
 import { exportDeckPdf } from "./export";
 import { SlideFrame } from "./SlideFrame";
 import {
   addLayoutSlide, applyTheme, duplicateSlide, goTo, importImage, loadDeck, present, removeSlide, reorderSlide, resizeDeck,
   slidesPresenceKey, useSlidesStore, watchDeck, writeSlide,
 } from "./store";
-
-/** El tamaño de un elemento, al día. */
-export function useBox<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
-  const [box, setBox] = useState({ width: 0, height: 0 });
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new ResizeObserver(() => setBox({ width: el.clientWidth, height: el.clientHeight }));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, box] as const;
-}
-
-/** Las hojas que van montadas: la actual y sus vecinas, para que pasar de una a otra no espere. */
-export const mountedAround = (current: number, total: number) =>
-  [current - 1, current, current + 1].filter((i) => i >= 0 && i < total);
 
 /** La clave de texto de cada tamaño (i18next usa `:` para otra cosa, así que no puede ir en la clave). */
 const SIZE_KEYS: Record<string, string> = { "16:9": "wide", "4:3": "standard", a4: "a4", "a4-landscape": "a4Landscape" };

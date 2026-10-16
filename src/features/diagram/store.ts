@@ -4,7 +4,7 @@ import { markPresence, type CanvasActor } from "@/features/canvas/store";
 import { fileStat, readFile, writeFile } from "@/features/editor/ipc";
 
 import { writeNewFile } from "./files";
-import { layoutDiagram, type LayoutDirection } from "./layout";
+import type { LayoutDirection } from "./layout";
 import { applyDiagramOps, EMPTY_DIAGRAM, parseDiagram, serializeDiagram, type Diagram, type DiagramOp, type DiagramResult } from "./model";
 
 /**
@@ -140,6 +140,8 @@ export function dispatchDiagram(path: string, ops: DiagramOp[], actor: CanvasAct
 export async function layoutAndCommit(path: string, direction: LayoutDirection, actor: CanvasActor | null = null): Promise<Diagram> {
   const before = useDiagramStore.getState().docs[path]?.diagram;
   if (!before) throw new Error(`El diagrama ${path} no está cargado`);
+  // ELK pesa más de 1 MB: se baja recién la primera vez que se acomoda un diagrama.
+  const { layoutDiagram } = await import("./layout");
   const after = await layoutDiagram(before, direction);
   // Si mientras se calculaba llegó otro cambio, se acomoda eso y no lo de antes.
   const now = useDiagramStore.getState().docs[path]?.diagram;
