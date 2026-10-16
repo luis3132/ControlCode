@@ -17,6 +17,7 @@ import { RouteModal } from "@/app/RouteModal";
 import { EditorArea } from "@/features/tabs/EditorArea";
 import { initLayoutSync } from "@/features/tabs/layout/layoutStore";
 import { initViewTabsPersistence } from "@/features/tabs/viewStore";
+import { initCanvasPersistence } from "@/features/canvas/store";
 import { initPanelFit, useUiStore } from "@/app/uiStore";
 import { buildWorkspaceTree } from "@/features/workspaces/workspaceTree";
 import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
@@ -28,6 +29,8 @@ import { AppExitListener } from "@/app/AppExitListener";
 import { SyncRunner } from "@/features/sync/SyncRunner";
 import { UpdateNotifier } from "@/features/updates/UpdateNotifier";
 import { ApprovalToast } from "@/features/runs/ApprovalToast";
+import { BackgroundAgents } from "@/features/background/BackgroundAgents";
+import { SlidesOverlay } from "@/features/slides/SlidesOverlay";
 import type { ShellOutletContext } from "@/app/shellContext";
 import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
@@ -152,6 +155,7 @@ export function AppShell() {
     initTabsPersistence();
     const myLabel = getCurrentWindow().label;
     initViewTabsPersistence(myLabel);
+    initCanvasPersistence(myLabel);
     // Después de las vistas: el árbol guardado se contrasta contra las tabs que existen.
     initLayoutSync(myLabel);
     loadWindowState(myLabel)
@@ -221,7 +225,10 @@ export function AppShell() {
         [&>*]:pointer-events-auto">
         <ApprovalToast />
         <UpdateNotifier />
+        <BackgroundAgents />
       </div>
+      {/* Presentar a pantalla completa, y la exportación de una presentación a PDF. */}
+      <SlidesOverlay />
       {/* Encima de todo y fuera de las rutas: lo pregunta un agente que está esperando, y
           no puede depender de en qué pantalla esté parado el usuario. */}
       <AskDialog />

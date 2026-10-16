@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import { Terminal } from "@/features/terminal/Terminal";
 import { useTabsStore } from "@/features/tabs/store";
-import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
+import { focusPlacement, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
 import { buildResumeCommand, isResumable, withLaunchArgs } from "@/features/sessions/agentResume";
 import { agentDef } from "@/features/agents/registry";
@@ -37,7 +37,7 @@ export function TerminalPanel() {
   const onWorkspace = useLocation().pathname.startsWith("/workspace");
   // Con la pantalla dividida se ven varias, pero el teclado va a una sola: la del grupo
   // enfocado. Si ahí hay un archivo o un navegador, a ninguna terminal.
-  const { visible, focusedItem } = usePlacements();
+  const { visible, focusedItem, canvas } = usePlacements();
   // Una oculta se queda con el último lugar que tuvo: cambiarle el tamaño sin que se vea le
   // mandaría a su TUI un resize para nada, y otro al volver a mostrarse.
   const lastRect = useRef(new Map<string, Rect | null>());
@@ -159,7 +159,13 @@ export function TerminalPanel() {
   return (
     // h-full en lugar de flex-1: el padre es position:absolute;inset:0 (no flex),
     // así que h-full es la única forma de darle altura real al panel.
-    <div className="relative h-full w-full overflow-hidden bg-gray-100 dark:bg-surface-deep">
+    // En el canvas el panel es transparente y no agarra el puntero: lo que se ve debajo es
+    // el canvas, y cada terminal se ubica sobre su nodo.
+    <div
+      className={canvas
+        ? "absolute inset-0 overflow-visible pointer-events-none"
+        : "relative h-full w-full overflow-hidden bg-gray-100 dark:bg-surface-deep"}
+    >
       {tabs.map((tab) => {
         // El resume del agente ya reconstruye su propia conversación; reproducir
         // también el scrollback crudo aquí duplicaría/ensuciaría la salida.
@@ -188,11 +194,11 @@ export function TerminalPanel() {
               // Sin "visible" explícito: así hereda el visibility del contenedor de
               // AppShell (que lo oculta fuera de /workspace) en vez de sobreescribirlo.
               visibility: shown ? undefined : "hidden",
-              pointerEvents: shown ? "auto" : "none",
+              pointerEvents: shown && !placement.inert ? "auto" : "none",
               zIndex: shown ? 1 : 0,
             }}
             {...{ [TERMINAL_TAB_ATTR]: tab.id }}
-            onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
+            onPointerDownCapture={() => focusPlacement(placement)}
           >
             {dropTarget === tab.id && (
               <div className="absolute inset-1 z-10 pointer-events-none flex items-end justify-center pb-6
@@ -229,7 +235,7 @@ export function TerminalPanel() {
         );
       })}
 
-      {tabs.length === 0 && (
+      {tabs.length === 0 && !canvas && (
         <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-400 dark:text-white/20">
           <span className="text-5xl select-none">⌥</span>
           <p className="text-sm">{t("terminal.empty")}</p>

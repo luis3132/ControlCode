@@ -374,3 +374,87 @@ export function BellIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Tres tarjetas sueltas sobre un lienzo: el modo canvas. */
+export function CanvasIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="3" y="4" width="8" height="7" rx="1.5" />
+      <rect x="14" y="7" width="7" height="6" rx="1.5" />
+      <rect x="6" y="14" width="9" height="6" rx="1.5" />
+    </svg>
+  );
+}
+
+/** Una nota adhesiva con la esquina doblada. */
+export function NoteIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M5 4h14v10l-5 6H5z" />
+      <path d="M14 20v-6h5" />
+      <path d="M8.5 8.5h7M8.5 11.5h4" />
+    </svg>
+  );
+}
+
+/** Cuatro rectángulos en grilla: ordenar. */
+export function ArrangeIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="4" y="4" width="7" height="7" rx="1.2" />
+      <rect x="13" y="4" width="7" height="7" rx="1.2" />
+      <rect x="4" y="13" width="7" height="7" rx="1.2" />
+      <rect x="13" y="13" width="7" height="7" rx="1.2" />
+    </svg>
+  );
+}
+
+/** Las cuatro esquinas de un encuadre: ver todo. */
+export function FitIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
+    </svg>
+  );
+}
+
+/** Una lupa con un más: ver al 100%. */
+export function ZoomInIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M20 20l-4.4-4.4M11 8.5v5M8.5 11h5" />
+    </svg>
+  );
+}
+
+/** Dos cajas unidas por una flecha en escalera: un diagrama. */
+export function DiagramIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="3" y="4" width="7" height="5" rx="1.2" />
+      <rect x="14" y="15" width="7" height="5" rx="1.2" />
+      <path d="M6.5 9v4.5h11V15" />
+    </svg>
+  );
+}
+
+/** Una hoja con renglones: un documento. */
+export function DocIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M14 3v4h4M9 12h6M9 15.5h6M9 9h2" />
+    </svg>
+  );
+}
+
+/** Una pantalla sobre un atril: una presentación. */
+export function SlidesIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="3" y="4" width="18" height="12" rx="1.5" />
+      <path d="M12 16v4M8.5 20h7M7 8.5h6M7 11.5h4" />
+    </svg>
+  );
+}

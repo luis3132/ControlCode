@@ -47,7 +47,7 @@ pub(super) fn browser_run(app: &AppHandle, args: &Value) -> Result<Value, String
 
 /// La ventana donde vive esa tab. Es más preciso que buscar por carpeta: dos ventanas
 /// pueden tener la misma carpeta abierta, y el navegador del agente está en la suya.
-fn window_with_tab(app: &AppHandle, tab_id: &str) -> Result<Option<String>, String> {
+pub(super) fn window_with_tab(app: &AppHandle, tab_id: &str) -> Result<Option<String>, String> {
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     Ok(conn
@@ -72,7 +72,7 @@ fn browser_timeout(request: &Value) -> u64 {
 
 /// La carpeta del PROYECTO de una tarea, no su cwd: una tarea aislada corre en un worktree,
 /// pero el navegador que el usuario tiene abierto es el de la carpeta del proyecto.
-fn project_of_task(app: &AppHandle, task_id: &str) -> Result<String, String> {
+pub(super) fn project_of_task(app: &AppHandle, task_id: &str) -> Result<String, String> {
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.query_row(
@@ -97,7 +97,7 @@ fn same_folder(a: &str, b: &str) -> bool {
 /// La ventana abierta que tiene una tab en esa carpeta. `None` si ninguna la tiene
 /// guardada todavía (una tab recién creada se escribe en la base con un rato de demora):
 /// entonces se le pregunta a la primera, que con una sola ventana es la correcta.
-fn window_with_folder(app: &AppHandle, cwd: &str) -> Result<Option<String>, String> {
+pub(super) fn window_with_folder(app: &AppHandle, cwd: &str) -> Result<Option<String>, String> {
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn

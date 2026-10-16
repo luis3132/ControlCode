@@ -101,6 +101,12 @@ NAVEGADOR
                                               Es el mismo camino que usan las 26
                                               herramientas browser_* del MCP.
 
+CANVAS
+  canvas run --json-args '{\"cwd\":\"...\",      Una orden al canvas de un proyecto: read,
+             \"request\":{\"op\":\"read\"}}'        pages, add, update, arrange, view…
+                                              Es el mismo camino que usan las
+                                              herramientas canvas_* del MCP.
+
 AGENTES, CUENTAS Y SKILLS
   agents                                      Qué poner en --agent (incluye las custom)
   accounts                                    Qué poner en --account, por TUI
@@ -124,7 +130,8 @@ SERVIDOR MCP (no lo escribís vos: lo lanza la app)
   y stdout hablando JSON-RPC con el agente que lo lanzó. Es el servidor `controlcode`
   que le da sus herramientas: el navegador del proyecto, la orquestación de la flota,
   la cuenta de git del usuario (PRs, issues, push/pull), los subprocesos (servidores y
-  compilaciones que la app corre por el agente), preguntarle algo al usuario,
+  compilaciones que la app corre por el agente), el canvas del workspace,
+  preguntarle algo al usuario,
   y —solo con --task— el permiso de cada acción.
 
   La app se lo agrega sola al comando de cada tab de Claude Code, con un

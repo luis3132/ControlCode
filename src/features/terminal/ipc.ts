@@ -32,3 +32,14 @@ export const ptyResize = (id: number, cols: number, rows: number) =>
 export const ptyKill = (id: number) => invoke<void>("pty_kill", { id });
 /** La carpeta donde está parado ahora el shell. `null` = no se sabe desde afuera (Windows). */
 export const ptyCwd = (id: number) => invoke<string | null>("pty_cwd", { id });
+
+export interface PtyActivity {
+  /** Hace cuánto escribió por última vez, en ms. */
+  idleMs: number;
+  /** El último título que puso la TUI (en qué está trabajando). */
+  title: string | null;
+  running: boolean;
+}
+
+/** Hace cuánto escribió cada PTY y su último título. Las claves llegan como texto. */
+export const ptyActivity = (ids: number[]) => invoke<Record<string, PtyActivity>>("pty_activity", { ids });

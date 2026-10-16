@@ -3,12 +3,14 @@
 //! La conexión y el schema viven un nivel más arriba (`database::connection`,
 //! `database::schema`); acá solo hay lecturas y escrituras sobre tablas ya creadas.
 
+mod canvas;
 mod sessions;
 mod snapshots;
 mod settings;
 mod windows;
 mod workspaces;
 
+pub use canvas::*;
 pub use sessions::*;
 pub use snapshots::*;
 pub use settings::*;

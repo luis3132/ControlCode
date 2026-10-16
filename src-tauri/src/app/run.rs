@@ -33,6 +33,7 @@ pub fn run() {
             crate::terminal::pty_create,
             crate::terminal::pty_attach,
             crate::terminal::pty_output_totals,
+            crate::terminal::pty_activity,
             // Subprocesos: los procesos largos que corren los agentes
             crate::procs::procs_list,
             crate::procs::procs_start,
@@ -57,6 +58,10 @@ pub fn run() {
             crate::database::list_workspace_snapshots,
             crate::database::take_workspace_snapshot,
             crate::database::forget_workspace_snapshot,
+            // Las páginas del canvas
+            crate::database::canvas_pages_load,
+            crate::database::canvas_page_save,
+            crate::database::canvas_page_delete,
             crate::database::find_open_tab_for_session,
             // Persistencia SQLite — ventanas y tabs
             crate::database::db_save_window_state,
@@ -89,6 +94,7 @@ pub fn run() {
             // Tabs de archivo
             crate::explorer::commands::explorer_read_file,
             crate::explorer::commands::explorer_write_file,
+            crate::explorer::commands::explorer_write_bytes,
             crate::explorer::commands::explorer_file_stat,
             // Control de versiones (panel derecho)
             crate::scm::scm_status,

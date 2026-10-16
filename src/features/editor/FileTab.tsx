@@ -13,10 +13,15 @@ import { relativeTo, type FileView } from "@/features/tabs/viewTabs";
 import { CodeEditor, type EditorHandle } from "./CodeEditor";
 import { fileStat, readFile, writeFile, type FileContent } from "./ipc";
 import { isMarkdownPath, rememberMarkdownPreview } from "./markdown";
+import { isDiagramPath } from "@/features/diagram/store";
+import { deckDirOf, isDeckFile } from "@/features/slides/deck";
 
 // Diferida: el render de Markdown (con su parser de HTML) solo se baja la primera vez que
 // alguien pide una vista previa, no en el arranque de la app.
 const MarkdownPreview = lazy(() => import("./MarkdownPreview"));
+// Ídem el editor de diagramas (React Flow y ELK).
+const DiagramEditor = lazy(() => import("@/features/diagram/DiagramEditor").then((m) => ({ default: m.DiagramEditor })));
+const SlidesView = lazy(() => import("@/features/slides/SlidesView").then((m) => ({ default: m.SlidesView })));
 
 /** Cada cuánto se mira si otro cambió el archivo. Solo en la tab visible. */
 const WATCH_MS = 2000;
@@ -47,6 +52,8 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<Banner>(null);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exported, setExported] = useState<string | null>(null);
   const editor = useRef<EditorHandle | null>(null);
   const mtime = useRef<number | null>(null);
   const dirty = useRef(false);
@@ -60,6 +67,11 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
 
   const markdown = isMarkdownPath(view.path);
   const preview = markdown && !!view.preview && content?.kind === "text";
+  // Un `.diagram.json` se abre como diagrama salvo que se pida el JSON (`preview: false`).
+  // Ídem el deck.json de una presentación: se ve la presentación.
+  const deckFile = isDeckFile(view.path);
+  const diagramFile = isDiagramPath(view.path) || deckFile;
+  const diagramMode = diagramFile && view.preview !== false && content?.kind === "text";
   const previewRef = useRef(preview);
   previewRef.current = preview;
   /** El texto que muestra la vista previa: el del editor, con lo que no se guardó. */
@@ -159,10 +171,10 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
   // Volver a la tab es para escribir en ella. En vista previa no: el editor está debajo, y
   // lo que se tipeara iría a un documento que no se ve.
   useEffect(() => {
-    if (!focused || preview) return;
+    if (!focused || preview || diagramMode) return;
     const frame = requestAnimationFrame(() => editor.current?.focus());
     return () => cancelAnimationFrame(frame);
-  }, [focused, preview]);
+  }, [focused, preview, diagramMode]);
 
   // Al pasar a la vista previa se toma lo que hay en el editor en ese momento.
   useEffect(() => {
@@ -178,8 +190,17 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.reveal?.nonce]);
 
-  const setMode = (mode: string) => {
+  const setMode = async (mode: string) => {
     const next = mode === "preview";
+    if (diagramFile) {
+      // El JSON editado a mano se guarda antes de dibujarlo; y al volver al código se relee,
+      // que el diagrama lo pudo haber cambiado.
+      if (next && dirty.current) await save();
+      else if (!next && !dirty.current) await load(true).catch((e) => setError(String(e)));
+      updateView(view.id, { preview: next });
+      if (!next) requestAnimationFrame(() => editor.current?.focus());
+      return;
+    }
     rememberMarkdownPreview(next);
     updateView(view.id, { preview: next });
     if (!next) requestAnimationFrame(() => editor.current?.focus());
@@ -193,17 +214,42 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
         <span className="flex-1 min-w-0 truncate font-mono text-[11px] text-gray-500 dark:text-white/40" title={view.path}>
           {rel}
         </span>
-        {markdown && content?.kind === "text" && (
+        {(markdown || diagramFile) && content?.kind === "text" && (
           <SegmentedControl
             size="sm"
             aria-label={t("editor.view.label")}
-            value={preview ? "preview" : "code"}
-            onChange={setMode}
+            value={preview || diagramMode ? "preview" : "code"}
+            onChange={(mode) => void setMode(mode)}
             options={[
               { value: "code", label: t("editor.view.code") },
-              { value: "preview", label: t("editor.view.preview") },
+              { value: "preview", label: t(deckFile ? "editor.view.slides" : diagramFile ? "editor.view.diagram" : "editor.view.preview") },
             ]}
           />
+        )}
+        {markdown && content?.kind === "text" && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={exporting}
+            title={t("doc.exportPdf")}
+            onClick={async () => {
+              // Lo que se exporta es lo del disco: con cambios sin guardar, se guardan antes.
+              setExporting(true);
+              try {
+                if (dirty.current) await save();
+                const { exportDocPdf } = await import("@/features/docs/export");
+                const out = await exportDocPdf(view.path, view.cwd);
+                setExported(out.split(/[\\/]/).pop() ?? out);
+                setTimeout(() => setExported(null), 5000);
+              } catch (e) {
+                setError(String(e));
+              } finally {
+                setExporting(false);
+              }
+            }}
+          >
+            {exporting ? t("doc.exporting") : exported ? t("doc.exported", { file: exported }) : "PDF"}
+          </Button>
         )}
         {view.dirty && (
           <Button size="sm" variant="primary" onClick={() => save()} disabled={saving}>
@@ -299,6 +345,13 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
           <div className="absolute inset-0">
             <Suspense fallback={<PreviewSkeleton />}>
               <MarkdownPreview source={previewSource ?? content.content} path={view.path} cwd={view.cwd} />
+            </Suspense>
+          </div>
+        )}
+        {diagramMode && (
+          <div className="absolute inset-0">
+            <Suspense fallback={<PreviewSkeleton />}>
+              {deckFile ? <SlidesView dir={deckDirOf(view.path)!} thumbnails /> : <DiagramEditor path={view.path} />}
             </Suspense>
           </div>
         )}

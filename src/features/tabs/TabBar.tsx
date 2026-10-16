@@ -3,7 +3,9 @@ import { useTranslation } from "react-i18next";
 import { Button, AddIcon, Tooltip } from "neogestify-ui-components";
 
 import { WindowLights } from "@/app/WindowLights";
-import { GlobeIcon, SplitRightIcon } from "@/app/icons";
+import { CanvasIcon, GlobeIcon, SplitRightIcon } from "@/app/icons";
+import { addBrowserHere, toggleCanvas } from "@/features/canvas/actions";
+import { useCanvasStore } from "@/features/canvas/store";
 import { NotificationBell } from "@/features/notifications/NotificationBell";
 import { GroupTabStrip } from "@/features/tabs/GroupTabStrip";
 import { splitGroup, useWorkspaceLayout } from "@/features/tabs/layout/layoutStore";
@@ -12,7 +14,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { openNewAgentWizard, TabDialogs } from "@/features/tabs/tabActions";
 import { STRIP_BG } from "@/features/tabs/tabStyle";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import { viewsOfWorkspace } from "@/features/tabs/viewTabs";
+import { comparablePath, viewsOfWorkspace } from "@/features/tabs/viewTabs";
 import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
 
 const BAR_BUTTON = `cc-t flex items-center justify-center w-7 h-7 rounded-md shrink-0 p-0
@@ -46,6 +48,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
   const layout = useWorkspaceLayout();
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const canvasOn = useCanvasStore((s) => (activeTab ? !!s.canvasMode[comparablePath(activeTab.cwd)] : false));
   const groups = layout ? allGroups(layout.root) : [];
   const only = groups.length === 1 ? groups[0]! : null;
   const divided = groups.length > 1;
@@ -112,12 +115,30 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
 
         <div className="flex items-center gap-0.5 shrink-0 pl-1 pr-2" data-tauri-drag-region>
           {activeTab && (
+            <Tooltip content={t(canvasOn ? "canvas.toggle.off" : "canvas.toggle.on")} placement="bottom">
+              <Button variant="icon"
+                onClick={() => {
+                  toggleCanvas(activeTab.cwd);
+                  navigate("/workspace");
+                }}
+                aria-label={t(canvasOn ? "canvas.toggle.off" : "canvas.toggle.on")}
+                aria-pressed={canvasOn}
+                data-tauri-drag-region="false"
+                className={`${BAR_BUTTON} ${canvasOn ? "!text-accent-600 dark:!text-accent-300 !bg-accent-500/12" : ""}`}
+              >
+                <CanvasIcon className="w-[15px] h-[15px]" />
+              </Button>
+            </Tooltip>
+          )}
+          {activeTab && (
             <Tooltip content={t("tabs.newBrowser")} placement="bottom">
               <Button variant="icon"
                 // Un navegador es del workspace: se abre al lado de sus agentes, para probar lo
                 // que están construyendo.
                 onClick={() => {
-                  openBrowser(activeTab.cwd);
+                  // En el canvas, a la página que se está mirando.
+                  if (canvasOn) addBrowserHere(activeTab.cwd).catch(console.error);
+                  else openBrowser(activeTab.cwd);
                   navigate("/workspace");
                 }}
                 aria-label={t("tabs.newBrowser")}
@@ -128,7 +149,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
               </Button>
             </Tooltip>
           )}
-          {only && (
+          {only && !canvasOn && (
             <Tooltip content={t("tabs.split.button")} placement="bottom">
               <Button variant="icon"
                 onClick={(e) => {

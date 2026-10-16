@@ -287,6 +287,18 @@ mod ops {
     }
 
     #[test]
+    fn escribir_bytes_crea_las_carpetas_que_faltan() {
+        let d = tmp();
+        let png = d.path().join("docs").join("diagrams").join("a.png");
+        super::super::explorer_write_bytes(s(&png), None, Some("iVBORw==".into())).unwrap();
+        assert_eq!(fs::read(&png).unwrap(), vec![0x89, b'P', b'N', b'G']);
+        let json = d.path().join("docs").join("a.diagram.json");
+        super::super::explorer_write_bytes(s(&json), Some("{}".into()), None).unwrap();
+        assert_eq!(fs::read_to_string(&json).unwrap(), "{}");
+        assert!(super::super::explorer_write_bytes(s(&json), None, Some("no es base64!".into())).is_err());
+    }
+
+    #[test]
     fn copiar_en_la_misma_carpeta_elige_un_nombre_libre() {
         let d = tmp();
         fs::write(d.path().join("a.ts"), "x").unwrap();

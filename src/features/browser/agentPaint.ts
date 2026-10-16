@@ -18,6 +18,8 @@ export interface AgentPaint {
   ink: string;
   /** El fondo tenue de la tab. */
   tint: string;
+  /** El mismo color en hex, para lo que no se pinta con clases (los bordes del canvas). */
+  hex: string;
 }
 
 /**
@@ -25,12 +27,12 @@ export interface AgentPaint {
  * el rojo es que algo falló.
  */
 export const AGENT_PAINTS: AgentPaint[] = [
-  { name: "violeta", strip: "bg-violet-500", ink: "text-violet-600 dark:text-violet-300", tint: "bg-violet-500/8" },
-  { name: "esmeralda", strip: "bg-emerald-500", ink: "text-emerald-600 dark:text-emerald-300", tint: "bg-emerald-500/8" },
-  { name: "ámbar", strip: "bg-amber-500", ink: "text-amber-600 dark:text-amber-300", tint: "bg-amber-500/8" },
-  { name: "fucsia", strip: "bg-fuchsia-500", ink: "text-fuchsia-600 dark:text-fuchsia-300", tint: "bg-fuchsia-500/8" },
-  { name: "cian", strip: "bg-cyan-500", ink: "text-cyan-600 dark:text-cyan-300", tint: "bg-cyan-500/8" },
-  { name: "lima", strip: "bg-lime-500", ink: "text-lime-600 dark:text-lime-300", tint: "bg-lime-500/8" },
+  { name: "violeta", strip: "bg-violet-500", ink: "text-violet-600 dark:text-violet-300", tint: "bg-violet-500/8", hex: "#8b5cf6" },
+  { name: "esmeralda", strip: "bg-emerald-500", ink: "text-emerald-600 dark:text-emerald-300", tint: "bg-emerald-500/8", hex: "#10b981" },
+  { name: "ámbar", strip: "bg-amber-500", ink: "text-amber-600 dark:text-amber-300", tint: "bg-amber-500/8", hex: "#f59e0b" },
+  { name: "fucsia", strip: "bg-fuchsia-500", ink: "text-fuchsia-600 dark:text-fuchsia-300", tint: "bg-fuchsia-500/8", hex: "#d946ef" },
+  { name: "cian", strip: "bg-cyan-500", ink: "text-cyan-600 dark:text-cyan-300", tint: "bg-cyan-500/8", hex: "#06b6d4" },
+  { name: "lima", strip: "bg-lime-500", ink: "text-lime-600 dark:text-lime-300", tint: "bg-lime-500/8", hex: "#84cc16" },
 ];
 
 /**

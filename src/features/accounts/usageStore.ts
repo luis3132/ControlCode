@@ -116,3 +116,33 @@ export function useHeadline(account: AgentAccount): number | null {
     return null;
   });
 }
+
+/**
+ * Las dos ventanas de una cuenta, de 0 a 100: la corta (sesión de 5 h) y la de la semana.
+ * `null` en la que no se sabe o no existe. Es lo que muestra el anillo doble de la barra.
+ */
+export function useUsageWindows(account: AgentAccount): { session: number | null; week: number | null } {
+  const session = useUsageStore((s) => {
+    if (account.agentId === "claude-code") {
+      const live = s.claude[account.id];
+      return live?.available ? live.session?.percent ?? null : null;
+    }
+    if (account.agentId === "codex") {
+      const w = s.codex[account.id]?.usage?.quota?.fiveHour;
+      return w ? Math.round(w.utilization * 100) : null;
+    }
+    return null;
+  });
+  const week = useUsageStore((s) => {
+    if (account.agentId === "claude-code") {
+      const live = s.claude[account.id];
+      return live?.available ? live.week?.percent ?? null : null;
+    }
+    if (account.agentId === "codex") {
+      const w = s.codex[account.id]?.usage?.quota?.sevenDay;
+      return w ? Math.round(w.utilization * 100) : null;
+    }
+    return null;
+  });
+  return { session, week };
+}

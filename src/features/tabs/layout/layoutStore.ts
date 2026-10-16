@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { useCanvasLayer } from "@/features/canvas/placements";
+import { useCanvasStore } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { setViewReplacer, useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath } from "@/features/tabs/viewTabs";
@@ -341,6 +343,11 @@ export interface Placement {
   groupId: string;
   /** `null` = sin dividir (o todavía sin medir): ocupa toda el área. */
   rect: Rect | null;
+  /** En el canvas: se ve pero no recibe el puntero (con zoom, xterm mide mal el mouse). Un
+   *  click le llega al nodo de abajo, que la enfoca. */
+  inert?: boolean;
+  /** En el canvas: qué hacer al tocarla, en vez de enfocar su grupo. */
+  focus?: () => void;
 }
 
 export interface Placements {
@@ -348,7 +355,18 @@ export interface Placements {
   visible: Map<string, Placement>;
   /** La que recibe el teclado. */
   focusedItem: string | null;
+  /** El área de tabs es un canvas: las cajas van en sus coordenadas, sobre su capa. */
+  canvas?: boolean;
 }
+
+/** Tocar una tab visible: enfoca su grupo, o lo que diga el canvas. */
+export function focusPlacement(placement: Placement | undefined): void {
+  if (!placement) return;
+  if (placement.focus) placement.focus();
+  else if (placement.groupId) focusGroup(placement.groupId);
+}
+
+const NOTHING = new Map<string, Placement>();
 
 /** Dónde se dibuja cada tab visible y cuál tiene el foco. Sin árbol (las tabs todavía no
  *  cargaron) se comporta como antes de que existieran los grupos. */
@@ -364,7 +382,21 @@ export function usePlacements(): Placements {
     const view = s.views.find((v) => v.id === s.activeViewId);
     return view && comparablePath(view.cwd) === activeCwd ? view.id : null;
   });
+  // Por separado y no el store entero: el viewport cambia en cada cuadro de un paneo, y
+  // eso no tiene que re-renderizar las terminales.
+  const canvasWorkspace = useCanvasLayer((s) => s.workspace);
+  const canvasVisible = useCanvasLayer((s) => s.visible);
+  const canvasFocus = useCanvasStore((s) => s.focusedItem);
+  const canvasOn = useCanvasStore((s) => (activeCwd ? !!s.canvasMode[activeCwd] : false));
 
+  // En modo canvas lo que se ve lo decide la página activa (ver `features/canvas`). Hasta que
+  // el canvas dice qué se ve, no se ve nada: si en ese primer cuadro valieran los grupos, la
+  // tab activa se mostraría un instante y eso alcanza para lanzar su agente dormido.
+  if (canvasOn || (canvasWorkspace !== null && canvasWorkspace === activeCwd)) {
+    const visible = canvasWorkspace === activeCwd ? canvasVisible : NOTHING;
+    const focusedItem = canvasFocus && visible.has(canvasFocus) ? canvasFocus : null;
+    return { visible, focusedItem, canvas: true };
+  }
   if (!layout) {
     const focusedItem = activeViewId ? viewKey(activeViewId) : activeTabId ? agentKey(activeTabId) : null;
     const visible = new Map<string, Placement>();

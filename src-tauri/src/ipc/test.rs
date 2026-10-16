@@ -435,7 +435,45 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let process_read = super::mcp::process_read_tool_names();
     assert!(process_read.iter().all(|n| process.contains(n)));
     assert!(!process_read.iter().any(|n| n.ends_with("_start") || n.ends_with("_stop") || n.ends_with("_send")));
-    assert_eq!(browser.len() + orchestration.len() + git.len() + process.len() + 1, offered.len());
+    // Las del canvas: todas se ofrecen.
+    let canvas = super::mcp::canvas_tool_names();
+    assert!(canvas.iter().all(|n| offered.contains(n)), "{canvas:?}");
+    assert_eq!(browser.len() + orchestration.len() + git.len() + process.len() + canvas.len() + 1, offered.len());
+}
+
+/// El canvas se aprueba solo —acomodar la vista es para lo que está— salvo lanzar un agente
+/// desde él, que gasta como la flota. Leerlo es lo único que no cambia nada.
+#[test]
+fn el_canvas_se_aprueba_solo_salvo_lanzar_un_agente() {
+    use super::mcp::{annotations, auto_approved};
+    for name in [
+        "canvas_read", "canvas_pages", "canvas_add", "canvas_update", "canvas_arrange", "canvas_view",
+        "diagram_create", "diagram_read", "diagram_edit", "diagram_export",
+        "doc_create", "doc_write", "doc_export", "asset_capture",
+        "slides_create", "slide_write", "slides_read", "slides_edit", "slides_goto", "slides_export",
+    ] {
+        assert!(auto_approved(name), "{name}");
+    }
+    assert!(!auto_approved("canvas_spawn"));
+    assert_eq!(annotations("canvas_read")["readOnlyHint"], json!(true));
+    assert_eq!(annotations("diagram_read")["readOnlyHint"], json!(true));
+    assert_eq!(annotations("slides_read")["readOnlyHint"], json!(true));
+    assert_eq!(annotations("canvas_add")["readOnlyHint"], json!(false));
+    assert_eq!(annotations("canvas_spawn")["destructiveHint"], json!(false));
+}
+
+/// Una tool del canvas le pide a la app `canvas.run` con su operación, sus argumentos y
+/// quién pide: la tab es lo que hace que lo que toca se pinte de su color.
+#[test]
+fn las_tools_del_canvas_piden_su_operacion_con_quien_pide() {
+    let call = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "canvas_add", "arguments": { "kind": "note", "text": "hola" } } });
+    let (out, seen) = mcp_session(&McpContext::Cwd { cwd: "/p".into(), tab: Some("t1".into()) }, &[call], |_, _| {
+        Ok(json!({ "text": "Added n1" }))
+    });
+    assert_eq!(seen[0].0, "canvas.run");
+    assert_eq!(seen[0].1, json!({ "cwd": "/p", "tabId": "t1", "request": { "op": "add", "kind": "note", "text": "hola" } }));
+    assert_eq!(out[0]["result"]["content"][0]["text"], "Added n1");
 }
 
 /// Las tools de subprocesos le piden a la app `proc.<acción>` con quién pide y sus
