@@ -30,6 +30,7 @@ import { SyncRunner } from "@/features/sync/SyncRunner";
 import { UpdateNotifier } from "@/features/updates/UpdateNotifier";
 import { ApprovalToast } from "@/features/runs/ApprovalToast";
 import { BackgroundAgents } from "@/features/background/BackgroundAgents";
+import { SlidesOverlay } from "@/features/slides/SlidesOverlay";
 import type { ShellOutletContext } from "@/app/shellContext";
 import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
@@ -226,6 +227,8 @@ export function AppShell() {
         <UpdateNotifier />
         <BackgroundAgents />
       </div>
+      {/* Presentar a pantalla completa, y la exportación de una presentación a PDF. */}
+      <SlidesOverlay />
       {/* Encima de todo y fuera de las rutas: lo pregunta un agente que está esperando, y
           no puede depender de en qué pantalla esté parado el usuario. */}
       <AskDialog />

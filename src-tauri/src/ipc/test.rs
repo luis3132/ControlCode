@@ -450,12 +450,14 @@ fn el_canvas_se_aprueba_solo_salvo_lanzar_un_agente() {
         "canvas_read", "canvas_pages", "canvas_add", "canvas_update", "canvas_arrange", "canvas_view",
         "diagram_create", "diagram_read", "diagram_edit", "diagram_export",
         "doc_create", "doc_write", "doc_export", "asset_capture",
+        "slides_create", "slide_write", "slides_read", "slides_edit", "slides_goto", "slides_export",
     ] {
         assert!(auto_approved(name), "{name}");
     }
     assert!(!auto_approved("canvas_spawn"));
     assert_eq!(annotations("canvas_read")["readOnlyHint"], json!(true));
     assert_eq!(annotations("diagram_read")["readOnlyHint"], json!(true));
+    assert_eq!(annotations("slides_read")["readOnlyHint"], json!(true));
     assert_eq!(annotations("canvas_add")["readOnlyHint"], json!(false));
     assert_eq!(annotations("canvas_spawn")["destructiveHint"], json!(false));
 }

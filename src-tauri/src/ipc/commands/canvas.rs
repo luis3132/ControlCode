@@ -15,6 +15,9 @@ use crate::ipc::protocol::arg_str;
 /// Casi todo es instantáneo; crear un agente espera a que sus skills estén en disco.
 const CANVAS_TIMEOUT_SECS: u64 = 60;
 
+/// Exportar una presentación muestra y captura hoja por hoja: con muchas hojas, minutos.
+const EXPORT_TIMEOUT_SECS: u64 = 900;
+
 pub(super) fn canvas_run(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let request = args
         .get("request")
@@ -39,7 +42,11 @@ pub(super) fn canvas_run(app: &AppHandle, args: &Value) -> Result<Value, String>
         "canvas.run",
         &json!({ "cwd": cwd, "request": request, "owner": owner }),
         window.as_deref(),
-        Duration::from_secs(CANVAS_TIMEOUT_SECS),
+        Duration::from_secs(if request.get("op").and_then(Value::as_str) == Some("slides.export") {
+            EXPORT_TIMEOUT_SECS
+        } else {
+            CANVAS_TIMEOUT_SECS
+        }),
     )?;
     unwrap_frontend_result(raw)
 }

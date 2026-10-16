@@ -1735,5 +1735,17 @@
   "doc.exportPdf": "Esporta in PDF",
   "doc.exporting": "Esportazione…",
   "doc.exported": "Salvato: {{file}}",
-  "doc.lastEdit": "Scritto da {{who}}"
+  "doc.lastEdit": "Scritto da {{who}}",
+  "canvas.add.slides": "Nuova presentazione",
+  "editor.view.slides": "Presentazione",
+  "slides.defaultName": "Presentazione",
+  "slides.empty": "Ancora nessuna slide",
+  "slides.prev": "Slide precedente",
+  "slides.next": "Slide successiva",
+  "slides.present": "Presenta",
+  "slides.exit": "Esci (Esc)",
+  "slides.exporting": "Esportazione…",
+  "slides.exported": "Salvato: {{file}}",
+  "slides.exportingPage": "Esportazione della slide {{n}} di {{total}}",
+  "slides.escCancels": "Esc annulla"
 }

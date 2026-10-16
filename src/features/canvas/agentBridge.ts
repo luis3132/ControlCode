@@ -98,7 +98,7 @@ export async function runCanvasRequest(cwd: string, request: CanvasRequest, owne
         const id = addBrowser(cwd, page.id, str(request, "url") ?? "", { owner: owner ?? undefined, actor, box: { ...boxOf(request), title } });
         return `Added a browser to page "${page.name}" as node ${id}. It is your browser: browser_* tools drive it.`;
       }
-      if (kind === "diagram" || kind === "doc") {
+      if (kind === "diagram" || kind === "doc" || kind === "slides") {
         const path = str(request, "path");
         if (!path) throw new Error(`Falta 'path': el archivo del ${kind === "doc" ? "documento" : "diagrama"}`);
         const { resolveInProject } = await import("@/features/diagram/paths");
@@ -109,7 +109,7 @@ export async function runCanvasRequest(cwd: string, request: CanvasRequest, owne
         const id = addNode(workspace, page.id, { ...boxOf(request), kind: "note", text: str(request, "text") ?? "", title }, actor);
         return `Added a note to page "${page.name}" as node ${id}.`;
       }
-      throw new Error("'kind' tiene que ser agent, browser, note, diagram o doc");
+      throw new Error("'kind' tiene que ser agent, browser, note, diagram, doc o slides");
     }
 
     case "update": {
@@ -172,6 +172,10 @@ export async function runCanvasRequest(cwd: string, request: CanvasRequest, owne
     }
 
     default:
+      if (request.op.startsWith("slides.") || request.op.startsWith("slide.")) {
+        const { runSlidesRequest } = await import("@/features/slides/agentBridge");
+        return runSlidesRequest(cwd, request, actor);
+      }
       if (request.op.startsWith("doc.") || request.op.startsWith("asset.")) {
         const { runDocRequest } = await import("@/features/docs/agentBridge");
         return runDocRequest(cwd, request, owner, actor);
@@ -220,7 +224,7 @@ function describe(workspace: string, page: CanvasPage, owner: ViewOwner | null):
       const whose = view?.kind === "browser" && view.owner ? ` owned by ${view.owner.id === owner?.id ? "you" : view.owner.label}` : "";
       return `- ${n.id} browser${title} ${url}${whose} ${box}`;
     }
-    if (n.kind === "diagram" || n.kind === "doc") {
+    if (n.kind === "diagram" || n.kind === "doc" || n.kind === "slides") {
       return `- ${n.id} ${n.kind}${title} ${n.ref ? relativeTo(n.ref, cwdOf(workspace)) : "?"} ${box}`;
     }
     const text = (n.text ?? "").replace(/\s+/g, " ").slice(0, 120);

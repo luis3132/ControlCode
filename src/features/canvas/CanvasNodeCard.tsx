@@ -3,7 +3,8 @@ import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
 import { useTranslation } from "react-i18next";
 import { CloseIcon } from "neogestify-ui-components";
 
-import { DiagramIcon, DocIcon, ExternalIcon, GlobeIcon, NoteIcon, ZoomInIcon } from "@/app/icons";
+import { DiagramIcon, DocIcon, ExternalIcon, GlobeIcon, NoteIcon, SlidesIcon, ZoomInIcon } from "@/app/icons";
+import { slidesPresenceKey } from "@/features/slides/store";
 import { docPresenceKey } from "@/features/docs/store";
 import { useDiagramStore } from "@/features/diagram/store";
 import { agentIcon } from "@/features/agents/agentIcons";
@@ -34,6 +35,7 @@ export type CanvasFlowNode = Node<CanvasNodeData, "card">;
 // un documento.
 const DiagramEditor = lazy(() => import("@/features/diagram/DiagramEditor").then((m) => ({ default: m.DiagramEditor })));
 const DocView = lazy(() => import("@/features/docs/DocView").then((m) => ({ default: m.DocView })));
+const SlidesView = lazy(() => import("@/features/slides/SlidesView").then((m) => ({ default: m.SlidesView })));
 
 /**
  * Un nodo del canvas: una cabecera por donde se agarra y, abajo, su contenido.
@@ -54,7 +56,9 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
   const dormant = useDormant((s) => (node.ref ? s.ids.has(node.ref) : false));
   const hibernated = useHibernation((s) => (node.ref ? s.ids.has(node.ref) : false));
   // Lo que un agente escribió en el documento con `doc_write` también pinta el nodo.
-  const presence = useCanvasStore((s) => s.presence[node.id] ?? (node.kind === "doc" && node.ref ? s.presence[docPresenceKey(node.ref)] : undefined));
+  const presence = useCanvasStore((s) => s.presence[node.id]
+    ?? (node.kind === "doc" && node.ref ? s.presence[docPresenceKey(node.ref)]
+      : node.kind === "slides" && node.ref ? s.presence[slidesPresenceKey(node.ref)] : undefined));
   const focused = useCanvasStore((s) => s.focusedItem !== null && s.focusedItem === placementKey(node));
   const [menu, setMenu] = useState(false);
   const diagramTitle = useDiagramStore((s) => (node.kind === "diagram" && node.ref ? s.docs[node.ref]?.diagram.title : undefined));
@@ -71,11 +75,11 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
     ?? (node.kind === "agent" ? tab?.title
       : node.kind === "browser" ? view?.title || view?.url || t("browser.newTab")
       : node.kind === "diagram" ? diagramTitle ?? node.ref?.split(/[\\/]/).pop()
-      : node.kind === "doc" ? node.ref?.split(/[\\/]/).pop()
+      : node.kind === "doc" || node.kind === "slides" ? node.ref?.split(/[\\/]/).pop()
       : t("canvas.note"))
     ?? t("canvas.node.closed");
   const Icon = node.kind === "agent" ? agentIcon(tab?.agentId ?? "bash", tab?.command ?? "")
-    : node.kind === "browser" ? GlobeIcon : node.kind === "diagram" ? DiagramIcon : node.kind === "doc" ? DocIcon : NoteIcon;
+    : node.kind === "browser" ? GlobeIcon : node.kind === "diagram" ? DiagramIcon : node.kind === "doc" ? DocIcon : node.kind === "slides" ? SlidesIcon : NoteIcon;
   const state = node.kind !== "agent" || !tab ? null
     : tab.ptyId != null ? (hibernated ? t("canvas.agent.sleeping") : t("canvas.agent.running"))
     : dormant ? t("canvas.agent.dormant") : t("canvas.agent.starting");
@@ -117,7 +121,7 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
         )}
         <div className="flex-1" />
         <div className="nodrag flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          {(node.kind === "diagram" || node.kind === "doc") && node.ref && (
+          {(node.kind === "diagram" || node.kind === "doc" || node.kind === "slides") && node.ref && (
             <HeaderButton label={t("canvas.node.openTab")} onClick={() => openInTab(workspace, node.ref!)}>
               <ExternalIcon className="w-3.5 h-3.5" />
             </HeaderButton>
@@ -172,6 +176,23 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
               </button>
             )}
           </>
+        ) : node.kind === "slides" && node.ref ? (
+          // La presentación: la hoja actual y sus vecinas, recorrible acá mismo.
+          <>
+            {live && (
+              <Suspense fallback={null}>
+                <SlidesView dir={node.ref} interactive={!inert} />
+              </Suspense>
+            )}
+            {(inert || !live) && (
+              <button
+                className="absolute inset-0 flex items-center justify-center text-xs text-gray-400"
+                onClick={() => centerOn(workspace, pageId, node.id)}
+              >
+                {!live && t("canvas.node.zoomIn")}
+              </button>
+            )}
+          </>
         ) : node.kind === "doc" && node.ref ? (
           // El documento en vivo. Con zoom, la rueda mueve el canvas y un click lo lleva a 100%.
           <>
@@ -211,8 +232,10 @@ function openInTab(workspace: string, path: string) {
   const cwd = agentsOf(workspace)[0]?.cwd ?? workspace;
   setCanvasMode(workspace, false);
   const views = useViewTabsStore.getState();
-  views.openFile(cwd, path);
-  const view = useViewTabsStore.getState().views.find((v) => v.kind === "file" && v.path === path);
+  // Una presentación se abre por su deck.json, que la tab muestra como presentación.
+  const file = /\.slides[\\/]*$/i.test(path) ? `${path.replace(/[\\/]+$/, "")}/deck.json` : path;
+  views.openFile(cwd, file);
+  const view = useViewTabsStore.getState().views.find((v) => v.kind === "file" && v.path === file);
   if (view && /\.(md|markdown|mdx)$/i.test(path)) views.updateView(view.id, { preview: true });
 }
 

@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AddIcon, CloseIcon } from "neogestify-ui-components";
 
-import { ArrangeIcon, DiagramIcon, DocIcon, FitIcon, GlobeIcon, NoteIcon } from "@/app/icons";
+import { ArrangeIcon, DiagramIcon, DocIcon, FitIcon, GlobeIcon, NoteIcon, SlidesIcon } from "@/app/icons";
+import { SIZE_PRESETS } from "@/features/slides/deck";
+import { createDeck } from "@/features/slides/store";
 import { createDoc } from "@/features/docs/store";
 import { freeDiagramPath, freeProjectPath } from "@/features/diagram/paths";
 import { createDiagram } from "@/features/diagram/store";
@@ -246,6 +248,15 @@ function AddMenu({ cwd, workspace, page, pages, align }: {
               const path = await freeProjectPath(cwd, "docs", title, ".md");
               await createDoc(path, `# ${title}\n`);
               done(addNode(workspace, page.id, { kind: "doc", ref: path }));
+            })().catch(console.error);
+          }} />
+          <MenuItem icon={<SlidesIcon className="w-4 h-4" />} label={t("canvas.add.slides")} onClick={() => {
+            setOpen(false);
+            (async () => {
+              const title = t("slides.defaultName");
+              const dir = await freeProjectPath(cwd, "docs/slides", title, ".slides");
+              await createDeck(dir, title, SIZE_PRESETS["16:9"]!);
+              done(addNode(workspace, page.id, { kind: "slides", ref: dir }));
             })().catch(console.error);
           }} />
           <MenuItem icon={<GlobeIcon className="w-4 h-4" />} label={t("canvas.add.browser")} onClick={() => done(addBrowser(cwd, page.id, ""))} />

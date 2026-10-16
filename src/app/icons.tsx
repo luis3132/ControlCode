@@ -448,3 +448,13 @@ export function DocIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Una pantalla sobre un atril: una presentación. */
+export function SlidesIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="3" y="4" width="18" height="12" rx="1.5" />
+      <path d="M12 16v4M8.5 20h7M7 8.5h6M7 11.5h4" />
+    </svg>
+  );
+}

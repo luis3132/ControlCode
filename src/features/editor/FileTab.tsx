@@ -14,12 +14,14 @@ import { CodeEditor, type EditorHandle } from "./CodeEditor";
 import { fileStat, readFile, writeFile, type FileContent } from "./ipc";
 import { isMarkdownPath, rememberMarkdownPreview } from "./markdown";
 import { isDiagramPath } from "@/features/diagram/store";
+import { deckDirOf, isDeckFile } from "@/features/slides/deck";
 
 // Diferida: el render de Markdown (con su parser de HTML) solo se baja la primera vez que
 // alguien pide una vista previa, no en el arranque de la app.
 const MarkdownPreview = lazy(() => import("./MarkdownPreview"));
 // Ídem el editor de diagramas (React Flow y ELK).
 const DiagramEditor = lazy(() => import("@/features/diagram/DiagramEditor").then((m) => ({ default: m.DiagramEditor })));
+const SlidesView = lazy(() => import("@/features/slides/SlidesView").then((m) => ({ default: m.SlidesView })));
 
 /** Cada cuánto se mira si otro cambió el archivo. Solo en la tab visible. */
 const WATCH_MS = 2000;
@@ -66,7 +68,9 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
   const markdown = isMarkdownPath(view.path);
   const preview = markdown && !!view.preview && content?.kind === "text";
   // Un `.diagram.json` se abre como diagrama salvo que se pida el JSON (`preview: false`).
-  const diagramFile = isDiagramPath(view.path);
+  // Ídem el deck.json de una presentación: se ve la presentación.
+  const deckFile = isDeckFile(view.path);
+  const diagramFile = isDiagramPath(view.path) || deckFile;
   const diagramMode = diagramFile && view.preview !== false && content?.kind === "text";
   const previewRef = useRef(preview);
   previewRef.current = preview;
@@ -218,7 +222,7 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
             onChange={(mode) => void setMode(mode)}
             options={[
               { value: "code", label: t("editor.view.code") },
-              { value: "preview", label: t(diagramFile ? "editor.view.diagram" : "editor.view.preview") },
+              { value: "preview", label: t(deckFile ? "editor.view.slides" : diagramFile ? "editor.view.diagram" : "editor.view.preview") },
             ]}
           />
         )}
@@ -347,7 +351,7 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
         {diagramMode && (
           <div className="absolute inset-0">
             <Suspense fallback={<PreviewSkeleton />}>
-              <DiagramEditor path={view.path} />
+              {deckFile ? <SlidesView dir={deckDirOf(view.path)!} thumbnails /> : <DiagramEditor path={view.path} />}
             </Suspense>
           </div>
         )}
