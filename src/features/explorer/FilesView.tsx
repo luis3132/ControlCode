@@ -10,6 +10,7 @@ import {
   PasteIcon, Skeleton, Tooltip, TrashIcon,
 } from "neogestify-ui-components";
 
+import { canvasDropAt, canvasKindOf, dropFileOnCanvas, setCanvasDropHint, type CanvasDrop } from "@/features/canvas/fileDrop";
 import { DotsIcon, FilePlusIcon, FolderOpenIcon, FolderPlusIcon, RefreshIcon, ScissorsIcon, SendIcon } from "@/app/icons";
 import { highlightAgents } from "@/features/browser/agentHighlight";
 import { agentPaint } from "@/features/browser/agentPaint";
@@ -82,6 +83,9 @@ interface Drag {
   copy: boolean;
   /** Afuera del árbol, sobre la terminal de un agente: se le menciona en vez de moverlo. */
   terminal: string | null;
+  /** Afuera del árbol, sobre el canvas: un diagrama, un documento o una presentación vuelve a
+   *  la página como un nodo. */
+  canvas: CanvasDrop | null;
 }
 
 /** Copiar al arrastrar: Alt en macOS, Ctrl en el resto — lo mismo que VS Code y que el
@@ -589,6 +593,9 @@ export function FilesView({ cwd, repo, title }: {
       const target = hit && canDrop(entry.path, hit.dir, copy) ? hit.dir : null;
       const terminal = hit ? null : terminalTabAt(ev.clientX, ev.clientY);
       setFileDropTarget(terminal);
+      const fileOnCanvas = canvasKindOf(entry.path, entry.isDir);
+      const canvas = hit || terminal || !fileOnCanvas ? null : canvasDropAt(ev.clientX, ev.clientY);
+      setCanvasDropHint(canvas?.workspace ?? null);
 
       // Quedarse sobre una carpeta cerrada la abre: si no, soltar en una subcarpeta que no
       // se ve obligaría a abrirla antes de empezar a arrastrar.
@@ -598,7 +605,7 @@ export function FilesView({ cwd, repo, title }: {
         if (over) hoverTimer.current = { dir: over, id: window.setTimeout(() => expand(over), HOVER_EXPAND_MS) };
       }
 
-      last = { path: entry.path, name: entry.name, x: ev.clientX, y: ev.clientY, target, copy, terminal };
+      last = { path: entry.path, name: entry.name, x: ev.clientX, y: ev.clientY, target, copy, terminal, canvas };
       setDrag(last);
     };
 
@@ -608,6 +615,7 @@ export function FilesView({ cwd, repo, title }: {
       window.removeEventListener("pointercancel", up);
       clearHover();
       setFileDropTarget(null);
+      setCanvasDropHint(null);
       if (!dragging) return;
       justDragged.current = true;
       // Si el `click` no llega (se soltó fuera de la fila), que no quede armado.
@@ -618,6 +626,11 @@ export function FilesView({ cwd, repo, title }: {
         if (!dropFilesOnTab(done.terminal, [{ path: done.path, isDir: entry.isDir }])) {
           setError(t("forge.agent.notRunning"));
         }
+        return;
+      }
+      if (ev.type !== "pointercancel" && done?.canvas) {
+        const file = canvasKindOf(done.path, entry.isDir);
+        if (file) dropFileOnCanvas(done.canvas, file);
         return;
       }
       if (ev.type === "pointercancel" || !done?.target) return;
@@ -884,7 +897,8 @@ export function FilesView({ cwd, repo, title }: {
         >
           {drag.copy && drag.target && <span className="font-bold text-emerald-500">+</span>}
           {drag.terminal && <span className="font-bold text-accent-500">@</span>}
-          <span className={drag.target || drag.terminal ? "" : "opacity-50"}>{drag.name}</span>
+          {drag.canvas && <span className="font-bold text-accent-500">+</span>}
+          <span className={drag.target || drag.terminal || drag.canvas ? "" : "opacity-50"}>{drag.name}</span>
         </div>,
         document.body
       )}

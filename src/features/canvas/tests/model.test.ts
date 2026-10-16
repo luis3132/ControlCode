@@ -122,3 +122,15 @@ describe("persistencia", () => {
     expect(parsePage("a", "A", "{no es json").nodes).toEqual([]);
   });
 });
+
+describe("canvasKindOf", () => {
+  it("un diagrama, un documento o una presentación (por su carpeta o cualquier archivo de adentro)", async () => {
+    const { canvasKindOf } = await import("../fileKinds");
+    expect(canvasKindOf("/p/docs/diagrams/a.diagram.json", false)).toEqual({ kind: "diagram", ref: "/p/docs/diagrams/a.diagram.json" });
+    expect(canvasKindOf("/p/docs/informe.md", false)).toEqual({ kind: "doc", ref: "/p/docs/informe.md" });
+    expect(canvasKindOf("/p/docs/slides/demo.slides", true)).toEqual({ kind: "slides", ref: "/p/docs/slides/demo.slides" });
+    expect(canvasKindOf("/p/docs/slides/demo.slides/02-x.html", false)).toEqual({ kind: "slides", ref: "/p/docs/slides/demo.slides" });
+    expect(canvasKindOf("/p/src/app.ts", false)).toBeNull();
+    expect(canvasKindOf("/p/src", true)).toBeNull();
+  });
+});

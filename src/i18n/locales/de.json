@@ -1789,5 +1789,8 @@
   "slides.sizes.a4": "A4 hoch",
   "slides.sizes.a4Landscape": "A4 quer",
   "accounts.ring.session": "Sitzung {{n}} %",
-  "accounts.ring.week": "Woche {{n}} %"
+  "accounts.ring.week": "Woche {{n}} %",
+  "canvas.add.existing": "Projektdatei…",
+  "canvas.add.existingFilter": "Diagramme, Dokumente und Präsentationen",
+  "canvas.add.notSupported": "Diese Datei kann nicht auf den Canvas: wähle eine .diagram.json, eine .md oder die deck.json einer Präsentation"
 }

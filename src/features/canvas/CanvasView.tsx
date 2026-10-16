@@ -10,6 +10,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 
 import { activePageOf, focusNode, placementKey, workspaceOf } from "./actions";
+import { CANVAS_DROP_ATTR, useCanvasDropHint } from "./fileDrop";
 import { CanvasNodeCard, type CanvasFlowNode } from "./CanvasNodeCard";
 import { NODE_GUTTER, NODE_HEADER, type CanvasNode, type CanvasPage } from "./model";
 import { setCanvasPlacements, setCanvasViewport } from "./placements";
@@ -52,8 +53,12 @@ export function CanvasView({ cwd }: { cwd: string }) {
 
   useWorkspaceSync(workspace);
 
+  const dropHint = useCanvasDropHint((s) => s.workspace === workspace);
+
   return (
-    <div className="absolute inset-0 bg-gray-100 dark:bg-surface-deep">
+    // Marcado para que el explorador sepa que acá se pueden soltar archivos (ver `fileDrop.ts`).
+    <div className="absolute inset-0 bg-gray-100 dark:bg-surface-deep" {...{ [CANVAS_DROP_ATTR]: workspace }}>
+      {dropHint && <div className="absolute inset-2 z-10 pointer-events-none rounded-xl border-2 border-dashed border-accent-500/60 bg-accent-500/5" />}
       {page && (
         <ReactFlowProvider key={page.id}>
           <PageFlow workspace={workspace} page={page} pages={pages ?? []} />

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { AddIcon, CloseIcon } from "neogestify-ui-components";
 
-import { ArrangeIcon, DiagramIcon, DocIcon, FitIcon, GlobeIcon, NoteIcon, SlidesIcon } from "@/app/icons";
+import { ArrangeIcon, DiagramIcon, DocIcon, FitIcon, FolderOpenIcon, GlobeIcon, NoteIcon, SlidesIcon } from "@/app/icons";
 import { SIZE_PRESETS } from "@/features/slides/deck";
 import { createDeck } from "@/features/slides/store";
 import { createDoc } from "@/features/docs/store";
@@ -15,6 +16,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { openNewAgentWizard } from "@/features/tabs/tabActions";
 
 import { addBrowser, addNode, centerOn, defaultPageName, workspaceOf } from "./actions";
+import { canvasKindOf } from "./fileDrop";
 import { pageOfAgent, type CanvasPage } from "./model";
 import { dispatchCanvas, newPageId, requestView, setActivePage, useCanvasStore } from "./store";
 
@@ -257,6 +259,23 @@ function AddMenu({ cwd, workspace, page, pages, align }: {
               const dir = await freeProjectPath(cwd, "docs/slides", title, ".slides");
               await createDeck(dir, title, SIZE_PRESETS["16:9"]!);
               done(addNode(workspace, page.id, { kind: "slides", ref: dir }));
+            })().catch(console.error);
+          }} />
+          <MenuItem icon={<FolderOpenIcon className="w-4 h-4" />} label={t("canvas.add.existing")} onClick={() => {
+            setOpen(false);
+            // Lo que se quitó del canvas sigue en el proyecto: se vuelve a traer de acá (o
+            // arrastrándolo desde el explorador).
+            (async () => {
+              const picked = await openDialog({
+                defaultPath: cwd,
+                multiple: false,
+                filters: [{ name: t("canvas.add.existingFilter"), extensions: ["json", "md", "markdown", "mdx", "html"] }],
+              });
+              if (typeof picked !== "string") return;
+              const file = canvasKindOf(picked, false);
+              if (!file) throw new Error(t("canvas.add.notSupported"));
+              const here = page.nodes.find((n) => n.kind === file.kind && n.ref === file.ref);
+              done(here?.id ?? addNode(workspace, page.id, { kind: file.kind, ref: file.ref }));
             })().catch(console.error);
           }} />
           <MenuItem icon={<GlobeIcon className="w-4 h-4" />} label={t("canvas.add.browser")} onClick={() => done(addBrowser(cwd, page.id, ""))} />
