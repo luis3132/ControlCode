@@ -11,7 +11,7 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 
 import { activePageOf, focusNode, placementKey, workspaceOf } from "./actions";
 import { CanvasNodeCard, type CanvasFlowNode } from "./CanvasNodeCard";
-import { NODE_HEADER, type CanvasNode, type CanvasPage } from "./model";
+import { NODE_GUTTER, NODE_HEADER, type CanvasNode, type CanvasPage } from "./model";
 import { setCanvasPlacements, setCanvasViewport } from "./placements";
 import { dispatchCanvas, newNodeId, setCanvasFocus, useCanvasStore } from "./store";
 
@@ -138,7 +138,12 @@ function PageFlow({ workspace, page, pages }: { workspace: string; page: CanvasP
       liveNow.add(node.id);
       visible.set(key, {
         groupId: "",
-        rect: { left: node.x, top: node.y + NODE_HEADER, width: node.w, height: node.h - NODE_HEADER },
+        rect: {
+          left: node.x + NODE_GUTTER,
+          top: node.y + NODE_HEADER,
+          width: node.w - 2 * NODE_GUTTER,
+          height: node.h - NODE_HEADER - NODE_GUTTER,
+        },
         inert: isInert,
         focus: () => focusNode(node),
       });

@@ -101,6 +101,11 @@ export const DEFAULT_SIZE: Record<CanvasNodeKind, { w: number; h: number }> = {
 /** El alto de la cabecera de un nodo, por donde se agarra. Lo de abajo es su contenido. */
 export const NODE_HEADER = 30;
 
+/** Lo que una terminal o un navegador deja libre a los costados y abajo de su nodo. Se
+ *  dibujan en una capa por encima del canvas: sin este margen tapaban los bordes y no había
+ *  de dónde agarrar el nodo para agrandarlo. */
+export const NODE_GUTTER = 6;
+
 /** Lo que queda entre nodos al ubicarlos solos. */
 export const GAP = 40;
 

@@ -61,6 +61,7 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
       : node.kind === "slides" && node.ref ? s.presence[slidesPresenceKey(node.ref)] : undefined));
   const focused = useCanvasStore((s) => s.focusedItem !== null && s.focusedItem === placementKey(node));
   const [menu, setMenu] = useState(false);
+  const [hover, setHover] = useState(false);
   const diagramTitle = useDiagramStore((s) => (node.kind === "diagram" && node.ref ? s.docs[node.ref]?.diagram.title : undefined));
 
   // De quién es: el color del agente (o del que maneja el navegador). Quien acaba de tocar
@@ -91,14 +92,19 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
   };
 
   return (
+    // Sin `overflow-hidden` acá: los tiradores para agrandarlo van sobre el borde, mitad
+    // afuera, y el menú de "mover a" baja por debajo de la cabecera. Recorta solo el cuerpo.
     <div
-      className={`group relative h-full w-full flex flex-col rounded-lg overflow-hidden
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className={`group relative h-full w-full flex flex-col rounded-lg
         bg-white dark:bg-surface-sunken shadow-sm
         ${selected || focused ? "ring-2 ring-accent-500/70" : "ring-1 ring-gray-300 dark:ring-white/10"}`}
       style={ring ? { boxShadow: `0 0 0 3px ${ring}, 0 0 24px ${ring}55` } : undefined}
     >
       <NodeResizer
-        isVisible={selected}
+        // También con el nodo enfocado o bajo el puntero: tocar su terminal no lo selecciona.
+        isVisible={selected || focused || hover}
         minWidth={MIN_SIZE[node.kind].w}
         minHeight={MIN_SIZE[node.kind].h}
         lineClassName="!border-accent-500/60"
@@ -106,7 +112,7 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
       />
 
       <div
-        className="cc-drag flex items-center gap-2 px-2.5 shrink-0 cursor-grab active:cursor-grabbing select-none
+        className="cc-drag flex items-center gap-2 px-2.5 shrink-0 cursor-grab active:cursor-grabbing select-none rounded-t-lg
           border-b border-gray-200 dark:border-white/8 bg-gray-50 dark:bg-surface"
         style={{ height: NODE_HEADER, ...(own ? { boxShadow: `inset 3px 0 0 ${own}` } : {}) }}
         onDoubleClick={() => centerOn(workspace, pageId, node.id)}
@@ -155,7 +161,7 @@ export const CanvasNodeCard = memo(function CanvasNodeCard({ data, selected }: N
         </div>
       </div>
 
-      <div className="relative flex-1 min-h-0">
+      <div className="relative flex-1 min-h-0 overflow-hidden rounded-b-lg">
         {node.kind === "note" ? (
           <NoteBody node={node} workspace={workspace} pageId={pageId} />
         ) : node.kind === "diagram" && node.ref ? (
