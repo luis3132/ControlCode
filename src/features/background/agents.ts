@@ -1,7 +1,11 @@
 /**
  * Qué agentes están trabajando sin que se los vea: las tareas de la flota (que no tienen
- * ventana) y los agentes de las tabs que no están a la vista (otra tab, otra página del
- * canvas, otro workspace) pero siguen ocupados.
+ * ventana) y las tabs en modo chat que no están a la vista (otra tab, otra página del
+ * canvas, otro workspace) con un turno corriendo.
+ *
+ * Solo lo que se sabe con certeza. Una tab de terminal no entra: desde afuera solo se ve
+ * que su TUI escribe, y Claude Code redibuja la pantalla también esperando al usuario, así
+ * que "escribió hace poco" avisaba de agentes que no estaban haciendo nada.
  *
  * Es lo que muestra la pila de la esquina (`BackgroundAgents`). Puro: recibe todo lo que
  * necesita y se prueba en Node.
@@ -10,11 +14,6 @@ import type { TabChat } from "@/features/chat/store";
 import { isActive } from "@/features/runs/fleetOrder";
 import type { PendingApproval, Task } from "@/features/runs/types";
 import type { Tab } from "@/features/tabs/types";
-import type { PtyActivity } from "@/features/terminal/ipc";
-
-/** Una terminal que escribió hace menos que esto está trabajando: una TUI ocupada redibuja
- *  su spinner sin parar, y esperando al usuario se queda quieta. */
-export const BUSY_WITHIN_MS = 4000;
 
 export interface BackgroundAgent {
   key: string;
@@ -23,7 +22,7 @@ export interface BackgroundAgent {
   agentId: string;
   command?: string;
   title: string;
-  /** Qué está haciendo, si se sabe: el título de su TUI, su última herramienta. */
+  /** Qué está haciendo, si se sabe: su última herramienta, o lo último que dijo. */
   detail: string | null;
   /** `waiting` = pidió permiso y espera a alguien. */
   state: "working" | "waiting";
@@ -33,7 +32,6 @@ export interface BackgroundInput {
   tabs: Tab[];
   /** Las tabs que se ven ahora (sus ids). */
   visibleTabs: Set<string>;
-  activity: Record<number, PtyActivity>;
   chats: Record<string, TabChat>;
   tasks: Task[];
   approvals: PendingApproval[];
@@ -66,16 +64,7 @@ export function backgroundAgents(input: BackgroundInput): BackgroundAgent[] {
         key: `tab:${tab.id}`, kind: "tab", id: tab.id, agentId: tab.agentId, command: tab.command, title: tab.title,
         detail: lastTool(chat), state: waiting ? "waiting" : "working",
       });
-      continue;
     }
-    // La terminal pelada no es un agente: que un `npm run dev` escriba no es que esté trabajando.
-    if (tab.agentId === "bash" || tab.ptyId == null) continue;
-    const act = input.activity[tab.ptyId];
-    if (!act?.running || act.idleMs > BUSY_WITHIN_MS) continue;
-    out.push({
-      key: `tab:${tab.id}`, kind: "tab", id: tab.id, agentId: tab.agentId, command: tab.command, title: tab.title,
-      detail: act.title && act.title !== tab.title ? act.title : null, state: "working",
-    });
   }
 
   if (!input.fleetVisible) {

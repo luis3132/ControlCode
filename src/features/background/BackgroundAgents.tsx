@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -13,20 +13,18 @@ import { useRunsStore } from "@/features/runs/store";
 import { activateItem, usePlacements } from "@/features/tabs/layout/layoutStore";
 import { agentKey, isAgentKey, keyId } from "@/features/tabs/layout/layoutTree";
 import { useTabsStore } from "@/features/tabs/store";
-import { ptyActivity, type PtyActivity } from "@/features/terminal/ipc";
 import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
 import { backgroundAgents, type BackgroundAgent } from "./agents";
 
-/** Cada cuánto se pregunta qué están haciendo las terminales. */
-const POLL_MS = 2000;
 /** Cuántas tarjetas se muestran desplegadas; el resto se cuenta. */
 const MAX_CARDS = 5;
 const COLLAPSED_KEY = "cc-background-collapsed";
 
 /**
  * Los agentes que trabajan sin que se los vea, en la esquina de abajo a la derecha: las
- * tareas de la flota y los agentes de las tabs que no están a la vista. Con su logo, qué
+ * tareas de la flota y las tabs en modo chat con un turno corriendo que no están a la vista
+ * (ver `agents.ts`). Con su logo, qué
  * están haciendo y, si pidieron permiso, que esperan a alguien. Un click lleva a cada uno.
  *
  * Desaparece cuando no hay ninguno: un "0 agentes" fijo en la esquina sería ruido.
@@ -42,7 +40,6 @@ export function BackgroundAgents() {
   const approvals = useRunsStore((s) => s.approvals);
   const taskActivity = useRunsStore((s) => s.activity);
   const { visible } = usePlacements();
-  const [activity, setActivity] = useState<Record<number, PtyActivity>>({});
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(COLLAPSED_KEY) === "1";
@@ -50,33 +47,6 @@ export function BackgroundAgents() {
       return false;
     }
   });
-
-  // Las terminales de agentes, a preguntar. Solo con la ventana a la vista: oculta, la
-  // esquina tampoco se ve.
-  const ptyIds = tabs
-    .filter((tab) => tab.ptyId != null && tab.mode !== "html" && tab.agentId !== "bash")
-    .map((tab) => tab.ptyId!)
-    .join(",");
-  useEffect(() => {
-    if (!ptyIds || !docVisible) {
-      setActivity({});
-      return;
-    }
-    let alive = true;
-    const ids = ptyIds.split(",").map(Number);
-    const poll = () =>
-      ptyActivity(ids)
-        .then((raw) => {
-          if (alive) setActivity(Object.fromEntries(Object.entries(raw).map(([k, v]) => [Number(k), v])));
-        })
-        .catch(() => {});
-    poll();
-    const timer = setInterval(poll, POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, [ptyIds, docVisible]);
 
   const onWorkspace = pathname.startsWith("/workspace");
   const visibleTabs = useMemo(
@@ -86,9 +56,9 @@ export function BackgroundAgents() {
 
   const agents = useMemo(
     () => backgroundAgents({
-      tabs, visibleTabs, activity, chats, tasks, approvals, taskActivity, fleetVisible: pathname.startsWith("/fleet"),
+      tabs, visibleTabs, chats, tasks, approvals, taskActivity, fleetVisible: pathname.startsWith("/fleet"),
     }),
-    [tabs, visibleTabs, activity, chats, tasks, approvals, taskActivity, pathname]
+    [tabs, visibleTabs, chats, tasks, approvals, taskActivity, pathname]
   );
 
   if (agents.length === 0) return null;

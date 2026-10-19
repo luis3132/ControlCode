@@ -10,33 +10,22 @@ const tab = (id: string, extra: Partial<Tab> = {}): Tab =>
   ({ id, title: `Claude — ${id}`, cwd: "/p", agentId: "claude-code", agentLabel: "Claude Code", command: "claude", ptyId: 1, openedAt: 0, ...extra });
 
 const input = (extra: Partial<BackgroundInput>): BackgroundInput => ({
-  tabs: [], visibleTabs: new Set(), activity: {}, chats: {}, tasks: [], approvals: [], fleetVisible: false, taskActivity: {}, ...extra,
+  tabs: [], visibleTabs: new Set(), chats: {}, tasks: [], approvals: [], fleetVisible: false, taskActivity: {}, ...extra,
 });
 
 describe("backgroundAgents", () => {
-  it("una terminal oculta que escribió hace poco está trabajando, con lo que dice su título", () => {
-    const out = backgroundAgents(input({
-      tabs: [tab("a", { ptyId: 7 })],
-      activity: { 7: { idleMs: 300, title: "Arreglando los tests", running: true } },
-    }));
-    expect(out).toEqual([expect.objectContaining({ id: "a", kind: "tab", state: "working", detail: "Arreglando los tests" })]);
+  it("una tab de terminal no se avisa nunca: que su TUI escriba no dice que esté trabajando", () => {
+    expect(backgroundAgents(input({ tabs: [tab("a", { ptyId: 7 }), tab("b", { ptyId: 8 })] }))).toEqual([]);
   });
 
-  it("no avisa de la que se está viendo, de la que espera al usuario ni de un bash", () => {
+  it("una tab en modo chat que se está viendo, o sin turno, no se avisa", () => {
+    const busy = { running: true, starting: false, chat: { items: [] } } as unknown as TabChat;
+    const idle = { running: false, starting: false, chat: { items: [] } } as unknown as TabChat;
     const out = backgroundAgents(input({
-      tabs: [tab("visible", { ptyId: 1 }), tab("quieta", { ptyId: 2 }), tab("shell", { ptyId: 3, agentId: "bash" })],
+      tabs: [tab("visible", { mode: "html" }), tab("quieta", { mode: "html" })],
       visibleTabs: new Set(["visible"]),
-      activity: {
-        1: { idleMs: 10, title: null, running: true },
-        2: { idleMs: 60_000, title: null, running: true },
-        3: { idleMs: 10, title: null, running: true },
-      },
+      chats: { visible: busy, quieta: idle },
     }));
-    expect(out).toEqual([]);
-  });
-
-  it("un proceso que terminó no está trabajando aunque haya escrito recién", () => {
-    const out = backgroundAgents(input({ tabs: [tab("a", { ptyId: 1 })], activity: { 1: { idleMs: 10, title: null, running: false } } }));
     expect(out).toEqual([]);
   });
 
