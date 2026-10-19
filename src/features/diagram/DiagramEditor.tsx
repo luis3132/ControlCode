@@ -11,7 +11,7 @@ import { FitIcon, RedoIcon, UndoIcon } from "@/app/icons";
 import { ArrowEdge, DiagramContext, ShapeNode, type ArrowFlowEdge, type DiagramEditing, type ShapeFlowNode } from "./DiagramNodes";
 import { EXPORT_FORMATS, exportDiagram, exportPath, type ExportFormat } from "./export";
 import {
-  COLORS, DEFAULT_NODE_SIZE, SHAPES, descendants, groupAt, parentsFirst,
+  COLORS, DEFAULT_NODE_SIZE, SHAPES, descendants, groupAt, parentsFirst, unrouted,
   type Arrow, type ColorName, type Diagram, type DiagramNode, type DiagramOp, type LineStyle, type Route, type Shape,
 } from "./model";
 import { PALETTE, PAPER, shapeOutline } from "./shapes";
@@ -93,8 +93,10 @@ function DiagramFlow({ path, diagram, interactive, canUndo, canRedo }: {
     const a = byId.get(e.from);
     const b = byId.get(e.to);
     if (!a || !b) return [];
-    return [{ id: e.id, type: "arrow" as const, source: e.from, target: e.to, selected: selected.has(e.id), zIndex: 1, data: { edge: e, a, b } }];
-  }), [diagram.edges, byId, selected]);
+    // Mientras se arrastra una de sus cajas, el recorrido que calculó ELK ya no la alcanza.
+    const edge = drafts[e.from] || drafts[e.to] ? unrouted(e) : e;
+    return [{ id: e.id, type: "arrow" as const, source: e.from, target: e.to, selected: selected.has(e.id), zIndex: 1, data: { edge, a, b } }];
+  }), [diagram.edges, byId, selected, drafts]);
 
   // Fuera del editor (en el canvas con zoom) se ve siempre entero.
   useEffect(() => {

@@ -8,4 +8,4 @@ mod test;
 
 pub use path_env::{find_program, program};
 pub use proc::output_with_timeout;
-pub use time::{now_ms, now_ts};
+pub use time::now_ts;

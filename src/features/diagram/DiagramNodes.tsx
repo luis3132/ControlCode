@@ -120,7 +120,7 @@ export const ArrowEdge = memo(function ArrowEdge({ id, data, selected }: EdgePro
   const presence = usePresenceColor(path, id);
   if (!data) return null;
   const { edge, a, b } = data;
-  const geo = edgeGeometry(a, b, edge.route);
+  const geo = edgeGeometry(a, b, edge.route, edge);
   const color = edgeColor(edge);
   const marker = (start: boolean) => `url(#a${start ? "s" : "e"}${color.replace("#", "")})`;
   const isEditing = editing === id;

@@ -187,8 +187,41 @@ export function edgeSides(a: Box, b: Box): [Side, Side] {
 
 const isHorizontal = (side: Side) => side === "left" || side === "right";
 
-/** El camino de una flecha entre dos cajas. Recto, en escalera (como draw.io) o curvo. */
-export function edgeGeometry(a: Box, b: Box, route: Route = "orthogonal"): EdgeGeometry {
+/** De qué lado de la caja está un punto de su borde. */
+function sideOf(box: Box, p: { x: number; y: number }): Side {
+  const d = [
+    ["left", Math.abs(p.x - box.x)], ["right", Math.abs(p.x - (box.x + box.w))],
+    ["top", Math.abs(p.y - box.y)], ["bottom", Math.abs(p.y - (box.y + box.h))],
+  ] as const;
+  return [...d].sort((m, n) => m[1] - n[1])[0]![0];
+}
+
+/** El recorrido que calculó ELK, como camino: por sus quiebres, con la etiqueta donde ELK le
+ *  dejó lugar (o en medio del tramo del medio). */
+function routedGeometry(a: Box, b: Box, points: { x: number; y: number }[], labelAt?: { x: number; y: number }): EdgeGeometry {
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"}${r(p.x)},${r(p.y)}`).join("");
+  const mid = Math.floor((points.length - 1) / 2);
+  const p = points[mid]!;
+  const q = points[mid + 1] ?? p;
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
+  return {
+    path,
+    label: labelAt ?? { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 },
+    source: { ...first, side: sideOf(a, first) },
+    target: { ...last, side: sideOf(b, last) },
+  };
+}
+
+/**
+ * El camino de una flecha entre dos cajas. Si el acomodado automático le calculó un recorrido
+ * (`routed`), ese; si no, recto, en escalera (como draw.io) o curvo.
+ */
+export function edgeGeometry(
+  a: Box, b: Box, route: Route = "orthogonal",
+  routed?: { points?: { x: number; y: number }[]; labelAt?: { x: number; y: number } },
+): EdgeGeometry {
+  if (routed?.points && routed.points.length >= 2) return routedGeometry(a, b, routed.points, routed.labelAt);
   // A sí mismo: un rulo sobre el lado derecho.
   if (a === b || (a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h)) {
     const x = a.x + a.w;

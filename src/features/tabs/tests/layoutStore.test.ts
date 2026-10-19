@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  activateItem, focusGroup, moveItemTo, resetLayoutSync, splitGroup, syncLayouts, useLayoutStore,
+  activateItem, focusGroup, lastItemOf, moveItemTo, resetLayoutSync, resumeWorkspace, splitGroup, syncLayouts, useLayoutStore,
 } from "../layout/layoutStore";
 import { allGroups, type LayoutNode, type WorkspaceLayout } from "../layout/layoutTree";
 import { useTabsStore } from "../store";
@@ -41,6 +41,35 @@ describe("grupos enganchados a las tabs", () => {
   });
 
   afterEach(() => unsubs.forEach((u) => u()));
+
+  it("volver a una carpeta vuelve a lo último que se miró en ella, no a su primer agente", () => {
+    addAgent(agent("a1", "/a"));
+    addAgent(agent("a2", "/a"));
+    addAgent(agent("a3", "/a"));
+    activateItem("a:a2");
+    openView(file("fa", "/a"));
+    addAgent(agent("b1", "/b"));
+    expect(useTabsStore.getState().activeTabId).toBe("b1");
+
+    expect(lastItemOf("/a")).toBe("v:fa");
+    resumeWorkspace("/a", "a1");
+    expect(useViewTabsStore.getState().activeViewId).toBe("fa");
+    expect(useTabsStore.getState().activeTabId).not.toBe("b1");
+
+    // Un agente, igual.
+    activateItem("a:a3");
+    activateItem("a:b1");
+    resumeWorkspace("/a", "a1");
+    expect(useTabsStore.getState().activeTabId).toBe("a3");
+  });
+
+  it("sin nada recordado (o si lo que se miraba se cerró), al agente que se le pasa", () => {
+    expect(lastItemOf("/nueva")).toBeNull();
+    addAgent(agent("n1", "/nueva"));
+    addAgent(agent("x1", "/x"));
+    resumeWorkspace("/nueva", "n1");
+    expect(useTabsStore.getState().activeTabId).toBe("n1");
+  });
 
   it("lo que se abre cae en el grupo enfocado", () => {
     addAgent(agent("t1"));

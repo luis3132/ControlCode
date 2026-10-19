@@ -50,6 +50,26 @@ export interface DiagramEdge {
   style?: LineStyle;
   route?: Route;
   color?: ColorName;
+  /**
+   * El recorrido que calculó el acomodado automático (ELK): de dónde sale, por dónde dobla y
+   * dónde entra, en absoluto. Mientras las dos cajas sigan donde ELK las puso se dibuja así;
+   * al mover cualquiera de las dos se descarta y la flecha vuelve a trazarse sola.
+   */
+  points?: Point[];
+  /** Dónde ELK dejó lugar para la etiqueta (su centro), con el recorrido de arriba. */
+  labelAt?: Point;
+}
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/** La flecha sin su recorrido calculado: ya no sirve si se movió una de sus cajas. */
+export function unrouted(edge: DiagramEdge): DiagramEdge {
+  if (!edge.points && !edge.labelAt) return edge;
+  const { points: _p, labelAt: _l, ...rest } = edge;
+  return rest;
 }
 
 export interface Diagram {
@@ -141,6 +161,9 @@ export function freeSpotIn(nodes: DiagramNode[], w: number, h: number): { x: num
   const bottom = Math.max(...others.map((n) => n.y + n.h));
   return { x: Math.min(...others.map((n) => n.x)), y: bottom + GAP };
 }
+
+const validPoints = (p: unknown): boolean =>
+  Array.isArray(p) && p.length >= 2 && p.every((q) => q && finite((q as Point).x) && finite((q as Point).y));
 
 /** Si `inner` cae adentro de `outer`. */
 export function contains(outer: DiagramNode, inner: { x: number; y: number; w: number; h: number }): boolean {
@@ -279,6 +302,8 @@ export function applyDiagramOps(diagram: Diagram, ops: DiagramOp[]): DiagramResu
         const dx = updated.x - node.x;
         const dy = updated.y - node.y;
         const inside = node.shape === "group" && (dx || dy) ? descendants(d, node.id) : null;
+        // Lo que se movió o cambió de tamaño ya no está donde ELK trazó sus flechas.
+        const moved = dx || dy || updated.w !== node.w || updated.h !== node.h ? new Set([node.id, ...(inside ?? [])]) : null;
         d = {
           ...d,
           nodes: d.nodes.map((n) => {
@@ -286,6 +311,7 @@ export function applyDiagramOps(diagram: Diagram, ops: DiagramOp[]): DiagramResu
             if (inside?.has(n.id)) return { ...n, x: n.x + dx, y: n.y + dy };
             return n;
           }),
+          edges: moved ? d.edges.map((e) => (moved.has(e.from) || moved.has(e.to) ? unrouted(e) : e)) : d.edges,
         };
         touched.push(node.id);
         break;
@@ -317,7 +343,14 @@ export function applyDiagramOps(diagram: Diagram, ops: DiagramOp[]): DiagramResu
 
       case "edge.update": {
         const edge = requireEdge(d, op.id);
-        const updated = cleanEdge(op.patch, edge, d);
+        let updated = cleanEdge(op.patch, edge, d);
+        // Otros extremos, u otra forma de trazarla: el recorrido calculado ya no vale.
+        if (updated.from !== edge.from || updated.to !== edge.to || updated.route !== edge.route) updated = unrouted(updated);
+        // Una etiqueta nueva no entra donde ELK le dejó lugar a la vieja.
+        if (updated.label !== edge.label && updated.labelAt) {
+          const { labelAt: _l, ...rest } = updated;
+          updated = rest;
+        }
         d = { ...d, edges: d.edges.map((e) => (e.id === edge.id ? updated : e)) };
         touched.push(edge.id);
         break;
@@ -395,6 +428,8 @@ export function parseDiagram(text: string): Diagram {
       ...(STYLES.includes(e.style as LineStyle) ? { style: e.style } : {}),
       ...(ROUTES.includes(e.route as Route) ? { route: e.route } : {}),
       ...(isColor(e.color) && e.color !== "default" ? { color: e.color } : {}),
+      ...(validPoints(e.points) ? { points: e.points!.map(({ x, y }) => ({ x, y })) } : {}),
+      ...(e.labelAt && finite(e.labelAt.x) && finite(e.labelAt.y) ? { labelAt: { x: e.labelAt.x, y: e.labelAt.y } } : {}),
     });
   }
   return { version: 1, ...(typeof raw.title === "string" && raw.title ? { title: raw.title } : {}), nodes, edges };

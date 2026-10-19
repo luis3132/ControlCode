@@ -7,7 +7,7 @@
  */
 import ELK, { type ElkExtendedEdge, type ElkNode } from "elkjs/lib/elk.bundled.js";
 
-import type { Diagram, DiagramNode } from "./model";
+import type { Diagram, DiagramEdge, DiagramNode, Point } from "./model";
 import { FONT_SIZE, LINE_HEIGHT, textWidth } from "./shapes";
 
 export type LayoutDirection = "LR" | "TB" | "RL" | "BT";
@@ -70,6 +70,10 @@ export async function layoutDiagram(diagram: Diagram, direction: LayoutDirection
       "elk.hierarchyHandling": "INCLUDE_CHILDREN",
       "elk.edgeRouting": "ORTHOGONAL",
       "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+      // En el orden en que se escribieron: un ciclo ("¿falta algo? → volver") no da vuelta
+      // el flujo, y lo que va primero queda arriba (o a la izquierda).
+      "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+      "elk.layered.cycleBreaking.strategy": "MODEL_ORDER",
       ...SPACING,
     },
     children: children(undefined).map(toElk),
@@ -90,8 +94,35 @@ export async function layoutDiagram(diagram: Diagram, direction: LayoutDirection
   };
   walk(result, 0, 0);
 
+  // El recorrido de cada flecha, relativo al nodo que la contiene (`container`).
+  const origin = (id: string | undefined) => (id && id !== "root" ? placed.get(id) : undefined) ?? { x: 0, y: 0 };
+  const routes = new Map<string, { points: Point[]; labelAt?: Point }>();
+  const collect = (node: ElkNode) => {
+    for (const edge of (node.edges ?? []) as (ElkExtendedEdge & { container?: string })[]) {
+      const section = edge.sections?.[0];
+      if (!section) continue;
+      const o = origin(edge.container);
+      const at = (p: { x: number; y: number }) => ({ x: Math.round(o.x + p.x), y: Math.round(o.y + p.y) });
+      const points = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map(at);
+      const label = edge.labels?.[0];
+      const labelAt = label?.x !== undefined && label.y !== undefined
+        ? at({ x: label.x + (label.width ?? 0) / 2, y: label.y + (label.height ?? 0) / 2 })
+        : undefined;
+      routes.set(edge.id, { points, ...(labelAt ? { labelAt } : {}) });
+    }
+    for (const child of node.children ?? []) collect(child);
+  };
+  collect(result);
+  const routed = (e: DiagramEdge): DiagramEdge => {
+    const route = routes.get(e.id);
+    // Una flecha recta o curva se sigue trazando sola: el recorrido de ELK es en escalera.
+    if (!route || (e.route && e.route !== "orthogonal")) return e;
+    return { ...e, points: route.points, ...(route.labelAt ? { labelAt: route.labelAt } : {}) };
+  };
+
   return {
     ...diagram,
+    edges: diagram.edges.map(routed),
     nodes: diagram.nodes.map((n) => {
       const p = placed.get(n.id);
       if (!p) return n;

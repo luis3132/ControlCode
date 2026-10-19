@@ -5,6 +5,7 @@ import {
   Button, AddIcon, ArchiveIcon, BoxIcon, CloseIcon, TrashIcon, Tooltip,
 } from "neogestify-ui-components";
 
+import { resumeWorkspace } from "@/features/tabs/layout/layoutStore";
 import { useTabsStore } from "@/features/tabs/store";
 import { openAddFolderWizard } from "@/features/tabs/tabActions";
 import { agentIcon } from "@/features/agents/agentIcons";
@@ -212,6 +213,13 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
     navigate("/workspace");
   };
 
+  // Elegir la carpeta vuelve a lo último que se miró en ella (un agente, un archivo, un
+  // navegador), no a su primer agente: cambiar de carpeta y volver deja todo como estaba.
+  const openWorkspace = (cwd: string, firstTabId: string) => {
+    resumeWorkspace(cwd, firstTabId);
+    navigate("/workspace");
+  };
+
   // Click derecho sobre el WORKSPACE: sus skills valen para todos los agentes que se
   // abran en esa carpeta. Sobre un AGENTE: solo para ese.
   const onWorkspaceMenu = (e: React.MouseEvent, ws: WorkspaceNode) =>
@@ -358,7 +366,7 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
               expanded={ws.agents.some((a) => a.tabId === activeTabId)}
               onActivate={() => (ws.closed
                 ? reopenWorkspace(ws).catch(console.error)
-                : openAgent(ws.agents[0].tabId))}
+                : openWorkspace(ws.cwd, ws.agents[0].tabId))}
               onOpenAgent={openAgent}
               onWorkspaceMenu={onWorkspaceMenu}
               onAgentMenu={onAgentMenu}

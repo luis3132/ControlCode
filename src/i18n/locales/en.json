@@ -1791,5 +1791,8 @@
   "slides.sizes.a4": "A4 portrait",
   "slides.sizes.a4Landscape": "A4 landscape",
   "accounts.ring.session": "session {{n}}%",
-  "accounts.ring.week": "week {{n}}%"
+  "accounts.ring.week": "week {{n}}%",
+  "canvas.add.existing": "Project file…",
+  "canvas.add.existingFilter": "Diagrams, documents and presentations",
+  "canvas.add.notSupported": "That file can't go on the canvas: pick a .diagram.json, a .md or a presentation's deck.json"
 }
