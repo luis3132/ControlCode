@@ -288,6 +288,24 @@ export function activateItem(key: string): void {
   syncLayouts(true);
 }
 
+/**
+ * Lo último que se miró en un workspace: la tab visible de su grupo enfocado, que el árbol
+ * recuerda (y guarda entre aperturas de la app) aunque se haya ido a otra carpeta. Es a
+ * donde se vuelve al elegir la carpeta, en vez de a su primer agente. `null` si el
+ * workspace no tiene árbol o lo que se miraba ya no existe.
+ */
+export function lastItemOf(cwd: string): string | null {
+  const workspace = comparablePath(cwd);
+  const layout = useLayoutStore.getState().layouts[workspace];
+  const key = layout ? focusedActive(layout) : null;
+  return key && workspaceOfKey(key) === workspace ? key : null;
+}
+
+/** Ir a un workspace: a lo último que se miró ahí, o a `fallback` (un agente suyo). */
+export function resumeWorkspace(cwd: string, fallbackTabId: string): void {
+  activateItem(lastItemOf(cwd) ?? agentKey(fallbackTabId));
+}
+
 /** Enfoca un grupo: su tab visible pasa a ser la activa. Uno vacío solo se enfoca. */
 export function focusGroup(groupId: string): void {
   const layout = currentLayout();
