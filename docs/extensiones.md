@@ -8,7 +8,7 @@ Que cualquier desarrollador pueda agregarle a Control Code lo que quiera, con HT
 
 Ejemplos de lo que tiene que poder hacerse **sin tocar el código de la app**:
 
-- **Gestor de base de datos.** Una UI para explorar tablas y correr queries, y tools `db_query` y `db_schema` para que el agente consulte la misma conexión.
+- **Gestor de base de datos.** Una UI para explorar tablas y correr queries, y su propio servidor MCP (`mcp__db-manager__query`, `…__schema`) para que el agente consulte la misma conexión.
 - **Docker.** Contenedores, logs, reinicios; el agente puede leer los logs de un contenedor que falla.
 - **Lenguajes.** Validación, autocompletado, hover e ir a la definición vía LSP; el agente recibe los diagnósticos como tool.
 - **Cliente HTTP, Redis, S3, Linear/Jira, visores de logs**, o lo que se le ocurra a alguien.
@@ -24,15 +24,17 @@ Ejemplos de lo que tiene que poder hacerse **sin tocar el código de la app**:
 ## 2. Arquitectura
 
 ```
-                         ┌──────────────── App (Tauri) ─────────────────┐
- Agente ──MCP──► ccode mcp ──IPC (TCP+token)──► ExtensionHost          │
-                         │                        │  ▲                  │
-                         │        stdio JSON-RPC  ▼  │ eventos          │
-                         │                  backend de la extensión ────┼──► Postgres, Docker, rust-analyzer…
-                         │                        ▲                     │
- UI de la extensión ─────┼─ postMessage ─► bridge ┘                     │
- (iframe en view tab)    └──────────────────────────────────────────────┘
+                                       ┌──────────────── App (Tauri) ─────────────────┐
+ Agente ──MCP──► ccode mcp --ext <id> ──IPC (TCP+token)──► ExtensionHost            │
+                                       │                        │  ▲                    │
+                                       │        stdio JSON-RPC  ▼  │ eventos            │
+                                       │                  backend de la extensión ──────┼──► Postgres, Docker, rust-analyzer…
+                                       │                        ▲                       │
+ UI de la extensión ───────────────────┼─ postMessage ─► bridge ┘                       │
+ (iframe en view tab)                  └────────────────────────────────────────────────┘
 ```
+
+Cada extensión con tools es **su propio servidor MCP** para el agente (`mcp__db-manager__query`), aunque por debajo sea un puente a la app, igual que `controlcode`. Ver sección 4.1.
 
 Tres piezas nuevas:
 
@@ -40,7 +42,7 @@ Tres piezas nuevas:
 |---|---|---|
 | `ExtensionHost` | `src-tauri/src/extensions/` | Descubre extensiones, valida manifests, lanza y supervisa los backends, rutea llamadas y eventos, aplica permisos. |
 | Bridge de UI | `src/features/extensions/` | Monta las vistas en iframes sandboxed y les expone `window.controlcode`. |
-| Comandos IPC `ext.*` | `src-tauri/src/ipc/commands/extensions.rs` | Para que `ccode mcp` (y la CLI) lleguen a las extensiones: `ext.tools`, `ext.call`, `ext.list`, `ext.command`… |
+| Comandos IPC `ext.*` | `src-tauri/src/ipc/commands/extensions.rs` | Para que `ccode mcp --ext` (y la CLI) lleguen a las extensiones: `ext.tools`, `ext.call`, `ext.list`, `ext.command`… |
 
 Todo pasa por la app. Ni la UI ni `ccode mcp` hablan directo con el proceso de la extensión, porque es la app quien aplica permisos, pide aprobaciones y sabe qué extensión está activa en qué workspace.
 
@@ -111,14 +113,62 @@ Sobre los permisos: el backend es un ejecutable nativo, así que **nada le impid
 
 ## 4. Puntos de contribución
 
-Todo va bajo `contributes`. Cada punto es declarativo: la app lo conoce sin lanzar el backend, así las tools aparecen en el MCP, los comandos en la paleta y los iconos en la barra sin costo hasta que se usan.
+Todo va bajo `contributes`. Cada punto es declarativo: la app lo conoce sin lanzar el backend, así su servidor MCP aparece en el config del agente, los comandos en la paleta y los iconos en la barra sin costo hasta que se usan.
 
-### 4.1 `tools`: tools MCP
+### 4.1 `mcp`: un servidor MCP propio
+
+Cada extensión aporta **su propio servidor MCP**, no tools sueltas dentro de `controlcode`. Así:
+
+- **Cada una tiene sus nombres:** `mcp__db-manager__query`, `mcp__docker__logs`. No hay choques entre extensiones ni prefijos inventados.
+- **La persona controla cada servidor:** lo prende o lo apaga por separado, desde `/mcp` en Claude Code o desde la app.
+- **`controlcode` queda solo con lo de la app:** navegador, git, procesos, canvas, orquestación.
+- **El ecosistema MCP entero se vuelve extensión:** cualquier servidor MCP existente (Postgres, GitHub, Sentry…) puede ser una extensión, con o sin UI propia.
+
+Separar en servidores **no reduce la cantidad de tools** que ve el agente: Claude Code junta las de todos. Lo que la controla es activar extensiones por workspace (sección 14). Ayuda que Claude Code, cuando hay muchas tools MCP, cargue su definición bajo demanda.
+
+Hay dos formas de declararlo.
+
+#### a) Servidor propio, con el backend compartido (`server`)
+
+```jsonc
+"mcp": {
+  "server": "db-manager",            // nombre con el que lo ve el agente; por defecto el id corto
+  "tools": [ /* ver abajo */ ]
+}
+```
+
+La app agrega al `--mcp-config` de cada tab y de cada tarea de la flota una entrada más:
+
+```jsonc
+"db-manager": { "command": "<ccode>", "args": ["mcp", "--ext", "acme.db-manager", "--cwd", "…", "--tab", "…"] }
+```
+
+`ccode mcp --ext` es el mismo puente de siempre, pero solo expone las tools de esa extensión y las manda como `ext.call` a la app, que las pasa al **mismo proceso backend que usa la UI**. Esto es lo que mantiene el principio 1: la query que corre el agente aparece en la pantalla de la extensión. Si Claude Code lanzara el backend directamente, habría un proceso por tab, separado del de la UI, y ese estado compartido se perdería.
+
+La aprobación de tools `destructive` sigue pasando por la app, porque toda llamada pasa por ella.
+
+#### b) Servidor MCP externo (`external`)
+
+```jsonc
+"mcp": {
+  "server": "postgres",
+  "external": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-postgres", "${setting:url}"] }
+}
+```
+
+Para envolver un MCP que ya existe. La app solo lo agrega al config, igual que `languages` declara un servidor LSP, y reemplaza `${setting:…}` y `${secret:…}` al escribirlo.
+
+- **No comparte estado con la UI:** lo lanza Claude Code. Si la extensión también tiene backend y UI, ve sus propias conexiones, no las llamadas del agente.
+- **La app no ve sus llamadas:** no puede aplicar `destructive` ni mostrar el historial. Rigen los permisos de Claude Code.
+
+Es la forma más barata de sumar algo, a cambio de esas dos limitaciones.
+
+#### Declarar tools (forma `server`)
 
 ```jsonc
 "tools": [
   {
-    "name": "db_query",
+    "name": "query",
     "description": "Run a read-only SQL query on a saved connection. Returns at most `limit` rows.",
     "inputSchema": {
       "type": "object",
@@ -132,7 +182,7 @@ Todo va bajo `contributes`. Cada punto es declarativo: la app lo conoce sin lanz
     "destructive": false
   },
   {
-    "name": "db_execute",
+    "name": "execute",
     "description": "Run a statement that changes data or schema.",
     "inputSchema": { … },
     "destructive": true               // pasa por aprobación de la persona
@@ -140,7 +190,7 @@ Todo va bajo `contributes`. Cada punto es declarativo: la app lo conoce sin lanz
 ]
 ```
 
-El agente las ve como `mcp__controlcode__db_query`. Los nombres se validan contra los de la app y los de las demás extensiones activas; si chocan, se usa `<id corto>_<name>` y se avisa en la UI de extensiones.
+El agente las ve como `mcp__db-manager__query`. Los nombres solo tienen que ser únicos dentro de la extensión. Lo que tiene que ser único es el nombre del servidor: no puede ser `controlcode` ni el de otra extensión activa o un MCP que la persona ya tenga configurado. Si choca, la app le agrega un sufijo y lo avisa en la UI de extensiones.
 
 ### 4.2 `views`: interfaz
 
@@ -181,7 +231,7 @@ Aparecen en la paleta de comandos y se pueden correr desde la CLI con `ccode ext
       "args": [],
       "initializationOptions": {}
     },
-    "agentTools": true              // exponer diagnostics/definition/references al agente
+    "agentTools": true              // exponer diagnostics/definition/references al agente (tools de `controlcode`)
   }
 ]
 ```
@@ -266,7 +316,7 @@ Todo método que empiece con `host/` es la API del host (sección 6). Además:
 
 ### Tools dinámicas
 
-Algunas extensiones no saben sus tools de antemano; por ejemplo, una que expone cada endpoint de una API OpenAPI. Pueden declarar `"dynamicTools": true` y responder `tools/list`. Como Claude Code pide la lista al arrancar, cuando cambia se manda `notifications/tools/list_changed` por `ccode mcp`. **Hay que verificar** que Claude Code la respete en caliente. Si no, el cambio llega en la próxima tab.
+Algunas extensiones no saben sus tools de antemano; por ejemplo, una que expone cada endpoint de una API OpenAPI. Pueden declarar `"dynamicTools": true` y responder `tools/list`. Como Claude Code pide la lista al arrancar, cuando cambia se manda `notifications/tools/list_changed` por su `ccode mcp --ext`. **Hay que verificar** que Claude Code la respete en caliente. Si no, el cambio llega en la próxima tab.
 
 ## 6. API del host
 
@@ -335,7 +385,7 @@ Es la pieza que más acerca la app a un IDE, y vale como feature por sí sola.
 
 - **En la app:** un cliente LSP en Rust (`src-tauri/src/lsp/`), uno por lenguaje y workspace, lanzado según `contributes.languages`. Mantiene los documentos abiertos sincronizados (`didOpen`/`didChange`/`didSave`).
 - **En el editor (CodeMirror, `src/features/editor/`):** extensiones de CodeMirror que muestran diagnósticos (lint gutter + subrayados), autocompletado, hover, firma, ir a la definición, renombrar, formatear y code actions. `@codemirror/lint` y `@codemirror/autocomplete` cubren la parte visual; lo que falta es conectarlos con LSP.
-- **Para el agente** (`agentTools: true`), tools genéricas que sirven para cualquier lenguaje con extensión:
+- **Para el agente** (`agentTools: true`), tools genéricas que sirven para cualquier lenguaje con extensión. Van en el servidor `controlcode`, no en uno por lenguaje, porque las implementa la app y son las mismas para todos:
   - `lsp_diagnostics(path?)`: errores y warnings de un archivo o del workspace.
   - `lsp_definition(path, line, column)` y `lsp_references(...)`.
   - `lsp_hover(path, line, column)`: tipos y documentación.
@@ -353,7 +403,7 @@ Hay que ser honestos: **una extensión con backend corre con los permisos del us
 - **Al instalar:** se muestran el publisher, el origen (registry, repo, local) y los permisos declarados, y se pide confirmación. Si una actualización pide permisos nuevos, se pide confirmación de nuevo.
 - **Integridad:** los binarios de un release traen un `checksums.json` (sha256) que se verifica al descargar. Más adelante, firma con una clave del publisher.
 - **API del host:** cada llamada pasa por el filtro de permisos. Sin `agents`, una extensión no puede lanzar tareas, aunque sea nativa.
-- **Tools destructivas:** `destructive: true` hace que la llamada del agente pase por aprobación, con el mismo flujo de `approve_tool_use` y la tarjeta del chat en tabs HTML. En una tab de TUI, Claude Code ya pide permiso por tool MCP según su configuración. La app puede pedir una segunda confirmación propia para estas.
+- **Tools destructivas** (solo en la forma `server` de la sección 4.1; un MCP `external` no pasa por la app): `destructive: true` hace que la llamada del agente pase por aprobación, con el mismo flujo de `approve_tool_use` y la tarjeta del chat en tabs HTML. En una tab de TUI, Claude Code ya pide permiso por tool MCP según su configuración. La app puede pedir una segunda confirmación propia para estas.
 - **Extensiones de workspace** (`.controlcode/extensions/` en el repo): nunca se activan solas. La primera vez se pregunta, y la respuesta se recuerda por hash del manifest + binarios, así un cambio en el repo vuelve a preguntar.
 - **UI:** iframe sin `same-origin` ni acceso a Tauri, con CSP estricta. Una UI maliciosa solo puede hacer lo que su propia extensión ya podía.
 - **Desactivar todo:** `controlcode --disable-extensions`, y un modo seguro en la UI si la app no arranca bien.
@@ -369,7 +419,7 @@ use controlcode_extension::{prelude::*, tool, ui_method, command};
 struct Db { pools: Mutex<HashMap<String, PgPool>> }
 
 #[tool(description = "Run a read-only SQL query on a saved connection")]
-async fn db_query(ext: &Ext<Db>, connection: String, sql: String, limit: Option<u32>)
+async fn query(ext: &Ext<Db>, connection: String, sql: String, limit: Option<u32>)
     -> Result<QueryResult>
 {
     let rows = ext.state().run(&connection, &sql, limit.unwrap_or(500)).await?;
@@ -387,10 +437,10 @@ async fn connect(ext: &Ext<Db>) -> Result<()> {
     Ok(())
 }
 
-controlcode_extension::main!(Db; db_query, list_tables, connect);
+controlcode_extension::main!(Db; query, list_tables, connect);
 ```
 
-- `#[tool]` genera el `inputSchema` a partir de la firma, con `schemars`, y lo puede volcar al manifest con `cargo ccext manifest`.
+- `#[tool]` usa el nombre de la función como nombre de la tool (`mcp__db-manager__query`) y genera el `inputSchema` a partir de la firma, con `schemars`, y lo puede volcar al manifest con `cargo ccext manifest`.
 - `ext.host()` es un cliente tipado de toda la API del host.
 - `Result` se convierte en un `CallToolResult` con `isError` si falla.
 
@@ -423,8 +473,9 @@ Se reusa el marketplace (`src-tauri/src/marketplace/`), que hoy maneja registrie
 |---|---|
 | `src-tauri/src/extensions/` (nuevo) | `manifest.rs` (parseo y validación), `registry.rs` (descubrir, habilitar, por workspace), `host.rs` (procesos, JSON-RPC, supervisión), `api.rs` (API del host + permisos), `protocol.rs` (handler `ccext://`). |
 | `src-tauri/src/ipc/commands/extensions.rs` (nuevo) | `ext.tools`, `ext.call`, `ext.list`, `ext.run`, `ext.install`… y su entrada en `dispatch.rs`. |
-| `src-tauri/src/ipc/mcp.rs` | `tools_for` suma las tools de `ext.tools` para el `cwd` del contexto. En `call_tool`, un nombre que no es propio se manda como `ext.call`. Manejo de `tools/list_changed`. |
-| `src-tauri/src/bin/cli.rs` | Subcomandos `ext …` y timeouts de `ext.call`. |
+| `src-tauri/src/ipc/mcp.rs` | Un `McpContext` nuevo para `--ext <id>`: `tools_for` devuelve solo las tools de esa extensión (`ext.tools`) y `call_tool` las manda como `ext.call`. Manejo de `tools/list_changed`. Las tools de `controlcode` no cambian. |
+| Escritura de `--mcp-config` (`tab_browser_mcp`/`chat_mcp` en `mcp.rs`, `write_mcp_config` en `runs/supervisor.rs`, adaptadores de Codex/Gemini) | Agregar una entrada por extensión activa en el workspace: `ccode mcp --ext …` para la forma `server`, el comando tal cual para `external`. |
+| `src-tauri/src/bin/cli.rs` | `mcp --ext <id>`, subcomandos `ext …` y timeouts de `ext.call`. |
 | `src-tauri/src/database/schema.rs` | Tabla de extensiones instaladas, habilitadas por workspace y confianza de workspace. |
 | `src-tauri/tauri.conf.json` | Registro del protocolo `ccext` y CSP. |
 | `src/features/extensions/` (nuevo) | Bridge `postMessage`, `ExtensionView` (iframe), página de gestión, settings generados. |
@@ -435,7 +486,7 @@ Se reusa el marketplace (`src-tauri/src/marketplace/`), que hoy maneja registrie
 
 ## 13. Fases
 
-1. **Host de extensiones.** El manifest, el registro, los procesos con supervisión, el protocolo JSON-RPC, la API del host básica (`workspace`, `ui`, `storage`, `secrets`, `fs`) y los puntos `tools` y `commands`. Instalación local con `ccode ext dev`. *Listo cuando:* una extensión de ejemplo expone una tool que el agente usa desde una tab.
+1. **Host de extensiones.** El manifest, el registro, los procesos con supervisión, el protocolo JSON-RPC, la API del host básica (`workspace`, `ui`, `storage`, `secrets`, `fs`) y los puntos `mcp` (las dos formas, con `ccode mcp --ext`) y `commands`. Instalación local con `ccode ext dev`. *Listo cuando:* una extensión de ejemplo aparece como su propio servidor MCP y el agente usa su tool desde una tab.
 2. **UI.** El protocolo `ccext://`, los iframes, `window.controlcode`, el tema, las ubicaciones `tab` y `sidebar` y la página de gestión. *Listo cuando:* la query que corre el agente aparece en vivo en la UI de la extensión.
 3. **Gestor de base de datos** como primera extensión oficial (SQLite + Postgres con `sqlx`), escrita solo con la API pública. Sirve para encontrar lo que falta antes de publicar el SDK.
 4. **Lenguajes.** El cliente LSP, la integración en CodeMirror, el panel de Problemas y las tools `lsp_*`. Extensiones oficiales para Rust, TS/JS y Python que solo declaran el servidor.
@@ -445,8 +496,9 @@ Se reusa el marketplace (`src-tauri/src/marketplace/`), que hoy maneja registrie
 ## 14. Preguntas abiertas
 
 - **`tools/list_changed` en Claude Code.** ¿Recarga las tools en caliente? Define si instalar una extensión requiere reiniciar las tabs abiertas.
-- **Límite de tools.** Muchas extensiones pueden inflar la lista que ve el agente, y eso cuesta contexto y precisión. Opciones: activar extensiones por workspace (no globales), o una tool `ext_tools(search)` que liste bajo demanda en vez de exponer todo.
-- **Otros agentes.** Codex, Gemini y similares, si la app los soporta: ¿reciben las mismas tools vía su propio config MCP? `ccode mcp` es estándar, así que en principio sí.
+- **Cantidad de tools.** Un servidor por extensión ordena los nombres, pero no reduce el total. Propuesta: las extensiones se activan **por workspace** (un proyecto sin base de datos no lleva `db-manager` en su config) y se confía en la carga diferida de Claude Code cuando hay muchas. A medir con 5–10 extensiones activas antes de agregar algo más.
+- **MCP `external` y estado compartido.** ¿Vale ofrecer una forma de que un MCP externo pase por la app (la app lo lanza y hace de proxy), para tener historial y aprobación de `destructive` también ahí?
+- **Otros agentes.** Codex, Gemini y similares, si la app los soporta: ¿reciben los mismos servidores vía su propio config MCP? `ccode mcp --ext` es estándar, así que en principio sí; hay que sumarlos en sus adaptadores (`extra_args` de Codex, etc.).
 - **Backends WASM** como segunda opción para extensiones sin red ni procesos: ¿valen la complejidad?
 - **Firma de extensiones:** ¿clave por publisher o confianza en el registry?
 - **¿Migrar features propias?** Por ejemplo, diagramas o slides como extensiones oficiales, para validar el principio 4.
