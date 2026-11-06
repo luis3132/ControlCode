@@ -103,6 +103,8 @@ fn payload(tabs: Vec<&str>, authoritative: bool) -> WindowStatePayload {
                 tab_order: 0,
                 session_id: None,
                 scrollback: None,
+                pty_id: None,
+                keep_scrollback: false,
                 history_id: None,
                 account_id: None,
                 prelaunch: Vec::new(),
@@ -165,6 +167,33 @@ fn un_guardado_autoritativo_si_cierra_las_tabs_que_faltan() {
     let skills: String =
         conn.query_row("SELECT skills FROM session_history", [], |r| r.get(0)).unwrap();
     assert!(skills.contains("una-skill"), "el historial guarda la skill: {skills}");
+}
+
+/// El scrollback ya no viaja en cada guardado: una tab dormida conserva el que tiene la
+/// base, y una que lo manda lo reemplaza.
+#[test]
+fn el_scrollback_se_conserva_si_la_tab_no_lo_manda() {
+    let db: DbConnection = std::sync::Arc::new(std::sync::Mutex::new(setup_window_save()));
+    let app = mock_app_with_main_window();
+    let scrollback = |db: &DbConnection| -> Option<String> {
+        db.lock().unwrap().query_row("SELECT scrollback FROM tabs WHERE id = 't1'", [], |r| r.get(0)).unwrap()
+    };
+
+    let mut first = payload(vec!["t1", "t2"], true);
+    first.tabs[0].scrollback = Some("hola".into());
+    db_save_window_state_sync(first, &db, app.handle()).unwrap();
+    assert_eq!(scrollback(&db).as_deref(), Some("hola"));
+
+    let mut keep = payload(vec!["t1", "t2"], true);
+    keep.tabs[0].keep_scrollback = true;
+    db_save_window_state_sync(keep, &db, app.handle()).unwrap();
+    assert_eq!(scrollback(&db).as_deref(), Some("hola"), "dormida: no se toca");
+
+    // Un PTY que ya no existe tampoco borra lo guardado.
+    let mut gone = payload(vec!["t1", "t2"], true);
+    gone.tabs[0].pty_id = Some(u32::MAX);
+    db_save_window_state_sync(gone, &db, app.handle()).unwrap();
+    assert_eq!(scrollback(&db).as_deref(), Some("hola"), "sin PTY: queda lo último");
 }
 
 /// Una tab en modo HTML vuelve en modo HTML al reabrir la app; un modo que no se conoce

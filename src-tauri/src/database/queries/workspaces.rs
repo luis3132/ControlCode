@@ -42,7 +42,7 @@ pub fn db_get_last_active_workspace_id(db: &DbConnection) -> Result<String, Stri
 /// Si `default` tiene algún tab abierto sin guardar, "Nuevo workspace" (que lo resetea)
 /// debe advertir antes de descartarlo. Cuenta tabs de ventanas `is_open=1` bajo `default`.
 #[tauri::command]
-pub fn default_workspace_has_content(db: tauri::State<DbConnection>) -> Result<bool, String> {
+pub async fn default_workspace_has_content(db: tauri::State<'_, DbConnection>) -> Result<bool, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let count: i64 = conn
         .query_row(
@@ -55,7 +55,7 @@ pub fn default_workspace_has_content(db: tauri::State<DbConnection>) -> Result<b
     Ok(count > 0)
 }
 
-#[tauri::command]
+/// La registra `app::blocking`, que la corre fuera del hilo principal.
 pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<WorkspaceSummary>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     list_workspaces(&conn)
@@ -182,10 +182,10 @@ pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result
 /// ventana "scratch" abierta vía "Nuevo workspace" (que vive en el bucket por defecto,
 /// oculto) no se cuela al guardar el workspace con el que sí estás trabajando.
 #[tauri::command]
-pub fn db_save_workspace(
+pub async fn db_save_workspace(
     name: String,
     source_workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Workspace, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let now = now_ts();
@@ -260,7 +260,7 @@ pub(crate) fn move_open_windows_to_workspace(
     Ok(())
 }
 
-#[tauri::command]
+/// La registra `app::blocking`, que la corre fuera del hilo principal.
 pub fn db_get_workspace_windows(
     workspace_id: String,
     db: tauri::State<DbConnection>,
@@ -327,10 +327,10 @@ pub fn mark_window_open(db: &DbConnection, window_id: &str) -> Result<(), String
 }
 
 #[tauri::command]
-pub fn db_rename_workspace(
+pub async fn db_rename_workspace(
     workspace_id: String,
     name: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let affected = conn
@@ -355,9 +355,9 @@ pub fn db_rename_workspace(
 /// Rechaza borrar el workspace por defecto o uno que todavía tiene ventanas abiertas
 /// (evita que el autosave de esas ventanas quede apuntando a un workspace_id inexistente).
 #[tauri::command]
-pub fn db_delete_workspace(
+pub async fn db_delete_workspace(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
     if workspace_id == DEFAULT_WORKSPACE_ID {
         return Err("No se puede eliminar el workspace por defecto".to_string());

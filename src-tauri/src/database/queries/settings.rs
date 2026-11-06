@@ -30,11 +30,11 @@ pub fn set_setting(db: &DbConnection, key: &str, value: &str) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub fn db_get_setting(key: String, db: tauri::State<DbConnection>) -> Result<Option<String>, String> {
+pub async fn db_get_setting(key: String, db: tauri::State<'_, DbConnection>) -> Result<Option<String>, String> {
     get_setting(&db, &key)
 }
 
-#[tauri::command]
+/// La registra `app::blocking`, que la corre fuera del hilo principal.
 pub fn db_set_setting(key: String, value: String, db: tauri::State<DbConnection>) -> Result<(), String> {
     set_setting(&db, &key, &value)
 }

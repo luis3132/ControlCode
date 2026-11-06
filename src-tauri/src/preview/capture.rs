@@ -57,7 +57,7 @@ pub async fn preview_capture<R: Runtime>(webview: Webview<R>) -> Result<Response
 /// En la carpeta temporal del sistema y no en el proyecto: dentro del workspace aparecería
 /// en git, y cualquier agente de la máquina puede leer la temporal.
 #[tauri::command]
-pub fn preview_save_capture(request: Request<'_>) -> Result<String, String> {
+pub async fn preview_save_capture(request: Request<'_>) -> Result<String, String> {
     // De quién es la foto. Va por cabecera porque el cuerpo es el PNG crudo, y termina en
     // el NOMBRE del archivo: con dos agentes sacando fotos de la misma página, que la ruta
     // diga de quién es evita que uno abra la del otro.
@@ -232,7 +232,7 @@ fn mime_for(path: &Path) -> &'static str {
 
 /// Un archivo del disco, listo para que la página lo ponga en un `<input type=file>`.
 #[tauri::command]
-pub fn preview_read_upload(path: String) -> Result<UploadFile, String> {
+pub async fn preview_read_upload(path: String) -> Result<UploadFile, String> {
     use base64::Engine;
     let file = Path::new(&path);
     let meta = fs::metadata(file).map_err(|e| format!("no se pudo leer {path}: {e}"))?;

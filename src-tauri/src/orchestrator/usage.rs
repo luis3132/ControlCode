@@ -85,14 +85,14 @@ fn stats_with_limit(limit: usize) -> Stats {
 
 /// Estado del modo orquestador. Lo pide la UI al montar; después se mantiene con el evento.
 #[tauri::command]
-pub fn orchestrator_stats(db: tauri::State<crate::database::DbConnection>) -> Result<Stats, String> {
+pub async fn orchestrator_stats(db: tauri::State<'_, crate::database::DbConnection>) -> Result<Stats, String> {
     Ok(stats_with_limit(watch_limit(&db)))
 }
 
 /// Pone el contador en cero. Sirve para medir una tarea concreta ("¿cuánto costó esto?")
 /// sin reiniciar la app.
 #[tauri::command]
-pub fn orchestrator_reset_usage(app: AppHandle) -> Result<(), String> {
+pub async fn orchestrator_reset_usage(app: AppHandle) -> Result<(), String> {
     *usage() = Usage::default();
     emit_stats(&app);
     Ok(())

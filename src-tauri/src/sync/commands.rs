@@ -92,14 +92,14 @@ fn status(conn: &Connection) -> SyncStatus {
 }
 
 #[tauri::command]
-pub fn sync_status(app: AppHandle) -> Result<SyncStatus, String> {
+pub async fn sync_status(app: AppHandle) -> Result<SyncStatus, String> {
     let db = db(&app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     Ok(status(&conn))
 }
 
 #[tauri::command]
-pub fn sync_set_auto(app: AppHandle, auto: bool) -> Result<(), String> {
+pub async fn sync_set_auto(app: AppHandle, auto: bool) -> Result<(), String> {
     let db = db(&app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     set(&conn, "sync.auto", if auto { "1" } else { "0" })

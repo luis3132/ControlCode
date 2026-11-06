@@ -497,9 +497,9 @@ pub fn list_session_history(
 /// (vive fuera de la app, en `~/.claude/projects` y equivalentes): esto solo saca la
 /// sesión de la vista de Sesiones.
 #[tauri::command]
-pub fn db_delete_session_history(
+pub async fn db_delete_session_history(
     history_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM session_history WHERE id = ?1", [&history_id])

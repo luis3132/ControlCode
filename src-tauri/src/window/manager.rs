@@ -318,7 +318,7 @@ pub async fn close_and_forget_window(app: tauri::AppHandle, label: String) -> Re
 /// juegos de ventanas para el mismo layout guardado), simplemente se enfoca la que ya
 /// existe.
 #[tauri::command]
-pub fn focus_window(app: tauri::AppHandle, label: String) -> Result<(), String> {
+pub async fn focus_window(app: tauri::AppHandle, label: String) -> Result<(), String> {
     if let Some(win) = app.get_webview_window(&label) {
         let _ = win.unminimize();
         win.set_focus().map_err(|e| e.to_string())?;
@@ -351,7 +351,7 @@ pub async fn broadcast_event(
 /// Retorna el directorio home del usuario.
 /// Necesario porque `process.env.HOME` no existe en el contexto browser de Tauri.
 #[tauri::command]
-pub fn get_home_dir() -> Result<String, String> {
+pub async fn get_home_dir() -> Result<String, String> {
     dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .ok_or_else(|| "Cannot determine home directory".to_string())

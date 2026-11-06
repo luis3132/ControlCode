@@ -330,10 +330,14 @@ export function Terminal({
 
     const attachListeners = async (ptyId: number) => {
       // ── 3. Escuchar stdout del PTY ──────────────────────
-      unlistenData = await listen<PtyData>(`pty-data-${ptyId}`, (event) => onPtyData(event.payload));
+      // `listen` es async: si la terminal se desmonta mientras se registra, la limpieza ya
+      // corrió y no lo va a soltar. Se suelta acá, o seguiría escribiendo en un xterm muerto.
+      const offData = await listen<PtyData>(`pty-data-${ptyId}`, (event) => onPtyData(event.payload));
+      if (cancelled) { offData(); return; }
+      unlistenData = offData;
 
       // ── 4. Escuchar salida del proceso ──────────────────
-      unlistenExit = await listen<{ code: number }>(
+      const offExit = await listen<{ code: number }>(
         `pty-exit-${ptyId}`,
         (event) => {
           setStatus("exited");
@@ -343,6 +347,8 @@ export function Terminal({
           onExit?.(event.payload.code);
         }
       );
+      if (cancelled) { offExit(); return; }
+      unlistenExit = offExit;
     };
 
     const initPty = async () => {

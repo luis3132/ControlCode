@@ -256,10 +256,10 @@ pub fn default_steps() -> Vec<GraphifyStep> {
 /// caen los destinos de alcance `project`, que son los que conviven con las skills que la
 /// app monta en ese repo.
 #[tauri::command]
-pub fn graphify_plan(
+pub async fn graphify_plan(
     cwd: String,
     scope: Scope,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<GraphifyPlan, String> {
     let saved = crate::database::get_setting(&db, STEPS_KEY)?
         .and_then(|raw| serde_json::from_str::<Vec<GraphifyStep>>(&raw).ok())
@@ -284,9 +284,9 @@ pub fn graphify_install_command(platform: Option<String>, scope: Scope) -> Strin
 /// Guarda los comandos editados. Devuelve los que quedaron vigentes, que es lo que la
 /// interfaz muestra: así guardar y leer no pueden discrepar.
 #[tauri::command]
-pub fn graphify_save_steps(
+pub async fn graphify_save_steps(
     steps: Vec<GraphifyStep>,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Vec<GraphifyStep>, String> {
     let merged = merge_steps(&steps);
     let raw = serde_json::to_string(&merged).map_err(|e| e.to_string())?;

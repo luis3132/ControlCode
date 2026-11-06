@@ -252,7 +252,7 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Sen
 }
 
 #[tauri::command]
-pub fn procs_list() -> Vec<Subprocess> {
+pub async fn procs_list() -> Vec<Subprocess> {
     super::list(None)
 }
 
@@ -277,7 +277,7 @@ pub async fn procs_restart(id: String) -> Result<Subprocess, String> {
 
 /// Olvida los terminados (uno, o todos con `id` vacío).
 #[tauri::command]
-pub fn procs_clear(id: Option<String>) -> usize {
+pub async fn procs_clear(id: Option<String>) -> usize {
     super::clear(id.as_deref())
 }
 

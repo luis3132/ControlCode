@@ -8,7 +8,9 @@ use tauri::{AppHandle, Emitter};
 
 struct PtySession {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    /// Con su propio lock: escribir puede bloquearse (un proceso que no lee su entrada) y
+    /// no puede trabar el registro entero mientras tanto.
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Box<dyn portable_pty::Child + Send>,
     /// Contenedor de ciclo de vida de la tab. Matar `killer` alcanza solo al proceso que
     /// lanzamos; esto se lleva además a toda su descendencia (ver `containment`).
@@ -363,7 +365,7 @@ pub fn spawn<R: tauri::Runtime>(app: &AppHandle<R>, opts: SpawnOptions<'_>) -> R
         .try_clone_reader()
         .map_err(|e| format!("Failed to get PTY reader: {e}"))?;
 
-    registry().insert(id, PtySession { master: pair.master, writer, killer: child, group });
+    registry().insert(id, PtySession { master: pair.master, writer: Arc::new(Mutex::new(writer)), killer: child, group });
     buffers().insert(id, PtyBuffer::default());
 
     let app_clone = app.clone();
@@ -424,6 +426,15 @@ pub fn spawn<R: tauri::Runtime>(app: &AppHandle<R>, opts: SpawnOptions<'_>) -> R
     Ok(id)
 }
 
+/// Cuánto se espera, después del primer pedazo, a que llegue más antes de mandarlo.
+///
+/// Cada evento es un `eval` en el webview, que en Linux corre en el hilo de la interfaz.
+/// Una TUI que redibuja sin parar (un spinner, un agente escribiendo) manda cientos de
+/// pedazos chicos por segundo, y con varias tabs así la cola de `eval` congelaba la app.
+/// Juntando unos milisegundos sale como mucho un evento por frame y por terminal; el eco
+/// de lo que se tipea apenas se demora.
+const EMIT_COALESCE: std::time::Duration = std::time::Duration::from_millis(6);
+
 /// Junta lo que el lector fue dejando y lo manda al frontend, cortando siempre en un
 /// borde de carácter UTF-8.
 fn emit_loop<R: tauri::Runtime>(app: &AppHandle<R>, event_name: &str, rx: &std::sync::mpsc::Receiver<Vec<u8>>) {
@@ -431,8 +442,10 @@ fn emit_loop<R: tauri::Runtime>(app: &AppHandle<R>, event_name: &str, rx: &std::
     let mut end: u64 = 0;
     while let Ok(chunk) = rx.recv() {
         pending.extend_from_slice(&chunk);
+        let deadline = std::time::Instant::now() + EMIT_COALESCE;
         while pending.len() < MAX_EVENT_BYTES {
-            match rx.try_recv() {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(left) {
                 Ok(more) => pending.extend_from_slice(&more),
                 Err(_) => break,
             }
@@ -507,7 +520,7 @@ pub fn is_running(id: u32) -> bool {
 /// Cuánto escribió en total cada PTY. Barato (no copia nada): el autoguardado lo usa para
 /// pedir el scrollback solo de las tabs que tuvieron salida nueva.
 #[tauri::command]
-pub fn pty_output_totals(ids: Vec<u32>) -> HashMap<u32, u64> {
+pub async fn pty_output_totals(ids: Vec<u32>) -> HashMap<u32, u64> {
     let buffers = buffers();
     ids.into_iter().filter_map(|id| buffers.get(&id).map(|b| (id, b.total_bytes))).collect()
 }
@@ -537,10 +550,13 @@ pub fn scrollback_of(id: u32) -> Option<(String, u64)> {
 /// Escribe al PTY desde código Rust (servidor IPC). `pty_write` es la versión `async`
 /// que expone el mismo comportamiento al frontend vía invoke.
 pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {
-    let mut registry = registry();
-    let session = registry.get_mut(&id).ok_or_else(|| format!("PTY session {id} not found"))?;
-    session.writer.write_all(data.as_bytes()).map_err(|e| format!("PTY write error: {e}"))?;
-    session.writer.flush().map_err(|e| format!("PTY flush error: {e}"))
+    let writer = registry()
+        .get(&id)
+        .map(|session| session.writer.clone())
+        .ok_or_else(|| format!("PTY session {id} not found"))?;
+    let mut writer = writer.lock().unwrap_or_else(|e| e.into_inner());
+    writer.write_all(data.as_bytes()).map_err(|e| format!("PTY write error: {e}"))?;
+    writer.flush().map_err(|e| format!("PTY flush error: {e}"))
 }
 
 /// Escribe datos (input del usuario desde xterm.js) al PTY.
@@ -574,7 +590,11 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
 /// Mata el proceso del PTY y toda su descendencia, pero conserva su salida: un subproceso
 /// detenido sigue mostrando sus logs hasta que se lo limpia (`release`).
 pub fn terminate(id: u32) -> Result<(), String> {
-    if let Some(mut session) = registry().remove(&id) {
+    // El lock se suelta antes de matar: `kill_all` espera hasta 300 ms a que el árbol se
+    // muera, y con el registro tomado se trababan todas las terminales (escribir,
+    // redimensionar, el autoguardado) mientras tanto.
+    let session = registry().remove(&id);
+    if let Some(mut session) = session {
         // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
         // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los
         // hijos y se pierde el vínculo). Con cgroups o Job Objects el orden da igual.
@@ -618,7 +638,7 @@ pub fn shell_launch(script: &str) -> CommandBuilder {
 /// app. `None` = no se puede saber desde afuera (Windows: la informa el propio PowerShell
 /// por OSC 9;9, ver `shell::POWERSHELL_INTEGRATION`).
 #[tauri::command]
-pub fn pty_cwd(id: u32) -> Option<String> {
+pub async fn pty_cwd(id: u32) -> Option<String> {
     let pid = registry().get(&id).and_then(|s| s.killer.process_id())?;
     super::shell::process_cwd(pid)
 }

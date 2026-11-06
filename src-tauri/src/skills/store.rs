@@ -70,7 +70,7 @@ pub(super) fn fetch_usage_for_skill(conn: &rusqlite::Connection, skill_id: &str)
     Ok(rows)
 }
 
-#[tauri::command]
+/// La registra `app::blocking`, que la corre fuera del hilo principal.
 pub fn list_skills(db: tauri::State<DbConnection>) -> Result<Vec<SkillWithUsage>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let query = format!("SELECT {SKILL_COLUMNS} FROM skills ORDER BY name ASC");

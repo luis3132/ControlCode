@@ -91,7 +91,16 @@ pub struct TabStatePayload {
     pub cwd: String,
     pub tab_order: i32,
     pub session_id: Option<String>,
+    /// El scrollback a guardar, cuando lo manda el frontend. Con `pty_id` no hace falta:
+    /// el backend lo lee de su propio buffer (ver `ScrollbackSource`).
     pub scrollback: Option<String>,
+    /// El PTY vivo de la tab: el backend lee de ahí el scrollback, y solo lo reescribe si
+    /// el proceso escribió algo desde el último guardado.
+    #[serde(default)]
+    pub pty_id: Option<u32>,
+    /// Dejar el scrollback que ya está en la base (una tab dormida: el suyo vino de ahí).
+    #[serde(default)]
+    pub keep_scrollback: bool,
     pub history_id: Option<String>,
     pub account_id: Option<String>,
     #[serde(default)]
