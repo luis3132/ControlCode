@@ -106,6 +106,35 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
     Ok(())
 }
 
+/// Al arrancar, Tauri ya creó la ventana "main" (`tauri.conf.json`) y `restore_windows` la
+/// reusa solo si alguna fila del workspace se llama así. Después de un "Abrir aquí" esa fila
+/// queda con otro label, y entonces se restauraban las ventanas del workspace y además
+/// quedaba "main" en blanco, en `default`: su autoguardado le subía el `last_active` a
+/// `default` y el arranque siguiente abría el workspace equivocado. Acá la primera ventana
+/// con tabs pasa a llamarse "main".
+pub fn adopt_main(db: &DbConnection, rows: &mut [WindowRow]) -> Result<(), String> {
+    if rows.iter().any(|w| w.label == "main") {
+        return Ok(());
+    }
+    let Some(first) = rows
+        .iter_mut()
+        .find(|w| database::count_tabs_for_window(db, &w.id).unwrap_or(0) > 0)
+    else {
+        return Ok(());
+    };
+    // El label es único en toda la tabla: si lo tiene una fila de otro workspace, se le da otro.
+    let taken: Option<String> = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        conn.query_row("SELECT id FROM windows WHERE label = 'main'", [], |r| r.get(0)).ok()
+    };
+    if let Some(other) = taken {
+        database::rename_window_label(db, &other, &database::fresh_window_label())?;
+    }
+    database::rename_window_label(db, &first.id, "main")?;
+    first.label = "main".into();
+    Ok(())
+}
+
 /// Crea una ventana nativa en blanco (sin tabs) para un workspace específico. Usado
 /// cuando un workspace se queda sin ninguna ventana viva que mostrar: al cerrar la única
 /// ventana que le quedaba (ver `close_and_forget_window`), o al intentar "abrir" un
@@ -162,8 +191,7 @@ pub async fn open_workspace(
         .find_map(|row| app.get_webview_window(&row.label));
     if let Some(win) = live_window {
         database::touch_workspace_now(&db, &workspace_id)?;
-        let _ = win.unminimize();
-        let _ = win.set_focus();
+        raise(&win);
         return Ok(());
     }
 
@@ -182,19 +210,24 @@ pub async fn open_workspace(
 
     restore_windows(&app, rows, false)?;
 
-    for label in previously_open {
-        if let Some(win) = app.get_webview_window(&label) {
-            let _ = super::close_guard::close_now(&win);
-        }
-    }
-
     // Si el workspace no tenía filas (0 ventanas guardadas) o todas sus filas eran
     // filas vacías que `restore_windows` se saltó, no quedó ninguna ventana viva
     // para este workspace pese a haberlo "abierto" — se le abre una en blanco en vez de
     // dejar al usuario sin nada visible.
-    let live_now = database::db_get_workspace_windows(workspace_id.clone(), app.state::<DbConnection>())?;
-    if live_now.is_empty() {
+    //
+    // ANTES de cerrar las anteriores: al revés, si no se había podido crear ninguna, "Abrir
+    // aquí" cerraba la única ventana que había, la app se quedaba sin ventanas y se cerraba.
+    if !has_live_window(&app, &workspace_id)? {
         spawn_blank_window(&app, &db, &workspace_id)?;
+    }
+
+    // Y se cierran solo si de verdad quedó una ventana del workspace nuevo a la vista.
+    if has_live_window(&app, &workspace_id)? {
+        for label in previously_open {
+            if let Some(win) = app.get_webview_window(&label) {
+                let _ = super::close_guard::close_now(&win);
+            }
+        }
     }
 
     let _ = app.emit("cc-workspace-changed", ());
@@ -312,18 +345,49 @@ pub async fn close_and_forget_window(app: tauri::AppHandle, label: String) -> Re
     Ok(())
 }
 
+/// Si el workspace tiene alguna ventana nativa viva en este proceso (no solo `is_open` en la
+/// base, que puede haber quedado viejo).
+fn has_live_window(app: &AppHandle, workspace_id: &str) -> Result<bool, String> {
+    let rows = database::db_get_workspace_windows(workspace_id.to_string(), app.state::<DbConnection>())?;
+    Ok(rows.iter().any(|row| app.get_webview_window(&row.label).is_some()))
+}
+
+/// Trae una ventana al frente.
+///
+/// En GNOME con Wayland, `set_focus` no hace nada: el compositor no deja que una app se
+/// ponga adelante sola, a lo sumo avisa "está lista". Ahí se la esconde y se la vuelve a
+/// mostrar, que el compositor sí trata como una ventana nueva y la pone adelante.
+fn raise<R: tauri::Runtime>(win: &tauri::WebviewWindow<R>) {
+    let _ = win.unminimize();
+    if win.is_focused().unwrap_or(false) {
+        return;
+    }
+    if is_wayland() {
+        let _ = win.hide();
+        let _ = win.show();
+    }
+    let _ = win.set_focus();
+}
+
+fn is_wayland() -> bool {
+    cfg!(target_os = "linux")
+        && (std::env::var("XDG_SESSION_TYPE").is_ok_and(|v| v.eq_ignore_ascii_case("wayland"))
+            || std::env::var_os("WAYLAND_DISPLAY").is_some())
+}
+
 /// Trae al frente una ventana nativa ya abierta (des-minimiza + foco). Usado cuando el
 /// usuario intenta "abrir" un workspace que ya tiene ventanas vivas — en vez de crear
 /// ventanas duplicadas para el mismo workspace (el caos que reportó el usuario: dos
 /// juegos de ventanas para el mismo layout guardado), simplemente se enfoca la que ya
 /// existe.
+///
+/// Devuelve si la ventana existía: `false` es que no hay nada que enfocar, y quien llama
+/// tiene que abrirla en vez de dar el pedido por resuelto.
 #[tauri::command]
-pub async fn focus_window(app: tauri::AppHandle, label: String) -> Result<(), String> {
-    if let Some(win) = app.get_webview_window(&label) {
-        let _ = win.unminimize();
-        win.set_focus().map_err(|e| e.to_string())?;
-    }
-    Ok(())
+pub async fn focus_window(app: tauri::AppHandle, label: String) -> Result<bool, String> {
+    let Some(win) = app.get_webview_window(&label) else { return Ok(false) };
+    raise(&win);
+    Ok(true)
 }
 
 /// "Nueva ventana": una ventana en blanco más en el workspace dado, con su fila, así su

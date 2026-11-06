@@ -361,7 +361,8 @@ pub fn run() {
             crate::ipc::mcp::sweep_configs(&db);
 
             let active_id = crate::database::db_get_last_active_workspace_id(&db)?;
-            let windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;
+            let mut windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;
+            crate::window::adopt_main(&db, &mut windows)?;
             crate::window::restore_windows(app.handle(), windows, true)?;
 
             // Servidor IPC de la CLI `controlcode` (Fase 8). Va después de restaurar las

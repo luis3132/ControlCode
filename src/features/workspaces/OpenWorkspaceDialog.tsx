@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  AlertaToast,
   Button,
 } from "neogestify-ui-components";
 import { useWorkspacesStore } from "@/features/workspaces/store";
@@ -22,6 +23,9 @@ export function OpenWorkspaceDialog({ workspace, onClose }: OpenWorkspaceDialogP
     try {
       await openWorkspace(workspace.id, where);
       onClose();
+    } catch (e) {
+      console.error(e);
+      AlertaToast(t("workspace.open.failed"), String(e), "error", 8000);
     } finally {
       setBusy(false);
     }

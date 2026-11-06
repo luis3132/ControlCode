@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { Button, AddIcon, BoxIcon, ChevronDownIcon, FolderIcon, SaveIcon, Tooltip } from "neogestify-ui-components";
+import { AlertaToast, Button, AddIcon, BoxIcon, ChevronDownIcon, FolderIcon, SaveIcon, Tooltip } from "neogestify-ui-components";
 
 import { ExternalIcon } from "@/app/icons";
 import { useTabsStore } from "@/features/tabs/store";
@@ -128,6 +128,7 @@ export function WorkspaceChip({ compact = false }: { compact?: boolean }) {
       setOpen(false);
     } catch (e) {
       console.error(e);
+      AlertaToast(t("workspace.open.failed"), String(e), "error", 8000);
     } finally {
       setOpening(null);
     }

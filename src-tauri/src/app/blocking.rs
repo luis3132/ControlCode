@@ -21,15 +21,41 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| e.to_string())?
 }
 
+/// Las ventanas nativas que existen ahora en este proceso.
+///
+/// `is_open` en la base no alcanza para decir qué está abierto: queda en 1 si la app se
+/// cerró con "cerrar todo" (sale sin pasar por el cierre de cada ventana), si se la mató o
+/// si una ventana no se pudo crear. Con eso un workspace figuraba abierto sin ninguna
+/// ventana detrás, y elegirlo "enfocaba" una ventana que no existía: no pasaba nada y no
+/// había forma de abrirlo.
+fn live_labels(app: &AppHandle) -> std::collections::HashSet<String> {
+    app.webview_windows().into_keys().collect()
+}
+
 /// Lo pide cada ventana cuando cambian los workspaces o las tabs de alguna.
 #[tauri::command]
 pub async fn db_list_workspaces(app: AppHandle) -> Result<Vec<WorkspaceSummary>, String> {
-    blocking(app, crate::database::db_list_workspaces).await
+    let live = live_labels(&app);
+    blocking(app, move |db| {
+        let mut workspaces = crate::database::db_list_workspaces(db.clone())?;
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        for ws in &mut workspaces {
+            ws.open_window_count = crate::database::open_window_labels(&conn, &ws.id)?
+                .iter()
+                .filter(|label| live.contains(*label))
+                .count() as i64;
+        }
+        Ok(workspaces)
+    })
+    .await
 }
 
+/// Las ventanas abiertas de un workspace: las que la base da por abiertas y además existen.
 #[tauri::command]
 pub async fn db_get_workspace_windows(app: AppHandle, workspace_id: String) -> Result<Vec<WindowRow>, String> {
-    blocking(app, move |db| crate::database::db_get_workspace_windows(workspace_id, db)).await
+    let live = live_labels(&app);
+    let rows = blocking(app, move |db| crate::database::db_get_workspace_windows(workspace_id, db)).await?;
+    Ok(rows.into_iter().filter(|row| live.contains(&row.label)).collect())
 }
 
 #[tauri::command]

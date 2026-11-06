@@ -61,6 +61,19 @@ pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<Workspac
     list_workspaces(&conn)
 }
 
+/// Los labels de las ventanas de un workspace que la base da por abiertas.
+pub fn open_window_labels(conn: &rusqlite::Connection, workspace_id: &str) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT label FROM windows WHERE workspace_id = ?1 AND is_open = 1")
+        .map_err(|e| e.to_string())?;
+    let labels = stmt
+        .query_map([workspace_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(labels)
+}
+
 /// Los workspaces guardados (todos menos `default`), el más usado primero.
 pub fn list_workspaces(conn: &rusqlite::Connection) -> Result<Vec<WorkspaceSummary>, String> {
     let mut stmt = conn

@@ -33,6 +33,7 @@
   "workspace.open.title": "Ouvrir « {{name}} »",
   "workspace.open.body": "Où l'ouvrir ? Dans cette fenêtre, qui cède la place à celles du workspace, ou dans des fenêtres séparées.",
   "workspace.open.here": "Dans cette fenêtre",
+  "workspace.open.failed": "Impossible d'ouvrir le workspace",
   "workspace.open.newWindow": "Dans une autre fenêtre",
   "workspace.list.open": "En cours d'utilisation",
   "workspace.list.goTo": "Aller à la fenêtre",
