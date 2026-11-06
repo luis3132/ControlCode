@@ -1818,6 +1818,7 @@
   "android.connecting": "Connecting to the device…",
   "android.screen": "Device screen: the mouse is your finger, the keyboard types, Esc or right click is back",
   "android.untypeable": "adb can't type these characters: {{chars}}",
+  "android.injectBlocked": "The phone doesn't let adb simulate touches or keys. On Xiaomi, Redmi and POCO: Settings → Developer options → turn on \"USB debugging (Security settings)\" (it asks for a Mi account and a SIM), then try again.",
   "android.agentActing": "{{agent}} is using the device",
   "android.anAgent": "An agent"
 }

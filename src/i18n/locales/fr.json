@@ -1818,6 +1818,7 @@
   "android.connecting": "Connexion à l'appareil…",
   "android.screen": "Écran de l'appareil : la souris est votre doigt, le clavier écrit, Échap ou clic droit fait retour",
   "android.untypeable": "adb ne peut pas taper ces caractères : {{chars}}",
+  "android.injectBlocked": "Le téléphone ne laisse pas adb simuler des touchers ni des touches. Sur Xiaomi, Redmi et POCO : Paramètres → Options pour les développeurs → activez « Débogage USB (paramètres de sécurité) » (un compte Mi et une SIM sont demandés), puis réessayez.",
   "android.agentActing": "{{agent}} utilise l'appareil",
   "android.anAgent": "Un agent"
 }

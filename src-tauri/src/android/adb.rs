@@ -60,10 +60,10 @@ fn search_adb() -> Option<PathBuf> {
 /// La ruta de `adb`, si hay uno.
 pub fn locate() -> Option<PathBuf> {
     let mut cached = LOCATED.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((at, found)) = cached.as_ref() {
-        if at.elapsed() < LOCATE_TTL {
-            return found.clone();
-        }
+    if let Some((at, found)) = cached.as_ref()
+        && at.elapsed() < LOCATE_TTL
+    {
+        return found.clone();
     }
     let found = search_adb();
     *cached = Some((Instant::now(), found.clone()));
@@ -81,14 +81,42 @@ pub fn emulator() -> Option<PathBuf> {
     roots.iter().map(|r| r.join("emulator").join(&name)).find(|p| p.is_file())
 }
 
-/// Corre `adb [-s serial] args…` y devuelve su salida estándar tal cual (puede ser binaria:
-/// una captura).
-pub fn run(serial: Option<&str>, args: &[&str], limit: Duration) -> Result<Vec<u8>, String> {
+/// Lo que se le dice a quien pidió un toque que el teléfono no deja simular. Empieza con
+/// `INJECT_EVENTS` para que la vista lo reconozca y lo muestre en el idioma de la persona.
+pub const INJECT_BLOCKED: &str = "INJECT_EVENTS: the device does not let adb simulate touches or keys. \
+On Xiaomi, Redmi and POCO phones, turn on \"USB debugging (Security settings)\" in Developer options \
+(MIUI asks for a Mi account and a SIM), then try again. Only the user can do it, on the phone.";
+
+/// Un error de Android traducido a algo que se pueda hacer.
+pub fn explain(text: String) -> String {
+    if text.contains("INJECT_EVENTS") {
+        INJECT_BLOCKED.to_string()
+    } else {
+        text
+    }
+}
+
+/// `adb [-s serial]`, listo para agregarle argumentos, para lo que queda corriendo (el video,
+/// la entrada de la persona). En Windows, sin abrir una consola.
+pub fn command(serial: Option<&str>) -> Result<Command, String> {
     let bin = locate().ok_or_else(|| NOT_FOUND.to_string())?;
     let mut cmd = Command::new(bin);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     if let Some(serial) = serial {
         cmd.args(["-s", serial]);
     }
+    Ok(cmd)
+}
+
+/// Corre `adb [-s serial] args…` y devuelve su salida estándar tal cual (puede ser binaria:
+/// una captura).
+pub fn run(serial: Option<&str>, args: &[&str], limit: Duration) -> Result<Vec<u8>, String> {
+    let mut cmd = command(serial)?;
     cmd.args(args);
     let out = output_with_timeout(&mut cmd, limit).map_err(|e| {
         if e.kind() == std::io::ErrorKind::TimedOut {
@@ -100,7 +128,7 @@ pub fn run(serial: Option<&str>, args: &[&str], limit: Duration) -> Result<Vec<u
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
         let text = if err.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { err };
-        return Err(if text.is_empty() { format!("adb {} failed", args.join(" ")) } else { text });
+        return Err(if text.is_empty() { format!("adb {} failed", args.join(" ")) } else { explain(text) });
     }
     Ok(out.stdout)
 }
@@ -114,7 +142,7 @@ pub fn shell(serial: &str, command: &str, limit: Duration) -> Result<String, Str
     // `am`, `pm`) y salen igual con 0.
     if let Some(at) = text.find("Exception occurred while executing") {
         let detail = text[at..].lines().take(2).collect::<Vec<_>>().join(" ");
-        return Err(detail);
+        return Err(explain(detail));
     }
     Ok(text)
 }
@@ -177,10 +205,10 @@ static AVDS: Mutex<Option<(Instant, Vec<String>)>> = Mutex::new(None);
 /// cada pocos segundos y cada vez sería lanzar el emulador para que liste.
 pub fn avds() -> Vec<String> {
     let mut cached = AVDS.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((at, list)) = cached.as_ref() {
-        if at.elapsed() < LOCATE_TTL {
-            return list.clone();
-        }
+    if let Some((at, list)) = cached.as_ref()
+        && at.elapsed() < LOCATE_TTL
+    {
+        return list.clone();
     }
     let list = emulator()
         .and_then(|bin| output_with_timeout(Command::new(bin).arg("-list-avds"), Duration::from_secs(10)).ok())

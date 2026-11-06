@@ -20,6 +20,10 @@ export interface AndroidStatus {
 
 /** Lo que hace la persona sobre la pantalla, en píxeles del dispositivo. */
 export type UserInput =
+  /** El dedo en vivo: baja, se mueve y sube. */
+  | { kind: "down"; x: number; y: number }
+  | { kind: "move"; x: number; y: number }
+  | { kind: "up"; x: number; y: number }
   | { kind: "tap"; x: number; y: number }
   | { kind: "hold"; x: number; y: number; ms: number }
   | { kind: "swipe"; x: number; y: number; x2: number; y2: number; ms: number }
@@ -36,6 +40,11 @@ export async function androidFrame(serial: string): Promise<ArrayBuffer> {
   return png instanceof ArrayBuffer ? png : new Uint8Array(png).buffer;
 }
 
+/** La dirección del video en vivo de la pantalla (un socket local; ver `stream.ts`). */
+export const androidStream = (serial: string) => invoke<string>("android_stream", { serial });
+
+/** Va a la cola del dispositivo y vuelve enseguida; los errores llegan por el evento
+ *  `android-input-error`. */
 export const androidInput = (serial: string, action: UserInput) => invoke<void>("android_input", { serial, action });
 
 export const androidSelect = (serial: string | null) => invoke<void>("android_select", { serial });

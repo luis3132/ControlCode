@@ -34,6 +34,7 @@ pub fn run() {
             crate::android::commands::android_input,
             crate::android::commands::android_select,
             crate::android::commands::android_start_avd,
+            crate::android::commands::android_stream,
             // Terminal embebida (PTY)
             crate::terminal::pty_create,
             crate::terminal::pty_attach,

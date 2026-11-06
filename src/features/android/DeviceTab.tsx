@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
@@ -9,30 +10,15 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import type { AndroidView } from "@/features/tabs/viewTabs";
 
 import { fitInside, gesture, toDevice, wheelSwipe, type Size } from "./geometry";
-import { androidFrame, androidInput, androidSelect, androidStartAvd, deviceName, type UserInput } from "./ipc";
+import { androidInput, androidSelect, androidStartAvd, deviceName, type UserInput } from "./ipc";
 import { specialKey, typedChar, untypeable } from "./keys";
 import { TOUCH_MS, useAndroidStore, type ShownTouch } from "./store";
+import { useScreen } from "./stream";
 
-/** Cada cuánto se pide un cuadro mientras nadie toca nada. `screencap` tarda de 100 a
- *  600 ms según el teléfono; se pide el siguiente recién cuando llegó el anterior. */
-const FRAME_EVERY_MS = 250;
 /** Cada cuánto se vuelve a mirar qué dispositivos hay, mientras la vista se ve. */
 const DEVICES_EVERY_MS = 3000;
 /** Cuánto se juntan las letras antes de mandarlas: una llamada a adb por letra se notaría. */
 const TYPE_BATCH_MS = 140;
-
-interface Frame {
-  url: string;
-  width: number;
-  height: number;
-}
-
-/** El tamaño de un PNG, de su cabecera. */
-function pngSize(bytes: Uint8Array): Size | null {
-  if (bytes.length < 24 || bytes[0] !== 0x89 || bytes[1] !== 0x50) return null;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return { width: view.getUint32(16), height: view.getUint32(20) };
-}
 
 /**
  * La pantalla de un dispositivo Android, en vivo, que se usa con el mouse como dedo y con
@@ -51,12 +37,22 @@ export function DeviceTab({ view, shown }: { view: AndroidView; shown: boolean }
   const chosen = devices.find((d) => d.serial === view.serial);
   const serial = device?.serial ?? null;
 
-  const [frame, setFrame] = useState<Frame | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const screen = useScreen(serial, shown);
   const [notice, setNotice] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
-  const kick = useRef<(() => void) | null>(null);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
+
+  const explain = (message: string) => (message.startsWith("INJECT_EVENTS") ? t("android.injectBlocked") : message);
+
+  // Lo que el teléfono no dejó hacer (los toques van sin esperar respuesta).
+  useEffect(() => {
+    if (!serial) return;
+    const off = listen<{ serial: string; message: string }>("android-input-error", (e) => {
+      if (e.payload.serial === serial) setNotice(explain(e.payload.message));
+    });
+    return () => void off.then((f) => f());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serial]);
 
   // Mientras se ve, mirar seguido qué hay conectado: enchufar el teléfono tiene que alcanzar.
   useEffect(() => {
@@ -74,57 +70,14 @@ export function DeviceTab({ view, shown }: { view: AndroidView; shown: boolean }
     if (shown) androidSelect(device.serial).catch(() => {});
   }, [device, shown, view.id, view.title]);
 
-  // Los cuadros: uno detrás del otro mientras la tab se ve.
-  useEffect(() => {
-    if (!shown || !serial) return;
-    let alive = true;
-    let wake: (() => void) | null = null;
-    let lastUrl: string | null = null;
-    kick.current = () => wake?.();
-    (async () => {
-      while (alive) {
-        const started = performance.now();
-        try {
-          const png = new Uint8Array(await androidFrame(serial));
-          const size = pngSize(png);
-          if (!alive) break;
-          if (size) {
-            const url = URL.createObjectURL(new Blob([png], { type: "image/png" }));
-            setFrame({ url, ...size });
-            if (lastUrl) URL.revokeObjectURL(lastUrl);
-            lastUrl = url;
-            setError(null);
-          }
-        } catch (e) {
-          if (!alive) break;
-          setError(String(e));
-        }
-        const rest = Math.max(0, FRAME_EVERY_MS - (performance.now() - started));
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, rest);
-          wake = () => {
-            clearTimeout(timer);
-            resolve();
-          };
-        });
-        wake = null;
-      }
-    })();
-    return () => {
-      alive = false;
-      wake?.();
-      kick.current = null;
-      if (lastUrl) setTimeout(() => URL.revokeObjectURL(lastUrl!), 1000);
-    };
-  }, [shown, serial]);
-
   // Lo que hace un agente se ve enseguida, sin esperar al próximo cuadro.
   const latestAgent = useMemo(
     () => [...touches].reverse().find((x) => x.ownerId && x.touch.serial === serial) ?? null,
     [touches, serial]
   );
   useEffect(() => {
-    if (latestAgent) setTimeout(() => kick.current?.(), 120);
+    if (latestAgent) setTimeout(() => screen.kick(), 120);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestAgent]);
 
   /** Manda algo al dispositivo, en orden, y pide el cuadro que lo muestra. */
@@ -132,8 +85,10 @@ export function DeviceTab({ view, shown }: { view: AndroidView; shown: boolean }
     if (!serial) return;
     queue.current = queue.current
       .then(() => androidInput(serial, action))
-      .then(() => kick.current?.())
-      .catch((e) => setNotice(String(e)));
+      .then(() => {
+        if (action.kind !== "down" && action.kind !== "move") screen.kick();
+      })
+      .catch((e) => setNotice(explain(String(e))));
   };
 
   const pressKey = (key: string) => {
@@ -188,7 +143,7 @@ export function DeviceTab({ view, shown }: { view: AndroidView; shown: boolean }
         <PowerIcon className="w-4 h-4 stroke-2" />
       </ToolButton>
       <div className="flex-1" />
-      <ToolButton label={t("android.refresh")} onClick={() => { refresh(); kick.current?.(); }}>
+      <ToolButton label={t("android.refresh")} onClick={() => { refresh(); screen.kick(); }}>
         <RefreshIcon className="w-4 h-4 stroke-2" />
       </ToolButton>
     </div>
@@ -232,8 +187,9 @@ export function DeviceTab({ view, shown }: { view: AndroidView; shown: boolean }
     body = (
       <Screen
         serial={device.serial}
-        frame={frame}
-        error={error}
+        canvas={screen.canvas}
+        frame={screen.size}
+        error={screen.error}
         touches={touches.filter((x) => x.touch.serial === device.serial)}
         acting={latestAgent}
         onInput={send}
@@ -275,9 +231,11 @@ function Empty({ title, body, children }: { title: string; body?: string | null;
 }
 
 /** La pantalla y lo que se hace sobre ella. */
-function Screen({ serial, frame, error, touches, acting, onInput, onKey, onNotice }: {
+function Screen({ serial, canvas, frame, error, touches, acting, onInput, onKey, onNotice }: {
   serial: string;
-  frame: Frame | null;
+  canvas: HTMLCanvasElement;
+  /** El tamaño de la pantalla del dispositivo. */
+  frame: Size | null;
   error: string | null;
   touches: ShownTouch[];
   acting: ShownTouch | null;
@@ -288,7 +246,15 @@ function Screen({ serial, frame, error, touches, acting, onInput, onKey, onNotic
   const { t } = useTranslation();
   const stage = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<Size>({ width: 0, height: 0 });
-  const press = useRef<{ device: { x: number; y: number }; client: { x: number; y: number }; at: number } | null>(null);
+  const press = useRef<{
+    device: { x: number; y: number };
+    client: { x: number; y: number };
+    at: number;
+    /** Por dónde va el dedo, y el próximo MOVE que espera al siguiente cuadro de animación. */
+    last: { x: number; y: number };
+    pending: { x: number; y: number } | null;
+    raf: number;
+  } | null>(null);
   const typed = useRef("");
   const typeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wheel = useRef<{ delta: number; at: { x: number; y: number }; timer: ReturnType<typeof setTimeout> | null }>({
@@ -312,6 +278,32 @@ function Screen({ serial, frame, error, touches, acting, onInput, onKey, onNotic
     if (!frame) return null;
     const rect = e.currentTarget.getBoundingClientRect();
     return toDevice({ x: e.clientX - rect.left, y: e.clientY - rect.top }, shown, frame);
+  };
+
+  /** Como `devicePoint`, pero pegado al borde si el mouse se salió de la pantalla. */
+  const clampedPoint = (e: { clientX: number; clientY: number; currentTarget: Element }) => {
+    if (!frame) return null;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.min(Math.max(e.clientX - rect.left, 0), shown.width - 1);
+    const y = Math.min(Math.max(e.clientY - rect.top, 0), shown.height - 1);
+    return toDevice({ x, y }, shown, frame);
+  };
+
+  /** Levanta el dedo: al soltar, o si el navegador cancela el gesto. */
+  const release = (end: { x: number; y: number } | null, clientEnd: { x: number; y: number } | null) => {
+    const start = press.current;
+    press.current = null;
+    if (!start) return;
+    if (start.raf) cancelAnimationFrame(start.raf);
+    const at = end ?? start.last;
+    onInput({ kind: "up", ...at });
+    const moved = clientEnd ? Math.hypot(clientEnd.x - start.client.x, clientEnd.y - start.client.y) : 0;
+    showOwn(gesture(start.device, at, moved, performance.now() - start.at));
+  };
+
+  // El canvas lo maneja `useScreen`; acá solo se cuelga.
+  const mountCanvas = (el: HTMLDivElement | null) => {
+    if (el && canvas.parentElement !== el) el.appendChild(canvas);
   };
 
   const showOwn = (action: UserInput) => {
@@ -376,23 +368,37 @@ function Screen({ serial, frame, error, touches, acting, onInput, onKey, onNotic
             if (!point) return;
             e.currentTarget.setPointerCapture(e.pointerId);
             e.currentTarget.focus({ preventScroll: true });
-            press.current = { device: point, client: { x: e.clientX, y: e.clientY }, at: performance.now() };
-          }}
-          onPointerUp={(e) => {
-            const start = press.current;
-            press.current = null;
-            if (!start || !frame) return;
-            const rect = e.currentTarget.getBoundingClientRect();
-            const x = Math.min(Math.max(e.clientX - rect.left, 0), shown.width);
-            const y = Math.min(Math.max(e.clientY - rect.top, 0), shown.height);
-            const end = toDevice({ x, y }, shown, frame) ?? start.device;
-            const moved = Math.hypot(e.clientX - start.client.x, e.clientY - start.client.y);
             flushTyped();
-            const action = gesture(start.device, end, moved, performance.now() - start.at);
-            onInput(action);
-            showOwn(action);
+            press.current = {
+              device: point,
+              client: { x: e.clientX, y: e.clientY },
+              at: performance.now(),
+              last: point,
+              pending: null,
+              raf: 0,
+            };
+            onInput({ kind: "down", ...point });
           }}
-          onPointerCancel={() => { press.current = null; }}
+          onPointerMove={(e) => {
+            const p = press.current;
+            const point = p && clampedPoint(e);
+            if (!p || !point) return;
+            p.pending = point;
+            // Un MOVE por cuadro de animación alcanza; el backend junta los que se atrasan.
+            if (!p.raf) {
+              p.raf = requestAnimationFrame(() => {
+                p.raf = 0;
+                const next = p.pending;
+                p.pending = null;
+                if (!next || press.current !== p || (next.x === p.last.x && next.y === p.last.y)) return;
+                p.last = next;
+                onInput({ kind: "move", ...next });
+              });
+            }
+          }}
+          onPointerUp={(e) => release(clampedPoint(e), { x: e.clientX, y: e.clientY })}
+          onPointerCancel={() => release(null, null)}
+          onLostPointerCapture={() => release(null, null)}
           // Click derecho es "atrás", como en scrcpy.
           onContextMenu={(e) => { e.preventDefault(); onKey("back"); }}
           onWheel={(e) => {
@@ -427,7 +433,7 @@ function Screen({ serial, frame, error, touches, acting, onInput, onKey, onNotic
             typeText(e.clipboardData.getData("text/plain"));
           }}
         >
-          <img src={frame.url} alt="" draggable={false} className="block w-full h-full pointer-events-none" />
+          <div ref={mountCanvas} className="absolute inset-0 pointer-events-none" />
           <svg
             className="absolute inset-0 w-full h-full pointer-events-none"
             viewBox={`0 0 ${frame.width} ${frame.height}`}
