@@ -3,6 +3,7 @@
 //! Cada módulo cubre un dominio; `app` es el que los ensambla y arranca Tauri.
 
 mod accounts;
+mod android;
 mod agents;
 mod app;
 mod chat;

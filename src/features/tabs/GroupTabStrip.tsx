@@ -115,7 +115,7 @@ export function GroupTabStrip({ items, active, groupFocused, draggable }: {
         }
         const view = viewsById.get(keyId(key));
         if (!view) return null;
-        const title = view.title || (view.kind === "browser" ? t("browser.newTab") : "");
+        const title = view.title || (view.kind === "browser" ? t("browser.newTab") : view.kind === "android" ? t("android.tab") : "");
         return (
           <Fragment key={key}>
             {separator && <span className="shrink-0 self-center w-px h-4 mx-1 bg-gray-300 dark:bg-white/10" />}

@@ -17,7 +17,11 @@ export interface TabStatePayload {
   historyId: string | null;
   accountId: string | null;
   prelaunch: PrelaunchStep[];
+  /** El scrollback a guardar. Una tab con `ptyId` no lo manda: el backend lo lee del PTY. */
   scrollback: string | null;
+  ptyId: number | null;
+  /** Dejar el scrollback que ya tiene la base. */
+  keepScrollback: boolean;
   openedAt: number;
   mode: "terminal" | "html";
 }

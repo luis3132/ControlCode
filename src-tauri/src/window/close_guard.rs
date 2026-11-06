@@ -80,7 +80,7 @@ pub(crate) fn close_now(win: &tauri::WebviewWindow) -> tauri::Result<()> {
 /// Cierra la ventana que acaba de guardar. Deja la fila como cualquier cierre del sistema
 /// (`is_open = 0` al pasar por `CloseRequested`), sin "olvidarla" como el botón de cerrar.
 #[tauri::command]
-pub fn close_window_saved(app: tauri::AppHandle, label: String) -> Result<(), String> {
+pub async fn close_window_saved(app: tauri::AppHandle, label: String) -> Result<(), String> {
     use tauri::Manager;
     match app.get_webview_window(&label) {
         Some(win) => close_now(&win).map_err(|e| e.to_string()),

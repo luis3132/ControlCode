@@ -1,5 +1,6 @@
 //! El ciclo de vida de la aplicación: arranque, eventos y apagado.
 
+mod blocking;
 mod rendering;
 mod run;
 mod signals;

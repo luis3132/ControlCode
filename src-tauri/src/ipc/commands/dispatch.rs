@@ -13,6 +13,7 @@ use serde_json::Value;
 use tauri::AppHandle;
 
 use super::agents::{account_list, agent_list, prelaunch_list};
+use super::android::android_run;
 use super::app::app_status;
 use super::ask::user_ask;
 use super::browser::browser_run;
@@ -57,6 +58,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "run.approve" => run_approve(app, args),
         "browser.run" => browser_run(app, args),
         "canvas.run" => canvas_run(app, args),
+        "android.run" => android_run(app, args),
         "user.ask" => user_ask(app, args),
         "forge.run" => crate::forge::tools::run(app, args),
         "mcp.cancel" => {

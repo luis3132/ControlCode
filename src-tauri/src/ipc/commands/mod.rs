@@ -1,6 +1,7 @@
 //! Los comandos que atiende el servidor IPC, uno por dominio.
 
 mod agents;
+mod android;
 mod app;
 mod ask;
 mod browser;

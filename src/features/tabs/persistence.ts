@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabsStore } from "@/features/tabs/store";
-import { ptyAttach, ptyCwd, ptyOutputTotals } from "@/features/terminal/ipc";
+import { ptyCwd, ptyOutputTotals } from "@/features/terminal/ipc";
 import { rememberShellCwd } from "@/features/terminal/shellCwd";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { discoverSessionId } from "@/features/sessions/ipc";
@@ -17,18 +17,17 @@ const HIDDEN_REFRESH_MS = 120_000;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let initialized = false;
 
-// El scrollback de cada PTY puede pesar hasta MAX_BUFFER_BYTES (3MB, ver pty_manager.rs).
-// Antes, CADA guardado (incluido el debounce de 400ms disparado por renombrar/reordenar/
-// activar una tab) volvía a pedir por IPC el scrollback completo de TODAS las tabs y
-// reescribía la fila entera en SQLite — con varias tabs de agentes activos eso significa
-// megabytes de tráfico IPC + disco en cada click. El scrollback solo hace falta fresco
-// para sobrevivir a un crash, no en cada cambio de metadata, así que se cachea por ptyId
-// y solo se refresca en el ciclo periódico de 20s (o si todavía no hay nada cacheado).
-const scrollbackCache = new Map<number, string>();
-/** Cuánto había escrito cada PTY cuando se cacheó su scrollback. Si no cambió, el cache
- *  sigue siendo el scrollback de ahora y no hace falta copiarlo de nuevo: antes cada
- *  refresco de 20 s copiaba hasta 3 MB por tab por IPC aunque la terminal estuviera quieta. */
-const scrollbackTotals = new Map<number, number>();
+// El scrollback de cada PTY puede pesar hasta 3 MB (ver pty_manager.rs) y NO viaja en el
+// guardado: la tab viva manda su `ptyId` y el backend lo lee de su propio buffer, solo si
+// el proceso escribió algo desde la última vez. Antes cada guardado copiaba por IPC el de
+// todas las tabs (decenas de MB serializados en el hilo de la interfaz, que la congelaban)
+// y la base lo reescribía entero aunque no hubiera cambiado.
+/** Cuánto había escrito cada PTY en el último guardado: el periódico no escribe si ninguno
+ *  escribió nada nuevo. */
+const savedTotals = new Map<number, number>();
+/** Las tabs dormidas que ya se guardaron desde esta ventana: su scrollback (el que trajeron
+ *  de la base) ya está ahí, y no hace falta volver a mandarlo. */
+const savedDormant = new Set<string>();
 /** Lo último que se escribió en la base, para no reescribir lo mismo cada 20 s. */
 let lastSaved: { tabs: unknown; workspaceId: unknown } | null = null;
 let lastPeriodicAt = 0;
@@ -60,30 +59,6 @@ interface SaveOptions {
   periodic?: boolean;
 }
 
-async function fetchScrollback(ptyId: number | null, total?: number): Promise<string | null> {
-  if (ptyId == null) return null;
-  try {
-    const { data } = await ptyAttach(ptyId);
-    scrollbackCache.set(ptyId, data);
-    if (total !== undefined) scrollbackTotals.set(ptyId, total);
-    else scrollbackTotals.delete(ptyId);
-    return data;
-  } catch {
-    scrollbackCache.delete(ptyId); // el proceso ya no existe
-    scrollbackTotals.delete(ptyId);
-    return null;
-  }
-}
-
-/** Usa el scrollback cacheado si hay uno (guardados "rápidos" de metadata); si el PTY
- * todavía no tiene nada cacheado (tab recién creada), lo pide una vez igual. */
-async function cachedOrFetchScrollback(ptyId: number | null): Promise<string | null> {
-  if (ptyId == null) return null;
-  const cached = scrollbackCache.get(ptyId);
-  if (cached !== undefined) return cached;
-  return fetchScrollback(ptyId);
-}
-
 /** Cuánto va de un guardado: pasos hechos de un total que se conoce desde el principio. */
 export type SaveProgress = (done: number, total: number, step: SaveStep) => void;
 
@@ -101,21 +76,14 @@ async function saveNow(
   const win = getCurrentWindow();
   const { tabs, workspaceId, hydrated } = useTabsStore.getState();
 
-  // Refrescar es pedir el scrollback de las tabs que escribieron algo desde la última vez;
-  // las quietas siguen con el que ya se tenía.
-  let resolveScrollback = cachedOrFetchScrollback;
-  let anyOutput = false;
-  if (opts.refreshScrollback) {
-    const ids = tabs.map((t) => t.ptyId).filter((id): id is number => id != null);
-    const totals = ids.length ? await ptyOutputTotals(ids).catch(() => ({} as Record<string, number>)) : {};
-    const stale = (id: number) => {
-      const total = totals[String(id)];
-      return total === undefined || !scrollbackCache.has(id) || scrollbackTotals.get(id) !== total;
-    };
-    anyOutput = ids.some(stale);
-    resolveScrollback = (ptyId) =>
-      ptyId != null && stale(ptyId) ? fetchScrollback(ptyId, totals[String(ptyId)]) : cachedOrFetchScrollback(ptyId);
+  // El periódico solo escribe si alguna terminal escribió algo (o cambiaron las tabs): el
+  // backend relee el scrollback de las que cambiaron.
+  const ids = tabs.map((t) => t.ptyId).filter((id): id is number => id != null);
+  let totals: Record<string, number> = {};
+  if (opts.refreshScrollback && ids.length) {
+    totals = await ptyOutputTotals(ids).catch(() => ({} as Record<string, number>));
   }
+  const anyOutput = ids.some((id) => totals[String(id)] !== undefined && savedTotals.get(id) !== totals[String(id)]);
   if (opts.periodic && !anyOutput && lastSaved?.tabs === tabs && lastSaved.workspaceId === workspaceId) return;
   // Posición + una lectura de scrollback por tab + la escritura en la base. Los pasos son
   // los reales: cada uno avisa cuando TERMINA, no cuando empieza.
@@ -136,8 +104,10 @@ async function saveNow(
   }
   step({ kind: "bounds" });
 
-  const tabsPayload = await Promise.all(
-    tabs.map(async (t, i) => ({
+  const tabsPayload = tabs.map((t, i) => {
+    step({ kind: "terminal", title: t.title });
+    const dormant = t.ptyId == null;
+    return {
       id: t.id,
       title: t.title,
       titleIsCustom: t.titleIsCustom ?? false,
@@ -151,14 +121,15 @@ async function saveNow(
       accountId: t.accountId ?? null,
       prelaunch: t.prelaunch ?? [],
       // Sin proceso todavía (una tab dormida, ver `useDormant`) se guarda el que trajo al
-      // restaurarse: si no, el primer guardado le borraba el historial a una que no se miró.
-      scrollback: t.ptyId == null
-        ? (step({ kind: "terminal", title: t.title }), t.scrollback ?? null)
-        : await resolveScrollback(t.ptyId).finally(() => step({ kind: "terminal", title: t.title })),
+      // restaurarse, una sola vez: si no, el primer guardado le borraba el historial a una
+      // que no se miró. Después ya está en la base y basta con no tocarlo.
+      scrollback: dormant && !savedDormant.has(t.id) ? t.scrollback ?? null : null,
+      ptyId: t.ptyId ?? null,
+      keepScrollback: dormant && savedDormant.has(t.id),
       openedAt: t.openedAt,
-      mode: t.mode ?? "terminal",
-    }))
-  );
+      mode: t.mode ?? "terminal" as const,
+    };
+  });
 
   // La carpeta de cada terminal pelada, para volver ahí al reabrir (ver `shellCwd.ts`). En
   // Linux y macOS se le pregunta al sistema; en Windows ya la avisó el propio PowerShell.
@@ -167,16 +138,6 @@ async function saveNow(
       .filter((t) => t.agentId === SHELL_AGENT_ID && t.ptyId != null)
       .map((t) => ptyCwd(t.ptyId!).then((path) => { if (path) rememberShellCwd(t.id, path); }, () => {}))
   );
-
-  // Podar entradas de PTYs que ya no pertenecen a ninguna tab de esta ventana (cerradas,
-  // transferidas a otra ventana) — el Map, si no, crece sin límite durante toda la sesión.
-  const liveIds = new Set(tabs.map((t) => t.ptyId).filter((id): id is number => id != null));
-  for (const cachedId of scrollbackCache.keys()) {
-    if (!liveIds.has(cachedId)) {
-      scrollbackCache.delete(cachedId);
-      scrollbackTotals.delete(cachedId);
-    }
-  }
 
   await saveWindowState({
     label: win.label,
@@ -191,7 +152,15 @@ async function saveNow(
     // único que autoriza al backend a dar por cerradas las que falten. Ver
     // `WindowStatePayload::authoritative`.
     authoritative: hydrated,
-  }).then(() => { lastSaved = { tabs, workspaceId }; }, console.error);
+  }).then(() => {
+    lastSaved = { tabs, workspaceId };
+    if (opts.refreshScrollback) {
+      savedTotals.clear();
+      for (const [id, total] of Object.entries(totals)) savedTotals.set(Number(id), total);
+    }
+    savedDormant.clear();
+    for (const t of tabs) if (t.ptyId == null) savedDormant.add(t.id);
+  }, console.error);
   step({ kind: "write" });
 }
 

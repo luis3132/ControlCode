@@ -40,7 +40,7 @@ const REGISTRY_COLUMNS: &str =
     "id, name, source_type, location, priority, enabled, cache_json, last_fetched, cache_error";
 
 #[tauri::command]
-pub fn list_registries(db: tauri::State<DbConnection>) -> Result<Vec<RegistrySummary>, String> {
+pub async fn list_registries(db: tauri::State<'_, DbConnection>) -> Result<Vec<RegistrySummary>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(&format!(
@@ -367,7 +367,7 @@ pub async fn install_marketplace_skill(
 /// diálogo de "agregar repositorio" la usa mientras el usuario tipea, para mostrarle en
 /// qué se traduce el link que pegó (o el error, si no es un repo válido).
 #[tauri::command]
-pub fn preview_registry_location(source_type: String, location: String) -> Result<String, String> {
+pub async fn preview_registry_location(source_type: String, location: String) -> Result<String, String> {
     match source_type.as_str() {
         "github" => {
             let (owner, repo, branch, subpath) = parse_github_location(&location)?;

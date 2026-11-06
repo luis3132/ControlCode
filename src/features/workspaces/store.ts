@@ -89,10 +89,13 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
   },
 
   focusIfOpen: async (id) => {
+    // `openWindowsOf` ya trae solo las ventanas que existen; igual se confirma al enfocar,
+    // porque una pudo cerrarse en el medio. Si ninguna estaba, el llamador la abre.
     const liveWindows = await ipc.openWindowsOf(id).catch(() => []);
-    if (liveWindows.length === 0) return false;
-    await focusWindow(liveWindows[0].label).catch(console.error);
-    return true;
+    for (const win of liveWindows) {
+      if (await focusWindow(win.label).catch(() => false)) return true;
+    }
+    return false;
   },
 
   renameWorkspace: async (id, name) => {

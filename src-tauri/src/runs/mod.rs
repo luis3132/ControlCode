@@ -57,18 +57,18 @@ fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
 
 /// Las tarjetas de un workspace, más recientes primero.
 #[tauri::command]
-pub fn run_list_tasks(
+pub async fn run_list_tasks(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<Task>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list_tasks(&conn, &workspace_id)
 }
 
 #[tauri::command]
-pub fn run_list_runs(
+pub async fn run_list_runs(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<Run>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list_runs(&conn, &workspace_id)
@@ -298,7 +298,7 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
 
 /// Para un run entero: lo que espera no arranca y lo que corre se detiene.
 #[tauri::command]
-pub fn run_cancel_run(app: AppHandle, run_id: String) -> Result<(), String> {
+pub async fn run_cancel_run(app: AppHandle, run_id: String) -> Result<(), String> {
     let db = db_of(&app)?;
     let live: Vec<String> = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -326,7 +326,7 @@ pub fn run_cancel_run(app: AppHandle, run_id: String) -> Result<(), String> {
 
 /// Lo que se dejaron escrito los agentes de un run.
 #[tauri::command]
-pub fn run_list_facts(run_id: String, db: tauri::State<DbConnection>) -> Result<Vec<Fact>, String> {
+pub async fn run_list_facts(run_id: String, db: tauri::State<'_, DbConnection>) -> Result<Vec<Fact>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::facts_of_run(&conn, &run_id)
 }
@@ -395,7 +395,7 @@ pub fn run_get_tiers(db: tauri::State<DbConnection>) -> routing::Tiers {
 }
 
 #[tauri::command]
-pub fn run_set_tiers(tiers: routing::Tiers, db: tauri::State<DbConnection>) -> Result<routing::Tiers, String> {
+pub async fn run_set_tiers(tiers: routing::Tiers, db: tauri::State<'_, DbConnection>) -> Result<routing::Tiers, String> {
     for c in [routing::Complexity::Trivial, routing::Complexity::Standard, routing::Complexity::Hard] {
         let entries = tiers.get(c);
         // Un tramo vacío no tiene a quién asignar: lanzar con esa complejidad fallaría
@@ -468,7 +468,7 @@ pub struct DiscardedWorktree {
 /// Nunca con la tarea viva: sería sacarle la carpeta a un agente que está trabajando.
 /// Se niega también si hay cambios sin commitear (ver `worktrees::remove`).
 #[tauri::command]
-pub fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<DiscardedWorktree, String> {
+pub async fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<DiscardedWorktree, String> {
     let db = db_of(&app)?;
     let (task, project_cwd, skills_dir) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -505,7 +505,7 @@ pub fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<Discarded
 }
 
 #[tauri::command]
-pub fn run_cancel_task(app: AppHandle, task_id: String) -> Result<(), String> {
+pub async fn run_cancel_task(app: AppHandle, task_id: String) -> Result<(), String> {
     supervisor::cancel(&app, &task_id)
 }
 
@@ -657,7 +657,7 @@ pub async fn run_reroute_task(
 /// Si todavía corre, la para (ver `supervisor::hand_off`). Si ya terminó, no toca nada:
 /// reabrir una conversación cerrada es solo reanudarla.
 #[tauri::command]
-pub fn run_hand_off_task(app: AppHandle, task_id: String) -> Result<Task, String> {
+pub async fn run_hand_off_task(app: AppHandle, task_id: String) -> Result<Task, String> {
     let db = db_of(&app)?;
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -730,7 +730,7 @@ pub fn drop_tab_approvals(tab_id: &str) -> usize {
 
 /// Los pedidos que están esperando a una persona ahora mismo.
 #[tauri::command]
-pub fn run_pending_approvals() -> Vec<broker::PendingApproval> {
+pub async fn run_pending_approvals() -> Vec<broker::PendingApproval> {
     broker::pending()
 }
 
@@ -740,12 +740,12 @@ pub fn run_pending_approvals() -> Vec<broker::PendingApproval> {
 /// Con `remember`, además deja escrita la regla exacta del pedido para su carpeta, y
 /// resuelve con ella lo que otros agentes de esa carpeta estuvieran esperando.
 #[tauri::command]
-pub fn run_decide_approval(
+pub async fn run_decide_approval(
     app: AppHandle,
     approval_id: String,
     allow: bool,
     remember: bool,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<bool, String> {
     let Some(pending) = broker::get(&approval_id) else {
         supervisor::notify_approvals(&app);
@@ -772,7 +772,7 @@ pub fn run_decide_approval(
 /// adentro del input, que es como la herramienta las recibe (`answers`: pregunta →
 /// respuesta). `false` si ya no estaba esperando.
 #[tauri::command]
-pub fn run_answer_question(
+pub async fn run_answer_question(
     app: AppHandle,
     approval_id: String,
     answers: std::collections::HashMap<String, String>,
@@ -823,19 +823,19 @@ fn remember_rule(
 
 /// Las reglas de una carpeta, en el orden en que se evalúan.
 #[tauri::command]
-pub fn run_list_rules(cwd: String, db: tauri::State<DbConnection>) -> Result<Vec<store::RuleRow>, String> {
+pub async fn run_list_rules(cwd: String, db: tauri::State<'_, DbConnection>) -> Result<Vec<store::RuleRow>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list_rules(&conn, &cwd)
 }
 
 /// Agrega una regla escrita a mano, y resuelve con ella lo que estuviera esperando.
 #[tauri::command]
-pub fn run_add_rule(
+pub async fn run_add_rule(
     app: AppHandle,
     cwd: String,
     pattern: String,
     allow: bool,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<store::RuleRow, String> {
     if !rules::is_valid_pattern(&pattern) {
         return Err(format!(
@@ -853,7 +853,7 @@ pub fn run_add_rule(
 }
 
 #[tauri::command]
-pub fn run_delete_rule(id: String, db: tauri::State<DbConnection>) -> Result<bool, String> {
+pub async fn run_delete_rule(id: String, db: tauri::State<'_, DbConnection>) -> Result<bool, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::delete_rule(&conn, &id)
 }

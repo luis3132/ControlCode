@@ -43,19 +43,19 @@ pub(crate) fn save_canvas_page(conn: &rusqlite::Connection, page: &CanvasPageRow
 }
 
 #[tauri::command]
-pub fn canvas_pages_load(workspace: String, db: tauri::State<DbConnection>) -> Result<Vec<CanvasPageRow>, String> {
+pub async fn canvas_pages_load(workspace: String, db: tauri::State<'_, DbConnection>) -> Result<Vec<CanvasPageRow>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     load_canvas_pages(&conn, &workspace).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn canvas_page_save(page: CanvasPageRow, db: tauri::State<DbConnection>) -> Result<(), String> {
+pub async fn canvas_page_save(page: CanvasPageRow, db: tauri::State<'_, DbConnection>) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     save_canvas_page(&conn, &page).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn canvas_page_delete(id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+pub async fn canvas_page_delete(id: String, db: tauri::State<'_, DbConnection>) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM canvas_pages WHERE id = ?1", [&id]).map_err(|e| e.to_string())?;
     Ok(())

@@ -18,8 +18,8 @@ pub fn validate_preset(name: &str, command: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn list_prelaunch_presets(
-    db: tauri::State<DbConnection>,
+pub async fn list_prelaunch_presets(
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<PrelaunchPreset>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
@@ -40,11 +40,11 @@ pub fn list_prelaunch_presets(
 
 /// Crea o actualiza. `id` vacío/ausente = alta.
 #[tauri::command]
-pub fn save_prelaunch_preset(
+pub async fn save_prelaunch_preset(
     id: Option<String>,
     name: String,
     command: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<PrelaunchPreset, String> {
     let name = name.trim().to_string();
     let command = command.trim().to_string();
@@ -101,7 +101,7 @@ pub fn save_prelaunch_preset(
 }
 
 #[tauri::command]
-pub fn delete_prelaunch_preset(id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+pub async fn delete_prelaunch_preset(id: String, db: tauri::State<'_, DbConnection>) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM prelaunch_presets WHERE id = ?1", [&id])
         .map_err(|e| e.to_string())?;

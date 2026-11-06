@@ -146,7 +146,7 @@ pub fn cli_install_status(app: AppHandle) -> Result<CliInstallStatus, String> {
 }
 
 #[tauri::command]
-pub fn install_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
+pub async fn install_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
     let source = source_binary(&app).ok_or_else(|| {
         format!(
             "No se encontró el binario '{CLI_FILE}' junto a la app. \
@@ -186,7 +186,7 @@ pub fn install_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
 }
 
 #[tauri::command]
-pub fn uninstall_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
+pub async fn uninstall_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
     let dir = target_dir().ok_or("No se pudo determinar el directorio del usuario")?;
     let target = dir.join(CLI_FILE);
 

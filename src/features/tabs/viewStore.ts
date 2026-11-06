@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { useTabsStore } from "@/features/tabs/store";
 import {
   baseName, findExisting, nextActiveAfterClose, toPersisted, transientToReplace,
-  type BrowserView, type DiffView, type FileView, type ViewOwner, type ViewTab,
+  type AndroidView, type BrowserView, type DiffView, type FileView, type ViewOwner, type ViewTab,
 } from "@/features/tabs/viewTabs";
 import { isMarkdownPath, prefersMarkdownPreview } from "@/features/editor/markdown";
 import { isInside, remapPath } from "@/features/explorer/paths";
@@ -25,12 +25,18 @@ interface ViewTabsState {
   /** Devuelve el id de la tab. `activate: false` la abre sin sacar al usuario de lo que mira;
    *  `owner` la marca como manejada por un agente. */
   openBrowser: (cwd: string, url?: string, opts?: { activate?: boolean; owner?: ViewOwner }) => string;
+  /** La vista del dispositivo Android de `cwd`: la que ya hay o una nueva. Devuelve su id.
+   *  `activate: false` la abre (si no estaba) sin sacar al usuario de lo que mira. */
+  openAndroid: (cwd: string, opts?: { activate?: boolean }) => string;
   keepMounted: (id: string) => void;
   activateView: (id: string) => void;
   /** Volver a la terminal. */
   showTerminal: () => void;
   closeView: (id: string) => void;
-  updateView: (id: string, patch: Partial<Omit<FileView, "kind" | "id">> | Partial<Omit<BrowserView, "kind" | "id">>) => void;
+  updateView: (
+    id: string,
+    patch: Partial<Omit<FileView, "kind" | "id">> | Partial<Omit<BrowserView, "kind" | "id">> | Partial<Omit<AndroidView, "kind" | "id">>
+  ) => void;
   /** Un archivo o carpeta cambió de lugar: las tabs de lo que estaba ahí lo siguen. */
   retargetPath: (from: string, to: string) => void;
   /** Se borró: se cierran las tabs de lo que había ahí, salvo las que tienen cambios sin
@@ -128,6 +134,25 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => {
     openBrowser: (cwd, url = "", opts) => {
       const view: BrowserView = { kind: "browser", cwd, url, id: crypto.randomUUID(), title: "", owner: opts?.owner };
       const activate = opts?.activate ?? true;
+      set((s) => ({
+        views: [...s.views, view],
+        activeViewId: activate ? view.id : s.activeViewId,
+        keepMountedIds: activate ? s.keepMountedIds : [...s.keepMountedIds, view.id],
+      }));
+      return view.id;
+    },
+
+    openAndroid: (cwd, opts) => {
+      const activate = opts?.activate ?? true;
+      const existing = findExisting(get().views, { kind: "android", cwd });
+      if (existing) {
+        set((s) => ({
+          activeViewId: activate ? existing.id : s.activeViewId,
+          keepMountedIds: activate || s.keepMountedIds.includes(existing.id) ? s.keepMountedIds : [...s.keepMountedIds, existing.id],
+        }));
+        return existing.id;
+      }
+      const view: AndroidView = { kind: "android", cwd, id: crypto.randomUUID(), title: "" };
       set((s) => ({
         views: [...s.views, view],
         activeViewId: activate ? view.id : s.activeViewId,

@@ -39,11 +39,11 @@ pub struct WorkspaceSnapshot {
 
 /// Guarda (o reemplaza) el recuerdo de una carpeta.
 #[tauri::command]
-pub fn save_workspace_snapshot(
+pub async fn save_workspace_snapshot(
     cwd: String,
     workspace_id: String,
     tabs: Vec<SnapshotTab>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
     let tabs_json = serde_json::to_string(&tabs).map_err(|e| e.to_string())?;
     let conn = db.lock().map_err(|e| e.to_string())?;
@@ -61,7 +61,7 @@ pub fn save_workspace_snapshot(
 }
 
 #[tauri::command]
-pub fn list_workspace_snapshots(db: tauri::State<DbConnection>) -> Result<Vec<WorkspaceSnapshot>, String> {
+pub async fn list_workspace_snapshots(db: tauri::State<'_, DbConnection>) -> Result<Vec<WorkspaceSnapshot>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT cwd, workspace_id, tabs_json, closed_at FROM workspace_snapshots ORDER BY closed_at DESC")
@@ -93,9 +93,9 @@ pub fn list_workspace_snapshots(db: tauri::State<DbConnection>) -> Result<Vec<Wo
 
 /// Lo devuelve y lo borra: reabrir un workspace consume su recuerdo.
 #[tauri::command]
-pub fn take_workspace_snapshot(
+pub async fn take_workspace_snapshot(
     cwd: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Option<WorkspaceSnapshot>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let row: Option<(String, String, i64)> = conn
@@ -121,7 +121,7 @@ pub fn take_workspace_snapshot(
 
 /// Olvidar un workspace cerrado sin reabrirlo.
 #[tauri::command]
-pub fn forget_workspace_snapshot(cwd: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+pub async fn forget_workspace_snapshot(cwd: String, db: tauri::State<'_, DbConnection>) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM workspace_snapshots WHERE cwd = ?1", [&cwd])
         .map_err(|e| e.to_string())?;

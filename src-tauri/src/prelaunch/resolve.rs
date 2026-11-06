@@ -56,9 +56,9 @@ pub fn resolve(db: &DbConnection, steps: &[PrelaunchStep]) -> Result<Vec<String>
 /// Lo que invoca el frontend justo antes de spawnear, igual que `agent_account_env`: si un
 /// preset fue borrado mientras la tab estaba guardada, se entera acá y no arranca.
 #[tauri::command]
-pub fn resolve_prelaunch(
+pub async fn resolve_prelaunch(
     steps: Vec<PrelaunchStep>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<String>, String> {
     resolve(&db, &steps)
 }

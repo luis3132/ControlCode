@@ -66,8 +66,12 @@ export function WorkspacesPage() {
   // Si el workspace elegido ya tiene ventanas vivas, se enfocan en vez de abrir otro
   // juego duplicado de ventanas para el mismo workspace.
   const handleSelectWorkspace = async (ws: WorkspaceSummary) => {
-    const focused = await focusIfOpen(ws.id);
-    if (!focused) setOpenTarget(ws);
+    try {
+      const focused = await focusIfOpen(ws.id);
+      if (!focused) setOpenTarget(ws);
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   const handleDelete = async (ws: WorkspaceSummary) => {

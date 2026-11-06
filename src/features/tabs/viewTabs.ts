@@ -1,5 +1,5 @@
 /**
- * Las tabs que no son agentes: un archivo, un diff o un navegador.
+ * Las tabs que no son agentes: un archivo, un diff, un navegador o un dispositivo Android.
  *
  * Viven en la misma barra que los agentes porque son la misma forma de trabajar —abrir
  * algo al lado de lo que está haciendo el agente y volver con un click—, pero NO son
@@ -70,7 +70,16 @@ export interface BrowserView extends ViewBase {
   touch?: boolean;
 }
 
-export type ViewTab = FileView | DiffView | BrowserView;
+/** La pantalla de un dispositivo Android (por adb), que usan la persona y los agentes.
+ *  Una por workspace: los agentes la comparten, y cada toque se dibuja con el color de
+ *  quien lo hizo (ver `features/android`). */
+export interface AndroidView extends ViewBase {
+  kind: "android";
+  /** El dispositivo elegido. Ausente = el único conectado, o el primero. */
+  serial?: string | null;
+}
+
+export type ViewTab = FileView | DiffView | BrowserView | AndroidView;
 
 /** Qué muestra una tab, sin su identidad. `Omit` a secas no reparte sobre la unión. */
 export type ViewTarget = ViewTab extends infer V ? (V extends ViewTab ? Omit<V, "id" | "title"> : never) : never;
@@ -104,7 +113,7 @@ export function relativeTo(path: string, root: string): string {
 export function transientToReplace(views: ViewTab[], cwd: string): ViewTab | undefined {
   const workspace = comparablePath(cwd);
   return views.find(
-    (v) => v.transient && v.kind !== "browser" && !(v.kind === "file" && v.dirty) && comparablePath(v.cwd) === workspace
+    (v) => v.transient && (v.kind === "file" || v.kind === "diff") && !(v.kind === "file" && v.dirty) && comparablePath(v.cwd) === workspace
   );
 }
 
@@ -118,6 +127,8 @@ export function findExisting(views: ViewTab[], wanted: ViewTarget): ViewTab | un
         && v.staged === wanted.staged
         && (v.commit ?? null) === (wanted.commit ?? null);
     }
+    // El dispositivo es uno solo por workspace: lo comparten la persona y sus agentes.
+    if (v.kind === "android" && wanted.kind === "android") return true;
     // Navegadores puede haber varios a propósito: dos pantallas del mismo proyecto.
     return false;
   });
@@ -198,13 +209,13 @@ export function viewLabels(views: ViewTab[]): Map<string, { title: string; hint:
   const clashKey = (v: ViewTab) => `${v.kind}:${v.title}`;
   const byTitle = new Map<string, ViewTab[]>();
   for (const v of views) {
-    if (v.kind === "browser") continue;
+    if (v.kind === "browser" || v.kind === "android") continue;
     const list = byTitle.get(clashKey(v)) ?? [];
     list.push(v);
     byTitle.set(clashKey(v), list);
   }
   for (const v of views) {
-    if (v.kind === "browser") {
+    if (v.kind === "browser" || v.kind === "android") {
       out.set(v.id, { title: v.title, hint: null });
       continue;
     }

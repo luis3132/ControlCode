@@ -243,7 +243,7 @@ pub(crate) fn link_dirs_of_workspace(
 /// antes de lanzar el proceso del agente (ver `Terminal.tsx`): es el momento en que hay
 /// que garantizar que en esa carpeta están las skills de ESTA tab/workspace y ninguna
 /// otra, porque varios agentes escanean su carpeta de skills una sola vez, al arrancar.
-#[tauri::command]
+/// La registra `app::blocking`, que la corre fuera del hilo principal.
 pub fn reconcile_tab_skills(tab_id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let row: Option<(String, String)> = conn
@@ -347,7 +347,7 @@ pub(super) fn ensure_symlink(
     symlink::symlink_dir(&skill.source_path, &link_path).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+/// La registra `app::blocking`, que la corre fuera del hilo principal.
 pub fn attach_skill(
     skill_id: String,
     workspace_id: String,
@@ -418,7 +418,7 @@ pub fn attach_skill(
     Ok(())
 }
 
-#[tauri::command]
+/// La registra `app::blocking`, que la corre fuera del hilo principal.
 pub fn detach_skill(
     skill_id: String,
     workspace_id: String,
@@ -457,7 +457,7 @@ pub fn detach_skill(
 /// Reconcilia en vez de solo crear: además de agregar lo que falta, quita de esas
 /// carpetas las skills que quedaron de otro workspace o de una tab ya cerrada.
 #[tauri::command]
-pub fn sync_workspace_skills(workspace_id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+pub async fn sync_workspace_skills(workspace_id: String, db: tauri::State<'_, DbConnection>) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let tabs = tabs_for_scope(&conn, &workspace_id, None, None)?;
     let pairs: Vec<(String, String)> =
@@ -469,7 +469,7 @@ pub fn sync_workspace_skills(workspace_id: String, db: tauri::State<DbConnection
 /// Verifica, para cada attachment habilitado de un workspace, que el symlink físico
 /// exista y apunte al `source_path` correcto. Solo devuelve entradas con problema —
 /// una skill sana no aparece en el resultado.
-#[tauri::command]
+/// La registra `app::blocking`, que la corre fuera del hilo principal.
 pub fn check_symlinks_health(
     workspace_id: String,
     db: tauri::State<DbConnection>,

@@ -88,11 +88,11 @@ pub fn list_accounts(conn: &rusqlite::Connection) -> Result<Vec<AgentAccount>, S
 }
 
 #[tauri::command]
-pub fn create_agent_account(
+pub async fn create_agent_account(
     agent_id: String,
     name: String,
     app: AppHandle,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<AgentAccount, String> {
     if spec_for(&agent_id).is_none() {
         return Err(format!("'{agent_id}' no soporta varias cuentas"));
@@ -136,10 +136,10 @@ pub fn create_agent_account(
 /// Están separados a propósito: sacarla de la app es reversible (se vuelve a agregar con el
 /// mismo nombre y el login sigue ahí), borrar la carpeta no lo es.
 #[tauri::command]
-pub fn delete_agent_account(
+pub async fn delete_agent_account(
     id: String,
     delete_files: bool,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
     let dir: Option<String> = {
         let conn = db.lock().map_err(|e| e.to_string())?;

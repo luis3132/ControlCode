@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Button, AddIcon, Tooltip } from "neogestify-ui-components";
 
 import { WindowLights } from "@/app/WindowLights";
-import { CanvasIcon, GlobeIcon, SplitRightIcon } from "@/app/icons";
+import { CanvasIcon, GlobeIcon, PhoneIcon, SplitRightIcon } from "@/app/icons";
+import { useHasAdb } from "@/features/android/store";
 import { addBrowserHere, toggleCanvas } from "@/features/canvas/actions";
 import { useCanvasStore } from "@/features/canvas/store";
 import { NotificationBell } from "@/features/notifications/NotificationBell";
@@ -45,6 +46,9 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
   const views = useViewTabsStore((s) => s.views);
   const activeViewId = useViewTabsStore((s) => s.activeViewId);
   const openBrowser = useViewTabsStore((s) => s.openBrowser);
+  const openAndroid = useViewTabsStore((s) => s.openAndroid);
+  // Sin adb no hay dispositivo que mostrar: el botón ni aparece.
+  const hasAdb = useHasAdb();
   const layout = useWorkspaceLayout();
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
@@ -146,6 +150,22 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
                 className={BAR_BUTTON}
               >
                 <GlobeIcon className="w-[15px] h-[15px]" />
+              </Button>
+            </Tooltip>
+          )}
+          {activeTab && hasAdb && (
+            <Tooltip content={t("tabs.newDevice")} placement="bottom">
+              <Button variant="icon"
+                // El dispositivo es uno por workspace: abrirlo de nuevo lo trae al frente.
+                onClick={() => {
+                  openAndroid(activeTab.cwd);
+                  navigate("/workspace");
+                }}
+                aria-label={t("tabs.newDevice")}
+                data-tauri-drag-region="false"
+                className={BAR_BUTTON}
+              >
+                <PhoneIcon className="w-[15px] h-[15px]" />
               </Button>
             </Tooltip>
           )}

@@ -6,6 +6,8 @@ import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, TextArea, Tras
 import {
   BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
 } from "@/app/icons";
+import { activateItem, globalActiveItem } from "@/features/tabs/layout/layoutStore";
+import { viewKey } from "@/features/tabs/layout/layoutTree";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { normalizeUrl, type BrowserView } from "@/features/tabs/viewTabs";
@@ -284,11 +286,20 @@ export function BrowserTab({ view, active, shown = active }: { view: BrowserView
       const frame = column.current;
       if (!page || !frame) throw new Error("La página todavía no está cargada.");
       // La foto es del webview: si la tab no está a la vista, saldría lo que esté encima.
-      // Se la trae al frente antes de disparar, que además es lo que hace que el usuario
-      // vea lo mismo que el agente.
+      // Se la trae al frente solo para disparar, y después se deja todo como estaba: la
+      // tab que se miraba y el foco (alguien puede estar tipeando en una terminal).
+      const back = globalActiveItem();
+      const focused = document.activeElement;
       useViewTabsStore.getState().activateView(view.id);
-      const frozen = await freezePage(page, frame);
-      return previewSaveCapture(await canvasToPng(frozen.canvas), tag);
+      try {
+        const frozen = await freezePage(page, frame);
+        return previewSaveCapture(await canvasToPng(frozen.canvas), tag);
+      } finally {
+        if (back && back !== viewKey(view.id)) activateItem(back);
+        if (focused instanceof HTMLElement && focused.isConnected && focused !== document.activeElement) {
+          focused.focus({ preventScroll: true });
+        }
+      }
     },
     requestPick: (timeoutMs) => new Promise((resolve) => {
       // Un solo pedido a la vez: el anterior se da por cancelado en vez de quedar colgado.

@@ -137,7 +137,7 @@ pub fn list_custom_agents(db: tauri::State<DbConnection>) -> Result<Vec<CustomAg
 /// la pisa entera (el formulario siempre manda el objeto completo).
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-pub fn upsert_custom_agent(
+pub async fn upsert_custom_agent(
     id: Option<String>,
     label: String,
     command: String,
@@ -146,7 +146,7 @@ pub fn upsert_custom_agent(
     sessions_dir: Option<String>,
     session_id_from: Option<String>,
     env: Option<HashMap<String, String>>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<CustomAgent, String> {
     let label = label.trim().to_string();
     let command = command.trim().to_string();
@@ -211,7 +211,7 @@ pub fn upsert_custom_agent(
 }
 
 #[tauri::command]
-pub fn delete_custom_agent(id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+pub async fn delete_custom_agent(id: String, db: tauri::State<'_, DbConnection>) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM custom_agents WHERE id = ?1", [&id])
         .map_err(|e| e.to_string())?;
@@ -221,9 +221,9 @@ pub fn delete_custom_agent(id: String, db: tauri::State<DbConnection>) -> Result
 /// Importa las TUIs que una versión anterior guardaba en `localStorage` del frontend.
 /// Idempotente por id: reimportar no duplica ni pisa lo que el usuario ya editó acá.
 #[tauri::command]
-pub fn import_legacy_custom_agents(
+pub async fn import_legacy_custom_agents(
     agents: Vec<LegacyCustomAgent>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<usize, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut imported = 0;

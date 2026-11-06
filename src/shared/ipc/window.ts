@@ -6,7 +6,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 export const homeDir = () => invoke<string>("get_home_dir");
 
-export const focusWindow = (label: string) => invoke<void>("focus_window", { label });
+/** `false` si esa ventana ya no existe. */
+export const focusWindow = (label: string) => invoke<boolean>("focus_window", { label });
 
 /**
  * Cierra ESTA ventana. Si quedan otras del mismo workspace, su fila se borra; si era la

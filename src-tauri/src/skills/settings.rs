@@ -36,13 +36,13 @@ pub(super) fn skills_dir_from_value(value: Option<String>) -> Result<PathBuf, St
 }
 
 #[tauri::command]
-pub fn get_skills_dir(db: tauri::State<DbConnection>) -> Result<String, String> {
+pub async fn get_skills_dir(db: tauri::State<'_, DbConnection>) -> Result<String, String> {
     let dir = resolve_skills_dir(&db)?;
     Ok(dir.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-pub fn set_skills_dir(path: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+pub async fn set_skills_dir(path: String, db: tauri::State<'_, DbConnection>) -> Result<(), String> {
     std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     crate::database::db_set_setting("skills_dir".to_string(), path, db)
 }

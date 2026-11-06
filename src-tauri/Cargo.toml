@@ -1,6 +1,6 @@
 [package]
 name = "controlcode"
-version = "2.0.1"
+version = "2.1.0"
 description = "Control Code — AI coding agent command center"
 authors = ["luis3132"]
 edition = "2024"
@@ -77,6 +77,9 @@ futures-util = "0.3"
 # Las imágenes de las tabs de archivo viajan como data URL: sin esto habría que abrirle al
 # webview el protocolo de assets sobre todo el disco. Ya venía en el árbol.
 base64 = "0.22"
+# Android: las capturas que ve el agente van reducidas y en JPEG (una pantalla en PNG pesa
+# megas). Ya venía en el árbol por Tauri; acá solo se le prenden los formatos.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "zip"] }
 trash = "5"

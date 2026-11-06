@@ -10,6 +10,7 @@ use crate::database::models::{
 use crate::database::DbConnection;
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use super::sessions::{archive_tab_row, resolve_for_archive, ResolvedSession};
 
@@ -67,6 +68,55 @@ fn resolve_closing_tabs(state: &WindowStatePayload, db: &DbConnection) -> HashMa
     }).collect()
 }
 
+/// Qué hacer con la columna `scrollback` de una tab en este guardado.
+#[derive(Debug, PartialEq)]
+enum ScrollbackSource {
+    /// Escribir esto (lo leído del PTY, o lo que mandó el frontend).
+    Write(Option<String>),
+    /// Dejar lo que ya está en la base.
+    Keep,
+}
+
+lazy_static::lazy_static! {
+    /// Por tab, el PTY y cuánto había escrito cuando se guardó su scrollback por última vez.
+    /// Si el total no cambió, la base ya tiene ese scrollback y no se vuelve a copiar.
+    static ref SAVED_SCROLLBACK: Mutex<HashMap<String, (u32, u64)>> = Mutex::new(HashMap::new());
+}
+
+/// El scrollback de cada tab, resuelto antes de tomar el lock de la base.
+///
+/// Antes el frontend mandaba el scrollback de todas las tabs en cada guardado (hasta 3 MB
+/// cada una) y la base lo reescribía entero aunque no hubiera cambiado: decenas de MB por
+/// IPC, serializados en el hilo de la interfaz, y la base bloqueada mientras tanto. Ahora
+/// la tab viva manda solo su `pty_id`, y el scrollback se lee del buffer del PTY solo si
+/// el proceso escribió algo desde la última vez.
+fn resolve_scrollbacks(state: &WindowStatePayload) -> Vec<(ScrollbackSource, Option<(u32, u64)>)> {
+    let saved = SAVED_SCROLLBACK.lock().unwrap_or_else(|e| e.into_inner());
+    state
+        .tabs
+        .iter()
+        .map(|t| {
+            if t.keep_scrollback {
+                return (ScrollbackSource::Keep, None);
+            }
+            let Some(pty) = t.pty_id else {
+                return (ScrollbackSource::Write(t.scrollback.clone()), None);
+            };
+            let Some(total) = crate::terminal::output_total(pty) else {
+                // El PTY ya no existe: lo último guardado es lo mejor que hay.
+                return (ScrollbackSource::Keep, None);
+            };
+            if saved.get(&t.id) == Some(&(pty, total)) {
+                return (ScrollbackSource::Keep, None);
+            }
+            match crate::terminal::scrollback_of(pty) {
+                Some((data, total)) => (ScrollbackSource::Write(Some(data)), Some((pty, total))),
+                None => (ScrollbackSource::Keep, None),
+            }
+        })
+        .collect()
+}
+
 /// Genérica sobre el runtime para poder ejercitarla con el runtime de prueba de Tauri: es
 /// la función que decide qué tabs se dan por cerradas, y eso necesita test.
 pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
@@ -89,6 +139,7 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     // ANTES de tomar el lock: resolver la sesión lee disco y puede lanzar un proceso, y
     // hacerlo con el mutex tomado bloquea la base para toda la app (ver `ResolvedSession`).
     let resolved = resolve_closing_tabs(&state, db);
+    let scrollbacks = resolve_scrollbacks(&state);
 
     let conn = db.lock().map_err(|e| e.to_string())?;
     let now = now_ts();
@@ -160,7 +211,10 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     } else {
         Vec::new()
     };
-    for closed_id in closed_ids {
+    let tabs_changed = !closed_ids.is_empty()
+        || state.tabs.iter().any(|t| !existing_ids.contains(&t.id));
+    for closed_id in &closed_ids {
+        let closed_id = *closed_id;
         let resolved = resolved.get(closed_id.as_str()).cloned().unwrap_or_default();
         archive_tab_row(&conn, closed_id, &state.workspace_id, &resolved)?;
         if let Ok(pair) = conn.query_row(
@@ -179,7 +233,11 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     // en cada autosave (cada ~400ms), o sea que una skill asignada a una tab puntual
     // dejaba de estar asignada casi de inmediato. Al no borrar la fila, el id de la tab
     // es estable y el attachment sobrevive hasta que la tab se cierra de verdad (arriba).
-    for t in &state.tabs {
+    for (t, (scrollback, _)) in state.tabs.iter().zip(&scrollbacks) {
+        let (keep, scrollback) = match scrollback {
+            ScrollbackSource::Keep => (true, t.scrollback.as_deref()),
+            ScrollbackSource::Write(data) => (false, data.as_deref()),
+        };
         conn.execute(
             "INSERT INTO tabs (id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, account_id, prelaunch, opened_at, created_at, last_active, mode)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16, ?17)
@@ -193,7 +251,7 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
                cwd = excluded.cwd,
                tab_order = excluded.tab_order,
                session_id = excluded.session_id,
-               scrollback = excluded.scrollback,
+               scrollback = CASE WHEN ?18 THEN tabs.scrollback ELSE excluded.scrollback END,
                history_id = excluded.history_id,
                account_id = excluded.account_id,
                prelaunch = excluded.prelaunch,
@@ -210,32 +268,49 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
                 t.cwd,
                 t.tab_order,
                 t.session_id,
-                t.scrollback,
+                scrollback,
                 t.history_id,
                 t.account_id,
                 crate::prelaunch::steps_to_json(&t.prelaunch),
                 t.opened_at,
                 now,
                 crate::database::tab_mode(&t.mode),
+                keep,
             ],
         )
         .map_err(|e| e.to_string())?;
     }
 
     crate::skills::reconcile_link_dirs(&conn, &orphaned_dirs);
+    drop(conn);
 
-    // El conteo de tabs de este workspace pudo haber cambiado (tab agregada/cerrada) —
-    // se notifica a todas las ventanas (ej. el Home de otra ventana) para que refresquen.
-    use tauri::Emitter;
-    let _ = app.emit("cc-workspace-changed", ());
+    {
+        let mut saved = SAVED_SCROLLBACK.lock().unwrap_or_else(|e| e.into_inner());
+        for (t, (_, written)) in state.tabs.iter().zip(&scrollbacks) {
+            if let Some(written) = written {
+                saved.insert(t.id.clone(), *written);
+            }
+        }
+        for closed in &closed_ids {
+            saved.remove(closed.as_str());
+        }
+    }
+
+    // Solo cuando cambiaron las tabs (alguna nueva o cerrada): las demás ventanas refrescan
+    // su lista de workspaces con esto. Antes salía en cada guardado, cada 400 ms con
+    // actividad, y cada ventana respondía con una consulta a la base.
+    if tabs_changed {
+        use tauri::Emitter;
+        let _ = app.emit("cc-workspace-changed", ());
+    }
 
     Ok(())
 }
 
 #[tauri::command]
-pub fn db_load_window_state(
+pub async fn db_load_window_state(
     label: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Option<RestoredWindowState>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
 

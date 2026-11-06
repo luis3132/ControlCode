@@ -29,6 +29,12 @@ pub fn run() {
         .plugin(crate::updates::plugin())
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
+            crate::android::commands::android_status,
+            crate::android::commands::android_frame,
+            crate::android::commands::android_input,
+            crate::android::commands::android_select,
+            crate::android::commands::android_start_avd,
+            crate::android::commands::android_stream,
             // Terminal embebida (PTY)
             crate::terminal::pty_create,
             crate::terminal::pty_attach,
@@ -45,9 +51,9 @@ pub fn run() {
             crate::terminal::pty_kill,
             crate::terminal::pty_cwd,
             // Persistencia SQLite — workspaces (layouts guardados de ventanas/tabs)
-            crate::database::db_list_workspaces,
+            super::blocking::db_list_workspaces,
             crate::database::db_save_workspace,
-            crate::database::db_get_workspace_windows,
+            super::blocking::db_get_workspace_windows,
             crate::database::db_rename_workspace,
             crate::database::db_delete_workspace,
             crate::database::default_workspace_has_content,
@@ -213,7 +219,7 @@ pub fn run() {
             crate::prelaunch::resolve_prelaunch,
             // Settings genéricos (key-value)
             crate::database::db_get_setting,
-            crate::database::db_set_setting,
+            super::blocking::db_set_setting,
             // Gestión de skills (symlinks globales)
             crate::skills::get_skills_dir,
             crate::skills::set_skills_dir,
@@ -221,15 +227,15 @@ pub fn run() {
             crate::skills::install_skill,
             crate::skills::create_skill,
             crate::skills::fork_skill,
-            crate::skills::list_skills,
+            super::blocking::list_skills,
             crate::skills::get_skill_detail,
             crate::skills::update_skill_content,
             crate::skills::delete_skill,
-            crate::skills::attach_skill,
-            crate::skills::detach_skill,
-            crate::skills::check_symlinks_health,
+            super::blocking::attach_skill,
+            super::blocking::detach_skill,
+            super::blocking::check_symlinks_health,
             crate::skills::sync_workspace_skills,
-            crate::skills::reconcile_tab_skills,
+            super::blocking::reconcile_tab_skills,
             crate::skills::check_session_skills,
             crate::skills::restore_session_skills,
             crate::ipc::bridge::cli_respond,
@@ -361,7 +367,8 @@ pub fn run() {
             crate::ipc::mcp::sweep_configs(&db);
 
             let active_id = crate::database::db_get_last_active_workspace_id(&db)?;
-            let windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;
+            let mut windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;
+            crate::window::adopt_main(&db, &mut windows)?;
             crate::window::restore_windows(app.handle(), windows, true)?;
 
             // Servidor IPC de la CLI `controlcode` (Fase 8). Va después de restaurar las
