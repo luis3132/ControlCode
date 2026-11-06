@@ -80,7 +80,7 @@ export function currentWorkspace(): string | null {
 }
 
 /** La tab que el resto de la app considera activa, como clave del árbol. */
-function globalActiveItem(): string | null {
+export function globalActiveItem(): string | null {
   const { tabs, activeTabId } = useTabsStore.getState();
   const { views, activeViewId } = useViewTabsStore.getState();
   const active = tabs.find((t) => t.id === activeTabId);

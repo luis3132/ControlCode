@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 
+import { agentIsActing } from "@/features/browser/agentFocusGuard";
 import { BrowserTab } from "@/features/browser/BrowserTab";
 import { DiffTab } from "@/features/editor/DiffTab";
 import { FileTab } from "@/features/editor/FileTab";
@@ -40,6 +41,9 @@ export function ViewTabsHost() {
   placementsRef.current = visible;
   useEffect(() => {
     const onBlur = () => setTimeout(() => {
+      // Si fue un agente (o la página que él maneja) el que movió el foco, no es la persona
+      // eligiendo el navegador: el panel no cambia. Ver `agentFocusGuard`.
+      if (agentIsActing()) return;
       const frame = document.activeElement;
       if (frame?.tagName !== "IFRAME") return;
       const key = frame.closest<HTMLElement>("[data-view-key]")?.dataset.viewKey;

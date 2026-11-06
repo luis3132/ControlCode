@@ -18,6 +18,7 @@ import { comparablePath, type BrowserView, type ViewOwner } from "@/features/tab
 import {
   consoleForAgent, isFailed, mergeCookies, networkForAgent, requestRows, type CookieRow,
 } from "./debugLog";
+import { keepUserFocus } from "./agentFocusGuard";
 import { debugLogOf, refreshProxyLog } from "./debugStore";
 import {
   previewAddMock, previewClearMocks, previewCookies, previewListMocks, previewReadUpload, previewRequest, type Mock,
@@ -280,7 +281,7 @@ function inServerTerms(host: BrowserHost, text: string): string {
 async function inPage(host: BrowserHost, command: PageCommand, withEffects: boolean): Promise<string> {
   const firstId = debugLogOf(host.viewId).nextId;
   const startedAt = Date.now();
-  const result = await host.channel.run(command, timeoutFor(command));
+  const result = await keepUserFocus(() => host.channel.run(command, timeoutFor(command)));
   return inServerTerms(host, asText(result)) + (withEffects ? await sideEffects(host, firstId, startedAt) : "");
 }
 

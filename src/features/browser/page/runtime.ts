@@ -660,7 +660,7 @@ declare global {
     if ((el as HTMLInputElement).readOnly) states.push("readonly");
     if (attr("aria-invalid") === "true") states.push("invalid");
     if (role === "heading") states.push(`level=${attr("aria-level") ?? el.tagName.slice(1)}`);
-    if (document.activeElement === el) states.push("focused");
+    if (focusedElement() === el) states.push("focused");
     if (el.tagName === "DIALOG" && (el as HTMLDialogElement).open) states.push("open");
     return states;
   }
@@ -861,18 +861,70 @@ declare global {
     return el.dispatchEvent(event);
   }
 
+  // ── Foco del agente ─────────────────────────────────────────────────────────────
+  // Un `focus()` de verdad acá adentro le saca el foco a la app entera: la persona que
+  // estaba tipeando en una terminal pasa a tipear en la página, y la app cree que hizo
+  // click en el navegador y le cambia el panel. Mientras la persona no esté en la página,
+  // el agente enfoca "de mentira": se anota qué elemento enfocó y se le mandan los eventos
+  // de foco que escuchan los frameworks (`focus`/`focusin`, que es lo que usa React).
+  let virtualFocus: Element | null = null;
+
+  // La persona hizo click en la página: el foco de verdad vuelve a mandar.
+  document.addEventListener("focusin", (event) => { if (event.isTrusted) virtualFocus = null; }, true);
+
+  function agentFocus(el: Element): void {
+    if (document.hasFocus()) {
+      virtualFocus = null;
+      (el as HTMLElement).focus?.({ preventScroll: true });
+      return;
+    }
+    const prev = focusedElement();
+    if (prev === el) return;
+    if (prev !== document.body) {
+      prev.dispatchEvent(new FocusEvent("blur", { relatedTarget: el }));
+      prev.dispatchEvent(new FocusEvent("focusout", { bubbles: true, composed: true, relatedTarget: el }));
+    }
+    virtualFocus = el;
+    el.dispatchEvent(new FocusEvent("focus", { relatedTarget: prev }));
+    el.dispatchEvent(new FocusEvent("focusin", { bubbles: true, composed: true, relatedTarget: prev }));
+  }
+
+  /** Lo que tiene el foco para el agente: lo que enfocó él, o el de verdad. */
+  function focusedElement(): Element {
+    if (virtualFocus?.isConnected) return virtualFocus;
+    virtualFocus = null;
+    return document.activeElement ?? document.body;
+  }
+
+  /** Trae el elemento al centro scrolleando solo dentro de la página. `scrollIntoView`
+   *  scrollea también los ancestros del `<iframe>`, y con eso movía paneles de la app. */
+  function reveal(el: Element): void {
+    for (let node = el.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      const scrolls = /(auto|scroll|overlay)/.test(style.overflowY + style.overflowX)
+        && (node.scrollHeight > node.clientHeight || node.scrollWidth > node.clientWidth);
+      if (!scrolls) continue;
+      const r = el.getBoundingClientRect();
+      const c = node.getBoundingClientRect();
+      node.scrollTop += r.top + r.height / 2 - (c.top + c.height / 2);
+      node.scrollLeft += r.left + r.width / 2 - (c.left + c.width / 2);
+    }
+    const r = el.getBoundingClientRect();
+    window.scrollBy(r.left + r.width / 2 - innerWidth / 2, r.top + r.height / 2 - innerHeight / 2);
+  }
+
   /** Dónde tocar el elemento, trayéndolo a la vista. Falla si otra cosa lo tapa: eso es un
    *  bug de la página (un overlay que quedó abierto), y un click que lo atraviesa lo
    *  escondería. */
   function aim(el: Element): { x: number; y: number; target: Element } {
-    el.scrollIntoView({ block: "center", inline: "center" });
+    reveal(el);
     let target = el;
     let rect = el.getBoundingClientRect();
     // Los checkbox "lindos" esconden el input (0×0 o transparente) y se tocan por su label.
     const labels = isFormControl(el) ? (el as HTMLInputElement).labels : null;
     if ((rect.width === 0 || rect.height === 0) && labels && labels.length) {
       target = labels[0];
-      target.scrollIntoView({ block: "center", inline: "center" });
+      reveal(target);
       rect = target.getBoundingClientRect();
     }
     if (rect.width === 0 || rect.height === 0) throw new Error(`${describeElement(el)} no se ve (mide 0×0).`);
@@ -899,9 +951,15 @@ declare global {
     const approach = isTouch() ? ["pointerdown"] : ["pointerover", "pointerenter", "pointermove", "pointerdown"];
     if (isTouch()) sendTouch(target, "touchstart", x, y);
     for (const type of approach) mouse(target, type, x, y);
-    if (typeof (target as HTMLElement).focus === "function") (target as HTMLElement).focus({ preventScroll: true });
+    if (typeof (target as HTMLElement).focus === "function") agentFocus(target);
     if (isTouch()) sendTouch(target, "touchend", x, y);
     mouse(target, "pointerup", x, y);
+    // Un submit con el form inválido no se aprieta: el navegador enfocaría el primer campo
+    // inválido (robándole el foco a la persona) y no enviaría nada. Se le dice al agente.
+    const invalid = invalidForm(target);
+    if (invalid.formInvalid) {
+      return { clicked: describeElement(el), submitted: false, ...invalid };
+    }
     // `click()` y no un MouseEvent a mano: dispara lo que hace el navegador con un click de
     // verdad (seguir el link, marcar el checkbox, enviar el form).
     if (typeof (target as HTMLElement).click === "function") (target as HTMLElement).click();
@@ -950,7 +1008,7 @@ declare global {
   async function type(el: Element, text: string, clear: boolean, submit: boolean): Promise<unknown> {
     if ((el as HTMLInputElement).disabled) throw new Error(`${describeElement(el)} está deshabilitado.`);
     await cursor.toElement(el, `type "${clipLabel(text)}"`);
-    (el as HTMLElement).focus?.({ preventScroll: false });
+    agentFocus(el);
     if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
       const field = el as HTMLInputElement | HTMLTextAreaElement;
       if (["checkbox", "radio", "button", "submit", "file"].includes((field as HTMLInputElement).type)) {
@@ -961,13 +1019,14 @@ declare global {
       inputEvent(field, text);
       field.dispatchEvent(new Event("change", { bubbles: true }));
     } else if ((el as HTMLElement).isContentEditable) {
-      if (clear) {
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        const selection = window.getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(range);
-      }
+      // Sin foco de verdad la selección hay que ponerla a mano: todo el contenido para
+      // reemplazarlo, o el final para agregar.
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      if (!clear) range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
       if (!document.execCommand("insertText", false, text)) {
         el.textContent = clear ? text : `${el.textContent ?? ""}${text}`;
         inputEvent(el, text);
@@ -992,10 +1051,10 @@ declare global {
 
   async function press(key: string, targetEl?: Element): Promise<unknown> {
     const combo = parseKeyCombo(key);
-    const el = targetEl ?? document.activeElement ?? document.body;
+    const el = targetEl ?? focusedElement();
     if (el instanceof Element && el !== document.body) await cursor.toElement(el, `key ${key}`);
     else cursor.say(`key ${key}`);
-    if (targetEl) (targetEl as HTMLElement).focus?.({ preventScroll: false });
+    if (targetEl) agentFocus(targetEl);
     const code = /^[a-z]$/i.test(combo.key) ? `Key${combo.key.toUpperCase()}`
       : /^\d$/.test(combo.key) ? `Digit${combo.key}` : combo.key === " " ? "Space" : combo.key;
     const init: KeyboardEventInit = {
@@ -1013,6 +1072,11 @@ declare global {
           (el as HTMLElement).click();
         } else if (el.tagName === "INPUT") {
           const form = (el as HTMLInputElement).form;
+          // Inválido, el navegador enfocaría el campo malo en vez de enviar (ver `click`).
+          if (form && !form.noValidate && !form.checkValidity()) {
+            el.dispatchEvent(new KeyboardEvent("keyup", init));
+            return { pressed: key, on: describeElement(el), submitted: false, ...invalidForm(form.querySelector("button:not([type]),button[type=submit],input[type=submit]") ?? el) };
+          }
           if (form) {
             const submitter = form.querySelector<HTMLElement>("button:not([type]),button[type=submit],input[type=submit]");
             if (submitter) submitter.click();
@@ -1027,12 +1091,12 @@ declare global {
         const list = focusables();
         const index = list.indexOf(el as HTMLElement);
         const next = list[(index + (combo.shiftKey ? -1 : 1) + list.length) % list.length];
-        next?.focus();
+        if (next) agentFocus(next);
       }
     }
     el.dispatchEvent(new KeyboardEvent("keyup", init));
     await settle(1000);
-    const focused = document.activeElement;
+    const focused = focusedElement();
     return {
       pressed: key,
       on: describeElement(el),
@@ -1142,7 +1206,7 @@ declare global {
       const el = resolve(command.target);
       await cursor.toElement(el, "scroll");
       if (command.dy) el.scrollBy(0, command.dy);
-      else el.scrollIntoView({ block: "center" });
+      else reveal(el);
     } else if (command.to === "top") {
       window.scrollTo(0, 0);
     } else if (command.to === "bottom") {
