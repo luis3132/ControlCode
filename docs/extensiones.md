@@ -271,7 +271,118 @@ La pantalla de settings arma el formulario sola a partir del esquema (JSON Schem
 
 - `skills`: skills que se instalan con la extensión y se desinstalan con ella, usando el sistema actual de `src-tauri/src/skills`.
 - `processes`: presets para `process_start`, por ejemplo "docker compose up".
-- `themes`: archivos de CSS vars que se suman a los temas de la app.
+- `themes`: temas completos que se suman a los de la app (ver 4.9).
+
+### 4.9 Cambiar la interfaz
+
+Una extensión no solo agrega cosas: también puede cambiar cómo se ve y cómo se arma la app. Lo que **no** puede es correr JavaScript propio en la ventana principal, por dos razones:
+
+- **Seguridad:** ese JS tendría `invoke` de Tauri, y con eso acceso a las terminales, los secretos, las llaves de git y el sistema de archivos, sin pasar por ningún permiso.
+- **Estabilidad:** dependería del DOM interno de React, y cualquier actualización de la app lo rompería.
+
+Por eso los cambios de interfaz siguen el mismo modelo que el resto: la extensión **declara** qué quiere cambiar, y la app lo aplica o le presta el lugar a una vista en iframe. Hay cinco niveles, del más seguro al más potente.
+
+#### a) Temas (`themes`)
+
+```jsonc
+"themes": [
+  { "id": "nord", "label": "Nord", "kind": "dark", "path": "themes/nord.json" }
+]
+```
+
+Un tema cubre **todos los tokens** de `App.css`, no solo los colores:
+
+- colores de la app y del terminal (los 16 ANSI, el cursor y la selección);
+- fuentes de la interfaz, del editor y del terminal;
+- tamaños, radios, densidad (compacta, normal, amplia) y sombras;
+- colores del resaltado de sintaxis del editor.
+
+Junto a los temas van los **packs de íconos** (`iconThemes`), que reemplazan los íconos de archivos, de carpetas y de la barra lateral.
+
+Son solo datos, sin código, así que no piden permiso.
+
+#### b) Estilos propios (`styles`)
+
+```jsonc
+"styles": [
+  { "path": "ui/compact.css", "label": "Barra de estado compacta", "default": true }
+]
+```
+
+Hojas CSS que se inyectan en la ventana principal, como el `userChrome.css` de Firefox. Sirven para cambios que un tema no alcanza: esconder un elemento, cambiar tamaños o espaciados, reacomodar la barra de estado. La persona puede activar o desactivar cada hoja desde la página de la extensión.
+
+Para que una actualización no las rompa, la app publica **anclajes estables**, que son parte de la API y se versionan con `engine`:
+
+| Anclaje | Qué marca |
+|---|---|
+| `data-cc="sidebar"`, `data-cc="sidebar.section"` + `data-cc-id` | La barra lateral y cada sección |
+| `data-cc="explorer.row"` + `data-cc-path` | Cada fila del explorador |
+| `data-cc="tabbar"`, `data-cc="tab"` + `data-cc-kind` | La barra de tabs y cada tab (`agent`, `file`, `browser`, `extension`…) |
+| `data-cc="statusbar"`, `data-cc="statusbar.item"` + `data-cc-id` | La barra de estado y cada item |
+| `data-cc="terminal"`, `data-cc="editor"`, `data-cc="canvas"`, `data-cc="canvas.node"` | Las áreas principales |
+| `data-cc-state="active\|busy\|dormant"` | El estado de tabs, agentes y nodos |
+
+Las clases de Tailwind y la estructura interna **no** son API: una hoja que dependa de ellas puede romperse en cualquier versión, y la página de extensiones lo advierte.
+
+La CSP de la ventana principal ya bloquea cargar recursos externos, así que una hoja no puede usar `url()` o `@import` para sacar datos de la app. Solo puede usar archivos de su propia extensión (`ccext://<id>/…`). Requiere el permiso `ui:styles`, que se muestra al instalar.
+
+#### c) Decorar lo que ya existe (`host.ui.decorate`)
+
+Sin reemplazar nada, la extensión le agrega información a piezas propias de la app:
+
+```ts
+await controlcode.host.ui.decorate({
+  target: "explorer.row",           // explorer.row | tab | canvas.node | terminal | editor.line
+  match: "**/migrations/*.sql",
+  badge: "M", color: "warning", tooltip: "Migración pendiente"
+});
+```
+
+- Badges, colores y tooltips en filas del explorador (como git con los archivos modificados), en tabs y en nodos del canvas.
+- Entradas en los menús contextuales (`contributes.menus`) y acciones en la cabecera de una tab o de un nodo.
+- Decoraciones en el editor (`editor.decorate`, sección 6) y marcas en el terminal, por ejemplo resaltar las líneas que coinciden con un patrón.
+
+La app dibuja todo con sus propios componentes, así que no hace falta permiso: la extensión solo manda datos.
+
+#### d) Reemplazar o reacomodar piezas (`overrides`)
+
+```jsonc
+"overrides": [
+  { "replace": "explorer", "view": "tree" },       // su vista ocupa el lugar del explorador
+  { "replace": "welcome", "view": "home" },        // otra pantalla de inicio
+  { "hide": "sidebar.section:changes" },
+  { "order": "statusbar", "items": ["branch", "acme.db-manager.status", "usage"] }
+]
+```
+
+- **`replace`:** una vista de la extensión (iframe, sección 7) ocupa el lugar de una pieza propia. Se pueden reemplazar:
+  - el explorador;
+  - la pantalla de inicio;
+  - la barra de estado entera;
+  - el render de un tipo de nodo del canvas;
+  - la vista de chat de las tabs HTML.
+
+  Los visores de archivos ya se cubren con `editors` (4.5).
+- **`hide` y `order`:** esconder o reordenar secciones de la barra lateral, items de la barra de estado, botones de la toolbar y entradas de los menús.
+
+Cada pieza reemplazable recibe por el bridge los mismos datos y acciones que usa la original. Por ejemplo, un explorador propio recibe el árbol, el watcher y `editor.open`. Así reemplazarla no obliga a reimplementar el acceso a los datos.
+
+Reglas:
+
+- **La original queda de respaldo.** Si la vista no carga, falla o el backend se cae, vuelve la pieza original y se avisa. Desde el menú de la pieza siempre se puede volver a la original.
+- **Una sola extensión por pieza.** Si dos quieren reemplazar lo mismo, la persona elige cuál en la página de extensiones.
+- Requiere el permiso `ui:override`.
+
+#### e) Distribución de la ventana (`host.ui.layout`)
+
+- Poner la barra lateral a la izquierda o a la derecha, y abrir, cerrar o redimensionar paneles.
+- Guardar y aplicar presets de distribución (`contributes.layouts`). Por ejemplo, "revisión": diff a la izquierda, agente a la derecha y Problemas abajo.
+
+Los presets que se aplican desde la paleta de comandos no piden permiso. Para cambiar la distribución sin que la persona lo pida, hace falta `ui:layout`.
+
+#### Si algo sale mal
+
+El modo seguro (`--disable-extensions`, o mantener Shift al abrir la app) arranca **sin estilos, sin overrides y sin temas de extensiones**. Así una hoja CSS que esconda todo o un reemplazo roto nunca dejan la app inutilizable.
 
 ## 5. Protocolo del backend
 
@@ -327,7 +438,7 @@ Lo que una extensión puede pedirle a Control Code. Está disponible igual desde
 | `workspace` | `info` (cwd, nombre, rama), `list` | — | sí |
 | `fs` | `read`, `write`, `list`, `watch`, `stat`, limitado al workspace | `fs:workspace:read` / `:write` | sí (lectura) |
 | `editor` | `open(path, line?)`, `activeFile`, `selection`, `publishDiagnostics`, `decorate` | `editor` | sí (`open`) |
-| `ui` | `notify`, `input` (prompt), `pick` (lista), `openView`, `statusbar.set` | — | sí |
+| `ui` | `notify`, `input` (prompt), `pick` (lista), `openView`, `statusbar.set`, `decorate`, `layout` (sección 4.9) | — / `ui:layout` | sí |
 | `processes` | `start`, `send`, `output`, `stop`: los mismos de `src-tauri/src/procs` y visibles en la app | `processes` | no |
 | `agents` | `ask` (como `ask_user`), `task.add`, `task.status`, `roster`, `tabs.list`, `tabs.send` | `agents` | no |
 | `git` | `status`, `diff`, y la cuenta del usuario: `pr.create`, `issue.list`, `checks` (lo de `forge`) | `git` / `git:account` | no |
@@ -406,6 +517,7 @@ Hay que ser honestos: **una extensión con backend corre con los permisos del us
 - **Tools destructivas** (solo en la forma `server` de la sección 4.1; un MCP `external` no pasa por la app): `destructive: true` hace que la llamada del agente pase por aprobación, con el mismo flujo de `approve_tool_use` y la tarjeta del chat en tabs HTML. En una tab de TUI, Claude Code ya pide permiso por tool MCP según su configuración. La app puede pedir una segunda confirmación propia para estas.
 - **Extensiones de workspace** (`.controlcode/extensions/` en el repo): nunca se activan solas. La primera vez se pregunta, y la respuesta se recuerda por hash del manifest + binarios, así un cambio en el repo vuelve a preguntar.
 - **UI:** iframe sin `same-origin` ni acceso a Tauri, con CSP estricta. Una UI maliciosa solo puede hacer lo que su propia extensión ya podía.
+- **Cambios a la interfaz (4.9):** nunca JS en la ventana principal. El CSS propio (`ui:styles`) no puede cargar nada externo por la CSP. Una pieza reemplazada (`ui:override`) es un iframe más, con la original de respaldo. Igual puede engañar a la vista; por ejemplo, un explorador propio puede esconder un archivo. Por eso estos permisos se muestran aparte al instalar.
 - **Desactivar todo:** `controlcode --disable-extensions`, y un modo seguro en la UI si la app no arranca bien.
 
 ## 10. Desarrollo de extensiones
@@ -481,6 +593,8 @@ Se reusa el marketplace (`src-tauri/src/marketplace/`), que hoy maneja registrie
 | `src/features/extensions/` (nuevo) | Bridge `postMessage`, `ExtensionView` (iframe), página de gestión, settings generados. |
 | `src/features/tabs/viewTabs.ts` | `kind: "extension"` con `{ extensionId, viewId, state }`. |
 | `src/features/canvas/` | Nodo `extension-view`. |
+| `src/App.css` + componentes de la app | Todos los tokens como CSS vars (fuentes, tamaños, densidad, terminal), anclajes `data-cc*` en las piezas públicas, y huecos (`<Slot id="explorer">`) que muestran la pieza original o la vista que la reemplaza, con respaldo si falla. |
+| `src/features/extensions/` | Carga de temas, packs de íconos y hojas `styles`, registro de decoraciones, `overrides` y presets de distribución. |
 | `src/features/editor/` + `src-tauri/src/lsp/` (nuevo) | Cliente LSP y su integración en CodeMirror (fase 3). |
 | `src/features/marketplace/` | Sección de extensiones (fase 5). |
 
@@ -492,6 +606,11 @@ Se reusa el marketplace (`src-tauri/src/marketplace/`), que hoy maneja registrie
 4. **Lenguajes.** El cliente LSP, la integración en CodeMirror, el panel de Problemas y las tools `lsp_*`. Extensiones oficiales para Rust, TS/JS y Python que solo declaran el servidor.
 5. **SDK y plantillas.** El crate `controlcode-extension`, `@controlcode/extension-ui`, `ccode ext new/pack` y la documentación para desarrolladores.
 6. **Resto de contribuciones y distribución.** `editors`, `events`, `settings`, `panel`/`canvas`/`statusbar`, el marketplace, las actualizaciones y la confianza de workspace.
+7. **Cambiar la interfaz (4.9).** Se puede hacer en dos partes:
+   - **Primero, lo que no tiene riesgo:** temas completos, packs de íconos, `decorate`, menús y presets de distribución. Los temas no dependen del host, así que pueden adelantarse a la fase 1.
+   - **Después:** los anclajes `data-cc*` documentados, `styles` y `overrides` con su respaldo.
+
+   *Listo cuando:* una extensión reemplaza el explorador por uno propio y, al matar su backend, vuelve el original sin recargar la app.
 
 ## 14. Preguntas abiertas
 
@@ -501,4 +620,6 @@ Se reusa el marketplace (`src-tauri/src/marketplace/`), que hoy maneja registrie
 - **Otros agentes.** Codex, Gemini y similares, si la app los soporta: ¿reciben los mismos servidores vía su propio config MCP? `ccode mcp --ext` es estándar, así que en principio sí; hay que sumarlos en sus adaptadores (`extra_args` de Codex, etc.).
 - **Backends WASM** como segunda opción para extensiones sin red ni procesos: ¿valen la complejidad?
 - **Firma de extensiones:** ¿clave por publisher o confianza en el registry?
+- **¿Qué piezas son reemplazables?** Cada `replace` es un compromiso de API: la pieza tiene que exponer sus datos y acciones por el bridge. Propuesta para empezar: explorador, pantalla de inicio, barra de estado y nodos del canvas. El terminal y el editor quedan fuera, porque reemplazarlos rompe demasiadas cosas (xterm, PTYs, CodeMirror, LSP).
+- **¿Cuántos anclajes `data-cc` publicar?** Cada uno se mantiene entre versiones. Mejor pocos y bien elegidos, y sumar más cuando una extensión real lo pida.
 - **¿Migrar features propias?** Por ejemplo, diagramas o slides como extensiones oficiales, para validar el principio 4.
