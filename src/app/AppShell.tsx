@@ -35,6 +35,7 @@ import type { ShellOutletContext } from "@/app/shellContext";
 import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
+import { initAndroidEvents } from "@/features/android/store";
 import { useFleetEvents } from "@/features/runs/useFleetEvents";
 import { useProcessEvents } from "@/features/processes/useProcessEvents";
 import { initNotifications } from "@/features/notifications/watch";
@@ -129,6 +130,7 @@ export function AppShell() {
   // Puente de la CLI `ccode`: esta ventana queda disponible para atender los comandos
   // que solo el frontend puede resolver (crear/cerrar tabs).
   useEffect(() => initCliBridge(), []);
+  useEffect(() => initAndroidEvents(), []);
   // Los avisos de la campana y el punto de "terminó" de las tabs: escuchan los stores de
   // siempre y comparan cada cambio con el anterior.
   useEffect(() => initNotifications(), []);

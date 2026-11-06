@@ -107,6 +107,12 @@ CANVAS
                                               Es el mismo camino que usan las
                                               herramientas canvas_* del MCP.
 
+ANDROID
+  android run --json-args '{\"cwd\":\"...\",     Una orden al dispositivo Android (adb):
+              \"request\":{\"op\":\"snapshot\"}}'   devices, snapshot, tap, type, key, app…
+                                              Es el mismo camino que usan las
+                                              herramientas android_* del MCP.
+
 AGENTES, CUENTAS Y SKILLS
   agents                                      Qué poner en --agent (incluye las custom)
   accounts                                    Qué poner en --account, por TUI
@@ -466,6 +472,8 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             Duration::from_secs(asked + 60)
         }
         "browser.run" => Duration::from_secs(controlcode_lib::ipc::mcp::BROWSER_TIMEOUT_SECS + 15),
+        // Instalar un APK o esperar a que arranque un emulador lleva minutos.
+        "android.run" => Duration::from_secs(controlcode_lib::ipc::mcp::ANDROID_TIMEOUT_SECS),
         // Esperar a que terminen workers: lo que pidió el agente, más margen.
         "run.await" => {
             let requested = args.pointer("/args/timeout_s").and_then(Value::as_u64).unwrap_or(300).clamp(10, 1800);

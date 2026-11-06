@@ -1,13 +1,13 @@
 import { useTranslation } from "react-i18next";
 import { Button, DocumentIcon } from "neogestify-ui-components";
 
-import { BranchIcon, GlobeIcon } from "@/app/icons";
+import { BranchIcon, GlobeIcon, PhoneIcon } from "@/app/icons";
 import type { AgentPaint } from "@/features/browser/agentPaint";
 import { activeMark, TAB_ACTIVE, TAB_IDLE, TAB_SHELL } from "@/features/tabs/tabStyle";
 
 import type { ViewTab } from "./viewTabs";
 
-const ICON = { file: DocumentIcon, diff: BranchIcon, browser: GlobeIcon } as const;
+const ICON = { file: DocumentIcon, diff: BranchIcon, browser: GlobeIcon, android: PhoneIcon } as const;
 
 /**
  * Una tab de archivo, diff o navegador en la barra de arriba.
@@ -44,7 +44,7 @@ export function ViewTabItem({
   const { t } = useTranslation();
   const Icon = ICON[view.kind];
   const dirty = view.kind === "file" && view.dirty;
-  const title = view.title || (view.kind === "browser" ? t("browser.newTab") : "");
+  const title = view.title || (view.kind === "browser" ? t("browser.newTab") : view.kind === "android" ? t("android.tab") : "");
 
   return (
     <div
@@ -55,7 +55,7 @@ export function ViewTabItem({
       onDoubleClick={onPin}
       // Click del medio cierra, como en cualquier navegador o editor.
       onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(); } }}
-      title={paintHint ?? (view.kind === "browser" ? view.url || title : view.kind === "file" ? view.path : `${view.root}/${view.path}`)}
+      title={paintHint ?? (view.kind === "browser" ? view.url || title : view.kind === "android" ? title : view.kind === "file" ? view.path : `${view.root}/${view.path}`)}
       className={`${TAB_SHELL} max-w-52 min-w-24 ${className}
         ${paint && !isActive ? paint.tint : ""}
         ${isActive ? TAB_ACTIVE : TAB_IDLE}`}

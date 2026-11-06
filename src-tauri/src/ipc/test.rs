@@ -438,7 +438,30 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     // Las del canvas: todas se ofrecen.
     let canvas = super::mcp::canvas_tool_names();
     assert!(canvas.iter().all(|n| offered.contains(n)), "{canvas:?}");
-    assert_eq!(browser.len() + orchestration.len() + git.len() + process.len() + canvas.len() + 1, offered.len());
+    // Las de Android: todas se ofrecen, haya o no `adb` en este equipo (si no hay, el servidor
+    // no las lista, pero el permiso no estorba).
+    let android = offered.iter().filter(|n| n.contains("__android_")).count();
+    assert_eq!(browser.len() + orchestration.len() + git.len() + process.len() + canvas.len() + android + 1, offered.len());
+}
+
+/// Usar el teléfono como una persona se aprueba solo, como el navegador. Lo que no vuelve
+/// solo (instalar o borrar apps, el shell libre) o gasta (arrancar un emulador) lo aprueba la
+/// persona.
+#[test]
+fn android_se_aprueba_solo_salvo_instalar_shell_y_emulador() {
+    use super::mcp::{annotations, auto_approved};
+    for name in [
+        "android_devices", "android_snapshot", "android_screenshot", "android_tap", "android_swipe",
+        "android_type", "android_key", "android_app", "android_wait", "android_logcat",
+    ] {
+        assert!(auto_approved(name), "{name}");
+    }
+    for name in ["android_install", "android_shell", "android_emulator"] {
+        assert!(!auto_approved(name), "{name}");
+    }
+    assert_eq!(annotations("android_snapshot")["readOnlyHint"], json!(true));
+    assert_eq!(annotations("android_tap")["readOnlyHint"], json!(false));
+    assert_eq!(annotations("android_shell")["destructiveHint"], json!(true));
 }
 
 /// El canvas se aprueba solo —acomodar la vista es para lo que está— salvo lanzar un agente

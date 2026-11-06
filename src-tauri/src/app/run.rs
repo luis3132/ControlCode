@@ -29,6 +29,11 @@ pub fn run() {
         .plugin(crate::updates::plugin())
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
+            crate::android::commands::android_status,
+            crate::android::commands::android_frame,
+            crate::android::commands::android_input,
+            crate::android::commands::android_select,
+            crate::android::commands::android_start_avd,
             // Terminal embebida (PTY)
             crate::terminal::pty_create,
             crate::terminal::pty_attach,

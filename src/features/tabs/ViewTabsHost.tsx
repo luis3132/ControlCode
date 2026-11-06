@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 
+import { DeviceTab } from "@/features/android/DeviceTab";
 import { agentIsActing } from "@/features/browser/agentFocusGuard";
 import { BrowserTab } from "@/features/browser/BrowserTab";
 import { DiffTab } from "@/features/editor/DiffTab";
@@ -83,6 +84,7 @@ export function ViewTabsHost() {
             {view.kind === "file" && <FileTab view={view} active={shown && onWorkspace} focused={focused} />}
             {view.kind === "diff" && <DiffTab view={view} active={shown && onWorkspace} />}
             {view.kind === "browser" && <BrowserTab view={view} active={focused} shown={shown && onWorkspace && docVisible} />}
+            {view.kind === "android" && <DeviceTab view={view} shown={shown && onWorkspace && docVisible} />}
           </div>
         );
       })}

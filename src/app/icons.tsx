@@ -111,6 +111,63 @@ export function GlobeIcon({ className }: IconProps) {
   );
 }
 
+/** Teléfono: un dispositivo Android. */
+export function PhoneIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+      <path d="M10.5 18.5h3" />
+    </svg>
+  );
+}
+
+/** Los tres botones de navegación de Android: atrás (triángulo), inicio (círculo) y
+ *  recientes (cuadrado), como se dibujan en el teléfono. */
+export function NavBackIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M16 5.5v13L6 12z" />
+    </svg>
+  );
+}
+
+export function NavHomeIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <circle cx="12" cy="12" r="6.5" />
+    </svg>
+  );
+}
+
+export function NavRecentsIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
+
+/** Parlante: el volumen del dispositivo. `up` suma las ondas. */
+export function VolumeIcon({ className, up }: IconProps & { up?: boolean }) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+      <path d="M15.5 9.5a3.5 3.5 0 010 5" />
+      {up && <path d="M18 7a7 7 0 010 10" />}
+    </svg>
+  );
+}
+
+/** Encendido: el botón de bloqueo del teléfono. */
+export function PowerIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M12 3.5v8" />
+      <path d="M7 6.5a7 7 0 1010 0" />
+    </svg>
+  );
+}
+
 /** Cursor sobre un recuadro punteado: marcar un elemento de la página. */
 export function PickIcon({ className }: IconProps) {
   return (

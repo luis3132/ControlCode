@@ -133,6 +133,7 @@ fn tool_names() -> Vec<&'static str> {
     names.extend(GIT_TOOLS.iter().map(|t| t.name));
     names.extend(PROCESS_TOOLS.iter().map(|t| t.name));
     names.extend(CANVAS_TOOLS.iter().map(|t| t.name));
+    names.extend(ANDROID_TOOLS.iter().map(|t| t.name));
     names.push(ASK_TOOL);
     names.push(TOOL_NAME);
     names
@@ -1049,6 +1050,279 @@ where
     }
 }
 
+// ── Android ─────────────────────────────────────────────────────
+
+/// Una tool del dispositivo Android: la operación de `android.run`, si solo mira y si se
+/// aprueba sola.
+struct AndroidTool {
+    name: &'static str,
+    op: &'static str,
+    read_only: bool,
+    /// Usar el teléfono como una persona se aprueba solo, como el navegador. Instalar o
+    /// borrar apps, arrancar un emulador y el shell libre los aprueba la persona.
+    auto: bool,
+    description: &'static str,
+    properties: fn() -> Value,
+    required: &'static [&'static str],
+}
+
+const ANDROID_DEVICE: &str = "Serial or model of the device (from android_devices). Only needed when several are \
+connected; by default the one you used last, or the one the user is looking at.";
+
+/// Tope de un pedido al dispositivo: instalar un APK grande o esperar a que arranque un
+/// emulador lleva minutos.
+pub const ANDROID_TIMEOUT_SECS: u64 = 300;
+
+fn android_props(mut properties: Value) -> Value {
+    if let Some(object) = properties.as_object_mut() {
+        object.insert("device".into(), json!({ "type": "string", "description": ANDROID_DEVICE }));
+    }
+    properties
+}
+
+fn android_target() -> Value {
+    json!({
+        "ref": { "type": "string", "description": "A ref from android_snapshot, e.g. \"a12\"." },
+        "text": { "type": "string", "description": "Visible text, content description or resource id of the element (searched on the current screen; slower than a ref)." },
+        "x": { "type": "number", "description": "Horizontal position in device pixels (instead of ref/text)." },
+        "y": { "type": "number", "description": "Vertical position in device pixels." },
+    })
+}
+
+const ANDROID_TOOLS: &[AndroidTool] = &[
+    AndroidTool {
+        name: "android_devices",
+        op: "devices",
+        read_only: true,
+        auto: true,
+        description: "List the Android devices and emulators connected through adb (serial, model, state, screen \
+size), and the emulators that can be started.",
+        properties: || json!({}),
+        required: &[],
+    },
+    AndroidTool {
+        name: "android_emulator",
+        op: "emulator",
+        read_only: false,
+        auto: false,
+        description: "Start an Android emulator (AVD) and wait until it has booted (up to 150 s). Without `avd`, \
+lists the ones available.",
+        properties: || json!({ "avd": { "type": "string", "description": "AVD name, as android_devices lists it." } }),
+        required: &[],
+    },
+    AndroidTool {
+        name: "android_snapshot",
+        op: "snapshot",
+        read_only: true,
+        auto: true,
+        description: "Read what is on the device screen through accessibility: one line per element with its text, \
+id, state (clickable, editable, checked, focused…), its center in device pixels and a ref (a1, a2…) to act on. \
+Takes 1-3 s. Refs are valid until the screen changes: take a new snapshot after acting. If the tree is empty \
+(games, Flutter, video), use android_screenshot.",
+        properties: || android_props(json!({})),
+        required: &[],
+    },
+    AndroidTool {
+        name: "android_screenshot",
+        op: "screenshot",
+        read_only: true,
+        auto: true,
+        description: "A picture of the device screen, scaled down. Use it when android_snapshot is not enough: to \
+check how something looks, or on screens without an accessibility tree. The text says how to convert what you \
+measure on it to device pixels.",
+        properties: || android_props(json!({ "max": { "type": "number", "description": "Longest side of the image in pixels (320-2000). Default 1280." } })),
+        required: &[],
+    },
+    AndroidTool {
+        name: "android_tap",
+        op: "tap",
+        read_only: false,
+        auto: true,
+        description: "Tap an element like a finger would: by ref, by visible text, or by coordinates. `hold_ms` \
+makes it a long press; `double` a double tap. The user sees the touch drawn in your color.",
+        properties: || {
+            let mut p = android_target();
+            p["hold_ms"] = json!({ "type": "number", "description": "Long press for this many milliseconds (e.g. 800)." });
+            p["double"] = json!({ "type": "boolean", "description": "Double tap." });
+            android_props(p)
+        },
+        required: &[],
+    },
+    AndroidTool {
+        name: "android_swipe",
+        op: "swipe",
+        read_only: false,
+        auto: true,
+        description: "Swipe or scroll. With `direction` it scrolls the screen (or the element given by ref/text) so \
+that you see what is further in that direction: down shows what is below. With from_x/from_y/to_x/to_y it \
+drags exactly between those points (pull to refresh, sliders, drag and drop).",
+        properties: || {
+            let mut p = android_target();
+            p["direction"] = json!({ "type": "string", "enum": ["up", "down", "left", "right"] });
+            p["amount"] = json!({ "type": "number", "description": "How far, as a fraction of the area (0.1-1). Default 0.7." });
+            p["from_x"] = json!({ "type": "number" });
+            p["from_y"] = json!({ "type": "number" });
+            p["to_x"] = json!({ "type": "number" });
+            p["to_y"] = json!({ "type": "number" });
+            p["duration_ms"] = json!({ "type": "number", "description": "How long the finger moves (50-5000). Default 300; slower is a drag, faster a fling." });
+            android_props(p)
+        },
+        required: &[],
+    },
+    AndroidTool {
+        name: "android_type",
+        op: "type",
+        read_only: false,
+        auto: true,
+        description: "Type text into the focused field, or first tap the field given by `ref` or `target`. \
+Newlines press enter. adb can only type ASCII: accents, ñ and emoji are left out and the result says which.",
+        properties: || android_props(json!({
+            "text": { "type": "string", "description": "What to type." },
+            "ref": { "type": "string", "description": "Field to tap first: a ref from android_snapshot." },
+            "target": { "type": "string", "description": "Field to tap first, by its visible text, hint or id." },
+            "clear": { "type": "boolean", "description": "Delete what the field had before typing." },
+            "submit": { "type": "boolean", "description": "Press enter at the end." },
+        })),
+        required: &["text"],
+    },
+    AndroidTool {
+        name: "android_key",
+        op: "key",
+        read_only: false,
+        auto: true,
+        description: "Press a system or keyboard key: back, home, recents, enter, backspace, tab, escape, up, down, \
+left, right, volume_up, volume_down, power, menu, search, wakeup, sleep, or a KEYCODE_ name or number. Several, \
+comma-separated, are pressed in order.",
+        properties: || android_props(json!({
+            "key": { "type": "string", "description": "e.g. \"back\" or \"home\" or \"KEYCODE_CAMERA\"." },
+            "long": { "type": "boolean", "description": "Long press." },
+        })),
+        required: &["key"],
+    },
+    AndroidTool {
+        name: "android_app",
+        op: "app",
+        read_only: false,
+        auto: true,
+        description: "Apps on the device: launch or stop one by package, open a URL or deep link, list the \
+installed packages, or say which app and screen are in the foreground.",
+        properties: || android_props(json!({
+            "action": { "type": "string", "enum": ["launch", "stop", "open_url", "list", "current"], "description": "Default: current." },
+            "package": { "type": "string", "description": "e.g. com.example.app (launch, stop)." },
+            "url": { "type": "string", "description": "For open_url: https://… or myapp://screen." },
+            "filter": { "type": "string", "description": "For list: only packages containing this." },
+            "all": { "type": "boolean", "description": "For list: include system packages." },
+        })),
+        required: &[],
+    },
+    AndroidTool {
+        name: "android_install",
+        op: "install",
+        read_only: false,
+        auto: false,
+        description: "Install an APK (path relative to the project), uninstall an app, or clear its data.",
+        properties: || android_props(json!({
+            "action": { "type": "string", "enum": ["install", "uninstall", "clear"], "description": "Default: install." },
+            "path": { "type": "string", "description": "The .apk, e.g. app/build/outputs/apk/debug/app-debug.apk." },
+            "package": { "type": "string", "description": "For uninstall and clear." },
+        })),
+        required: &[],
+    },
+    AndroidTool {
+        name: "android_wait",
+        op: "wait",
+        read_only: true,
+        auto: true,
+        description: "Wait until a text appears on screen (or disappears, with `gone`), or, without `text`, until the \
+screen stops changing (after a navigation or an animation).",
+        properties: || android_props(json!({
+            "text": { "type": "string", "description": "Visible text, content description or id to wait for." },
+            "gone": { "type": "boolean", "description": "Wait for it to disappear instead." },
+            "timeout_s": { "type": "number", "description": "1-60. Default 10." },
+        })),
+        required: &[],
+    },
+    AndroidTool {
+        name: "android_logcat",
+        op: "logcat",
+        read_only: true,
+        auto: true,
+        description: "Read the device log: the last lines, only one app's (by package, while it runs), from a level \
+up, or matching a pattern. `clear` empties it, to read only what comes next.",
+        properties: || android_props(json!({
+            "lines": { "type": "number", "description": "How many of the last lines (1-2000). Default 200." },
+            "package": { "type": "string", "description": "Only this running app." },
+            "level": { "type": "string", "enum": ["V", "D", "I", "W", "E", "F"], "description": "This level and above." },
+            "grep": { "type": "string", "description": "Only lines matching this regex (case-insensitive)." },
+            "clear": { "type": "boolean", "description": "Clear the log instead of reading it." },
+        })),
+        required: &[],
+    },
+    AndroidTool {
+        name: "android_shell",
+        op: "shell",
+        read_only: false,
+        auto: false,
+        description: "Run a command in the device shell (adb shell). Prefer the other android_ tools: they are \
+approved on their own and the user sees what you do.",
+        properties: || android_props(json!({
+            "command": { "type": "string", "description": "e.g. \"settings get system screen_brightness\"." },
+            "timeout_s": { "type": "number", "description": "1-300. Default 30." },
+        })),
+        required: &["command"],
+    },
+];
+
+/// Si este equipo tiene `adb`: sin él las tools de Android no se ofrecen.
+fn android_available() -> bool {
+    crate::android::adb::locate().is_some()
+}
+
+/// Lo que se le explica al modelo sobre Android, solo si hay `adb`.
+const ANDROID_INSTRUCTIONS: &str = "\nAndroid: the user's phone or emulator, through adb, shown live in Control Code. \
+Use it like a person: android_snapshot to read the screen and get refs, android_tap/android_swipe/android_type/\
+android_key to act, android_wait after something that loads, android_screenshot when the snapshot is empty or you \
+need to see how it looks, android_logcat for crashes. android_app launches apps and opens deep links.";
+
+/// Las instrucciones del servidor para este equipo.
+fn instructions() -> String {
+    let mut text = INSTRUCTIONS.to_string();
+    if android_available() {
+        // Antes de la línea final ("Everything pages … return"), que vale para todas.
+        match text.rfind("\nEverything ") {
+            Some(at) => text.insert_str(at, ANDROID_INSTRUCTIONS),
+            None => text.push_str(ANDROID_INSTRUCTIONS),
+        }
+    }
+    text
+}
+
+/// Le pasa el pedido al dispositivo y devuelve el texto, y la imagen si la hay.
+fn android<F>(context: &McpContext, tool: &AndroidTool, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let mut request = match arguments {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    request.insert("op".into(), json!(tool.op));
+    let mut payload = context.scope();
+    payload["request"] = Value::Object(request);
+    match send("android.run", payload) {
+        Ok(data) => {
+            let text = data.get("text").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| data.to_string());
+            let mut content = Vec::new();
+            if let (Some(image), Some(mime)) = (data.get("image").and_then(Value::as_str), data.get("mime").and_then(Value::as_str)) {
+                content.push(json!({ "type": "image", "data": image, "mimeType": mime }));
+            }
+            content.push(json!({ "type": "text", "text": text }));
+            json!({ "content": content })
+        }
+        Err(e) => tool_error(&e),
+    }
+}
+
 // ── Orquestación ────────────────────────────────────────────────
 
 /// Qué puede hacer una tool de orquestación, que es lo que decide quién la tiene permitida.
@@ -1264,6 +1538,8 @@ where
         process(context, tool, args, send)
     } else if let Some(tool) = CANVAS_TOOLS.iter().find(|t| t.name == name) {
         canvas(context, tool, args, send)
+    } else if let Some(tool) = ANDROID_TOOLS.iter().find(|t| t.name == name) {
+        android(context, tool, args, send)
     } else if name == ASK_TOOL {
         ask(context, args, send)
     } else {
@@ -1353,7 +1629,7 @@ where
                         "protocolVersion": version,
                         "capabilities": { "tools": {} },
                         "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
-                        "instructions": prefixed(INSTRUCTIONS, prefix),
+                        "instructions": prefixed(&instructions(), prefix),
                     }))
                 }
                 // El cliente pregunta si seguimos vivos: la especificación pide contestar
@@ -1459,6 +1735,9 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
     tools.extend(GIT_TOOLS.iter().map(|t| schema(t.name, t.description, (t.properties)(), t.required)));
     tools.extend(PROCESS_TOOLS.iter().map(|t| schema(t.name, t.description, (t.properties)(), t.required)));
     tools.extend(CANVAS_TOOLS.iter().map(|t| schema(t.name, t.description, (t.properties)(), t.required)));
+    if android_available() {
+        tools.extend(ANDROID_TOOLS.iter().map(|t| schema(t.name, t.description, (t.properties)(), t.required)));
+    }
     tools.push(ask_schema());
     // Todo el texto de una vez y en un solo lugar: el `name` queda pelado (lo prefija la
     // TUI; ponerlo acá daría `controlcode_controlcode_browser_click`) y se prefija el resto
@@ -1487,7 +1766,7 @@ const BROWSER_READ_ONLY: &[&str] = &[
 /// Las que pueden romper algo que no vuelve solo: correr código arbitrario en la página
 /// del usuario (puede borrar sus datos por la API de su app) y parar el trabajo de un
 /// agente.
-const DESTRUCTIVE: &[&str] = &["browser_eval", "task_cancel", "process_stop"];
+const DESTRUCTIVE: &[&str] = &["browser_eval", "task_cancel", "process_stop", "android_install", "android_shell"];
 
 /// Si una tool solo lee: no cambia la página, el repo, el host ni el run.
 fn is_read_only(name: &str) -> bool {
@@ -1496,6 +1775,7 @@ fn is_read_only(name: &str) -> bool {
         || GIT_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || PROCESS_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || CANVAS_TOOLS.iter().any(|t| t.name == name && t.read_only)
+        || ANDROID_TOOLS.iter().any(|t| t.name == name && t.read_only)
         // Preguntar y pedir permiso no tocan nada: muestran una tarjeta.
         || name == ASK_TOOL
         || name == TOOL_NAME
@@ -1540,6 +1820,7 @@ pub fn auto_approved(name: &str) -> bool {
         || GIT_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || PROCESS_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || CANVAS_TOOLS.iter().any(|t| t.name == name && t.auto)
+        || ANDROID_TOOLS.iter().any(|t| t.name == name && t.auto)
 }
 
 /// Las tools de una tab (sin la de permisos, que es solo de las tareas de fondo), con si se
